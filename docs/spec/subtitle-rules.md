@@ -19,7 +19,7 @@
 | `min_gap` | 0.08 s | 0.08 s | 相邻两条之间至少空出的时间 |
 | `strip_end_punct` | true | false | 显示时去掉每行末尾的标点 |
 
-默认按母稿语言选：`zh*` 用 `zh-talk`，其余用 `en-talk`。`resegment` 请求的 `rules` 可以给一个配置名，再覆盖其中几项。
+默认按母稿语言选：`zh*` 用 `zh-talk`，其余用 `en-talk`。`resegment` 请求的 `rules` 可以给一个配置名，再覆盖其中几项；带 `rules` 的 `resegment` 把它保存到母稿的 `subtitle_rules` 字段。之后的断句、显示时间计算和校验都按母稿的 `subtitle_rules`，没有这个字段时用语言默认配置。
 
 ## 2. 宽度
 
@@ -98,5 +98,5 @@
 | 编号 | 级别 | 规则 |
 |---|---|---|
 | `W_SUB_TOO_WIDE` | 警告 | 单个字词宽度超过一行上限 |
-| `W_SUB_SHORT` | 警告 | 字幕显示时长不足 `min_duration` 且无法延长 |
+| `W_SUB_SHORT` | 警告 | 字幕显示时长不足 `min_duration` 且无法延长；或者投影到序列后，因剪辑截断或变速，显示时长不足 `min_duration`。后者 `ids` 写字幕轨、字幕条和片段 |
 | `W_SUB_CPS` | 警告 | 每秒字数超过 `cps` 且无法延长 |
