@@ -35,11 +35,13 @@ function expectOnlyError(project: Project, code: string): void {
 }
 
 describe("L1 semantic validation", () => {
-  it("accepts all five source projects, with only VFR and smooth warnings on standard projects", async () => {
+  it("accepts all five source projects, with only expected warnings on standard projects", async () => {
     for (const name of ["std-25", "std-2997-df", "std-2997-ndf"]) {
       const issues = validateProjectSemantics(await load(`fixtures/projects/${name}.zcut.json`));
       expect(issues.filter((issue) => issue.severity === "error")).toEqual([]);
-      expect(issues.map((issue) => issue.code)).toEqual(["W_VFR", "W_TIMEMAP_APPROX"]);
+      expect(new Set(issues.map((issue) => issue.code))).toEqual(
+        new Set(["W_VFR", "W_TIMEMAP_APPROX", "W_SUB_UNPROJECTED"]),
+      );
     }
     for (const name of ["minimal", "interview"])
       expect(validateProjectSemantics(await load(`examples/${name}.zcut.json`))).toEqual([]);

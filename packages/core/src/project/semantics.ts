@@ -1,6 +1,8 @@
 // biome-ignore-all lint/style/noNonNullAssertion: Indexed entries are guarded by schema or test setup.
 import { add, compare, div, mul, type Rational, rational, sub } from "../rational.js";
 import type { ProjectIssue } from "./io.js";
+import { projectSubtitles } from "./projection.js";
+import { mapClipTimeToSource } from "./time-map.js";
 import type { Clip, Project } from "./types.js";
 
 export interface ValidationIssue {
@@ -16,23 +18,6 @@ const lt = (a: Rational, b: Rational) => compare(a, b) < 0;
 const eq = (a: Rational, b: Rational) => compare(a, b) === 0;
 const grid = (time: Rational, rate: Rational) => mul(time, rate).denominator === 1n;
 const end = (clip: Clip) => add(clip.timeline_start, clip.duration);
-
-function mapped(clip: Clip, at: Rational): Rational {
-  if (!clip.time_map) return add(clip.source_start, at);
-  const points = clip.time_map;
-  for (let i = 0; i < points.length - 1; i++) {
-    const current = points[i]!;
-    const next = points[i + 1]!;
-    if (compare(at, next.at) <= 0) {
-      if (current.interp === "hold" && !eq(at, next.at)) return current.source;
-      return add(
-        current.source,
-        mul(sub(at, current.at), div(sub(next.source, current.source), sub(next.at, current.at))),
-      );
-    }
-  }
-  return points.at(-1)!.source;
-}
 
 function boundary(clip: Clip, side: "start" | "end"): { source: Rational; speed: Rational } {
   if (!clip.time_map || clip.time_map.length < 2) {
@@ -219,7 +204,11 @@ export function validateProjectSemantics(project: Project, parseIssues: ProjectI
               ...cuts.slice(1).map((time, index) => div(add(time, cuts[index]!), rational(2n))),
             ];
             outOfSync = samples.some(
-              (time) => !eq(mapped(a, sub(time, a.timeline_start)), mapped(b, sub(time, b.timeline_start))),
+              (time) =>
+                !eq(
+                  mapClipTimeToSource(a, sub(time, a.timeline_start)),
+                  mapClipTimeToSource(b, sub(time, b.timeline_start)),
+                ),
             );
           }
         }
@@ -271,6 +260,9 @@ export function validateProjectSemantics(project: Project, parseIssues: ProjectI
           report("E_REF", "error", "Override references missing cue", track.id, override.cue_id);
       }
     }
-  // Subtitle projection warnings belong to 1.3; width, duration and CPS warnings belong to 1.7.
+  for (const timeline of project.timelines)
+    for (const item of projectSubtitles(project, timeline.id).unprojected)
+      report("W_SUB_UNPROJECTED", "warning", "Subtitle token could not be projected", item.clip_id, item.token_id);
+  // Width, duration and CPS warnings belong to 1.7.
   return issues;
 }
