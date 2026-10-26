@@ -1,4 +1,7 @@
 export * from "./fingerprint.js";
+export * from "./project/id.js";
+export * from "./project/io.js";
+export * from "./project/types.js";
 export * from "./rational.js";
 export {
   validateEnvelope,
