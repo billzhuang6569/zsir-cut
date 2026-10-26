@@ -642,18 +642,18 @@
       ],
       "markers": [
         {
-          "id": "mrk_ch2",
-          "at": "1001/120s",
-          "duration": "0s",
-          "kind": "chapter",
-          "text": "第二段"
-        },
-        {
           "id": "mrk_rv_sub",
           "at": "23023/3000s",
           "duration": "1001/1500s",
           "kind": "review",
           "text": "S16：字词「粗剪」跨过 A1 剪点"
+        },
+        {
+          "id": "mrk_ch2",
+          "at": "1001/120s",
+          "duration": "0s",
+          "kind": "chapter",
+          "text": "第二段"
         },
         {
           "id": "mrk_rv_speed",

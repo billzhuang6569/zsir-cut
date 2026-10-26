@@ -642,18 +642,18 @@
       ],
       "markers": [
         {
-          "id": "mrk_ch2",
-          "at": "10s",
-          "duration": "0s",
-          "kind": "chapter",
-          "text": "第二段"
-        },
-        {
           "id": "mrk_rv_sub",
           "at": "46/5s",
           "duration": "4/5s",
           "kind": "review",
           "text": "S16：字词「然后」跨过 A1 剪点"
+        },
+        {
+          "id": "mrk_ch2",
+          "at": "10s",
+          "duration": "0s",
+          "kind": "chapter",
+          "text": "第二段"
         },
         {
           "id": "mrk_rv_speed",
