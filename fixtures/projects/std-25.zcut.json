@@ -301,31 +301,31 @@
               "media_id": "med_A",
               "timeline_start": "54s",
               "duration": "6s",
-              "source_start": "96s",
+              "source_start": "469/5s",
               "time_map": [
                 {
                   "at": "0s",
-                  "source": "96s",
+                  "source": "469/5s",
                   "interp": "linear"
                 },
                 {
                   "at": "2s",
-                  "source": "98s",
+                  "source": "479/5s",
                   "interp": "linear"
                 },
                 {
                   "at": "4s",
-                  "source": "99s",
+                  "source": "484/5s",
                   "interp": "hold"
                 },
                 {
                   "at": "5s",
-                  "source": "99s",
+                  "source": "484/5s",
                   "interp": "linear"
                 },
                 {
                   "at": "6s",
-                  "source": "101s",
+                  "source": "494/5s",
                   "interp": "linear"
                 }
               ],
@@ -477,31 +477,31 @@
               "media_id": "med_A",
               "timeline_start": "54s",
               "duration": "6s",
-              "source_start": "96s",
+              "source_start": "469/5s",
               "time_map": [
                 {
                   "at": "0s",
-                  "source": "96s",
+                  "source": "469/5s",
                   "interp": "linear"
                 },
                 {
                   "at": "2s",
-                  "source": "98s",
+                  "source": "479/5s",
                   "interp": "linear"
                 },
                 {
                   "at": "4s",
-                  "source": "99s",
+                  "source": "484/5s",
                   "interp": "hold"
                 },
                 {
                   "at": "5s",
-                  "source": "99s",
+                  "source": "484/5s",
                   "interp": "linear"
                 },
                 {
                   "at": "6s",
-                  "source": "101s",
+                  "source": "494/5s",
                   "interp": "linear"
                 }
               ],
@@ -660,7 +660,7 @@
           "at": "54s",
           "duration": "6s",
           "kind": "review",
-          "text": "S7：定格段字幕不投影"
+          "text": "S7：定格段上的字词「哪些」不投影"
         }
       ]
     }
