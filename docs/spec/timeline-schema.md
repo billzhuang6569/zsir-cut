@@ -254,6 +254,9 @@ L1 和 L2 的规则编号如下，`validate` 的输出和损失报告都用这�
 | `W_LOW_CONF` | 警告 | 对齐置信度低于阈值 |
 | `W_TIMEMAP_APPROX` | 警告 | 片段含 `smooth` 段，预览和投影按线性近似 |
 | `W_SUB_UNPROJECTED` | 警告 | 字幕落在倒放段、定格段或静帧上，没有投影 |
+| `W_SUB_TOO_WIDE` | 警告 | 单个字词宽度超过一行上限，见 `subtitle-rules.md` |
+| `W_SUB_SHORT` | 警告 | 字幕显示时长不足下限且无法延长，见 `subtitle-rules.md` |
+| `W_SUB_CPS` | 警告 | 每秒字数超过上限且无法延长，见 `subtitle-rules.md` |
 | `E_MEDIA_MISSING` | 错误（L2） | 文件找不到 |
 | `E_MEDIA_MISMATCH` | 错误（L2） | 文件存在但大小或指纹不符 |
 
