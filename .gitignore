@@ -42,3 +42,6 @@ proxies/
 
 # Generated fixtures (see docs/spec/fixtures.md)
 fixtures/.media/
+
+# Local progress page and scratch
+.tmp/

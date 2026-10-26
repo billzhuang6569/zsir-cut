@@ -32,7 +32,7 @@
 - trunk 加短生命周期分支，一个任务一个 PR。
 - Codex 的 PR 描述必须写三件事：改了什么、跑了哪些 fixture、loss report 有什么变化。
 - 任何涉及时间或格式的 bug，修复必须附带触发它的输入工程，防止回归。
-- spec 类 PR 由 Bill 批准后合并。代码类 PR 在 CI 和验收通过后由 Claude 合并，并在 PR 里留验收记录。
+- 所有 PR 由 Claude 验收后合并，并在 PR 里留验收记录。Bill 只在验收剪辑效果、Skill 剪辑效果和产品界面设计时介入，见 ADR-0012。
 
 ## 第 0 步：立合同，不写功能（约一周）
 
@@ -56,6 +56,8 @@
 ## 第 1 步：无头内核加导出，走 CLI（约两周）
 
 每个模块一个 PR，Codex 实现，CI 用 fixture 对 golden 文件比对，Claude 审 diff 和 loss report。
+
+详细拆分见 [docs/tasks/step-1.md](tasks/step-1.md)。下面七条是概要。
 
 1. 时间线读写与校验（`inspect`、`validate`）。
 2. `edit` 动词：有序操作列表、dry-run、revision 冲突检测、undo。
