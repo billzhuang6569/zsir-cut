@@ -185,6 +185,7 @@ export function validateProjectSemantics(project: Project, parseIssues: ProjectI
         const a = clips[i]!;
         const b = clips[j]!;
         if (a.sync_broken || b.sync_broken) continue;
+        if (!lt(a.timeline_start, end(b)) || !lt(b.timeline_start, end(a))) continue;
         let outOfSync = false;
         if (!a.time_map && !b.time_map)
           outOfSync = !eq(sub(a.timeline_start, a.source_start), sub(b.timeline_start, b.source_start));

@@ -7,6 +7,7 @@ export interface ProjectedCue {
   track_id: string;
   cue_id: string;
   clip_id: string | null;
+  clip_ids: string[];
   occurrence_id: string | null;
   piece: number;
   start: Rational;
@@ -81,6 +82,10 @@ export function projectSubtitles(
   const timeline = project.timelines.find((item) => item.id === timelineId);
   if (!timeline) throw new Error(`Unknown timeline: ${timelineId}`);
   const cues: ProjectedCue[] = [];
+  const mergeInfo = new WeakMap<
+    ProjectedCue,
+    { tokens: Token[]; breaks: Set<string>; settings: string; text: string | undefined }
+  >();
   const unprojected: UnprojectedToken[] = [];
   const seen = new Set<string>();
   for (const track of timeline.tracks) {
@@ -143,10 +148,11 @@ export function projectSubtitles(
                 const included = group.map((item) => item.token);
                 const lines =
                   override?.text !== undefined ? override.text.split("\n") : display(included, new Set(cue.breaks));
-                cues.push({
+                const projected: ProjectedCue = {
                   track_id: track.id,
                   cue_id: cue.id,
                   clip_id: clip.id,
+                  clip_ids: [clip.id],
                   occurrence_id: clip.occurrence_id,
                   piece,
                   start,
@@ -155,6 +161,17 @@ export function projectSubtitles(
                   lines,
                   style_id: override?.style_id ?? cue.style_id ?? track.default_style_id,
                   token_ids: included.map((item) => item.id),
+                };
+                cues.push(projected);
+                mergeInfo.set(projected, {
+                  tokens: included,
+                  breaks: new Set(cue.breaks),
+                  settings: JSON.stringify([
+                    override?.hidden ?? null,
+                    override?.text ?? null,
+                    override?.style_id ?? null,
+                  ]),
+                  text: override?.text,
                 });
                 piece++;
               }
@@ -201,6 +218,7 @@ export function projectSubtitles(
         track_id: track.id,
         cue_id: cue.id,
         clip_id: null,
+        clip_ids: [],
         occurrence_id: null,
         piece: 0,
         start: cue.timeline_start,
@@ -217,5 +235,34 @@ export function projectSubtitles(
     (a, b) =>
       byId(a.track_id, b.track_id) || compare(a.start, b.start) || byId(a.cue_id, b.cue_id) || a.piece - b.piece,
   );
-  return { cues, unprojected };
+  const merged: ProjectedCue[] = [];
+  const latest = new Map<string, ProjectedCue>();
+  const frame = div(rational(1n), timeline.edit_rate);
+  for (const cue of cues) {
+    const key = `${cue.track_id}\u0000${cue.cue_id}`;
+    const previous = latest.get(key);
+    const priorInfo = previous && mergeInfo.get(previous);
+    const info = mergeInfo.get(cue);
+    if (
+      previous &&
+      priorInfo &&
+      info &&
+      priorInfo.settings === info.settings &&
+      compare(cue.start, previous.end) >= 0 &&
+      compare(sub(cue.start, previous.end), frame) <= 0
+    ) {
+      previous.end = cue.end;
+      if (cue.clip_id && !previous.clip_ids.includes(cue.clip_id)) previous.clip_ids.push(cue.clip_id);
+      previous.token_ids.push(...cue.token_ids);
+      priorInfo.tokens.push(...info.tokens);
+      if (priorInfo.text === undefined) {
+        previous.lines = display(priorInfo.tokens, priorInfo.breaks);
+        previous.text = previous.lines.join("\n");
+      }
+      continue;
+    }
+    merged.push(cue);
+    if (info) latest.set(key, cue);
+  }
+  return { cues: merged, unprojected };
 }

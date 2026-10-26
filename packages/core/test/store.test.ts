@@ -156,6 +156,53 @@ describe("project write store", () => {
     expect(await readFile(path, "utf8")).toBe(original);
   });
 
+  it("reports E_SCHEMA with the schema path when edited output fails structure validation", async () => {
+    const invalid = (project: Project) => {
+      const track = project.timelines[0]?.tracks[0];
+      if (!track) throw new Error("Missing track");
+      track.id = "bad";
+    };
+    const result = await store().commitWrite(request(), invalid);
+    expect(result).toMatchObject({
+      status: "rejected",
+      error: { code: "E_VALIDATION" },
+      verification: { level: "L0", passed: false },
+    });
+    expect(result.verification.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "E_SCHEMA",
+          severity: "error",
+          message: expect.stringContaining("/timelines/0/tracks/0/id"),
+        }),
+      ]),
+    );
+    expect(result.verification.issues.every((issue) => issue.code === "E_SCHEMA")).toBe(true);
+    const preview = await store().previewWrite(request(), invalid);
+    expect(preview.error?.code).toBe("E_VALIDATION");
+    expect(preview.verification).toEqual(result.verification);
+    expect(await readFile(path, "utf8")).toBe(original);
+  });
+
+  it("reports E_SCHEMA when edited output cannot be serialized", async () => {
+    const invalid = (project: Project) => {
+      const timeline = project.timelines[0];
+      if (!timeline) throw new Error("Missing timeline");
+      timeline.edit_rate = { numerator: 25n, denominator: 0n };
+    };
+    const result = await store().commitWrite(request(), invalid);
+    expect(result.error?.code).toBe("E_VALIDATION");
+    expect(result.verification).toMatchObject({
+      level: "L0",
+      passed: false,
+      issues: [{ code: "E_SCHEMA", severity: "error", message: expect.stringContaining("zero denominator") }],
+    });
+    const preview = await store().previewWrite(request(), invalid);
+    expect(preview.error?.code).toBe("E_VALIDATION");
+    expect(preview.verification).toEqual(result.verification);
+    expect(await readFile(path, "utf8")).toBe(original);
+  });
+
   it("distinguishes failures before and after atomic replace, then recovers", async () => {
     const before = await store({
       projectPath: path,

@@ -1,6 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { basename, dirname, relative, resolve } from "node:path";
 import { fingerprint } from "./fingerprint.js";
+import { applyEdit } from "./project/edit.js";
 import { newId } from "./project/id.js";
 import { parseProject } from "./project/io.js";
 import { relinkMedia, validateProjectMedia } from "./project/media.js";
@@ -61,7 +62,7 @@ function errorEnvelope(
   verb: Verb,
   requestId: string,
   status: "rejected" | "failed",
-  code: "E_VALIDATION" | "E_UNSUPPORTED" | "E_IO" | "E_INTERNAL",
+  code: "E_VALIDATION" | "E_UNSUPPORTED" | "E_MIXED_DOMAIN" | "E_IO" | "E_INTERNAL",
   message: string,
   retryable = false,
 ): Envelope {
@@ -72,14 +73,24 @@ function errorEnvelope(
   return output;
 }
 
-function writeRequest(verb: "import_media" | "undo" | "redo", requestId: string, input: Request): WriteRequest {
+function writeRequest(
+  verb: "edit" | "import_media" | "undo" | "redo",
+  requestId: string,
+  input: Request,
+): WriteRequest {
   return {
     verb,
     request_id: requestId,
     base_revision: input.base_revision as string,
     idempotency_key: input.idempotency_key as string,
     author: input.author as Author,
-    ops: verb === "import_media" ? [{ paths: input.paths, relink: input.relink }] : [],
+    ops:
+      verb === "import_media"
+        ? [{ paths: input.paths, relink: input.relink }]
+        : verb === "edit"
+          ? (input.ops as unknown[])
+          : [],
+    ...(typeof input.timeline_id === "string" ? { timeline_id: input.timeline_id } : {}),
     ...(typeof input.target === "string" ? { target: input.target } : {}),
   };
 }
@@ -155,9 +166,50 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
       check.errors.map((item) => `${item.instancePath || "/"}: ${item.message}`).join("; ") || "Invalid request",
     );
   const request = input as Request;
-  if (verb !== "validate" && verb !== "undo" && verb !== "redo" && verb !== "import_media")
+  if (verb !== "validate" && verb !== "undo" && verb !== "redo" && verb !== "import_media" && verb !== "edit")
     return errorEnvelope(verb, requestId, "rejected", "E_UNSUPPORTED", `Verb ${verb} is not implemented`);
   try {
+    if (verb === "edit") {
+      const ops = request.ops as ({ op: string } & Record<string, unknown>)[];
+      const subtitle = new Set([
+        "edit_text",
+        "hide_tokens",
+        "set_token_state",
+        "resegment",
+        "set_cue",
+        "split_cue",
+        "merge_cues",
+        "set_override",
+        "remove_override",
+        "add_free_cue",
+        "remove_free_cue",
+        "add_style",
+        "update_style",
+        "add_subtitle_track",
+      ]);
+      if (ops.some((op) => subtitle.has(op.op)))
+        return errorEnvelope(
+          "edit",
+          requestId,
+          "rejected",
+          ops.every((op) => subtitle.has(op.op)) ? "E_UNSUPPORTED" : "E_MIXED_DOMAIN",
+          "Subtitle editing is not implemented",
+        );
+      const store = openProject({ projectPath: request.project as string });
+      const entityOps: Record<string, string> = {};
+      const mutator = (project: Parameters<typeof applyEdit>[0]) =>
+        applyEdit(
+          project,
+          ops,
+          entityOps,
+          `${request.base_revision}:${request.idempotency_key}`,
+          request.timeline_id as string | undefined,
+        );
+      const write = writeRequest("edit", requestId, request);
+      return request.dry_run === true
+        ? await store.previewWrite(write, mutator, entityOps)
+        : await store.commitWrite(write, mutator, entityOps);
+    }
     if (verb === "undo" || verb === "redo") {
       const store = openProject({ projectPath: request.project as string });
       return await store[verb](writeRequest(verb, requestId, request));

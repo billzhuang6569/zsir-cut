@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   type Clip,
+  compare,
   mapClipTimeToSource,
   mapSourceTimeToClip,
   type Project,
@@ -62,6 +63,13 @@ describe("time map", () => {
 });
 
 describe("subtitle projection", () => {
+  it("keeps freeze-separated cue_zh_19 as two visible cues", () => {
+    const cues = projectSubtitles(fixture("std-25"), "tl_std").cues.filter((cue) => cue.cue_id === "cue_zh_19");
+    expect(cues).toHaveLength(2);
+    expect(cues.map((cue) => cue.text)).toEqual(["哪些能保留", "要重做"]);
+    expect(cues.map((cue) => cue.clip_ids)).toEqual([["clp_a8"], ["clp_a8"]]);
+    expect(compare(cues[1]!.start, cues[0]!.end)).toBeGreaterThan(0);
+  });
   for (const name of ["std-25", "std-2997-df", "std-2997-ndf"]) {
     it(`projects ${name} and matches its complete snapshot`, () => {
       const project = fixture(name);
