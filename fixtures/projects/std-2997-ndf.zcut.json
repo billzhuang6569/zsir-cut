@@ -301,31 +301,31 @@
               "media_id": "med_A",
               "timeline_start": "9009/200s",
               "duration": "1001/200s",
-              "source_start": "2002/25s",
+              "source_start": "2829827/30000s",
               "time_map": [
                 {
                   "at": "0s",
-                  "source": "2002/25s",
+                  "source": "2829827/30000s",
                   "interp": "linear"
                 },
                 {
                   "at": "1001/600s",
-                  "source": "49049/600s",
+                  "source": "959959/10000s",
                   "interp": "linear"
                 },
                 {
                   "at": "1001/300s",
-                  "source": "33033/400s",
+                  "source": "1452451/15000s",
                   "interp": "hold"
                 },
                 {
                   "at": "1001/240s",
-                  "source": "33033/400s",
+                  "source": "1452451/15000s",
                   "interp": "linear"
                 },
                 {
                   "at": "1001/200s",
-                  "source": "101101/1200s",
+                  "source": "123123/1250s",
                   "interp": "linear"
                 }
               ],
@@ -477,31 +477,31 @@
               "media_id": "med_A",
               "timeline_start": "9009/200s",
               "duration": "1001/200s",
-              "source_start": "2002/25s",
+              "source_start": "2829827/30000s",
               "time_map": [
                 {
                   "at": "0s",
-                  "source": "2002/25s",
+                  "source": "2829827/30000s",
                   "interp": "linear"
                 },
                 {
                   "at": "1001/600s",
-                  "source": "49049/600s",
+                  "source": "959959/10000s",
                   "interp": "linear"
                 },
                 {
                   "at": "1001/300s",
-                  "source": "33033/400s",
+                  "source": "1452451/15000s",
                   "interp": "hold"
                 },
                 {
                   "at": "1001/240s",
-                  "source": "33033/400s",
+                  "source": "1452451/15000s",
                   "interp": "linear"
                 },
                 {
                   "at": "1001/200s",
-                  "source": "101101/1200s",
+                  "source": "123123/1250s",
                   "interp": "linear"
                 }
               ],
@@ -660,7 +660,7 @@
           "at": "9009/200s",
           "duration": "1001/200s",
           "kind": "review",
-          "text": "S7：定格段字幕不投影"
+          "text": "S7：定格段上的字词「哪些」不投影"
         }
       ]
     }
