@@ -228,7 +228,7 @@
 | `video.rate` | 视频流的 `r_frame_rate`，写成规范有理数 |
 | `video.vfr` | 读前 300 帧的显示时间戳，相邻差值超过一种（容差为时间基的 1 个单位）即为 true |
 | `duration` | 视频为帧数乘以帧时长；音频为采样数除以采样率；都是精确有理数。图片按约定写 `3600s` |
-| `start_timecode` | 视频取时码轨的 `timecode` 标签；WAV 取 bext 的 `time_reference` 换算；没有就不写 |
+| `start_timecode` | 视频取时码轨的 `timecode` 标签。WAV 取 bext 的 `time_reference`（从午夜起的采样数）换算：纯音频没有帧率，统一按 25 帧不丢帧表示，不在帧边界上时向下取整，精确采样数另存在 `ext.zsir.start_samples`。没有就不写 |
 | `audio` | 采样率和声道数 |
 | `reel` | 有 `reel_name` 标签时写入 |
 
