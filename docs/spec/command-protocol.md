@@ -78,7 +78,11 @@
 | `failed` | 内部或 IO 错误，什么都没写 | 按 `error.retryable` 决定是否原样重试 |
 | `committed_unverified` | 可能已经写入，但写后的校验或回读没有完成 | **不要直接重试。** 先 `inspect`，看 `receipt.after` 是否已是当前修订 |
 
-`changes` 按实体列出变化，用来让 Agent 自检和给人审阅。`verification.issues` 用 `timeline-schema.md` 第 8 节的规则编号。读动词的 `receipt` 为 null。
+`changes` 按实体列出变化，用来让 Agent 自检和给人审阅。`verification.issues` 用 `timeline-schema.md` 第 8 节的规则编号。
+
+读动词（`inspect`、`read_transcript`、`validate`、`diff`、`job_status`）成功时 `status` 为 `no_op`，`ok` 为 true，`receipt` 为 null，`changes` 为空，结果放在 `result` 里。`validate` 发现问题不算失败：问题列在 `verification.issues` 里，`verification.passed` 在没有错误级问题时为 true。
+
+`request_id` 由内核生成，格式是 `req_` 加小写 UUIDv7。
 
 ## 5. 并发与幂等
 
@@ -191,7 +195,7 @@
 | `read_transcript` | 读 | 读打包后的转写文本，可按时间线投影 |
 | `validate` | 读 | 跑 L1 校验，`media: true` 时加跑 L2 |
 | `diff` | 读 | 比较两个修订，输出实体级差异 |
-| `import_media` | 写 | 探测素材、计算指纹，加入 `media[]`；`relink` 模式为离线素材找回文件，见 9.2 |
+| `import_media` | 写 | 探测素材、计算指纹，加入 `media[]`；`relink` 模式为离线素材找回文件，见 9.2、9.3 |
 | `edit` | 写 | 应用一组有序操作，见第 10 节 |
 | `undo` / `redo` | 写 | 见第 6 节 |
 | `transcribe` | 写，长任务 | 跑识别和对齐，写入母稿第 1、3 层，并生成初始的第 2、4 层 |
@@ -210,7 +214,27 @@
 - 读视图里的每个时间同时给出规范形式和显示时码，例如 `{"t": "1001/200s", "tc": "01:00:05;00"}`。工程文件里只存规范形式。
 - `read_transcript` 输出打包文本，每行一条字幕，形如 `[cue_1 tok_01..tok_06] 01:00:00;00 我们做zsir-cut的初衷很简单`。一小时素材约 12 KB。Agent 按 token ID 发剪辑命令，不按时间猜。
 
-### 9.2 重链接
+### 9.2 导入素材
+
+`import_media` 的导入模式：`paths: [文件…]`，加上写请求的公共字段。对每个文件用 ffprobe 探测，在 `media[]` 末尾追加一条：
+
+| 字段 | 取值 |
+|---|---|
+| `id` | 新的 `med_` ID |
+| `kind` | 有非封面的视频流且帧数大于 1 为 `video`；只有一帧的图片格式为 `image`；只有音频为 `audio` |
+| `name` | 文件名 |
+| `path` | 相对工程文件所在目录的路径；`original_path` 是绝对路径 |
+| `size_bytes`、`fingerprint` | 文件大小和 `sampled-sha256-v1` 指纹 |
+| `video.rate` | 视频流的 `r_frame_rate`，写成规范有理数 |
+| `video.vfr` | 读前 300 帧的显示时间戳，相邻差值超过一种（容差为时间基的 1 个单位）即为 true |
+| `duration` | 视频为帧数乘以帧时长；音频为采样数除以采样率；都是精确有理数。图片按约定写 `3600s` |
+| `start_timecode` | 视频取时码轨的 `timecode` 标签；WAV 取 bext 的 `time_reference` 换算；没有就不写 |
+| `audio` | 采样率和声道数 |
+| `reel` | 有 `reel_name` 标签时写入 |
+
+同一个文件（大小和指纹都相同）已经在 `media[]` 里时不重复添加，在 `result.skipped` 里列出已有的 `media_id`。ffprobe 不可用或探测失败返回 `failed`，错误码 `E_IO`。
+
+### 9.3 重链接
 
 素材移盘或改名后，用 `import_media` 的 `relink` 模式找回，而不是重新导入。
 
