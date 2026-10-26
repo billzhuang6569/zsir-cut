@@ -1,3 +1,4 @@
+// biome-ignore-all lint/style/noNonNullAssertion: Fixture IDs and indexes are checked by test setup.
 import { copyFile, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +7,7 @@ import {
   add,
   compare,
   dispatch,
+  displayRanges,
   mapClipTimeToSource,
   type Project,
   parseProject,
@@ -157,6 +159,198 @@ describe("edit examples", () => {
     expect(output.status, JSON.stringify(output)).toBe("applied");
     expect(clips(await read(), "trk_a1").find((item) => item.id === "clp_a1")).toEqual(before);
     await validateAndUndo(beforeProject);
+  });
+});
+
+describe("subtitle edit operations", () => {
+  it("rejects approved tokens and locked cues, and force outside a manual session", async () => {
+    const before = await readFile(path, "utf8");
+    const op = {
+      op: "edit_text",
+      transcript_id: "trs_A_zh",
+      from_token: "tok_005",
+      to_token: "tok_006",
+      text: "今天 聊",
+    };
+    expect((await edit([op])).error?.code).toBe("E_LOCKED");
+    expect((await edit([{ ...op, force: true }])).error?.code).toBe("E_SESSION_STATE");
+    expect((await edit([{ ...op, from_token: "tok_000", to_token: "tok_001" }])).error?.code).toBe("E_LOCKED");
+    expect(await readFile(path, "utf8")).toBe(before);
+  });
+  it("replaces two tokens with three, preserves heard, interpolates, updates cue endpoints and projection", async () => {
+    const before = await read();
+    const result = await edit([
+      {
+        op: "edit_text",
+        transcript_id: "trs_A_zh",
+        from_token: "tok_018",
+        to_token: "tok_019",
+        text: "新 的 文字",
+        new_ids: ["tok_new_a", "tok_new_b", "tok_new_c"],
+      },
+    ]);
+    expect(result.status, JSON.stringify(result)).toBe("applied");
+    const after = await read();
+    const transcript = after.transcripts.find((item) => item.id === "trs_A_zh")!;
+    const tokens = transcript.tokens.filter((token) => token.id.startsWith("tok_new_"));
+    expect(tokens.map((token) => [token.text, token.heard, token.state])).toEqual([
+      ["新", "Agent先", "edited"],
+      ["的", "", "edited"],
+      ["文字", "", "edited"],
+    ]);
+    expect(new Set(tokens.map((token) => token.align.run)).size).toBe(1);
+    expect(tokens.every((token) => token.align.conf === undefined)).toBe(true);
+    expect(transcript.raw_runs.find((run) => run.id === tokens[0]!.align.run)).toMatchObject({
+      kind: "align",
+      engine: { name: "interpolate" },
+    });
+    expect(transcript.cues.find((cue) => cue.id === "cue_zh_03")?.first_token).toBe("tok_new_a");
+    expect(
+      projectSubtitles(after, "tl_std").cues.some((cue) => cue.cue_id === "cue_zh_03" && cue.text.includes("新的文字")),
+    ).toBe(true);
+    await validateAndUndo(before);
+  });
+  it("resegments around approved and locked cues while keeping matching cue IDs", async () => {
+    const before = await read();
+    const result = await edit([
+      {
+        op: "resegment",
+        transcript_id: "trs_A_zh",
+        range: { from_token: "tok_000", to_token: "tok_024" },
+        rules: { cpl: 4 },
+      },
+    ]);
+    expect(result.status, JSON.stringify(result)).toBe("applied");
+    const after = await read();
+    const old = before.transcripts.find((item) => item.id === "trs_A_zh")!;
+    const next = after.transcripts.find((item) => item.id === "trs_A_zh")!;
+    expect(next.cues.find((cue) => cue.id === "cue_zh_00")).toEqual(old.cues.find((cue) => cue.id === "cue_zh_00"));
+    expect(next.cues.find((cue) => cue.id === "cue_zh_01")).toEqual(old.cues.find((cue) => cue.id === "cue_zh_01"));
+    expect(
+      next.cues.some((cue) => cue.id === "cue_zh_03" && cue.first_token === "tok_018" && cue.last_token === "tok_024"),
+    ).toBe(false);
+    await validateAndUndo(before);
+  });
+  it("persists cpl 10 rules for display and warnings, then undo removes them", async () => {
+    const before = await read();
+    const result = await edit([
+      {
+        op: "resegment",
+        transcript_id: "trs_A_en",
+        range: { from_token: "tok_en_00", to_token: "tok_en_00" },
+        rules: { cpl: 10, min_duration: "3s", cps: 1 },
+      },
+    ]);
+    expect(result.status, JSON.stringify(result)).toBe("applied");
+    const after = await read();
+    const transcript = after.transcripts.find((item) => item.id === "trs_A_en")!;
+    expect(transcript.subtitle_rules).toEqual({ profile: "en-talk", cpl: 10, min_duration: rational(3n), cps: 1 });
+    const displayed = displayRanges(transcript).find((item) => item.cue.id === "cue_en_00")!;
+    expect(printRational(displayed.end, true)).toBe("271/50s");
+    expect(displayed.warnings).toEqual(["W_SUB_TOO_WIDE", "W_SUB_CPS"]);
+    const issues = validateProjectSemantics(after).filter((item) => item.ids.includes("cue_en_00"));
+    expect(new Set(issues.map((item) => item.code))).toEqual(new Set(["W_SUB_TOO_WIDE", "W_SUB_CPS"]));
+    await validateAndUndo(before);
+    expect((await read()).transcripts.find((item) => item.id === "trs_A_en")?.subtitle_rules).toBeUndefined();
+  });
+  it("uses saved rules for a later resegment without rules", async () => {
+    const before = await read();
+    const saved = await edit([
+      {
+        op: "resegment",
+        transcript_id: "trs_A_zh",
+        range: { from_token: "tok_018", to_token: "tok_024" },
+        rules: { profile: "zh-talk", cpl: 10, max_lines: 1 },
+      },
+    ]);
+    expect(saved.status, JSON.stringify(saved)).toBe("applied");
+    const first = await read();
+    expect(first.transcripts.find((item) => item.id === "trs_A_zh")?.subtitle_rules).toEqual({
+      profile: "zh-talk",
+      cpl: 10,
+      max_lines: 1,
+    });
+    const next = await edit([
+      { op: "resegment", transcript_id: "trs_A_zh", range: { from_token: "tok_010", to_token: "tok_017" } },
+    ]);
+    expect(next.status, JSON.stringify(next)).toBe("applied");
+    const changed = (await read()).transcripts.find((item) => item.id === "trs_A_zh")!;
+    expect(changed.subtitle_rules).toEqual({ profile: "zh-talk", cpl: 10, max_lines: 1 });
+    expect(
+      changed.cues.some(
+        (cue) => cue.id === "cue_zh_02" && cue.first_token === "tok_010" && cue.last_token === "tok_017",
+      ),
+    ).toBe(false);
+    await validateAndUndo(first);
+    await validateAndUndo(before);
+  });
+  it("splits manual timing at the boundary and merges only the outer edges", async () => {
+    const before = await read();
+    const output = await edit([
+      { op: "set_cue", cue_id: "cue_zh_03", timing: { start: "15s", end: "18s" } },
+      { op: "split_cue", cue_id: "cue_zh_03", after_token: "tok_020", new_id: "cue_manual_right" },
+    ]);
+    expect(output.status, JSON.stringify(output)).toBe("applied");
+    const after = await read();
+    const cues = after.transcripts.find((item) => item.id === "trs_A_zh")!.cues;
+    expect(cues.find((cue) => cue.id === "cue_zh_03")?.timing).toEqual({ start: rational(15n) });
+    expect(cues.find((cue) => cue.id === "cue_manual_right")?.timing).toEqual({ end: rational(18n) });
+    await validateAndUndo(before);
+
+    const merged = await edit([
+      { op: "set_cue", cue_id: "cue_zh_03", timing: { start: "15s", end: "18s" } },
+      { op: "set_cue", cue_id: "cue_zh_04", timing: { start: "20s", end: "23s" } },
+      { op: "merge_cues", cue_ids: ["cue_zh_03", "cue_zh_04"] },
+    ]);
+    expect(merged.status, JSON.stringify(merged)).toBe("applied");
+    const combined = (await read()).transcripts
+      .find((item) => item.id === "trs_A_zh")!
+      .cues.find((cue) => cue.id === "cue_zh_03");
+    expect(combined?.timing).toEqual({ start: rational(15n), end: rational(23n) });
+    await validateAndUndo(before);
+  });
+  const ops: Record<string, unknown>[] = [
+    { op: "hide_tokens", transcript_id: "trs_A_zh", tokens: ["tok_019"] },
+    { op: "set_token_state", transcript_id: "trs_A_zh", tokens: ["tok_019"], state: "edited" },
+    {
+      op: "resegment",
+      transcript_id: "trs_A_zh",
+      range: { from_token: "tok_018", to_token: "tok_024" },
+      rules: { profile: "zh-talk", cpl: 6 },
+    },
+    { op: "set_cue", cue_id: "cue_zh_03", breaks: ["tok_020"], state: "edited" },
+    { op: "split_cue", cue_id: "cue_zh_03", after_token: "tok_020", new_id: "cue_split_test" },
+    { op: "merge_cues", cue_ids: ["cue_zh_03", "cue_zh_04"] },
+    { op: "set_override", track_id: "trk_sub_zh", occurrence_id: "occ_1", cue_id: "cue_zh_03", text: "替换" },
+    { op: "remove_override", track_id: "trk_sub_zh", occurrence_id: "occ_2", cue_id: "cue_zh_08" },
+    {
+      op: "add_free_cue",
+      track_id: "trk_sub_zh",
+      id: "cue_free_test",
+      timeline_start: "70s",
+      duration: "2s",
+      text: "独立字幕",
+    },
+    { op: "add_style", id: "sty_test", name: "Test", font_family: "Arial", font_size: 0.05, color: "#ffffff" },
+    { op: "update_style", style_id: "sty_zh", name: "Updated" },
+    {
+      op: "add_subtitle_track",
+      id: "trk_sub_test",
+      name: "Test",
+      language: "zh-Hans",
+      carrier_tracks: ["trk_a1"],
+      default_style_id: "sty_zh",
+    },
+  ];
+  for (const op of ops)
+    it(`${op.op} validates and undoes`, async () => {
+      await successAndUndo(op);
+    });
+  it("removes a free cue and undoes", async () => {
+    const project = await read();
+    const track = project.timelines[0]!.tracks.find((item) => item.id === "trk_sub_zh");
+    if (!track || track.kind !== "subtitle") throw new Error("Missing subtitle track");
+    await successAndUndo({ op: "remove_free_cue", track_id: track.id, id: track.free_cues[0]!.id });
   });
 });
 
@@ -541,7 +735,7 @@ describe("edit boundaries and transaction", () => {
       to_token: "tok_001",
       text: "a",
     };
-    expect((await edit([subtitle])).error?.code).toBe("E_UNSUPPORTED");
+    expect((await edit([subtitle])).error?.code).toBe("E_LOCKED");
     expect((await edit([subtitle, { op: "remove", clip_ids: ["clp_v9"] }])).error?.code).toBe("E_MIXED_DOMAIN");
     expect(await readFile(path, "utf8")).toBe(before);
   });

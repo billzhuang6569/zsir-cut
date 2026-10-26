@@ -187,7 +187,7 @@ Project
 
 ### 5.1 转写母稿 `transcripts[]`
 
-一份母稿对应一个媒体的一组声道和一种语言：`id`、`media_id`、`source_channels`、`language`（BCP 47，例如 `zh-Hans`）。
+一份母稿对应一个媒体的一组声道和一种语言：`id`、`media_id`、`source_channels`、`language`（BCP 47，例如 `zh-Hans`）。可选的 `subtitle_rules` 保存这份母稿使用的断句规则，见 `subtitle-rules.md` 第 1 节。
 
 `raw_runs[]` 每次识别或对齐运行一条：`id`、`kind`（`asr` 或 `align`）、`engine`（`name`、`model`、`version`、`weights_digest`）、`created_at`、`range`（识别覆盖的源区间）、`tokens[]`（`text`、`start`、`end`、`conf`）。
 

@@ -1,7 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { basename, dirname, relative, resolve } from "node:path";
 import { fingerprint } from "./fingerprint.js";
-import { applyEdit } from "./project/edit.js";
+import { applyEdit, SUBTITLE_OPS } from "./project/edit.js";
 import { newId } from "./project/id.js";
 import { parseProject } from "./project/io.js";
 import { relinkMedia, validateProjectMedia } from "./project/media.js";
@@ -171,29 +171,13 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
   try {
     if (verb === "edit") {
       const ops = request.ops as ({ op: string } & Record<string, unknown>)[];
-      const subtitle = new Set([
-        "edit_text",
-        "hide_tokens",
-        "set_token_state",
-        "resegment",
-        "set_cue",
-        "split_cue",
-        "merge_cues",
-        "set_override",
-        "remove_override",
-        "add_free_cue",
-        "remove_free_cue",
-        "add_style",
-        "update_style",
-        "add_subtitle_track",
-      ]);
-      if (ops.some((op) => subtitle.has(op.op)))
+      if (ops.some((op) => SUBTITLE_OPS.has(op.op)) && !ops.every((op) => SUBTITLE_OPS.has(op.op)))
         return errorEnvelope(
           "edit",
           requestId,
           "rejected",
-          ops.every((op) => subtitle.has(op.op)) ? "E_UNSUPPORTED" : "E_MIXED_DOMAIN",
-          "Subtitle editing is not implemented",
+          "E_MIXED_DOMAIN",
+          "Editing and subtitle operations cannot be mixed",
         );
       const store = openProject({ projectPath: request.project as string });
       const entityOps: Record<string, string> = {};

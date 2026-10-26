@@ -38,6 +38,8 @@ type ErrorCode =
   | "E_UNSUPPORTED"
   | "E_NOT_FOUND"
   | "E_MIXED_DOMAIN"
+  | "E_LOCKED"
+  | "E_SESSION_STATE"
   | "E_IO"
   | "E_INTERNAL";
 export interface WriteEnvelope {

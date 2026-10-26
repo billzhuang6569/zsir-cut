@@ -8,6 +8,7 @@ export * from "./project/probe.js";
 export * from "./project/projection.js";
 export * from "./project/semantics.js";
 export * from "./project/store.js";
+export * from "./project/subtitle-rules.js";
 export * from "./project/time-map.js";
 export * from "./project/types.js";
 export * from "./rational.js";

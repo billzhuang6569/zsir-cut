@@ -1044,29 +1044,691 @@
         {
           "type": "object",
           "required": [
-            "op"
+            "op",
+            "transcript_id",
+            "from_token",
+            "to_token",
+            "text"
           ],
           "properties": {
             "op": {
-              "enum": [
-                "edit_text",
-                "hide_tokens",
-                "set_token_state",
-                "resegment",
-                "set_cue",
-                "split_cue",
-                "merge_cues",
-                "set_override",
-                "remove_override",
-                "add_free_cue",
-                "remove_free_cue",
-                "add_style",
-                "update_style",
-                "add_subtitle_track"
-              ]
+              "const": "edit_text"
+            },
+            "transcript_id": {
+              "$ref": "#/$defs/id"
+            },
+            "from_token": {
+              "$ref": "#/$defs/id"
+            },
+            "to_token": {
+              "$ref": "#/$defs/id"
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1
+            },
+            "new_ids": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/id"
+              }
+            },
+            "force": {
+              "type": "boolean"
             }
           },
-          "additionalProperties": true
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "op",
+            "transcript_id",
+            "tokens"
+          ],
+          "properties": {
+            "op": {
+              "const": "hide_tokens"
+            },
+            "transcript_id": {
+              "$ref": "#/$defs/id"
+            },
+            "tokens": {
+              "$ref": "#/$defs/ids"
+            },
+            "force": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "op",
+            "transcript_id",
+            "tokens",
+            "state"
+          ],
+          "properties": {
+            "op": {
+              "const": "set_token_state"
+            },
+            "transcript_id": {
+              "$ref": "#/$defs/id"
+            },
+            "tokens": {
+              "$ref": "#/$defs/ids"
+            },
+            "state": {
+              "enum": [
+                "auto",
+                "edited",
+                "approved"
+              ]
+            },
+            "force": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "op",
+            "transcript_id"
+          ],
+          "properties": {
+            "op": {
+              "const": "resegment"
+            },
+            "transcript_id": {
+              "$ref": "#/$defs/id"
+            },
+            "range": {
+              "type": "object",
+              "required": [
+                "from_token",
+                "to_token"
+              ],
+              "properties": {
+                "from_token": {
+                  "$ref": "#/$defs/id"
+                },
+                "to_token": {
+                  "$ref": "#/$defs/id"
+                }
+              },
+              "additionalProperties": false
+            },
+            "rules": {
+              "type": "object",
+              "properties": {
+                "profile": {
+                  "enum": [
+                    "zh-talk",
+                    "en-talk"
+                  ]
+                },
+                "cpl": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "max_lines": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 3
+                },
+                "cps": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "min_duration": {
+                  "$ref": "#/$defs/seconds"
+                },
+                "max_duration": {
+                  "$ref": "#/$defs/seconds"
+                },
+                "hard_pause": {
+                  "$ref": "#/$defs/seconds"
+                },
+                "soft_pause": {
+                  "$ref": "#/$defs/seconds"
+                },
+                "min_gap": {
+                  "$ref": "#/$defs/seconds"
+                },
+                "strip_end_punct": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            },
+            "force": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "op",
+            "cue_id"
+          ],
+          "properties": {
+            "op": {
+              "const": "set_cue"
+            },
+            "cue_id": {
+              "$ref": "#/$defs/id"
+            },
+            "breaks": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/id"
+              }
+            },
+            "timing": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "start": {
+                      "$ref": "#/$defs/seconds"
+                    },
+                    "end": {
+                      "$ref": "#/$defs/seconds"
+                    },
+                    "locked": {
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "style_id": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/id"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "state": {
+              "enum": [
+                "auto",
+                "edited",
+                "approved"
+              ]
+            },
+            "force": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "op",
+            "cue_id",
+            "after_token"
+          ],
+          "properties": {
+            "op": {
+              "const": "split_cue"
+            },
+            "cue_id": {
+              "$ref": "#/$defs/id"
+            },
+            "after_token": {
+              "$ref": "#/$defs/id"
+            },
+            "new_id": {
+              "$ref": "#/$defs/id"
+            },
+            "force": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "op",
+            "cue_ids"
+          ],
+          "properties": {
+            "op": {
+              "const": "merge_cues"
+            },
+            "cue_ids": {
+              "type": "array",
+              "minItems": 2,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/id"
+              }
+            },
+            "force": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "op",
+            "track_id",
+            "occurrence_id",
+            "cue_id"
+          ],
+          "properties": {
+            "op": {
+              "const": "set_override"
+            },
+            "track_id": {
+              "$ref": "#/$defs/id"
+            },
+            "occurrence_id": {
+              "$ref": "#/$defs/id"
+            },
+            "cue_id": {
+              "$ref": "#/$defs/id"
+            },
+            "hidden": {
+              "type": "boolean"
+            },
+            "text": {
+              "type": "string"
+            },
+            "style_id": {
+              "$ref": "#/$defs/id"
+            },
+            "force": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "op",
+            "track_id",
+            "occurrence_id",
+            "cue_id"
+          ],
+          "properties": {
+            "op": {
+              "const": "remove_override"
+            },
+            "track_id": {
+              "$ref": "#/$defs/id"
+            },
+            "occurrence_id": {
+              "$ref": "#/$defs/id"
+            },
+            "cue_id": {
+              "$ref": "#/$defs/id"
+            },
+            "force": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "op",
+            "track_id",
+            "timeline_start",
+            "duration",
+            "text"
+          ],
+          "properties": {
+            "op": {
+              "const": "add_free_cue"
+            },
+            "track_id": {
+              "$ref": "#/$defs/id"
+            },
+            "id": {
+              "$ref": "#/$defs/id"
+            },
+            "timeline_start": {
+              "$ref": "#/$defs/seconds"
+            },
+            "duration": {
+              "$ref": "#/$defs/seconds"
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1
+            },
+            "style_id": {
+              "$ref": "#/$defs/id"
+            },
+            "force": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "op",
+            "track_id",
+            "id"
+          ],
+          "properties": {
+            "op": {
+              "const": "remove_free_cue"
+            },
+            "track_id": {
+              "$ref": "#/$defs/id"
+            },
+            "id": {
+              "$ref": "#/$defs/id"
+            },
+            "force": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "op",
+            "name",
+            "font_family",
+            "font_size",
+            "color"
+          ],
+          "properties": {
+            "op": {
+              "const": "add_style"
+            },
+            "id": {
+              "$ref": "#/$defs/id"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "font_family": {
+              "type": "string",
+              "minLength": 1
+            },
+            "font_weight": {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 900
+            },
+            "font_size": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "color": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$"
+            },
+            "outline": {
+              "type": "object",
+              "required": [
+                "color",
+                "width"
+              ],
+              "properties": {
+                "color": {
+                  "type": "string",
+                  "pattern": "^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$"
+                },
+                "width": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              },
+              "additionalProperties": false
+            },
+            "box": {
+              "type": "object",
+              "required": [
+                "color"
+              ],
+              "properties": {
+                "color": {
+                  "type": "string",
+                  "pattern": "^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$"
+                },
+                "padding": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              },
+              "additionalProperties": false
+            },
+            "position": {
+              "type": "object",
+              "required": [
+                "anchor",
+                "margin_v"
+              ],
+              "properties": {
+                "anchor": {
+                  "enum": [
+                    "bottom",
+                    "top",
+                    "middle"
+                  ]
+                },
+                "margin_v": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              },
+              "additionalProperties": false
+            },
+            "max_lines": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2
+            },
+            "force": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "op",
+            "style_id"
+          ],
+          "properties": {
+            "op": {
+              "const": "update_style"
+            },
+            "style_id": {
+              "$ref": "#/$defs/id"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "font_family": {
+              "type": "string",
+              "minLength": 1
+            },
+            "font_weight": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 100,
+                  "maximum": 900
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "font_size": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "color": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$"
+            },
+            "outline": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "required": [
+                    "color",
+                    "width"
+                  ],
+                  "properties": {
+                    "color": {
+                      "type": "string",
+                      "pattern": "^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$"
+                    },
+                    "width": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "box": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "required": [
+                    "color"
+                  ],
+                  "properties": {
+                    "color": {
+                      "type": "string",
+                      "pattern": "^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$"
+                    },
+                    "padding": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "position": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "required": [
+                    "anchor",
+                    "margin_v"
+                  ],
+                  "properties": {
+                    "anchor": {
+                      "enum": [
+                        "bottom",
+                        "top",
+                        "middle"
+                      ]
+                    },
+                    "margin_v": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "max_lines": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "force": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "op",
+            "name",
+            "language",
+            "carrier_tracks",
+            "default_style_id"
+          ],
+          "properties": {
+            "op": {
+              "const": "add_subtitle_track"
+            },
+            "id": {
+              "$ref": "#/$defs/id"
+            },
+            "name": {
+              "type": "string"
+            },
+            "language": {
+              "type": "string",
+              "minLength": 2
+            },
+            "carrier_tracks": {
+              "$ref": "#/$defs/ids"
+            },
+            "default_style_id": {
+              "$ref": "#/$defs/id"
+            },
+            "force": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
         }
       ]
     }

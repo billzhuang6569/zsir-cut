@@ -1,5 +1,6 @@
 // biome-ignore-all lint/style/noNonNullAssertion: Indexed entries are guarded by project schema or local checks.
 import { add, compare, div, type Rational, rational, sub } from "../rational.js";
+import { cueText, displayRanges, transcriptRules } from "./subtitle-rules.js";
 import { clipTimeMap, mapSourceTimeToClip } from "./time-map.js";
 import type { Clip, Cue, Project, TimeMapPoint, Token, Transcript } from "./types.js";
 
@@ -88,6 +89,9 @@ export function projectSubtitles(
   >();
   const unprojected: UnprojectedToken[] = [];
   const seen = new Set<string>();
+  const ranges = new Map(
+    project.transcripts.flatMap((transcript) => displayRanges(transcript).map((item) => [item.cue.id, item])),
+  );
   for (const track of timeline.tracks) {
     if (track.kind !== "subtitle" || !track.enabled) continue;
     for (const carrierId of track.carrier_tracks) {
@@ -114,7 +118,8 @@ export function projectSubtitles(
             const lastIndex = indexes.get(cue.last_token);
             if (firstIndex === undefined || lastIndex === undefined || firstIndex > lastIndex) continue;
             const tokens = transcript.tokens.slice(firstIndex, lastIndex + 1);
-            const replacement = sourceRange?.(cue, transcript);
+            const shownTokens = tokens.filter((token) => token.text !== "");
+            const replacement = sourceRange?.(cue, transcript) ?? ranges.get(cue.id);
             const override = track.overrides.find(
               (item) => item.occurrence_id === clip.occurrence_id && item.cue_id === cue.id,
             );
@@ -130,8 +135,9 @@ export function projectSubtitles(
               const first = group[0]!;
               const last = group.at(-1)!;
               const startSource =
-                first.token.id === cue.first_token ? (cue.timing?.start ?? replacement?.start) : undefined;
-              const endSource = last.token.id === cue.last_token ? (cue.timing?.end ?? replacement?.end) : undefined;
+                first.token.id === shownTokens[0]?.id ? (cue.timing?.start ?? replacement?.start) : undefined;
+              const endSource =
+                last.token.id === shownTokens.at(-1)?.id ? (cue.timing?.end ?? replacement?.end) : undefined;
               const start = max(
                 clip.timeline_start,
                 startSource === undefined
@@ -147,7 +153,9 @@ export function projectSubtitles(
               if (compare(start, end) < 0 && !override?.hidden) {
                 const included = group.map((item) => item.token);
                 const lines =
-                  override?.text !== undefined ? override.text.split("\n") : display(included, new Set(cue.breaks));
+                  override?.text !== undefined
+                    ? override.text.split("\n")
+                    : cueText(included, transcriptRules(transcript), cue.breaks);
                 const projected: ProjectedCue = {
                   track_id: track.id,
                   cue_id: cue.id,
@@ -256,7 +264,10 @@ export function projectSubtitles(
       previous.token_ids.push(...cue.token_ids);
       priorInfo.tokens.push(...info.tokens);
       if (priorInfo.text === undefined) {
-        previous.lines = display(priorInfo.tokens, priorInfo.breaks);
+        const transcript = project.transcripts.find((item) => item.cues.some((entry) => entry.id === cue.cue_id));
+        previous.lines = transcript
+          ? cueText(priorInfo.tokens, transcriptRules(transcript), [...priorInfo.breaks])
+          : display(priorInfo.tokens, priorInfo.breaks);
         previous.text = previous.lines.join("\n");
       }
       continue;

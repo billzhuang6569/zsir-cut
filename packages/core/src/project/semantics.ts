@@ -2,6 +2,7 @@
 import { add, compare, div, mul, type Rational, rational, sub } from "../rational.js";
 import type { ProjectIssue } from "./io.js";
 import { projectSubtitles } from "./projection.js";
+import { displayRanges, transcriptRules } from "./subtitle-rules.js";
 import { mapClipTimeToSource } from "./time-map.js";
 import type { Clip, Project } from "./types.js";
 
@@ -249,6 +250,8 @@ export function validateProjectSemantics(project: Project, parseIssues: ProjectI
       if (cue.style_id && !styles.has(cue.style_id))
         report("E_REF", "error", "Cue references missing style", cue.id, cue.style_id);
     }
+    for (const result of displayRanges(transcript))
+      for (const code of result.warnings) report(code, "warning", "Subtitle display rule warning", result.cue.id);
   }
   const cueIds = new Set(project.transcripts.flatMap((transcript) => transcript.cues.map((cue) => cue.id)));
   for (const timeline of project.timelines)
@@ -261,9 +264,27 @@ export function validateProjectSemantics(project: Project, parseIssues: ProjectI
           report("E_REF", "error", "Override references missing cue", track.id, override.cue_id);
       }
     }
-  for (const timeline of project.timelines)
-    for (const item of projectSubtitles(project, timeline.id).unprojected)
+  const minimums = new Map(
+    project.transcripts.flatMap((transcript) =>
+      transcript.cues.map((cue) => [cue.id, transcriptRules(transcript).min_duration] as const),
+    ),
+  );
+  for (const timeline of project.timelines) {
+    const projected = projectSubtitles(project, timeline.id);
+    for (const item of projected.unprojected)
       report("W_SUB_UNPROJECTED", "warning", "Subtitle token could not be projected", item.clip_id, item.token_id);
-  // Width, duration and CPS warnings belong to 1.7.
+    for (const cue of projected.cues) {
+      const minimum = minimums.get(cue.cue_id);
+      if (cue.clip_id && minimum && lt(sub(cue.end, cue.start), minimum))
+        report(
+          "W_SUB_SHORT",
+          "warning",
+          "Projected subtitle is shorter than minimum duration",
+          cue.track_id,
+          cue.cue_id,
+          ...cue.clip_ids,
+        );
+    }
+  }
   return issues;
 }

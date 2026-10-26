@@ -919,6 +919,53 @@
             "$ref": "#/$defs/cue"
           }
         },
+        "subtitle_rules": {
+          "description": "Segmentation rules used for this transcript; see docs/spec/subtitle-rules.md section 1.",
+          "type": "object",
+          "required": [
+            "profile"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "profile": {
+              "enum": [
+                "zh-talk",
+                "en-talk"
+              ]
+            },
+            "cpl": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "max_lines": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3
+            },
+            "cps": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "min_duration": {
+              "$ref": "#/$defs/duration"
+            },
+            "max_duration": {
+              "$ref": "#/$defs/duration"
+            },
+            "hard_pause": {
+              "$ref": "#/$defs/duration"
+            },
+            "soft_pause": {
+              "$ref": "#/$defs/duration"
+            },
+            "min_gap": {
+              "$ref": "#/$defs/duration"
+            },
+            "strip_end_punct": {
+              "type": "boolean"
+            }
+          }
+        },
         "ext": {
           "$ref": "#/$defs/ext"
         }

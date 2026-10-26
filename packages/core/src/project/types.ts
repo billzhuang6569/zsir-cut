@@ -242,7 +242,21 @@ export interface Transcript {
   raw_runs: RawRun[];
   tokens: Token[];
   cues: Cue[];
+  subtitle_rules?: TranscriptSubtitleRules;
   ext?: Extension;
+}
+
+export interface TranscriptSubtitleRules {
+  profile: "zh-talk" | "en-talk";
+  cpl?: number;
+  max_lines?: number;
+  cps?: number;
+  min_duration?: Rational;
+  max_duration?: Rational;
+  hard_pause?: Rational;
+  soft_pause?: Rational;
+  min_gap?: Rational;
+  strip_end_punct?: boolean;
 }
 
 export interface StyleOutline {
