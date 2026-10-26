@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/billzhuang6569/zsir-cut/schema/envelope.schema.json",
+  "title": "zsir-cut command result envelope",
+  "description": "Every verb returns exactly this shape over both CLI and MCP. See docs/spec/command-protocol.md section 4.",
+  "type": "object",
+  "required": ["ok", "status", "verb", "request_id", "receipt", "changes", "verification", "result", "error"],
+  "additionalProperties": false,
+  "properties": {
+    "ok": { "type": "boolean" },
+    "status": { "enum": ["applied", "drafted", "dry_run", "no_op", "accepted", "rejected", "conflict", "failed", "committed_unverified"] },
+    "verb": {
+      "enum": ["inspect", "read_transcript", "validate", "diff", "import_media", "edit", "undo", "redo", "transcribe",
+               "session_begin", "session_review", "session_approve", "session_reject",
+               "render_preview", "view_timeline", "export", "job_status"]
+    },
+    "request_id": { "type": "string", "pattern": "^req_[A-Za-z0-9_-]{1,64}$" },
+    "receipt": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["before", "after", "idempotency_key", "replayed"],
+          "additionalProperties": false,
+          "properties": {
+            "before": { "$ref": "#/$defs/rev" },
+            "after": { "oneOf": [{ "$ref": "#/$defs/rev" }, { "type": "null" }] },
+            "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "replayed": { "type": "boolean" },
+            "session_id": { "type": "string" }
+          }
+        }
+      ]
+    },
+    "changes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["op", "entity", "id", "action"],
+        "additionalProperties": false,
+        "properties": {
+          "op": { "type": "string" },
+          "entity": { "enum": ["project", "media", "timeline", "track", "clip", "transition", "marker", "transcript", "token", "cue", "override", "free_cue", "style"] },
+          "id": { "type": "string" },
+          "action": { "enum": ["created", "updated", "trimmed", "moved", "removed", "split_from"] },
+          "detail": { "type": "object" }
+        }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "required": ["level", "passed", "issues"],
+      "additionalProperties": false,
+      "properties": {
+        "level": { "enum": ["none", "L0", "L1", "L2"] },
+        "passed": { "type": "boolean" },
+        "issues": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["code", "severity", "message", "ids"],
+            "additionalProperties": false,
+            "properties": {
+              "code": { "type": "string", "pattern": "^[EW]_[A-Z0-9_]+$" },
+              "severity": { "enum": ["error", "warning"] },
+              "message": { "type": "string" },
+              "ids": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+    "result": { "description": "Verb-specific payload.", "type": ["object", "null"] },
+    "error": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["code", "message", "retryable"],
+          "additionalProperties": false,
+          "properties": {
+            "code": { "enum": ["E_CONFLICT", "E_IDEMPOTENCY_MISMATCH", "E_VALIDATION", "E_NOT_FOUND", "E_MIXED_DOMAIN", "E_LOCKED", "E_UNDO_CONFLICT", "E_SESSION_STATE", "E_UNSUPPORTED", "E_IO", "E_INTERNAL"] },
+            "message": { "type": "string" },
+            "retryable": { "type": "boolean" },
+            "details": { "type": "object" }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    { "if": { "properties": { "status": { "enum": ["rejected", "conflict", "failed"] } } },
+      "then": { "properties": { "ok": { "const": false }, "error": { "type": "object" } } } },
+    { "if": { "properties": { "status": { "enum": ["applied", "drafted", "dry_run", "no_op", "accepted"] } } },
+      "then": { "properties": { "ok": { "const": true }, "error": { "type": "null" } } } },
+    { "if": { "properties": { "status": { "const": "committed_unverified" } } },
+      "then": { "properties": { "ok": { "const": false } } } }
+  ],
+  "$defs": {
+    "rev": { "type": "string", "pattern": "^rev_[A-Za-z0-9_-]{1,64}$" }
+  }
+}
