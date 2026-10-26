@@ -5,6 +5,7 @@
       "packages/**",
       "!packages/**/dist",
       "scripts/**",
+      "fixtures/synth/**/*.ts",
       "package.json",
       "pnpm-workspace.yaml",
       "tsconfig*.json",

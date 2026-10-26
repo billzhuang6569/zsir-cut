@@ -11,7 +11,11 @@
     "format": "biome format --write .",
     "typecheck": "tsc -b",
     "test": "vitest run",
-    "validate:examples": "node scripts/validate-examples.ts"
+    "validate:examples": "node scripts/validate-examples.ts",
+    "fixtures:gen": "node fixtures/synth/cli.ts gen",
+    "fixtures:bind": "node fixtures/synth/cli.ts bind",
+    "fixtures:check": "node fixtures/synth/cli.ts check",
+    "fixtures:relocate": "node fixtures/synth/cli.ts relocate"
   },
   "devDependencies": {
     "@biomejs/biome": "2.2.4",

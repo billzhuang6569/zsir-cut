@@ -5,7 +5,7 @@
     "allowImportingTsExtensions": true,
     "types": ["node"]
   },
-  "include": ["scripts/**/*.ts", "packages/core/test/**/*.ts", "vitest.config.ts"],
+  "include": ["scripts/**/*.ts", "packages/core/test/**/*.ts", "fixtures/synth/**/*.ts", "vitest.config.ts"],
   "references": [
     { "path": "./packages/core" },
     { "path": "./packages/exporters" },
