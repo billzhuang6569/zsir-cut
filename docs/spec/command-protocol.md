@@ -254,7 +254,7 @@
 | `add_free_cue` / `remove_free_cue` | | |
 | `add_style` / `update_style` | | 样式改动时 `version` 加一 |
 
-每个操作的完整参数 schema 在第 1 步由实现补进 `schema/command.schema.json`，补的时候以本文为准，有出入先改本文。
+每个操作的精确语义见 `docs/spec/edit-ops.md`。完整参数 schema 在第 1 步由实现按那份文档补进 `schema/command.schema.json`，有出入先改规格。
 
 ## 11. 错误码
 
