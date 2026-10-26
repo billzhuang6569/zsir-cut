@@ -97,7 +97,7 @@ Project
 - `original_path`：导入时的绝对路径，只用于提示和找回。
 - `size_bytes` 加 `fingerprint`：内容身份。`sampled-sha256-v1` 的算法是：对「文件字节数的十进制字符串、换行、开头 4 MiB、中间 4 MiB、末尾 4 MiB」做 SHA-256。中间 4 MiB 从字节偏移 `floor((文件大小 − 4 MiB) / 2)` 开始。12 MiB 及以下的文件对全文做 SHA-256。
 - `kind`：`video`、`audio` 或 `image`。`image` 的 `duration` 表示它允许被使用的最长时长，约定写 `"3600s"`；用它的片段 `source_start` 必须是 `"0s"`。
-- `duration`、`start_timecode`、`reel`：源时长、源起始时码、卷名。
+- `duration`、`start_timecode`、`reel`：源时长、源起始时码、卷名。纯音频和图片没有帧率，它们的 `start_timecode` 按 25 帧不丢帧解释。
 - `video`：`rate`、`width`、`height`、`pixel_aspect`、`vfr`。
 - `audio`：`sample_rate`、`channels`。
 - `proxy`：可选的代理文件，结构同 `path` 加 `fingerprint`。

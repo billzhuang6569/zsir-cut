@@ -15,6 +15,7 @@ const prefixes = new Set([
   "cue_",
   "sty_",
   "rev_",
+  "req_",
 ]);
 
 export interface IdSources {
