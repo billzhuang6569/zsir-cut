@@ -1,0 +1,1297 @@
+{
+  "schema": "zsir-cut/fixture-script",
+  "schema_version": "0.1",
+  "media": "A",
+  "duration_ms": 120000,
+  "sentences": [
+    {
+      "index": 0,
+      "text": "大家好我是庄Sir",
+      "en": "Hi everyone, I'm Zhuang Sir",
+      "start_ms": 500,
+      "end_ms": 2090,
+      "first": 0,
+      "last": 4
+    },
+    {
+      "index": 1,
+      "text": "今天聊聊zsir-cut这个项目",
+      "en": "Today let's talk about zsir-cut",
+      "start_ms": 5500,
+      "end_ms": 7580,
+      "first": 5,
+      "last": 9
+    },
+    {
+      "index": 2,
+      "text": "它是剪辑师和Agent共用的时间线",
+      "en": "A timeline shared by editors and agents",
+      "start_ms": 10500,
+      "end_ms": 13460,
+      "first": 10,
+      "last": 17
+    },
+    {
+      "index": 3,
+      "text": "Agent先把粗剪和字幕做完",
+      "en": "The agent does the rough cut and captions first",
+      "start_ms": 15500,
+      "end_ms": 17800,
+      "first": 18,
+      "last": 24
+    },
+    {
+      "index": 4,
+      "text": "然后交给FinalCutPro收尾",
+      "en": "Then hands off to Final Cut Pro",
+      "start_ms": 20500,
+      "end_ms": 22780,
+      "first": 25,
+      "last": 30
+    },
+    {
+      "index": 5,
+      "text": "也可以交给DaVinciResolve",
+      "en": "Or to DaVinci Resolve",
+      "start_ms": 25500,
+      "end_ms": 27240,
+      "first": 31,
+      "last": 35
+    },
+    {
+      "index": 6,
+      "text": "一条三分钟的采访大概要剪两小时",
+      "en": "A three-minute interview takes about two hours",
+      "start_ms": 30500,
+      "end_ms": 33800,
+      "first": 36,
+      "last": 45
+    },
+    {
+      "index": 7,
+      "text": "其中百分之六十的时间在找重复的话",
+      "en": "Sixty percent of it is finding repeated lines",
+      "start_ms": 35500,
+      "end_ms": 39020,
+      "first": 46,
+      "last": 55
+    },
+    {
+      "index": 8,
+      "text": "我们希望把这部分交给Agent",
+      "en": "We want the agent to take that part",
+      "start_ms": 40500,
+      "end_ms": 43020,
+      "first": 56,
+      "last": 62
+    },
+    {
+      "index": 9,
+      "text": "嗯就是说人只做判断",
+      "en": "So people only make the calls",
+      "start_ms": 45500,
+      "end_ms": 47480,
+      "first": 63,
+      "last": 68
+    },
+    {
+      "index": 10,
+      "text": "字幕要跟着剪辑一起走",
+      "en": "Captions must follow the edit",
+      "start_ms": 50500,
+      "end_ms": 52700,
+      "first": 69,
+      "last": 74
+    },
+    {
+      "index": 11,
+      "text": "删掉一句话字幕也跟着消失",
+      "en": "Delete a line and its caption goes too",
+      "start_ms": 55500,
+      "end_ms": 58140,
+      "first": 75,
+      "last": 81
+    },
+    {
+      "index": 12,
+      "text": "品牌词比如zsir-cut不能写错",
+      "en": "Brand names like zsir-cut must be right",
+      "start_ms": 60500,
+      "end_ms": 62800,
+      "first": 82,
+      "last": 87
+    },
+    {
+      "index": 13,
+      "text": "数字比如2026年10月也要对",
+      "en": "Numbers like October 2026 must be right",
+      "start_ms": 65500,
+      "end_ms": 68120,
+      "first": 88,
+      "last": 96
+    },
+    {
+      "index": 14,
+      "text": "我们用Qwen3做本地识别",
+      "en": "We use Qwen3 for local recognition",
+      "start_ms": 70500,
+      "end_ms": 72580,
+      "first": 97,
+      "last": 102
+    },
+    {
+      "index": 15,
+      "text": "云端用火山引擎兜底",
+      "en": "With Volcano Engine as cloud fallback",
+      "start_ms": 75500,
+      "end_ms": 77480,
+      "first": 103,
+      "last": 106
+    },
+    {
+      "index": 16,
+      "text": "every cut must be frame accurate",
+      "en": "Every cut must be frame accurate",
+      "start_ms": 80500,
+      "end_ms": 82420,
+      "first": 107,
+      "last": 112
+    },
+    {
+      "index": 17,
+      "text": "每一个剪点都要精确到帧",
+      "en": "Each cut point accurate to the frame",
+      "start_ms": 85500,
+      "end_ms": 87920,
+      "first": 113,
+      "last": 119
+    },
+    {
+      "index": 18,
+      "text": "交接之前先看损失报告",
+      "en": "Check the loss report before handoff",
+      "start_ms": 90500,
+      "end_ms": 92700,
+      "first": 120,
+      "last": 125
+    },
+    {
+      "index": 19,
+      "text": "哪些能保留哪些要重做",
+      "en": "What survives and what must be redone",
+      "start_ms": 95500,
+      "end_ms": 97700,
+      "first": 126,
+      "last": 131
+    },
+    {
+      "index": 20,
+      "text": "剪辑师拿到的工程还能继续改",
+      "en": "The editor can keep editing the project",
+      "start_ms": 100500,
+      "end_ms": 103360,
+      "first": 132,
+      "last": 138
+    },
+    {
+      "index": 21,
+      "text": "这才叫真正的交接",
+      "en": "That is a real handoff",
+      "start_ms": 105500,
+      "end_ms": 107260,
+      "first": 139,
+      "last": 144
+    },
+    {
+      "index": 22,
+      "text": "第一期先做采访口播",
+      "en": "Phase one starts with interviews",
+      "start_ms": 110500,
+      "end_ms": 112480,
+      "first": 145,
+      "last": 150
+    },
+    {
+      "index": 23,
+      "text": "谢谢大家",
+      "en": "Thank you",
+      "start_ms": 115500,
+      "end_ms": 116380,
+      "first": 151,
+      "last": 152
+    }
+  ],
+  "tokens": [
+    {
+      "index": 0,
+      "text": "大家",
+      "start_ms": 500,
+      "end_ms": 940,
+      "sentence": 0
+    },
+    {
+      "index": 1,
+      "text": "好",
+      "start_ms": 940,
+      "end_ms": 1160,
+      "sentence": 0
+    },
+    {
+      "index": 2,
+      "text": "我",
+      "start_ms": 1160,
+      "end_ms": 1380,
+      "sentence": 0
+    },
+    {
+      "index": 3,
+      "text": "是",
+      "start_ms": 1380,
+      "end_ms": 1600,
+      "sentence": 0
+    },
+    {
+      "index": 4,
+      "text": "庄Sir",
+      "start_ms": 1600,
+      "end_ms": 2090,
+      "sentence": 0
+    },
+    {
+      "index": 5,
+      "text": "今天",
+      "start_ms": 5500,
+      "end_ms": 5940,
+      "sentence": 1
+    },
+    {
+      "index": 6,
+      "text": "聊聊",
+      "start_ms": 5940,
+      "end_ms": 6380,
+      "sentence": 1
+    },
+    {
+      "index": 7,
+      "text": "zsir-cut",
+      "start_ms": 6380,
+      "end_ms": 6700,
+      "sentence": 1
+    },
+    {
+      "index": 8,
+      "text": "这个",
+      "start_ms": 6700,
+      "end_ms": 7140,
+      "sentence": 1
+    },
+    {
+      "index": 9,
+      "text": "项目",
+      "start_ms": 7140,
+      "end_ms": 7580,
+      "sentence": 1
+    },
+    {
+      "index": 10,
+      "text": "它",
+      "start_ms": 10500,
+      "end_ms": 10720,
+      "sentence": 2
+    },
+    {
+      "index": 11,
+      "text": "是",
+      "start_ms": 10720,
+      "end_ms": 10940,
+      "sentence": 2
+    },
+    {
+      "index": 12,
+      "text": "剪辑师",
+      "start_ms": 10940,
+      "end_ms": 11600,
+      "sentence": 2
+    },
+    {
+      "index": 13,
+      "text": "和",
+      "start_ms": 11600,
+      "end_ms": 11820,
+      "sentence": 2
+    },
+    {
+      "index": 14,
+      "text": "Agent",
+      "start_ms": 11820,
+      "end_ms": 12140,
+      "sentence": 2
+    },
+    {
+      "index": 15,
+      "text": "共用",
+      "start_ms": 12140,
+      "end_ms": 12580,
+      "sentence": 2
+    },
+    {
+      "index": 16,
+      "text": "的",
+      "start_ms": 12580,
+      "end_ms": 12800,
+      "sentence": 2
+    },
+    {
+      "index": 17,
+      "text": "时间线",
+      "start_ms": 12800,
+      "end_ms": 13460,
+      "sentence": 2
+    },
+    {
+      "index": 18,
+      "text": "Agent",
+      "start_ms": 15500,
+      "end_ms": 15820,
+      "sentence": 3
+    },
+    {
+      "index": 19,
+      "text": "先",
+      "start_ms": 15820,
+      "end_ms": 16040,
+      "sentence": 3
+    },
+    {
+      "index": 20,
+      "text": "把",
+      "start_ms": 16040,
+      "end_ms": 16260,
+      "sentence": 3
+    },
+    {
+      "index": 21,
+      "text": "粗剪",
+      "start_ms": 16260,
+      "end_ms": 16700,
+      "sentence": 3
+    },
+    {
+      "index": 22,
+      "text": "和",
+      "start_ms": 16700,
+      "end_ms": 16920,
+      "sentence": 3
+    },
+    {
+      "index": 23,
+      "text": "字幕",
+      "start_ms": 16920,
+      "end_ms": 17360,
+      "sentence": 3
+    },
+    {
+      "index": 24,
+      "text": "做完",
+      "start_ms": 17360,
+      "end_ms": 17800,
+      "sentence": 3
+    },
+    {
+      "index": 25,
+      "text": "然后",
+      "start_ms": 20500,
+      "end_ms": 20940,
+      "sentence": 4
+    },
+    {
+      "index": 26,
+      "text": "交给",
+      "start_ms": 20940,
+      "end_ms": 21380,
+      "sentence": 4
+    },
+    {
+      "index": 27,
+      "text": "Final",
+      "start_ms": 21380,
+      "end_ms": 21700,
+      "sentence": 4
+    },
+    {
+      "index": 28,
+      "text": "Cut",
+      "start_ms": 21700,
+      "end_ms": 22020,
+      "sentence": 4
+    },
+    {
+      "index": 29,
+      "text": "Pro",
+      "start_ms": 22020,
+      "end_ms": 22340,
+      "sentence": 4
+    },
+    {
+      "index": 30,
+      "text": "收尾",
+      "start_ms": 22340,
+      "end_ms": 22780,
+      "sentence": 4
+    },
+    {
+      "index": 31,
+      "text": "也",
+      "start_ms": 25500,
+      "end_ms": 25720,
+      "sentence": 5
+    },
+    {
+      "index": 32,
+      "text": "可以",
+      "start_ms": 25720,
+      "end_ms": 26160,
+      "sentence": 5
+    },
+    {
+      "index": 33,
+      "text": "交给",
+      "start_ms": 26160,
+      "end_ms": 26600,
+      "sentence": 5
+    },
+    {
+      "index": 34,
+      "text": "DaVinci",
+      "start_ms": 26600,
+      "end_ms": 26920,
+      "sentence": 5
+    },
+    {
+      "index": 35,
+      "text": "Resolve",
+      "start_ms": 26920,
+      "end_ms": 27240,
+      "sentence": 5
+    },
+    {
+      "index": 36,
+      "text": "一条",
+      "start_ms": 30500,
+      "end_ms": 30940,
+      "sentence": 6
+    },
+    {
+      "index": 37,
+      "text": "三",
+      "start_ms": 30940,
+      "end_ms": 31160,
+      "sentence": 6
+    },
+    {
+      "index": 38,
+      "text": "分钟",
+      "start_ms": 31160,
+      "end_ms": 31600,
+      "sentence": 6
+    },
+    {
+      "index": 39,
+      "text": "的",
+      "start_ms": 31600,
+      "end_ms": 31820,
+      "sentence": 6
+    },
+    {
+      "index": 40,
+      "text": "采访",
+      "start_ms": 31820,
+      "end_ms": 32260,
+      "sentence": 6
+    },
+    {
+      "index": 41,
+      "text": "大概",
+      "start_ms": 32260,
+      "end_ms": 32700,
+      "sentence": 6
+    },
+    {
+      "index": 42,
+      "text": "要",
+      "start_ms": 32700,
+      "end_ms": 32920,
+      "sentence": 6
+    },
+    {
+      "index": 43,
+      "text": "剪",
+      "start_ms": 32920,
+      "end_ms": 33140,
+      "sentence": 6
+    },
+    {
+      "index": 44,
+      "text": "两",
+      "start_ms": 33140,
+      "end_ms": 33360,
+      "sentence": 6
+    },
+    {
+      "index": 45,
+      "text": "小时",
+      "start_ms": 33360,
+      "end_ms": 33800,
+      "sentence": 6
+    },
+    {
+      "index": 46,
+      "text": "其中",
+      "start_ms": 35500,
+      "end_ms": 35940,
+      "sentence": 7
+    },
+    {
+      "index": 47,
+      "text": "百分之",
+      "start_ms": 35940,
+      "end_ms": 36600,
+      "sentence": 7
+    },
+    {
+      "index": 48,
+      "text": "六十",
+      "start_ms": 36600,
+      "end_ms": 37040,
+      "sentence": 7
+    },
+    {
+      "index": 49,
+      "text": "的",
+      "start_ms": 37040,
+      "end_ms": 37260,
+      "sentence": 7
+    },
+    {
+      "index": 50,
+      "text": "时间",
+      "start_ms": 37260,
+      "end_ms": 37700,
+      "sentence": 7
+    },
+    {
+      "index": 51,
+      "text": "在",
+      "start_ms": 37700,
+      "end_ms": 37920,
+      "sentence": 7
+    },
+    {
+      "index": 52,
+      "text": "找",
+      "start_ms": 37920,
+      "end_ms": 38140,
+      "sentence": 7
+    },
+    {
+      "index": 53,
+      "text": "重复",
+      "start_ms": 38140,
+      "end_ms": 38580,
+      "sentence": 7
+    },
+    {
+      "index": 54,
+      "text": "的",
+      "start_ms": 38580,
+      "end_ms": 38800,
+      "sentence": 7
+    },
+    {
+      "index": 55,
+      "text": "话",
+      "start_ms": 38800,
+      "end_ms": 39020,
+      "sentence": 7
+    },
+    {
+      "index": 56,
+      "text": "我们",
+      "start_ms": 40500,
+      "end_ms": 40940,
+      "sentence": 8
+    },
+    {
+      "index": 57,
+      "text": "希望",
+      "start_ms": 40940,
+      "end_ms": 41380,
+      "sentence": 8
+    },
+    {
+      "index": 58,
+      "text": "把",
+      "start_ms": 41380,
+      "end_ms": 41600,
+      "sentence": 8
+    },
+    {
+      "index": 59,
+      "text": "这",
+      "start_ms": 41600,
+      "end_ms": 41820,
+      "sentence": 8
+    },
+    {
+      "index": 60,
+      "text": "部分",
+      "start_ms": 41820,
+      "end_ms": 42260,
+      "sentence": 8
+    },
+    {
+      "index": 61,
+      "text": "交给",
+      "start_ms": 42260,
+      "end_ms": 42700,
+      "sentence": 8
+    },
+    {
+      "index": 62,
+      "text": "Agent",
+      "start_ms": 42700,
+      "end_ms": 43020,
+      "sentence": 8
+    },
+    {
+      "index": 63,
+      "text": "嗯",
+      "start_ms": 45500,
+      "end_ms": 45720,
+      "sentence": 9
+    },
+    {
+      "index": 64,
+      "text": "就是说",
+      "start_ms": 45720,
+      "end_ms": 46380,
+      "sentence": 9
+    },
+    {
+      "index": 65,
+      "text": "人",
+      "start_ms": 46380,
+      "end_ms": 46600,
+      "sentence": 9
+    },
+    {
+      "index": 66,
+      "text": "只",
+      "start_ms": 46600,
+      "end_ms": 46820,
+      "sentence": 9
+    },
+    {
+      "index": 67,
+      "text": "做",
+      "start_ms": 46820,
+      "end_ms": 47040,
+      "sentence": 9
+    },
+    {
+      "index": 68,
+      "text": "判断",
+      "start_ms": 47040,
+      "end_ms": 47480,
+      "sentence": 9
+    },
+    {
+      "index": 69,
+      "text": "字幕",
+      "start_ms": 50500,
+      "end_ms": 50940,
+      "sentence": 10
+    },
+    {
+      "index": 70,
+      "text": "要",
+      "start_ms": 50940,
+      "end_ms": 51160,
+      "sentence": 10
+    },
+    {
+      "index": 71,
+      "text": "跟着",
+      "start_ms": 51160,
+      "end_ms": 51600,
+      "sentence": 10
+    },
+    {
+      "index": 72,
+      "text": "剪辑",
+      "start_ms": 51600,
+      "end_ms": 52040,
+      "sentence": 10
+    },
+    {
+      "index": 73,
+      "text": "一起",
+      "start_ms": 52040,
+      "end_ms": 52480,
+      "sentence": 10
+    },
+    {
+      "index": 74,
+      "text": "走",
+      "start_ms": 52480,
+      "end_ms": 52700,
+      "sentence": 10
+    },
+    {
+      "index": 75,
+      "text": "删掉",
+      "start_ms": 55500,
+      "end_ms": 55940,
+      "sentence": 11
+    },
+    {
+      "index": 76,
+      "text": "一句",
+      "start_ms": 55940,
+      "end_ms": 56380,
+      "sentence": 11
+    },
+    {
+      "index": 77,
+      "text": "话",
+      "start_ms": 56380,
+      "end_ms": 56600,
+      "sentence": 11
+    },
+    {
+      "index": 78,
+      "text": "字幕",
+      "start_ms": 56600,
+      "end_ms": 57040,
+      "sentence": 11
+    },
+    {
+      "index": 79,
+      "text": "也",
+      "start_ms": 57040,
+      "end_ms": 57260,
+      "sentence": 11
+    },
+    {
+      "index": 80,
+      "text": "跟着",
+      "start_ms": 57260,
+      "end_ms": 57700,
+      "sentence": 11
+    },
+    {
+      "index": 81,
+      "text": "消失",
+      "start_ms": 57700,
+      "end_ms": 58140,
+      "sentence": 11
+    },
+    {
+      "index": 82,
+      "text": "品牌",
+      "start_ms": 60500,
+      "end_ms": 60940,
+      "sentence": 12
+    },
+    {
+      "index": 83,
+      "text": "词",
+      "start_ms": 60940,
+      "end_ms": 61160,
+      "sentence": 12
+    },
+    {
+      "index": 84,
+      "text": "比如",
+      "start_ms": 61160,
+      "end_ms": 61600,
+      "sentence": 12
+    },
+    {
+      "index": 85,
+      "text": "zsir-cut",
+      "start_ms": 61600,
+      "end_ms": 61920,
+      "sentence": 12
+    },
+    {
+      "index": 86,
+      "text": "不能",
+      "start_ms": 61920,
+      "end_ms": 62360,
+      "sentence": 12
+    },
+    {
+      "index": 87,
+      "text": "写错",
+      "start_ms": 62360,
+      "end_ms": 62800,
+      "sentence": 12
+    },
+    {
+      "index": 88,
+      "text": "数字",
+      "start_ms": 65500,
+      "end_ms": 65940,
+      "sentence": 13
+    },
+    {
+      "index": 89,
+      "text": "比如",
+      "start_ms": 65940,
+      "end_ms": 66380,
+      "sentence": 13
+    },
+    {
+      "index": 90,
+      "text": "2026",
+      "start_ms": 66380,
+      "end_ms": 66700,
+      "sentence": 13
+    },
+    {
+      "index": 91,
+      "text": "年",
+      "start_ms": 66700,
+      "end_ms": 66920,
+      "sentence": 13
+    },
+    {
+      "index": 92,
+      "text": "10",
+      "start_ms": 66920,
+      "end_ms": 67240,
+      "sentence": 13
+    },
+    {
+      "index": 93,
+      "text": "月",
+      "start_ms": 67240,
+      "end_ms": 67460,
+      "sentence": 13
+    },
+    {
+      "index": 94,
+      "text": "也",
+      "start_ms": 67460,
+      "end_ms": 67680,
+      "sentence": 13
+    },
+    {
+      "index": 95,
+      "text": "要",
+      "start_ms": 67680,
+      "end_ms": 67900,
+      "sentence": 13
+    },
+    {
+      "index": 96,
+      "text": "对",
+      "start_ms": 67900,
+      "end_ms": 68120,
+      "sentence": 13
+    },
+    {
+      "index": 97,
+      "text": "我们",
+      "start_ms": 70500,
+      "end_ms": 70940,
+      "sentence": 14
+    },
+    {
+      "index": 98,
+      "text": "用",
+      "start_ms": 70940,
+      "end_ms": 71160,
+      "sentence": 14
+    },
+    {
+      "index": 99,
+      "text": "Qwen3",
+      "start_ms": 71160,
+      "end_ms": 71480,
+      "sentence": 14
+    },
+    {
+      "index": 100,
+      "text": "做",
+      "start_ms": 71480,
+      "end_ms": 71700,
+      "sentence": 14
+    },
+    {
+      "index": 101,
+      "text": "本地",
+      "start_ms": 71700,
+      "end_ms": 72140,
+      "sentence": 14
+    },
+    {
+      "index": 102,
+      "text": "识别",
+      "start_ms": 72140,
+      "end_ms": 72580,
+      "sentence": 14
+    },
+    {
+      "index": 103,
+      "text": "云端",
+      "start_ms": 75500,
+      "end_ms": 75940,
+      "sentence": 15
+    },
+    {
+      "index": 104,
+      "text": "用",
+      "start_ms": 75940,
+      "end_ms": 76160,
+      "sentence": 15
+    },
+    {
+      "index": 105,
+      "text": "火山引擎",
+      "start_ms": 76160,
+      "end_ms": 77040,
+      "sentence": 15
+    },
+    {
+      "index": 106,
+      "text": "兜底",
+      "start_ms": 77040,
+      "end_ms": 77480,
+      "sentence": 15
+    },
+    {
+      "index": 107,
+      "text": "every",
+      "start_ms": 80500,
+      "end_ms": 80820,
+      "sentence": 16
+    },
+    {
+      "index": 108,
+      "text": "cut",
+      "start_ms": 80820,
+      "end_ms": 81140,
+      "sentence": 16
+    },
+    {
+      "index": 109,
+      "text": "must",
+      "start_ms": 81140,
+      "end_ms": 81460,
+      "sentence": 16
+    },
+    {
+      "index": 110,
+      "text": "be",
+      "start_ms": 81460,
+      "end_ms": 81780,
+      "sentence": 16
+    },
+    {
+      "index": 111,
+      "text": "frame",
+      "start_ms": 81780,
+      "end_ms": 82100,
+      "sentence": 16
+    },
+    {
+      "index": 112,
+      "text": "accurate",
+      "start_ms": 82100,
+      "end_ms": 82420,
+      "sentence": 16
+    },
+    {
+      "index": 113,
+      "text": "每",
+      "start_ms": 85500,
+      "end_ms": 85720,
+      "sentence": 17
+    },
+    {
+      "index": 114,
+      "text": "一个",
+      "start_ms": 85720,
+      "end_ms": 86160,
+      "sentence": 17
+    },
+    {
+      "index": 115,
+      "text": "剪点",
+      "start_ms": 86160,
+      "end_ms": 86600,
+      "sentence": 17
+    },
+    {
+      "index": 116,
+      "text": "都要",
+      "start_ms": 86600,
+      "end_ms": 87040,
+      "sentence": 17
+    },
+    {
+      "index": 117,
+      "text": "精确",
+      "start_ms": 87040,
+      "end_ms": 87480,
+      "sentence": 17
+    },
+    {
+      "index": 118,
+      "text": "到",
+      "start_ms": 87480,
+      "end_ms": 87700,
+      "sentence": 17
+    },
+    {
+      "index": 119,
+      "text": "帧",
+      "start_ms": 87700,
+      "end_ms": 87920,
+      "sentence": 17
+    },
+    {
+      "index": 120,
+      "text": "交接",
+      "start_ms": 90500,
+      "end_ms": 90940,
+      "sentence": 18
+    },
+    {
+      "index": 121,
+      "text": "之前",
+      "start_ms": 90940,
+      "end_ms": 91380,
+      "sentence": 18
+    },
+    {
+      "index": 122,
+      "text": "先",
+      "start_ms": 91380,
+      "end_ms": 91600,
+      "sentence": 18
+    },
+    {
+      "index": 123,
+      "text": "看",
+      "start_ms": 91600,
+      "end_ms": 91820,
+      "sentence": 18
+    },
+    {
+      "index": 124,
+      "text": "损失",
+      "start_ms": 91820,
+      "end_ms": 92260,
+      "sentence": 18
+    },
+    {
+      "index": 125,
+      "text": "报告",
+      "start_ms": 92260,
+      "end_ms": 92700,
+      "sentence": 18
+    },
+    {
+      "index": 126,
+      "text": "哪些",
+      "start_ms": 95500,
+      "end_ms": 95940,
+      "sentence": 19
+    },
+    {
+      "index": 127,
+      "text": "能",
+      "start_ms": 95940,
+      "end_ms": 96160,
+      "sentence": 19
+    },
+    {
+      "index": 128,
+      "text": "保留",
+      "start_ms": 96160,
+      "end_ms": 96600,
+      "sentence": 19
+    },
+    {
+      "index": 129,
+      "text": "哪些",
+      "start_ms": 96600,
+      "end_ms": 97040,
+      "sentence": 19
+    },
+    {
+      "index": 130,
+      "text": "要",
+      "start_ms": 97040,
+      "end_ms": 97260,
+      "sentence": 19
+    },
+    {
+      "index": 131,
+      "text": "重做",
+      "start_ms": 97260,
+      "end_ms": 97700,
+      "sentence": 19
+    },
+    {
+      "index": 132,
+      "text": "剪辑师",
+      "start_ms": 100500,
+      "end_ms": 101160,
+      "sentence": 20
+    },
+    {
+      "index": 133,
+      "text": "拿到",
+      "start_ms": 101160,
+      "end_ms": 101600,
+      "sentence": 20
+    },
+    {
+      "index": 134,
+      "text": "的",
+      "start_ms": 101600,
+      "end_ms": 101820,
+      "sentence": 20
+    },
+    {
+      "index": 135,
+      "text": "工程",
+      "start_ms": 101820,
+      "end_ms": 102260,
+      "sentence": 20
+    },
+    {
+      "index": 136,
+      "text": "还能",
+      "start_ms": 102260,
+      "end_ms": 102700,
+      "sentence": 20
+    },
+    {
+      "index": 137,
+      "text": "继续",
+      "start_ms": 102700,
+      "end_ms": 103140,
+      "sentence": 20
+    },
+    {
+      "index": 138,
+      "text": "改",
+      "start_ms": 103140,
+      "end_ms": 103360,
+      "sentence": 20
+    },
+    {
+      "index": 139,
+      "text": "这",
+      "start_ms": 105500,
+      "end_ms": 105720,
+      "sentence": 21
+    },
+    {
+      "index": 140,
+      "text": "才",
+      "start_ms": 105720,
+      "end_ms": 105940,
+      "sentence": 21
+    },
+    {
+      "index": 141,
+      "text": "叫",
+      "start_ms": 105940,
+      "end_ms": 106160,
+      "sentence": 21
+    },
+    {
+      "index": 142,
+      "text": "真正",
+      "start_ms": 106160,
+      "end_ms": 106600,
+      "sentence": 21
+    },
+    {
+      "index": 143,
+      "text": "的",
+      "start_ms": 106600,
+      "end_ms": 106820,
+      "sentence": 21
+    },
+    {
+      "index": 144,
+      "text": "交接",
+      "start_ms": 106820,
+      "end_ms": 107260,
+      "sentence": 21
+    },
+    {
+      "index": 145,
+      "text": "第一",
+      "start_ms": 110500,
+      "end_ms": 110940,
+      "sentence": 22
+    },
+    {
+      "index": 146,
+      "text": "期",
+      "start_ms": 110940,
+      "end_ms": 111160,
+      "sentence": 22
+    },
+    {
+      "index": 147,
+      "text": "先",
+      "start_ms": 111160,
+      "end_ms": 111380,
+      "sentence": 22
+    },
+    {
+      "index": 148,
+      "text": "做",
+      "start_ms": 111380,
+      "end_ms": 111600,
+      "sentence": 22
+    },
+    {
+      "index": 149,
+      "text": "采访",
+      "start_ms": 111600,
+      "end_ms": 112040,
+      "sentence": 22
+    },
+    {
+      "index": 150,
+      "text": "口播",
+      "start_ms": 112040,
+      "end_ms": 112480,
+      "sentence": 22
+    },
+    {
+      "index": 151,
+      "text": "谢谢",
+      "start_ms": 115500,
+      "end_ms": 115940,
+      "sentence": 23
+    },
+    {
+      "index": 152,
+      "text": "大家",
+      "start_ms": 115940,
+      "end_ms": 116380,
+      "sentence": 23
+    }
+  ]
+}

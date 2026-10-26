@@ -40,7 +40,7 @@
 ### 2.3 对齐规则
 
 - 视频片段的 `timeline_start`、`duration` 和时间映射关键点的 `at` 必须落在时间线帧网格上。
-- 音频片段的边界必须落在 `audio_rate` 的采样网格上，可以不在帧网格上。
+- 音频片段的边界必须落在时间线帧网格或 `audio_rate` 的采样网格上，两者满足其一即可。29.97 帧的一帧是 1601.6 个采样，所以帧边界上的音频剪点也合法。
 - 字幕时间可以是任意有理数，导出时由交接 profile 量化到目标帧网格。
 
 ## 3. 身份：三层 ID
@@ -96,7 +96,7 @@ Project
 - `path`：相对工程文件所在目录的路径，用 `/` 分隔，原样保存 UTF-8 字符，不做 URL 编码。
 - `original_path`：导入时的绝对路径，只用于提示和找回。
 - `size_bytes` 加 `fingerprint`：内容身份。`sampled-sha256-v1` 的算法是：对「文件字节数的十进制字符串、换行、开头 4 MiB、中间 4 MiB、末尾 4 MiB」做 SHA-256。12 MiB 及以下的文件对全文做 SHA-256。
-- `kind`：`video`、`audio` 或 `image`。
+- `kind`：`video`、`audio` 或 `image`。`image` 的 `duration` 表示它允许被使用的最长时长，约定写 `"3600s"`；用它的片段 `source_start` 必须是 `"0s"`。
 - `duration`、`start_timecode`、`reel`：源时长、源起始时码、卷名。
 - `video`：`rate`、`width`、`height`、`pixel_aspect`、`vfr`。
 - `audio`：`sample_rate`、`channels`。

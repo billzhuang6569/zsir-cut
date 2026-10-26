@@ -1,0 +1,4983 @@
+{
+  "schema": "zsir-cut/timeline",
+  "schema_version": "0.1",
+  "id": "prj_std_2997_df",
+  "name": "标准测试工程 std-2997-df",
+  "revision": {
+    "seq": 1,
+    "id": "rev_fixture_1",
+    "parent": null,
+    "created_at": "2026-10-26T00:00:00Z",
+    "author": {
+      "kind": "system",
+      "name": "fixtures"
+    }
+  },
+  "media": [
+    {
+      "id": "med_A",
+      "kind": "video",
+      "name": "A_2997.mov",
+      "path": "../.media/2997/A_2997.mov",
+      "size_bytes": 0,
+      "fingerprint": {
+        "algo": "sampled-sha256-v1",
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "duration": "1200199/10000s",
+      "start_timecode": "10:00:00;00",
+      "reel": "A",
+      "video": {
+        "rate": "30000/1001",
+        "width": 960,
+        "height": 540,
+        "pixel_aspect": "1",
+        "vfr": false
+      },
+      "audio": {
+        "sample_rate": "48000",
+        "channels": 2
+      }
+    },
+    {
+      "id": "med_B",
+      "kind": "video",
+      "name": "B_2997.mov",
+      "path": "../.media/2997/B_2997.mov",
+      "size_bytes": 0,
+      "fingerprint": {
+        "algo": "sampled-sha256-v1",
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "duration": "1350349/15000s",
+      "start_timecode": "10:00:01;12",
+      "reel": "B",
+      "video": {
+        "rate": "30000/1001",
+        "width": 960,
+        "height": 540,
+        "pixel_aspect": "1",
+        "vfr": false
+      },
+      "audio": {
+        "sample_rate": "48000",
+        "channels": 2
+      }
+    },
+    {
+      "id": "med_EXT",
+      "kind": "audio",
+      "name": "外录音频.wav",
+      "path": "../.media/shared/外录音频.wav",
+      "size_bytes": 0,
+      "fingerprint": {
+        "algo": "sampled-sha256-v1",
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "duration": "125s",
+      "start_timecode": "09:59:58:00",
+      "reel": "EXT",
+      "audio": {
+        "sample_rate": "48000",
+        "channels": 1
+      }
+    },
+    {
+      "id": "med_STILL",
+      "kind": "image",
+      "name": "静帧.png",
+      "path": "../.media/shared/静帧.png",
+      "size_bytes": 0,
+      "fingerprint": {
+        "algo": "sampled-sha256-v1",
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "duration": "3600s"
+    },
+    {
+      "id": "med_ALPHA",
+      "kind": "video",
+      "name": "图形_alpha.mov",
+      "path": "../.media/shared/图形_alpha.mov",
+      "size_bytes": 0,
+      "fingerprint": {
+        "algo": "sampled-sha256-v1",
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "duration": "5s",
+      "start_timecode": "00:00:00:00",
+      "video": {
+        "rate": "25",
+        "width": 960,
+        "height": 540,
+        "pixel_aspect": "1",
+        "vfr": false
+      }
+    },
+    {
+      "id": "med_VFR",
+      "kind": "video",
+      "name": "手机录屏_vfr.mp4",
+      "path": "../.media/shared/手机录屏_vfr.mp4",
+      "size_bytes": 0,
+      "fingerprint": {
+        "algo": "sampled-sha256-v1",
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "duration": "30s",
+      "video": {
+        "rate": "30",
+        "width": 960,
+        "height": 540,
+        "pixel_aspect": "1",
+        "vfr": true
+      },
+      "audio": {
+        "sample_rate": "48000",
+        "channels": 1
+      }
+    },
+    {
+      "id": "med_DUP1",
+      "kind": "video",
+      "name": "同名素材.mov",
+      "path": "../.media/shared/素材 盘/100% 原片/批次1/同名素材.mov",
+      "size_bytes": 0,
+      "fingerprint": {
+        "algo": "sampled-sha256-v1",
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "duration": "10s",
+      "start_timecode": "11:00:00:00",
+      "reel": "DUP1",
+      "video": {
+        "rate": "25",
+        "width": 960,
+        "height": 540,
+        "pixel_aspect": "1",
+        "vfr": false
+      },
+      "audio": {
+        "sample_rate": "48000",
+        "channels": 2
+      }
+    },
+    {
+      "id": "med_DUP2",
+      "kind": "video",
+      "name": "同名素材.mov",
+      "path": "../.media/shared/素材 盘/100% 原片/批次2/同名素材.mov",
+      "size_bytes": 0,
+      "fingerprint": {
+        "algo": "sampled-sha256-v1",
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "duration": "10s",
+      "start_timecode": "12:00:00:00",
+      "reel": "DUP2",
+      "video": {
+        "rate": "25",
+        "width": 960,
+        "height": 540,
+        "pixel_aspect": "1",
+        "vfr": false
+      },
+      "audio": {
+        "sample_rate": "48000",
+        "channels": 2
+      }
+    }
+  ],
+  "timelines": [
+    {
+      "id": "tl_std",
+      "name": "std-2997-df",
+      "edit_rate": "30000/1001",
+      "drop_frame": true,
+      "start_timecode": "01:00:00;00",
+      "audio_rate": "48000",
+      "format": {
+        "width": 960,
+        "height": 540,
+        "pixel_aspect": "1"
+      },
+      "tracks": [
+        {
+          "id": "trk_v1",
+          "kind": "video",
+          "name": "V1 主机位",
+          "enabled": true,
+          "clips": [
+            {
+              "id": "clp_v1",
+              "occurrence_id": "occ_1",
+              "media_id": "med_A",
+              "timeline_start": "0s",
+              "duration": "1001/120s",
+              "source_start": "127127/15000s",
+              "label": "A 第一次使用"
+            },
+            {
+              "id": "clp_v2",
+              "occurrence_id": "occ_2",
+              "media_id": "med_A",
+              "timeline_start": "1001/120s",
+              "duration": "1001/100s",
+              "source_start": "1001/30s",
+              "label": "A 第二次使用"
+            },
+            {
+              "id": "clp_v3",
+              "occurrence_id": "occ_3",
+              "media_id": "med_A",
+              "timeline_start": "11011/600s",
+              "duration": "1001/120s",
+              "source_start": "1001/15s",
+              "label": "A 第三次使用"
+            },
+            {
+              "id": "clp_v4",
+              "occurrence_id": "occ_5",
+              "media_id": "med_DUP1",
+              "timeline_start": "17017/600s",
+              "duration": "1001/300s",
+              "source_start": "0s",
+              "label": "批次1 同名素材"
+            },
+            {
+              "id": "clp_v5",
+              "occurrence_id": "occ_6",
+              "media_id": "med_DUP2",
+              "timeline_start": "19019/600s",
+              "duration": "1001/300s",
+              "source_start": "0s",
+              "label": "批次2 同名素材"
+            },
+            {
+              "id": "clp_v6",
+              "occurrence_id": "occ_7",
+              "media_id": "med_B",
+              "timeline_start": "7007/200s",
+              "duration": "1001/150s",
+              "source_start": "1001/20s",
+              "time_map": [
+                {
+                  "at": "0s",
+                  "source": "1001/20s",
+                  "interp": "linear"
+                },
+                {
+                  "at": "1001/150s",
+                  "source": "19019/300s",
+                  "interp": "linear"
+                }
+              ],
+              "label": "200% 变速"
+            },
+            {
+              "id": "clp_v7",
+              "occurrence_id": "occ_8",
+              "media_id": "med_B",
+              "timeline_start": "1001/24s",
+              "duration": "1001/300s",
+              "source_start": "11011/300s",
+              "time_map": [
+                {
+                  "at": "0s",
+                  "source": "11011/300s",
+                  "interp": "linear"
+                },
+                {
+                  "at": "1001/300s",
+                  "source": "1001/30s",
+                  "interp": "linear"
+                }
+              ],
+              "label": "倒放"
+            },
+            {
+              "id": "clp_v8",
+              "occurrence_id": "occ_9",
+              "media_id": "med_A",
+              "timeline_start": "9009/200s",
+              "duration": "1001/200s",
+              "source_start": "2002/25s",
+              "time_map": [
+                {
+                  "at": "0s",
+                  "source": "2002/25s",
+                  "interp": "linear"
+                },
+                {
+                  "at": "1001/600s",
+                  "source": "49049/600s",
+                  "interp": "linear"
+                },
+                {
+                  "at": "1001/300s",
+                  "source": "33033/400s",
+                  "interp": "hold"
+                },
+                {
+                  "at": "1001/240s",
+                  "source": "33033/400s",
+                  "interp": "linear"
+                },
+                {
+                  "at": "1001/200s",
+                  "source": "101101/1200s",
+                  "interp": "linear"
+                }
+              ],
+              "label": "分段变速 100% 50% 定格 200%"
+            },
+            {
+              "id": "clp_v9",
+              "occurrence_id": "occ_10",
+              "media_id": "med_B",
+              "timeline_start": "1001/20s",
+              "duration": "1001/300s",
+              "source_start": "1001/50s",
+              "time_map": [
+                {
+                  "at": "0s",
+                  "source": "1001/50s",
+                  "interp": "smooth"
+                },
+                {
+                  "at": "1001/600s",
+                  "source": "8008/375s",
+                  "interp": "smooth"
+                },
+                {
+                  "at": "1001/300s",
+                  "source": "1001/40s",
+                  "interp": "linear"
+                }
+              ],
+              "label": "平滑速度坡度"
+            }
+          ],
+          "transitions": [
+            {
+              "id": "trn_1",
+              "type": "cross_dissolve",
+              "from_clip": "clp_v2",
+              "to_clip": "clp_v3",
+              "duration": "1001/2500s",
+              "alignment": "center"
+            }
+          ]
+        },
+        {
+          "id": "trk_v2",
+          "kind": "video",
+          "name": "V2 插入与图形",
+          "enabled": true,
+          "clips": [
+            {
+              "id": "clp_b1",
+              "occurrence_id": "occ_4",
+              "media_id": "med_B",
+              "timeline_start": "1001/300s",
+              "duration": "1001/400s",
+              "source_start": "1001/100s",
+              "transform": {
+                "scale": 0.5,
+                "rotation_deg": 5,
+                "position": [
+                  0.2,
+                  -0.2
+                ],
+                "crop": {
+                  "left": 0.1,
+                  "top": 0.05,
+                  "right": 0.1,
+                  "bottom": 0.05
+                }
+              },
+              "label": "插入镜头 带变换"
+            },
+            {
+              "id": "clp_still",
+              "occurrence_id": "occ_11",
+              "media_id": "med_STILL",
+              "timeline_start": "1001/75s",
+              "duration": "1001/400s",
+              "source_start": "0s",
+              "label": "静帧"
+            },
+            {
+              "id": "clp_alpha",
+              "occurrence_id": "occ_12",
+              "media_id": "med_ALPHA",
+              "timeline_start": "1001/50s",
+              "duration": "1001/300s",
+              "source_start": "0s",
+              "label": "透明图形"
+            },
+            {
+              "id": "clp_vfr",
+              "occurrence_id": "occ_13",
+              "media_id": "med_VFR",
+              "timeline_start": "3003/100s",
+              "duration": "1001/300s",
+              "source_start": "0s",
+              "label": "可变帧率"
+            }
+          ],
+          "transitions": []
+        },
+        {
+          "id": "trk_a1",
+          "kind": "audio",
+          "name": "A1 主机位收音",
+          "enabled": true,
+          "clips": [
+            {
+              "id": "clp_a1",
+              "occurrence_id": "occ_1",
+              "media_id": "med_A",
+              "timeline_start": "0s",
+              "duration": "1001/125s",
+              "source_start": "127127/15000s",
+              "source_channels": [
+                0
+              ],
+              "label": "J cut 前段"
+            },
+            {
+              "id": "clp_a2",
+              "occurrence_id": "occ_2",
+              "media_id": "med_A",
+              "timeline_start": "1001/125s",
+              "duration": "31031/3000s",
+              "source_start": "33033/1000s",
+              "gain_db": -3,
+              "source_channels": [
+                0
+              ],
+              "label": "J cut 提前 10 帧"
+            },
+            {
+              "id": "clp_a3",
+              "occurrence_id": "occ_3",
+              "media_id": "med_A",
+              "timeline_start": "11011/600s",
+              "duration": "53053/6000s",
+              "source_start": "1001/15s",
+              "source_channels": [
+                0
+              ],
+              "label": "L cut 延后 15 帧"
+            },
+            {
+              "id": "clp_a8",
+              "occurrence_id": "occ_9",
+              "media_id": "med_A",
+              "timeline_start": "9009/200s",
+              "duration": "1001/200s",
+              "source_start": "2002/25s",
+              "time_map": [
+                {
+                  "at": "0s",
+                  "source": "2002/25s",
+                  "interp": "linear"
+                },
+                {
+                  "at": "1001/600s",
+                  "source": "49049/600s",
+                  "interp": "linear"
+                },
+                {
+                  "at": "1001/300s",
+                  "source": "33033/400s",
+                  "interp": "hold"
+                },
+                {
+                  "at": "1001/240s",
+                  "source": "33033/400s",
+                  "interp": "linear"
+                },
+                {
+                  "at": "1001/200s",
+                  "source": "101101/1200s",
+                  "interp": "linear"
+                }
+              ],
+              "source_channels": [
+                0
+              ]
+            }
+          ],
+          "transitions": []
+        },
+        {
+          "id": "trk_a2",
+          "kind": "audio",
+          "name": "A2 副机位",
+          "enabled": true,
+          "clips": [
+            {
+              "id": "clp_ab6",
+              "occurrence_id": "occ_7",
+              "media_id": "med_B",
+              "timeline_start": "7007/200s",
+              "duration": "1001/150s",
+              "source_start": "1001/20s",
+              "time_map": [
+                {
+                  "at": "0s",
+                  "source": "1001/20s",
+                  "interp": "linear"
+                },
+                {
+                  "at": "1001/150s",
+                  "source": "19019/300s",
+                  "interp": "linear"
+                }
+              ],
+              "source_channels": [
+                0
+              ]
+            }
+          ],
+          "transitions": []
+        },
+        {
+          "id": "trk_a3",
+          "kind": "audio",
+          "name": "A3 外录",
+          "enabled": true,
+          "clips": [
+            {
+              "id": "clp_ext",
+              "occurrence_id": "occ_14",
+              "media_id": "med_EXT",
+              "timeline_start": "0s",
+              "duration": "1001/125s",
+              "source_start": "157127/15000s",
+              "gain_db": -6,
+              "source_channels": [
+                0
+              ],
+              "label": "双系统外录，与 occ_1 同步"
+            }
+          ],
+          "transitions": []
+        },
+        {
+          "id": "trk_a4",
+          "kind": "audio",
+          "name": "A4 同名素材",
+          "enabled": true,
+          "clips": [
+            {
+              "id": "clp_d1",
+              "occurrence_id": "occ_5",
+              "media_id": "med_DUP1",
+              "timeline_start": "17017/600s",
+              "duration": "1001/300s",
+              "source_start": "0s",
+              "source_channels": [
+                0,
+                1
+              ]
+            },
+            {
+              "id": "clp_d2",
+              "occurrence_id": "occ_6",
+              "media_id": "med_DUP2",
+              "timeline_start": "19019/600s",
+              "duration": "1001/300s",
+              "source_start": "0s",
+              "source_channels": [
+                0,
+                1
+              ]
+            }
+          ],
+          "transitions": []
+        },
+        {
+          "id": "trk_sub_zh",
+          "kind": "subtitle",
+          "name": "中文字幕",
+          "enabled": true,
+          "language": "zh-Hans",
+          "carrier_tracks": [
+            "trk_a1"
+          ],
+          "default_style_id": "sty_zh",
+          "overrides": [
+            {
+              "occurrence_id": "occ_2",
+              "cue_id": "cue_zh_07",
+              "text": "其中百分之六十的时间在找重复的话（改）"
+            }
+          ],
+          "free_cues": [
+            {
+              "id": "cue_title",
+              "timeline_start": "0s",
+              "duration": "1001/400s",
+              "text": "zsir-cut 标准测试工程",
+              "style_id": "sty_title"
+            }
+          ]
+        },
+        {
+          "id": "trk_sub_en",
+          "kind": "subtitle",
+          "name": "English",
+          "enabled": true,
+          "language": "en",
+          "carrier_tracks": [
+            "trk_a1"
+          ],
+          "default_style_id": "sty_en",
+          "overrides": [],
+          "free_cues": []
+        }
+      ],
+      "markers": [
+        {
+          "id": "mrk_ch2",
+          "at": "1001/120s",
+          "duration": "0s",
+          "kind": "chapter",
+          "text": "第二段"
+        },
+        {
+          "id": "mrk_rv_sub",
+          "at": "23023/3000s",
+          "duration": "1001/1500s",
+          "kind": "review",
+          "text": "S16：字词「粗剪」跨过 A1 剪点"
+        },
+        {
+          "id": "mrk_rv_speed",
+          "at": "9009/200s",
+          "duration": "1001/200s",
+          "kind": "review",
+          "text": "S7：定格段字幕不投影"
+        }
+      ]
+    }
+  ],
+  "transcripts": [
+    {
+      "id": "trs_A_zh",
+      "media_id": "med_A",
+      "source_channels": [
+        0
+      ],
+      "language": "zh-Hans",
+      "raw_runs": [
+        {
+          "id": "run_truth_asr",
+          "kind": "asr",
+          "engine": {
+            "name": "fixture-script",
+            "model": "fixtures/synth/script.json",
+            "version": "0.1"
+          },
+          "created_at": "2026-10-26T00:00:00Z",
+          "range": {
+            "start": "0s",
+            "duration": "120s"
+          },
+          "tokens": [
+            {
+              "text": "大家",
+              "start": "1/2s",
+              "end": "47/50s",
+              "conf": 1
+            },
+            {
+              "text": "好",
+              "start": "47/50s",
+              "end": "29/25s",
+              "conf": 1
+            },
+            {
+              "text": "我",
+              "start": "29/25s",
+              "end": "69/50s",
+              "conf": 1
+            },
+            {
+              "text": "是",
+              "start": "69/50s",
+              "end": "8/5s",
+              "conf": 1
+            },
+            {
+              "text": "庄Sir",
+              "start": "8/5s",
+              "end": "209/100s",
+              "conf": 1
+            },
+            {
+              "text": "今天",
+              "start": "11/2s",
+              "end": "297/50s",
+              "conf": 1
+            },
+            {
+              "text": "聊聊",
+              "start": "297/50s",
+              "end": "319/50s",
+              "conf": 1
+            },
+            {
+              "text": "zsir-cut",
+              "start": "319/50s",
+              "end": "67/10s",
+              "conf": 1
+            },
+            {
+              "text": "这个",
+              "start": "67/10s",
+              "end": "357/50s",
+              "conf": 1
+            },
+            {
+              "text": "项目",
+              "start": "357/50s",
+              "end": "379/50s",
+              "conf": 1
+            },
+            {
+              "text": "它",
+              "start": "21/2s",
+              "end": "268/25s",
+              "conf": 1
+            },
+            {
+              "text": "是",
+              "start": "268/25s",
+              "end": "547/50s",
+              "conf": 1
+            },
+            {
+              "text": "剪辑师",
+              "start": "547/50s",
+              "end": "58/5s",
+              "conf": 1
+            },
+            {
+              "text": "和",
+              "start": "58/5s",
+              "end": "591/50s",
+              "conf": 1
+            },
+            {
+              "text": "Agent",
+              "start": "591/50s",
+              "end": "607/50s",
+              "conf": 1
+            },
+            {
+              "text": "共用",
+              "start": "607/50s",
+              "end": "629/50s",
+              "conf": 1
+            },
+            {
+              "text": "的",
+              "start": "629/50s",
+              "end": "64/5s",
+              "conf": 1
+            },
+            {
+              "text": "时间线",
+              "start": "64/5s",
+              "end": "673/50s",
+              "conf": 1
+            },
+            {
+              "text": "Agent",
+              "start": "31/2s",
+              "end": "791/50s",
+              "conf": 1
+            },
+            {
+              "text": "先",
+              "start": "791/50s",
+              "end": "401/25s",
+              "conf": 1
+            },
+            {
+              "text": "把",
+              "start": "401/25s",
+              "end": "813/50s",
+              "conf": 1
+            },
+            {
+              "text": "粗剪",
+              "start": "813/50s",
+              "end": "167/10s",
+              "conf": 1
+            },
+            {
+              "text": "和",
+              "start": "167/10s",
+              "end": "423/25s",
+              "conf": 1
+            },
+            {
+              "text": "字幕",
+              "start": "423/25s",
+              "end": "434/25s",
+              "conf": 1
+            },
+            {
+              "text": "做完",
+              "start": "434/25s",
+              "end": "89/5s",
+              "conf": 1
+            },
+            {
+              "text": "然后",
+              "start": "41/2s",
+              "end": "1047/50s",
+              "conf": 1
+            },
+            {
+              "text": "交给",
+              "start": "1047/50s",
+              "end": "1069/50s",
+              "conf": 1
+            },
+            {
+              "text": "Final",
+              "start": "1069/50s",
+              "end": "217/10s",
+              "conf": 1
+            },
+            {
+              "text": "Cut",
+              "start": "217/10s",
+              "end": "1101/50s",
+              "conf": 1
+            },
+            {
+              "text": "Pro",
+              "start": "1101/50s",
+              "end": "1117/50s",
+              "conf": 1
+            },
+            {
+              "text": "收尾",
+              "start": "1117/50s",
+              "end": "1139/50s",
+              "conf": 1
+            },
+            {
+              "text": "也",
+              "start": "51/2s",
+              "end": "643/25s",
+              "conf": 1
+            },
+            {
+              "text": "可以",
+              "start": "643/25s",
+              "end": "654/25s",
+              "conf": 1
+            },
+            {
+              "text": "交给",
+              "start": "654/25s",
+              "end": "133/5s",
+              "conf": 1
+            },
+            {
+              "text": "DaVinci",
+              "start": "133/5s",
+              "end": "673/25s",
+              "conf": 1
+            },
+            {
+              "text": "Resolve",
+              "start": "673/25s",
+              "end": "681/25s",
+              "conf": 1
+            },
+            {
+              "text": "一条",
+              "start": "61/2s",
+              "end": "1547/50s",
+              "conf": 1
+            },
+            {
+              "text": "三",
+              "start": "1547/50s",
+              "end": "779/25s",
+              "conf": 1
+            },
+            {
+              "text": "分钟",
+              "start": "779/25s",
+              "end": "158/5s",
+              "conf": 1
+            },
+            {
+              "text": "的",
+              "start": "158/5s",
+              "end": "1591/50s",
+              "conf": 1
+            },
+            {
+              "text": "采访",
+              "start": "1591/50s",
+              "end": "1613/50s",
+              "conf": 1
+            },
+            {
+              "text": "大概",
+              "start": "1613/50s",
+              "end": "327/10s",
+              "conf": 1
+            },
+            {
+              "text": "要",
+              "start": "327/10s",
+              "end": "823/25s",
+              "conf": 1
+            },
+            {
+              "text": "剪",
+              "start": "823/25s",
+              "end": "1657/50s",
+              "conf": 1
+            },
+            {
+              "text": "两",
+              "start": "1657/50s",
+              "end": "834/25s",
+              "conf": 1
+            },
+            {
+              "text": "小时",
+              "start": "834/25s",
+              "end": "169/5s",
+              "conf": 1
+            },
+            {
+              "text": "其中",
+              "start": "71/2s",
+              "end": "1797/50s",
+              "conf": 1
+            },
+            {
+              "text": "百分之",
+              "start": "1797/50s",
+              "end": "183/5s",
+              "conf": 1
+            },
+            {
+              "text": "六十",
+              "start": "183/5s",
+              "end": "926/25s",
+              "conf": 1
+            },
+            {
+              "text": "的",
+              "start": "926/25s",
+              "end": "1863/50s",
+              "conf": 1
+            },
+            {
+              "text": "时间",
+              "start": "1863/50s",
+              "end": "377/10s",
+              "conf": 1
+            },
+            {
+              "text": "在",
+              "start": "377/10s",
+              "end": "948/25s",
+              "conf": 1
+            },
+            {
+              "text": "找",
+              "start": "948/25s",
+              "end": "1907/50s",
+              "conf": 1
+            },
+            {
+              "text": "重复",
+              "start": "1907/50s",
+              "end": "1929/50s",
+              "conf": 1
+            },
+            {
+              "text": "的",
+              "start": "1929/50s",
+              "end": "194/5s",
+              "conf": 1
+            },
+            {
+              "text": "话",
+              "start": "194/5s",
+              "end": "1951/50s",
+              "conf": 1
+            },
+            {
+              "text": "我们",
+              "start": "81/2s",
+              "end": "2047/50s",
+              "conf": 1
+            },
+            {
+              "text": "希望",
+              "start": "2047/50s",
+              "end": "2069/50s",
+              "conf": 1
+            },
+            {
+              "text": "把",
+              "start": "2069/50s",
+              "end": "208/5s",
+              "conf": 1
+            },
+            {
+              "text": "这",
+              "start": "208/5s",
+              "end": "2091/50s",
+              "conf": 1
+            },
+            {
+              "text": "部分",
+              "start": "2091/50s",
+              "end": "2113/50s",
+              "conf": 1
+            },
+            {
+              "text": "交给",
+              "start": "2113/50s",
+              "end": "427/10s",
+              "conf": 1
+            },
+            {
+              "text": "Agent",
+              "start": "427/10s",
+              "end": "2151/50s",
+              "conf": 1
+            },
+            {
+              "text": "嗯",
+              "start": "91/2s",
+              "end": "1143/25s",
+              "conf": 1
+            },
+            {
+              "text": "就是说",
+              "start": "1143/25s",
+              "end": "2319/50s",
+              "conf": 1
+            },
+            {
+              "text": "人",
+              "start": "2319/50s",
+              "end": "233/5s",
+              "conf": 1
+            },
+            {
+              "text": "只",
+              "start": "233/5s",
+              "end": "2341/50s",
+              "conf": 1
+            },
+            {
+              "text": "做",
+              "start": "2341/50s",
+              "end": "1176/25s",
+              "conf": 1
+            },
+            {
+              "text": "判断",
+              "start": "1176/25s",
+              "end": "1187/25s",
+              "conf": 1
+            },
+            {
+              "text": "字幕",
+              "start": "101/2s",
+              "end": "2547/50s",
+              "conf": 1
+            },
+            {
+              "text": "要",
+              "start": "2547/50s",
+              "end": "1279/25s",
+              "conf": 1
+            },
+            {
+              "text": "跟着",
+              "start": "1279/25s",
+              "end": "258/5s",
+              "conf": 1
+            },
+            {
+              "text": "剪辑",
+              "start": "258/5s",
+              "end": "1301/25s",
+              "conf": 1
+            },
+            {
+              "text": "一起",
+              "start": "1301/25s",
+              "end": "1312/25s",
+              "conf": 1
+            },
+            {
+              "text": "走",
+              "start": "1312/25s",
+              "end": "527/10s",
+              "conf": 1
+            },
+            {
+              "text": "删掉",
+              "start": "111/2s",
+              "end": "2797/50s",
+              "conf": 1
+            },
+            {
+              "text": "一句",
+              "start": "2797/50s",
+              "end": "2819/50s",
+              "conf": 1
+            },
+            {
+              "text": "话",
+              "start": "2819/50s",
+              "end": "283/5s",
+              "conf": 1
+            },
+            {
+              "text": "字幕",
+              "start": "283/5s",
+              "end": "1426/25s",
+              "conf": 1
+            },
+            {
+              "text": "也",
+              "start": "1426/25s",
+              "end": "2863/50s",
+              "conf": 1
+            },
+            {
+              "text": "跟着",
+              "start": "2863/50s",
+              "end": "577/10s",
+              "conf": 1
+            },
+            {
+              "text": "消失",
+              "start": "577/10s",
+              "end": "2907/50s",
+              "conf": 1
+            },
+            {
+              "text": "品牌",
+              "start": "121/2s",
+              "end": "3047/50s",
+              "conf": 1
+            },
+            {
+              "text": "词",
+              "start": "3047/50s",
+              "end": "1529/25s",
+              "conf": 1
+            },
+            {
+              "text": "比如",
+              "start": "1529/25s",
+              "end": "308/5s",
+              "conf": 1
+            },
+            {
+              "text": "zsir-cut",
+              "start": "308/5s",
+              "end": "1548/25s",
+              "conf": 1
+            },
+            {
+              "text": "不能",
+              "start": "1548/25s",
+              "end": "1559/25s",
+              "conf": 1
+            },
+            {
+              "text": "写错",
+              "start": "1559/25s",
+              "end": "314/5s",
+              "conf": 1
+            },
+            {
+              "text": "数字",
+              "start": "131/2s",
+              "end": "3297/50s",
+              "conf": 1
+            },
+            {
+              "text": "比如",
+              "start": "3297/50s",
+              "end": "3319/50s",
+              "conf": 1
+            },
+            {
+              "text": "2026",
+              "start": "3319/50s",
+              "end": "667/10s",
+              "conf": 1
+            },
+            {
+              "text": "年",
+              "start": "667/10s",
+              "end": "1673/25s",
+              "conf": 1
+            },
+            {
+              "text": "10",
+              "start": "1673/25s",
+              "end": "1681/25s",
+              "conf": 1
+            },
+            {
+              "text": "月",
+              "start": "1681/25s",
+              "end": "3373/50s",
+              "conf": 1
+            },
+            {
+              "text": "也",
+              "start": "3373/50s",
+              "end": "1692/25s",
+              "conf": 1
+            },
+            {
+              "text": "要",
+              "start": "1692/25s",
+              "end": "679/10s",
+              "conf": 1
+            },
+            {
+              "text": "对",
+              "start": "679/10s",
+              "end": "1703/25s",
+              "conf": 1
+            },
+            {
+              "text": "我们",
+              "start": "141/2s",
+              "end": "3547/50s",
+              "conf": 1
+            },
+            {
+              "text": "用",
+              "start": "3547/50s",
+              "end": "1779/25s",
+              "conf": 1
+            },
+            {
+              "text": "Qwen3",
+              "start": "1779/25s",
+              "end": "1787/25s",
+              "conf": 1
+            },
+            {
+              "text": "做",
+              "start": "1787/25s",
+              "end": "717/10s",
+              "conf": 1
+            },
+            {
+              "text": "本地",
+              "start": "717/10s",
+              "end": "3607/50s",
+              "conf": 1
+            },
+            {
+              "text": "识别",
+              "start": "3607/50s",
+              "end": "3629/50s",
+              "conf": 1
+            },
+            {
+              "text": "云端",
+              "start": "151/2s",
+              "end": "3797/50s",
+              "conf": 1
+            },
+            {
+              "text": "用",
+              "start": "3797/50s",
+              "end": "1904/25s",
+              "conf": 1
+            },
+            {
+              "text": "火山引擎",
+              "start": "1904/25s",
+              "end": "1926/25s",
+              "conf": 1
+            },
+            {
+              "text": "兜底",
+              "start": "1926/25s",
+              "end": "1937/25s",
+              "conf": 1
+            },
+            {
+              "text": "every",
+              "start": "161/2s",
+              "end": "4041/50s",
+              "conf": 1
+            },
+            {
+              "text": "cut",
+              "start": "4041/50s",
+              "end": "4057/50s",
+              "conf": 1
+            },
+            {
+              "text": "must",
+              "start": "4057/50s",
+              "end": "4073/50s",
+              "conf": 1
+            },
+            {
+              "text": "be",
+              "start": "4073/50s",
+              "end": "4089/50s",
+              "conf": 1
+            },
+            {
+              "text": "frame",
+              "start": "4089/50s",
+              "end": "821/10s",
+              "conf": 1
+            },
+            {
+              "text": "accurate",
+              "start": "821/10s",
+              "end": "4121/50s",
+              "conf": 1
+            },
+            {
+              "text": "每",
+              "start": "171/2s",
+              "end": "2143/25s",
+              "conf": 1
+            },
+            {
+              "text": "一个",
+              "start": "2143/25s",
+              "end": "2154/25s",
+              "conf": 1
+            },
+            {
+              "text": "剪点",
+              "start": "2154/25s",
+              "end": "433/5s",
+              "conf": 1
+            },
+            {
+              "text": "都要",
+              "start": "433/5s",
+              "end": "2176/25s",
+              "conf": 1
+            },
+            {
+              "text": "精确",
+              "start": "2176/25s",
+              "end": "2187/25s",
+              "conf": 1
+            },
+            {
+              "text": "到",
+              "start": "2187/25s",
+              "end": "877/10s",
+              "conf": 1
+            },
+            {
+              "text": "帧",
+              "start": "877/10s",
+              "end": "2198/25s",
+              "conf": 1
+            },
+            {
+              "text": "交接",
+              "start": "181/2s",
+              "end": "4547/50s",
+              "conf": 1
+            },
+            {
+              "text": "之前",
+              "start": "4547/50s",
+              "end": "4569/50s",
+              "conf": 1
+            },
+            {
+              "text": "先",
+              "start": "4569/50s",
+              "end": "458/5s",
+              "conf": 1
+            },
+            {
+              "text": "看",
+              "start": "458/5s",
+              "end": "4591/50s",
+              "conf": 1
+            },
+            {
+              "text": "损失",
+              "start": "4591/50s",
+              "end": "4613/50s",
+              "conf": 1
+            },
+            {
+              "text": "报告",
+              "start": "4613/50s",
+              "end": "927/10s",
+              "conf": 1
+            },
+            {
+              "text": "哪些",
+              "start": "191/2s",
+              "end": "4797/50s",
+              "conf": 1
+            },
+            {
+              "text": "能",
+              "start": "4797/50s",
+              "end": "2404/25s",
+              "conf": 1
+            },
+            {
+              "text": "保留",
+              "start": "2404/25s",
+              "end": "483/5s",
+              "conf": 1
+            },
+            {
+              "text": "哪些",
+              "start": "483/5s",
+              "end": "2426/25s",
+              "conf": 1
+            },
+            {
+              "text": "要",
+              "start": "2426/25s",
+              "end": "4863/50s",
+              "conf": 1
+            },
+            {
+              "text": "重做",
+              "start": "4863/50s",
+              "end": "977/10s",
+              "conf": 1
+            },
+            {
+              "text": "剪辑师",
+              "start": "201/2s",
+              "end": "2529/25s",
+              "conf": 1
+            },
+            {
+              "text": "拿到",
+              "start": "2529/25s",
+              "end": "508/5s",
+              "conf": 1
+            },
+            {
+              "text": "的",
+              "start": "508/5s",
+              "end": "5091/50s",
+              "conf": 1
+            },
+            {
+              "text": "工程",
+              "start": "5091/50s",
+              "end": "5113/50s",
+              "conf": 1
+            },
+            {
+              "text": "还能",
+              "start": "5113/50s",
+              "end": "1027/10s",
+              "conf": 1
+            },
+            {
+              "text": "继续",
+              "start": "1027/10s",
+              "end": "5157/50s",
+              "conf": 1
+            },
+            {
+              "text": "改",
+              "start": "5157/50s",
+              "end": "2584/25s",
+              "conf": 1
+            },
+            {
+              "text": "这",
+              "start": "211/2s",
+              "end": "2643/25s",
+              "conf": 1
+            },
+            {
+              "text": "才",
+              "start": "2643/25s",
+              "end": "5297/50s",
+              "conf": 1
+            },
+            {
+              "text": "叫",
+              "start": "5297/50s",
+              "end": "2654/25s",
+              "conf": 1
+            },
+            {
+              "text": "真正",
+              "start": "2654/25s",
+              "end": "533/5s",
+              "conf": 1
+            },
+            {
+              "text": "的",
+              "start": "533/5s",
+              "end": "5341/50s",
+              "conf": 1
+            },
+            {
+              "text": "交接",
+              "start": "5341/50s",
+              "end": "5363/50s",
+              "conf": 1
+            },
+            {
+              "text": "第一",
+              "start": "221/2s",
+              "end": "5547/50s",
+              "conf": 1
+            },
+            {
+              "text": "期",
+              "start": "5547/50s",
+              "end": "2779/25s",
+              "conf": 1
+            },
+            {
+              "text": "先",
+              "start": "2779/25s",
+              "end": "5569/50s",
+              "conf": 1
+            },
+            {
+              "text": "做",
+              "start": "5569/50s",
+              "end": "558/5s",
+              "conf": 1
+            },
+            {
+              "text": "采访",
+              "start": "558/5s",
+              "end": "2801/25s",
+              "conf": 1
+            },
+            {
+              "text": "口播",
+              "start": "2801/25s",
+              "end": "2812/25s",
+              "conf": 1
+            },
+            {
+              "text": "谢谢",
+              "start": "231/2s",
+              "end": "5797/50s",
+              "conf": 1
+            },
+            {
+              "text": "大家",
+              "start": "5797/50s",
+              "end": "5819/50s",
+              "conf": 1
+            }
+          ]
+        },
+        {
+          "id": "run_truth_align",
+          "kind": "align",
+          "engine": {
+            "name": "fixture-script",
+            "model": "fixtures/synth/script.json",
+            "version": "0.1"
+          },
+          "created_at": "2026-10-26T00:00:00Z",
+          "range": {
+            "start": "0s",
+            "duration": "120s"
+          },
+          "tokens": [
+            {
+              "text": "大家",
+              "start": "1/2s",
+              "end": "47/50s",
+              "conf": 1
+            },
+            {
+              "text": "好",
+              "start": "47/50s",
+              "end": "29/25s",
+              "conf": 1
+            },
+            {
+              "text": "我",
+              "start": "29/25s",
+              "end": "69/50s",
+              "conf": 1
+            },
+            {
+              "text": "是",
+              "start": "69/50s",
+              "end": "8/5s",
+              "conf": 1
+            },
+            {
+              "text": "庄Sir",
+              "start": "8/5s",
+              "end": "209/100s",
+              "conf": 1
+            },
+            {
+              "text": "今天",
+              "start": "11/2s",
+              "end": "297/50s",
+              "conf": 1
+            },
+            {
+              "text": "聊聊",
+              "start": "297/50s",
+              "end": "319/50s",
+              "conf": 1
+            },
+            {
+              "text": "zsir-cut",
+              "start": "319/50s",
+              "end": "67/10s",
+              "conf": 1
+            },
+            {
+              "text": "这个",
+              "start": "67/10s",
+              "end": "357/50s",
+              "conf": 1
+            },
+            {
+              "text": "项目",
+              "start": "357/50s",
+              "end": "379/50s",
+              "conf": 1
+            },
+            {
+              "text": "它",
+              "start": "21/2s",
+              "end": "268/25s",
+              "conf": 1
+            },
+            {
+              "text": "是",
+              "start": "268/25s",
+              "end": "547/50s",
+              "conf": 1
+            },
+            {
+              "text": "剪辑师",
+              "start": "547/50s",
+              "end": "58/5s",
+              "conf": 1
+            },
+            {
+              "text": "和",
+              "start": "58/5s",
+              "end": "591/50s",
+              "conf": 1
+            },
+            {
+              "text": "Agent",
+              "start": "591/50s",
+              "end": "607/50s",
+              "conf": 1
+            },
+            {
+              "text": "共用",
+              "start": "607/50s",
+              "end": "629/50s",
+              "conf": 1
+            },
+            {
+              "text": "的",
+              "start": "629/50s",
+              "end": "64/5s",
+              "conf": 1
+            },
+            {
+              "text": "时间线",
+              "start": "64/5s",
+              "end": "673/50s",
+              "conf": 1
+            },
+            {
+              "text": "Agent",
+              "start": "31/2s",
+              "end": "791/50s",
+              "conf": 1
+            },
+            {
+              "text": "先",
+              "start": "791/50s",
+              "end": "401/25s",
+              "conf": 1
+            },
+            {
+              "text": "把",
+              "start": "401/25s",
+              "end": "813/50s",
+              "conf": 1
+            },
+            {
+              "text": "粗剪",
+              "start": "813/50s",
+              "end": "167/10s",
+              "conf": 1
+            },
+            {
+              "text": "和",
+              "start": "167/10s",
+              "end": "423/25s",
+              "conf": 1
+            },
+            {
+              "text": "字幕",
+              "start": "423/25s",
+              "end": "434/25s",
+              "conf": 1
+            },
+            {
+              "text": "做完",
+              "start": "434/25s",
+              "end": "89/5s",
+              "conf": 1
+            },
+            {
+              "text": "然后",
+              "start": "41/2s",
+              "end": "1047/50s",
+              "conf": 1
+            },
+            {
+              "text": "交给",
+              "start": "1047/50s",
+              "end": "1069/50s",
+              "conf": 1
+            },
+            {
+              "text": "Final",
+              "start": "1069/50s",
+              "end": "217/10s",
+              "conf": 1
+            },
+            {
+              "text": "Cut",
+              "start": "217/10s",
+              "end": "1101/50s",
+              "conf": 1
+            },
+            {
+              "text": "Pro",
+              "start": "1101/50s",
+              "end": "1117/50s",
+              "conf": 1
+            },
+            {
+              "text": "收尾",
+              "start": "1117/50s",
+              "end": "1139/50s",
+              "conf": 1
+            },
+            {
+              "text": "也",
+              "start": "51/2s",
+              "end": "643/25s",
+              "conf": 1
+            },
+            {
+              "text": "可以",
+              "start": "643/25s",
+              "end": "654/25s",
+              "conf": 1
+            },
+            {
+              "text": "交给",
+              "start": "654/25s",
+              "end": "133/5s",
+              "conf": 1
+            },
+            {
+              "text": "DaVinci",
+              "start": "133/5s",
+              "end": "673/25s",
+              "conf": 1
+            },
+            {
+              "text": "Resolve",
+              "start": "673/25s",
+              "end": "681/25s",
+              "conf": 1
+            },
+            {
+              "text": "一条",
+              "start": "61/2s",
+              "end": "1547/50s",
+              "conf": 1
+            },
+            {
+              "text": "三",
+              "start": "1547/50s",
+              "end": "779/25s",
+              "conf": 1
+            },
+            {
+              "text": "分钟",
+              "start": "779/25s",
+              "end": "158/5s",
+              "conf": 1
+            },
+            {
+              "text": "的",
+              "start": "158/5s",
+              "end": "1591/50s",
+              "conf": 1
+            },
+            {
+              "text": "采访",
+              "start": "1591/50s",
+              "end": "1613/50s",
+              "conf": 1
+            },
+            {
+              "text": "大概",
+              "start": "1613/50s",
+              "end": "327/10s",
+              "conf": 1
+            },
+            {
+              "text": "要",
+              "start": "327/10s",
+              "end": "823/25s",
+              "conf": 1
+            },
+            {
+              "text": "剪",
+              "start": "823/25s",
+              "end": "1657/50s",
+              "conf": 1
+            },
+            {
+              "text": "两",
+              "start": "1657/50s",
+              "end": "834/25s",
+              "conf": 1
+            },
+            {
+              "text": "小时",
+              "start": "834/25s",
+              "end": "169/5s",
+              "conf": 1
+            },
+            {
+              "text": "其中",
+              "start": "71/2s",
+              "end": "1797/50s",
+              "conf": 1
+            },
+            {
+              "text": "百分之",
+              "start": "1797/50s",
+              "end": "183/5s",
+              "conf": 1
+            },
+            {
+              "text": "六十",
+              "start": "183/5s",
+              "end": "926/25s",
+              "conf": 1
+            },
+            {
+              "text": "的",
+              "start": "926/25s",
+              "end": "1863/50s",
+              "conf": 1
+            },
+            {
+              "text": "时间",
+              "start": "1863/50s",
+              "end": "377/10s",
+              "conf": 1
+            },
+            {
+              "text": "在",
+              "start": "377/10s",
+              "end": "948/25s",
+              "conf": 1
+            },
+            {
+              "text": "找",
+              "start": "948/25s",
+              "end": "1907/50s",
+              "conf": 1
+            },
+            {
+              "text": "重复",
+              "start": "1907/50s",
+              "end": "1929/50s",
+              "conf": 1
+            },
+            {
+              "text": "的",
+              "start": "1929/50s",
+              "end": "194/5s",
+              "conf": 1
+            },
+            {
+              "text": "话",
+              "start": "194/5s",
+              "end": "1951/50s",
+              "conf": 1
+            },
+            {
+              "text": "我们",
+              "start": "81/2s",
+              "end": "2047/50s",
+              "conf": 1
+            },
+            {
+              "text": "希望",
+              "start": "2047/50s",
+              "end": "2069/50s",
+              "conf": 1
+            },
+            {
+              "text": "把",
+              "start": "2069/50s",
+              "end": "208/5s",
+              "conf": 1
+            },
+            {
+              "text": "这",
+              "start": "208/5s",
+              "end": "2091/50s",
+              "conf": 1
+            },
+            {
+              "text": "部分",
+              "start": "2091/50s",
+              "end": "2113/50s",
+              "conf": 1
+            },
+            {
+              "text": "交给",
+              "start": "2113/50s",
+              "end": "427/10s",
+              "conf": 1
+            },
+            {
+              "text": "Agent",
+              "start": "427/10s",
+              "end": "2151/50s",
+              "conf": 1
+            },
+            {
+              "text": "嗯",
+              "start": "91/2s",
+              "end": "1143/25s",
+              "conf": 1
+            },
+            {
+              "text": "就是说",
+              "start": "1143/25s",
+              "end": "2319/50s",
+              "conf": 1
+            },
+            {
+              "text": "人",
+              "start": "2319/50s",
+              "end": "233/5s",
+              "conf": 1
+            },
+            {
+              "text": "只",
+              "start": "233/5s",
+              "end": "2341/50s",
+              "conf": 1
+            },
+            {
+              "text": "做",
+              "start": "2341/50s",
+              "end": "1176/25s",
+              "conf": 1
+            },
+            {
+              "text": "判断",
+              "start": "1176/25s",
+              "end": "1187/25s",
+              "conf": 1
+            },
+            {
+              "text": "字幕",
+              "start": "101/2s",
+              "end": "2547/50s",
+              "conf": 1
+            },
+            {
+              "text": "要",
+              "start": "2547/50s",
+              "end": "1279/25s",
+              "conf": 1
+            },
+            {
+              "text": "跟着",
+              "start": "1279/25s",
+              "end": "258/5s",
+              "conf": 1
+            },
+            {
+              "text": "剪辑",
+              "start": "258/5s",
+              "end": "1301/25s",
+              "conf": 1
+            },
+            {
+              "text": "一起",
+              "start": "1301/25s",
+              "end": "1312/25s",
+              "conf": 1
+            },
+            {
+              "text": "走",
+              "start": "1312/25s",
+              "end": "527/10s",
+              "conf": 1
+            },
+            {
+              "text": "删掉",
+              "start": "111/2s",
+              "end": "2797/50s",
+              "conf": 1
+            },
+            {
+              "text": "一句",
+              "start": "2797/50s",
+              "end": "2819/50s",
+              "conf": 1
+            },
+            {
+              "text": "话",
+              "start": "2819/50s",
+              "end": "283/5s",
+              "conf": 1
+            },
+            {
+              "text": "字幕",
+              "start": "283/5s",
+              "end": "1426/25s",
+              "conf": 1
+            },
+            {
+              "text": "也",
+              "start": "1426/25s",
+              "end": "2863/50s",
+              "conf": 1
+            },
+            {
+              "text": "跟着",
+              "start": "2863/50s",
+              "end": "577/10s",
+              "conf": 1
+            },
+            {
+              "text": "消失",
+              "start": "577/10s",
+              "end": "2907/50s",
+              "conf": 1
+            },
+            {
+              "text": "品牌",
+              "start": "121/2s",
+              "end": "3047/50s",
+              "conf": 1
+            },
+            {
+              "text": "词",
+              "start": "3047/50s",
+              "end": "1529/25s",
+              "conf": 1
+            },
+            {
+              "text": "比如",
+              "start": "1529/25s",
+              "end": "308/5s",
+              "conf": 1
+            },
+            {
+              "text": "zsir-cut",
+              "start": "308/5s",
+              "end": "1548/25s",
+              "conf": 1
+            },
+            {
+              "text": "不能",
+              "start": "1548/25s",
+              "end": "1559/25s",
+              "conf": 1
+            },
+            {
+              "text": "写错",
+              "start": "1559/25s",
+              "end": "314/5s",
+              "conf": 1
+            },
+            {
+              "text": "数字",
+              "start": "131/2s",
+              "end": "3297/50s",
+              "conf": 1
+            },
+            {
+              "text": "比如",
+              "start": "3297/50s",
+              "end": "3319/50s",
+              "conf": 1
+            },
+            {
+              "text": "2026",
+              "start": "3319/50s",
+              "end": "667/10s",
+              "conf": 1
+            },
+            {
+              "text": "年",
+              "start": "667/10s",
+              "end": "1673/25s",
+              "conf": 1
+            },
+            {
+              "text": "10",
+              "start": "1673/25s",
+              "end": "1681/25s",
+              "conf": 1
+            },
+            {
+              "text": "月",
+              "start": "1681/25s",
+              "end": "3373/50s",
+              "conf": 1
+            },
+            {
+              "text": "也",
+              "start": "3373/50s",
+              "end": "1692/25s",
+              "conf": 1
+            },
+            {
+              "text": "要",
+              "start": "1692/25s",
+              "end": "679/10s",
+              "conf": 1
+            },
+            {
+              "text": "对",
+              "start": "679/10s",
+              "end": "1703/25s",
+              "conf": 1
+            },
+            {
+              "text": "我们",
+              "start": "141/2s",
+              "end": "3547/50s",
+              "conf": 1
+            },
+            {
+              "text": "用",
+              "start": "3547/50s",
+              "end": "1779/25s",
+              "conf": 1
+            },
+            {
+              "text": "Qwen3",
+              "start": "1779/25s",
+              "end": "1787/25s",
+              "conf": 1
+            },
+            {
+              "text": "做",
+              "start": "1787/25s",
+              "end": "717/10s",
+              "conf": 1
+            },
+            {
+              "text": "本地",
+              "start": "717/10s",
+              "end": "3607/50s",
+              "conf": 1
+            },
+            {
+              "text": "识别",
+              "start": "3607/50s",
+              "end": "3629/50s",
+              "conf": 1
+            },
+            {
+              "text": "云端",
+              "start": "151/2s",
+              "end": "3797/50s",
+              "conf": 1
+            },
+            {
+              "text": "用",
+              "start": "3797/50s",
+              "end": "1904/25s",
+              "conf": 1
+            },
+            {
+              "text": "火山引擎",
+              "start": "1904/25s",
+              "end": "1926/25s",
+              "conf": 1
+            },
+            {
+              "text": "兜底",
+              "start": "1926/25s",
+              "end": "1937/25s",
+              "conf": 1
+            },
+            {
+              "text": "every",
+              "start": "161/2s",
+              "end": "4041/50s",
+              "conf": 1
+            },
+            {
+              "text": "cut",
+              "start": "4041/50s",
+              "end": "4057/50s",
+              "conf": 1
+            },
+            {
+              "text": "must",
+              "start": "4057/50s",
+              "end": "4073/50s",
+              "conf": 1
+            },
+            {
+              "text": "be",
+              "start": "4073/50s",
+              "end": "4089/50s",
+              "conf": 1
+            },
+            {
+              "text": "frame",
+              "start": "4089/50s",
+              "end": "821/10s",
+              "conf": 1
+            },
+            {
+              "text": "accurate",
+              "start": "821/10s",
+              "end": "4121/50s",
+              "conf": 1
+            },
+            {
+              "text": "每",
+              "start": "171/2s",
+              "end": "2143/25s",
+              "conf": 1
+            },
+            {
+              "text": "一个",
+              "start": "2143/25s",
+              "end": "2154/25s",
+              "conf": 1
+            },
+            {
+              "text": "剪点",
+              "start": "2154/25s",
+              "end": "433/5s",
+              "conf": 1
+            },
+            {
+              "text": "都要",
+              "start": "433/5s",
+              "end": "2176/25s",
+              "conf": 1
+            },
+            {
+              "text": "精确",
+              "start": "2176/25s",
+              "end": "2187/25s",
+              "conf": 1
+            },
+            {
+              "text": "到",
+              "start": "2187/25s",
+              "end": "877/10s",
+              "conf": 1
+            },
+            {
+              "text": "帧",
+              "start": "877/10s",
+              "end": "2198/25s",
+              "conf": 1
+            },
+            {
+              "text": "交接",
+              "start": "181/2s",
+              "end": "4547/50s",
+              "conf": 1
+            },
+            {
+              "text": "之前",
+              "start": "4547/50s",
+              "end": "4569/50s",
+              "conf": 1
+            },
+            {
+              "text": "先",
+              "start": "4569/50s",
+              "end": "458/5s",
+              "conf": 1
+            },
+            {
+              "text": "看",
+              "start": "458/5s",
+              "end": "4591/50s",
+              "conf": 1
+            },
+            {
+              "text": "损失",
+              "start": "4591/50s",
+              "end": "4613/50s",
+              "conf": 1
+            },
+            {
+              "text": "报告",
+              "start": "4613/50s",
+              "end": "927/10s",
+              "conf": 1
+            },
+            {
+              "text": "哪些",
+              "start": "191/2s",
+              "end": "4797/50s",
+              "conf": 1
+            },
+            {
+              "text": "能",
+              "start": "4797/50s",
+              "end": "2404/25s",
+              "conf": 1
+            },
+            {
+              "text": "保留",
+              "start": "2404/25s",
+              "end": "483/5s",
+              "conf": 1
+            },
+            {
+              "text": "哪些",
+              "start": "483/5s",
+              "end": "2426/25s",
+              "conf": 1
+            },
+            {
+              "text": "要",
+              "start": "2426/25s",
+              "end": "4863/50s",
+              "conf": 1
+            },
+            {
+              "text": "重做",
+              "start": "4863/50s",
+              "end": "977/10s",
+              "conf": 1
+            },
+            {
+              "text": "剪辑师",
+              "start": "201/2s",
+              "end": "2529/25s",
+              "conf": 1
+            },
+            {
+              "text": "拿到",
+              "start": "2529/25s",
+              "end": "508/5s",
+              "conf": 1
+            },
+            {
+              "text": "的",
+              "start": "508/5s",
+              "end": "5091/50s",
+              "conf": 1
+            },
+            {
+              "text": "工程",
+              "start": "5091/50s",
+              "end": "5113/50s",
+              "conf": 1
+            },
+            {
+              "text": "还能",
+              "start": "5113/50s",
+              "end": "1027/10s",
+              "conf": 1
+            },
+            {
+              "text": "继续",
+              "start": "1027/10s",
+              "end": "5157/50s",
+              "conf": 1
+            },
+            {
+              "text": "改",
+              "start": "5157/50s",
+              "end": "2584/25s",
+              "conf": 1
+            },
+            {
+              "text": "这",
+              "start": "211/2s",
+              "end": "2643/25s",
+              "conf": 1
+            },
+            {
+              "text": "才",
+              "start": "2643/25s",
+              "end": "5297/50s",
+              "conf": 1
+            },
+            {
+              "text": "叫",
+              "start": "5297/50s",
+              "end": "2654/25s",
+              "conf": 1
+            },
+            {
+              "text": "真正",
+              "start": "2654/25s",
+              "end": "533/5s",
+              "conf": 1
+            },
+            {
+              "text": "的",
+              "start": "533/5s",
+              "end": "5341/50s",
+              "conf": 1
+            },
+            {
+              "text": "交接",
+              "start": "5341/50s",
+              "end": "5363/50s",
+              "conf": 1
+            },
+            {
+              "text": "第一",
+              "start": "221/2s",
+              "end": "5547/50s",
+              "conf": 1
+            },
+            {
+              "text": "期",
+              "start": "5547/50s",
+              "end": "2779/25s",
+              "conf": 1
+            },
+            {
+              "text": "先",
+              "start": "2779/25s",
+              "end": "5569/50s",
+              "conf": 1
+            },
+            {
+              "text": "做",
+              "start": "5569/50s",
+              "end": "558/5s",
+              "conf": 1
+            },
+            {
+              "text": "采访",
+              "start": "558/5s",
+              "end": "2801/25s",
+              "conf": 1
+            },
+            {
+              "text": "口播",
+              "start": "2801/25s",
+              "end": "2812/25s",
+              "conf": 1
+            },
+            {
+              "text": "谢谢",
+              "start": "231/2s",
+              "end": "5797/50s",
+              "conf": 1
+            },
+            {
+              "text": "大家",
+              "start": "5797/50s",
+              "end": "5819/50s",
+              "conf": 1
+            }
+          ]
+        }
+      ],
+      "tokens": [
+        {
+          "id": "tok_000",
+          "text": "大家",
+          "state": "approved",
+          "align": {
+            "start": "1/2s",
+            "end": "47/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_001",
+          "text": "好",
+          "state": "approved",
+          "align": {
+            "start": "47/50s",
+            "end": "29/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_002",
+          "text": "我",
+          "state": "approved",
+          "align": {
+            "start": "29/25s",
+            "end": "69/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_003",
+          "text": "是",
+          "state": "approved",
+          "align": {
+            "start": "69/50s",
+            "end": "8/5s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_004",
+          "text": "庄Sir",
+          "state": "approved",
+          "align": {
+            "start": "8/5s",
+            "end": "209/100s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_005",
+          "text": "今天",
+          "state": "auto",
+          "align": {
+            "start": "11/2s",
+            "end": "297/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_006",
+          "text": "聊聊",
+          "state": "auto",
+          "align": {
+            "start": "297/50s",
+            "end": "319/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_007",
+          "text": "zsir-cut",
+          "state": "auto",
+          "align": {
+            "start": "319/50s",
+            "end": "67/10s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_008",
+          "text": "这个",
+          "state": "auto",
+          "align": {
+            "start": "67/10s",
+            "end": "357/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_009",
+          "text": "项目",
+          "state": "auto",
+          "align": {
+            "start": "357/50s",
+            "end": "379/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_010",
+          "text": "它",
+          "state": "auto",
+          "align": {
+            "start": "21/2s",
+            "end": "268/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_011",
+          "text": "是",
+          "state": "auto",
+          "align": {
+            "start": "268/25s",
+            "end": "547/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_012",
+          "text": "剪辑师",
+          "state": "auto",
+          "align": {
+            "start": "547/50s",
+            "end": "58/5s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_013",
+          "text": "和",
+          "state": "auto",
+          "align": {
+            "start": "58/5s",
+            "end": "591/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_014",
+          "text": "Agent",
+          "state": "auto",
+          "align": {
+            "start": "591/50s",
+            "end": "607/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_015",
+          "text": "共用",
+          "state": "auto",
+          "align": {
+            "start": "607/50s",
+            "end": "629/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_016",
+          "text": "的",
+          "state": "auto",
+          "align": {
+            "start": "629/50s",
+            "end": "64/5s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_017",
+          "text": "时间线",
+          "state": "auto",
+          "align": {
+            "start": "64/5s",
+            "end": "673/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_018",
+          "text": "Agent",
+          "state": "auto",
+          "align": {
+            "start": "31/2s",
+            "end": "791/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_019",
+          "text": "先",
+          "state": "auto",
+          "align": {
+            "start": "791/50s",
+            "end": "401/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_020",
+          "text": "把",
+          "state": "auto",
+          "align": {
+            "start": "401/25s",
+            "end": "813/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_021",
+          "text": "粗剪",
+          "state": "auto",
+          "align": {
+            "start": "813/50s",
+            "end": "167/10s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_022",
+          "text": "和",
+          "state": "auto",
+          "align": {
+            "start": "167/10s",
+            "end": "423/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_023",
+          "text": "字幕",
+          "state": "auto",
+          "align": {
+            "start": "423/25s",
+            "end": "434/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_024",
+          "text": "做完",
+          "state": "auto",
+          "align": {
+            "start": "434/25s",
+            "end": "89/5s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_025",
+          "text": "然后",
+          "state": "auto",
+          "align": {
+            "start": "41/2s",
+            "end": "1047/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_026",
+          "text": "交给",
+          "state": "auto",
+          "align": {
+            "start": "1047/50s",
+            "end": "1069/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_027",
+          "text": "Final",
+          "state": "auto",
+          "align": {
+            "start": "1069/50s",
+            "end": "217/10s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_028",
+          "text": "Cut",
+          "state": "auto",
+          "align": {
+            "start": "217/10s",
+            "end": "1101/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_029",
+          "text": "Pro",
+          "state": "auto",
+          "align": {
+            "start": "1101/50s",
+            "end": "1117/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_030",
+          "text": "收尾",
+          "state": "auto",
+          "align": {
+            "start": "1117/50s",
+            "end": "1139/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_031",
+          "text": "也",
+          "state": "auto",
+          "align": {
+            "start": "51/2s",
+            "end": "643/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_032",
+          "text": "可以",
+          "state": "auto",
+          "align": {
+            "start": "643/25s",
+            "end": "654/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_033",
+          "text": "交给",
+          "state": "auto",
+          "align": {
+            "start": "654/25s",
+            "end": "133/5s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_034",
+          "text": "DaVinci",
+          "state": "auto",
+          "align": {
+            "start": "133/5s",
+            "end": "673/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_035",
+          "text": "Resolve",
+          "state": "auto",
+          "align": {
+            "start": "673/25s",
+            "end": "681/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_036",
+          "text": "一条",
+          "state": "auto",
+          "align": {
+            "start": "61/2s",
+            "end": "1547/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_037",
+          "text": "三",
+          "state": "auto",
+          "align": {
+            "start": "1547/50s",
+            "end": "779/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_038",
+          "text": "分钟",
+          "state": "auto",
+          "align": {
+            "start": "779/25s",
+            "end": "158/5s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_039",
+          "text": "的",
+          "state": "auto",
+          "align": {
+            "start": "158/5s",
+            "end": "1591/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_040",
+          "text": "采访",
+          "state": "auto",
+          "align": {
+            "start": "1591/50s",
+            "end": "1613/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_041",
+          "text": "大概",
+          "state": "auto",
+          "align": {
+            "start": "1613/50s",
+            "end": "327/10s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_042",
+          "text": "要",
+          "state": "auto",
+          "align": {
+            "start": "327/10s",
+            "end": "823/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_043",
+          "text": "剪",
+          "state": "auto",
+          "align": {
+            "start": "823/25s",
+            "end": "1657/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_044",
+          "text": "两",
+          "state": "auto",
+          "align": {
+            "start": "1657/50s",
+            "end": "834/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_045",
+          "text": "小时",
+          "state": "auto",
+          "align": {
+            "start": "834/25s",
+            "end": "169/5s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_046",
+          "text": "其中",
+          "state": "auto",
+          "align": {
+            "start": "71/2s",
+            "end": "1797/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_047",
+          "text": "百分之",
+          "state": "auto",
+          "align": {
+            "start": "1797/50s",
+            "end": "183/5s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_048",
+          "text": "六十",
+          "state": "auto",
+          "align": {
+            "start": "183/5s",
+            "end": "926/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_049",
+          "text": "的",
+          "state": "auto",
+          "align": {
+            "start": "926/25s",
+            "end": "1863/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_050",
+          "text": "时间",
+          "state": "auto",
+          "align": {
+            "start": "1863/50s",
+            "end": "377/10s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_051",
+          "text": "在",
+          "state": "auto",
+          "align": {
+            "start": "377/10s",
+            "end": "948/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_052",
+          "text": "找",
+          "state": "auto",
+          "align": {
+            "start": "948/25s",
+            "end": "1907/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_053",
+          "text": "重复",
+          "state": "auto",
+          "align": {
+            "start": "1907/50s",
+            "end": "1929/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_054",
+          "text": "的",
+          "state": "auto",
+          "align": {
+            "start": "1929/50s",
+            "end": "194/5s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_055",
+          "text": "话",
+          "state": "auto",
+          "align": {
+            "start": "194/5s",
+            "end": "1951/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_056",
+          "text": "我们",
+          "state": "auto",
+          "align": {
+            "start": "81/2s",
+            "end": "2047/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_057",
+          "text": "希望",
+          "state": "auto",
+          "align": {
+            "start": "2047/50s",
+            "end": "2069/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_058",
+          "text": "把",
+          "state": "auto",
+          "align": {
+            "start": "2069/50s",
+            "end": "208/5s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_059",
+          "text": "这",
+          "state": "auto",
+          "align": {
+            "start": "208/5s",
+            "end": "2091/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_060",
+          "text": "部分",
+          "state": "auto",
+          "align": {
+            "start": "2091/50s",
+            "end": "2113/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_061",
+          "text": "交给",
+          "state": "auto",
+          "align": {
+            "start": "2113/50s",
+            "end": "427/10s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_062",
+          "text": "Agent",
+          "state": "auto",
+          "align": {
+            "start": "427/10s",
+            "end": "2151/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_063",
+          "text": "",
+          "heard": "嗯",
+          "state": "auto",
+          "align": {
+            "start": "91/2s",
+            "end": "1143/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_064",
+          "text": "就是说",
+          "state": "auto",
+          "align": {
+            "start": "1143/25s",
+            "end": "2319/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_065",
+          "text": "人",
+          "state": "auto",
+          "align": {
+            "start": "2319/50s",
+            "end": "233/5s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_066",
+          "text": "只",
+          "state": "auto",
+          "align": {
+            "start": "233/5s",
+            "end": "2341/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_067",
+          "text": "做",
+          "state": "auto",
+          "align": {
+            "start": "2341/50s",
+            "end": "1176/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_068",
+          "text": "判断",
+          "state": "auto",
+          "align": {
+            "start": "1176/25s",
+            "end": "1187/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_069",
+          "text": "字幕",
+          "state": "auto",
+          "align": {
+            "start": "101/2s",
+            "end": "2547/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_070",
+          "text": "要",
+          "state": "auto",
+          "align": {
+            "start": "2547/50s",
+            "end": "1279/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_071",
+          "text": "跟着",
+          "state": "auto",
+          "align": {
+            "start": "1279/25s",
+            "end": "258/5s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_072",
+          "text": "剪辑",
+          "state": "auto",
+          "align": {
+            "start": "258/5s",
+            "end": "1301/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_073",
+          "text": "一起",
+          "state": "auto",
+          "align": {
+            "start": "1301/25s",
+            "end": "1312/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_074",
+          "text": "走",
+          "state": "auto",
+          "align": {
+            "start": "1312/25s",
+            "end": "527/10s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_075",
+          "text": "删掉",
+          "state": "auto",
+          "align": {
+            "start": "111/2s",
+            "end": "2797/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_076",
+          "text": "一句",
+          "state": "auto",
+          "align": {
+            "start": "2797/50s",
+            "end": "2819/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_077",
+          "text": "话",
+          "state": "auto",
+          "align": {
+            "start": "2819/50s",
+            "end": "283/5s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_078",
+          "text": "字幕",
+          "state": "auto",
+          "align": {
+            "start": "283/5s",
+            "end": "1426/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_079",
+          "text": "也",
+          "state": "auto",
+          "align": {
+            "start": "1426/25s",
+            "end": "2863/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_080",
+          "text": "跟着",
+          "state": "auto",
+          "align": {
+            "start": "2863/50s",
+            "end": "577/10s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_081",
+          "text": "消失",
+          "state": "auto",
+          "align": {
+            "start": "577/10s",
+            "end": "2907/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_082",
+          "text": "品牌",
+          "state": "auto",
+          "align": {
+            "start": "121/2s",
+            "end": "3047/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_083",
+          "text": "词",
+          "state": "auto",
+          "align": {
+            "start": "3047/50s",
+            "end": "1529/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_084",
+          "text": "比如",
+          "state": "auto",
+          "align": {
+            "start": "1529/25s",
+            "end": "308/5s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_085",
+          "text": "zsir-cut",
+          "state": "auto",
+          "align": {
+            "start": "308/5s",
+            "end": "1548/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_086",
+          "text": "不能",
+          "state": "auto",
+          "align": {
+            "start": "1548/25s",
+            "end": "1559/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_087",
+          "text": "写错",
+          "state": "auto",
+          "align": {
+            "start": "1559/25s",
+            "end": "314/5s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_088",
+          "text": "数字",
+          "state": "auto",
+          "align": {
+            "start": "131/2s",
+            "end": "3297/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_089",
+          "text": "比如",
+          "state": "auto",
+          "align": {
+            "start": "3297/50s",
+            "end": "3319/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_090",
+          "text": "2026",
+          "state": "auto",
+          "align": {
+            "start": "3319/50s",
+            "end": "667/10s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_091",
+          "text": "年",
+          "state": "auto",
+          "align": {
+            "start": "667/10s",
+            "end": "1673/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_092",
+          "text": "10",
+          "state": "auto",
+          "align": {
+            "start": "1673/25s",
+            "end": "1681/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_093",
+          "text": "月",
+          "state": "auto",
+          "align": {
+            "start": "1681/25s",
+            "end": "3373/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_094",
+          "text": "也",
+          "state": "auto",
+          "align": {
+            "start": "3373/50s",
+            "end": "1692/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_095",
+          "text": "要",
+          "state": "auto",
+          "align": {
+            "start": "1692/25s",
+            "end": "679/10s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_096",
+          "text": "对",
+          "state": "auto",
+          "align": {
+            "start": "679/10s",
+            "end": "1703/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_097",
+          "text": "我们",
+          "state": "auto",
+          "align": {
+            "start": "141/2s",
+            "end": "3547/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_098",
+          "text": "用",
+          "state": "auto",
+          "align": {
+            "start": "3547/50s",
+            "end": "1779/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_099",
+          "text": "Qwen3",
+          "state": "auto",
+          "align": {
+            "start": "1779/25s",
+            "end": "1787/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_100",
+          "text": "做",
+          "state": "auto",
+          "align": {
+            "start": "1787/25s",
+            "end": "717/10s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_101",
+          "text": "本地",
+          "state": "auto",
+          "align": {
+            "start": "717/10s",
+            "end": "3607/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_102",
+          "text": "识别",
+          "state": "auto",
+          "align": {
+            "start": "3607/50s",
+            "end": "3629/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_103",
+          "text": "云端",
+          "state": "auto",
+          "align": {
+            "start": "151/2s",
+            "end": "3797/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_104",
+          "text": "用",
+          "state": "auto",
+          "align": {
+            "start": "3797/50s",
+            "end": "1904/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_105",
+          "text": "火山引擎",
+          "state": "auto",
+          "align": {
+            "start": "1904/25s",
+            "end": "1926/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_106",
+          "text": "兜底",
+          "state": "auto",
+          "align": {
+            "start": "1926/25s",
+            "end": "1937/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_107",
+          "text": "every",
+          "state": "auto",
+          "align": {
+            "start": "161/2s",
+            "end": "4041/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_108",
+          "text": "cut",
+          "state": "auto",
+          "align": {
+            "start": "4041/50s",
+            "end": "4057/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_109",
+          "text": "must",
+          "state": "auto",
+          "align": {
+            "start": "4057/50s",
+            "end": "4073/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_110",
+          "text": "be",
+          "state": "auto",
+          "align": {
+            "start": "4073/50s",
+            "end": "4089/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_111",
+          "text": "frame",
+          "state": "auto",
+          "align": {
+            "start": "4089/50s",
+            "end": "821/10s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_112",
+          "text": "accurate",
+          "state": "auto",
+          "align": {
+            "start": "821/10s",
+            "end": "4121/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_113",
+          "text": "每",
+          "state": "auto",
+          "align": {
+            "start": "171/2s",
+            "end": "2143/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_114",
+          "text": "一个",
+          "state": "auto",
+          "align": {
+            "start": "2143/25s",
+            "end": "2154/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_115",
+          "text": "剪点",
+          "state": "auto",
+          "align": {
+            "start": "2154/25s",
+            "end": "433/5s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_116",
+          "text": "都要",
+          "state": "auto",
+          "align": {
+            "start": "433/5s",
+            "end": "2176/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_117",
+          "text": "精确",
+          "state": "auto",
+          "align": {
+            "start": "2176/25s",
+            "end": "2187/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_118",
+          "text": "到",
+          "state": "auto",
+          "align": {
+            "start": "2187/25s",
+            "end": "877/10s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_119",
+          "text": "帧",
+          "state": "auto",
+          "align": {
+            "start": "877/10s",
+            "end": "2198/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_120",
+          "text": "交接",
+          "state": "auto",
+          "align": {
+            "start": "181/2s",
+            "end": "4547/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_121",
+          "text": "之前",
+          "state": "auto",
+          "align": {
+            "start": "4547/50s",
+            "end": "4569/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_122",
+          "text": "先",
+          "state": "auto",
+          "align": {
+            "start": "4569/50s",
+            "end": "458/5s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_123",
+          "text": "看",
+          "state": "auto",
+          "align": {
+            "start": "458/5s",
+            "end": "4591/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_124",
+          "text": "损失",
+          "state": "auto",
+          "align": {
+            "start": "4591/50s",
+            "end": "4613/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_125",
+          "text": "报告",
+          "state": "auto",
+          "align": {
+            "start": "4613/50s",
+            "end": "927/10s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_126",
+          "text": "哪些",
+          "state": "auto",
+          "align": {
+            "start": "191/2s",
+            "end": "4797/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_127",
+          "text": "能",
+          "state": "auto",
+          "align": {
+            "start": "4797/50s",
+            "end": "2404/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_128",
+          "text": "保留",
+          "state": "auto",
+          "align": {
+            "start": "2404/25s",
+            "end": "483/5s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_129",
+          "text": "哪些",
+          "state": "auto",
+          "align": {
+            "start": "483/5s",
+            "end": "2426/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_130",
+          "text": "要",
+          "state": "auto",
+          "align": {
+            "start": "2426/25s",
+            "end": "4863/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_131",
+          "text": "重做",
+          "state": "auto",
+          "align": {
+            "start": "4863/50s",
+            "end": "977/10s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_132",
+          "text": "剪辑师",
+          "state": "auto",
+          "align": {
+            "start": "201/2s",
+            "end": "2529/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_133",
+          "text": "拿到",
+          "state": "auto",
+          "align": {
+            "start": "2529/25s",
+            "end": "508/5s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_134",
+          "text": "的",
+          "state": "auto",
+          "align": {
+            "start": "508/5s",
+            "end": "5091/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_135",
+          "text": "工程",
+          "state": "auto",
+          "align": {
+            "start": "5091/50s",
+            "end": "5113/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_136",
+          "text": "还能",
+          "state": "auto",
+          "align": {
+            "start": "5113/50s",
+            "end": "1027/10s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_137",
+          "text": "继续",
+          "state": "auto",
+          "align": {
+            "start": "1027/10s",
+            "end": "5157/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_138",
+          "text": "改",
+          "state": "auto",
+          "align": {
+            "start": "5157/50s",
+            "end": "2584/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_139",
+          "text": "这",
+          "state": "auto",
+          "align": {
+            "start": "211/2s",
+            "end": "2643/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_140",
+          "text": "才",
+          "state": "auto",
+          "align": {
+            "start": "2643/25s",
+            "end": "5297/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_141",
+          "text": "叫",
+          "state": "auto",
+          "align": {
+            "start": "5297/50s",
+            "end": "2654/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_142",
+          "text": "真正",
+          "state": "auto",
+          "align": {
+            "start": "2654/25s",
+            "end": "533/5s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_143",
+          "text": "的",
+          "state": "auto",
+          "align": {
+            "start": "533/5s",
+            "end": "5341/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_144",
+          "text": "交接",
+          "state": "auto",
+          "align": {
+            "start": "5341/50s",
+            "end": "5363/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_145",
+          "text": "第一",
+          "state": "auto",
+          "align": {
+            "start": "221/2s",
+            "end": "5547/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_146",
+          "text": "期",
+          "state": "auto",
+          "align": {
+            "start": "5547/50s",
+            "end": "2779/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_147",
+          "text": "先",
+          "state": "auto",
+          "align": {
+            "start": "2779/25s",
+            "end": "5569/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_148",
+          "text": "做",
+          "state": "auto",
+          "align": {
+            "start": "5569/50s",
+            "end": "558/5s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_149",
+          "text": "采访",
+          "state": "auto",
+          "align": {
+            "start": "558/5s",
+            "end": "2801/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_150",
+          "text": "口播",
+          "state": "auto",
+          "align": {
+            "start": "2801/25s",
+            "end": "2812/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_151",
+          "text": "谢谢",
+          "state": "auto",
+          "align": {
+            "start": "231/2s",
+            "end": "5797/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_152",
+          "text": "大家",
+          "state": "auto",
+          "align": {
+            "start": "5797/50s",
+            "end": "5819/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        }
+      ],
+      "cues": [
+        {
+          "id": "cue_zh_00",
+          "first_token": "tok_000",
+          "last_token": "tok_004",
+          "state": "approved"
+        },
+        {
+          "id": "cue_zh_01",
+          "first_token": "tok_005",
+          "last_token": "tok_009",
+          "timing": {
+            "start": "11/2s",
+            "end": "197/25s",
+            "locked": true
+          },
+          "state": "edited"
+        },
+        {
+          "id": "cue_zh_02",
+          "first_token": "tok_010",
+          "last_token": "tok_017",
+          "breaks": [
+            "tok_013"
+          ],
+          "state": "auto"
+        },
+        {
+          "id": "cue_zh_03",
+          "first_token": "tok_018",
+          "last_token": "tok_024",
+          "state": "auto"
+        },
+        {
+          "id": "cue_zh_04",
+          "first_token": "tok_025",
+          "last_token": "tok_030",
+          "state": "auto"
+        },
+        {
+          "id": "cue_zh_05",
+          "first_token": "tok_031",
+          "last_token": "tok_035",
+          "state": "auto"
+        },
+        {
+          "id": "cue_zh_06",
+          "first_token": "tok_036",
+          "last_token": "tok_045",
+          "breaks": [
+            "tok_040"
+          ],
+          "state": "auto"
+        },
+        {
+          "id": "cue_zh_07",
+          "first_token": "tok_046",
+          "last_token": "tok_055",
+          "breaks": [
+            "tok_050"
+          ],
+          "state": "auto"
+        },
+        {
+          "id": "cue_zh_08",
+          "first_token": "tok_056",
+          "last_token": "tok_062",
+          "state": "auto"
+        },
+        {
+          "id": "cue_zh_09",
+          "first_token": "tok_063",
+          "last_token": "tok_068",
+          "state": "auto"
+        },
+        {
+          "id": "cue_zh_10",
+          "first_token": "tok_069",
+          "last_token": "tok_074",
+          "state": "auto"
+        },
+        {
+          "id": "cue_zh_11",
+          "first_token": "tok_075",
+          "last_token": "tok_081",
+          "state": "auto"
+        },
+        {
+          "id": "cue_zh_12",
+          "first_token": "tok_082",
+          "last_token": "tok_087",
+          "state": "auto"
+        },
+        {
+          "id": "cue_zh_13",
+          "first_token": "tok_088",
+          "last_token": "tok_096",
+          "breaks": [
+            "tok_091"
+          ],
+          "state": "auto"
+        },
+        {
+          "id": "cue_zh_14",
+          "first_token": "tok_097",
+          "last_token": "tok_102",
+          "state": "auto"
+        },
+        {
+          "id": "cue_zh_15",
+          "first_token": "tok_103",
+          "last_token": "tok_106",
+          "state": "auto"
+        },
+        {
+          "id": "cue_zh_16",
+          "first_token": "tok_107",
+          "last_token": "tok_112",
+          "state": "auto"
+        },
+        {
+          "id": "cue_zh_17",
+          "first_token": "tok_113",
+          "last_token": "tok_119",
+          "state": "auto"
+        },
+        {
+          "id": "cue_zh_18",
+          "first_token": "tok_120",
+          "last_token": "tok_125",
+          "state": "auto"
+        },
+        {
+          "id": "cue_zh_19",
+          "first_token": "tok_126",
+          "last_token": "tok_131",
+          "state": "auto"
+        },
+        {
+          "id": "cue_zh_20",
+          "first_token": "tok_132",
+          "last_token": "tok_138",
+          "state": "auto"
+        },
+        {
+          "id": "cue_zh_21",
+          "first_token": "tok_139",
+          "last_token": "tok_144",
+          "state": "auto"
+        },
+        {
+          "id": "cue_zh_22",
+          "first_token": "tok_145",
+          "last_token": "tok_150",
+          "state": "auto"
+        },
+        {
+          "id": "cue_zh_23",
+          "first_token": "tok_151",
+          "last_token": "tok_152",
+          "state": "auto"
+        }
+      ]
+    },
+    {
+      "id": "trs_A_en",
+      "media_id": "med_A",
+      "source_channels": [
+        0
+      ],
+      "language": "en",
+      "raw_runs": [
+        {
+          "id": "run_translate",
+          "kind": "align",
+          "engine": {
+            "name": "manual-translation",
+            "model": "fixtures/synth/script.json",
+            "version": "0.1"
+          },
+          "created_at": "2026-10-26T00:00:00Z",
+          "range": {
+            "start": "0s",
+            "duration": "120s"
+          },
+          "tokens": [
+            {
+              "text": "Hi everyone, I'm Zhuang Sir",
+              "start": "1/2s",
+              "end": "209/100s"
+            },
+            {
+              "text": "Today let's talk about zsir-cut",
+              "start": "11/2s",
+              "end": "379/50s"
+            },
+            {
+              "text": "A timeline shared by editors and agents",
+              "start": "21/2s",
+              "end": "673/50s"
+            },
+            {
+              "text": "The agent does the rough cut and captions first",
+              "start": "31/2s",
+              "end": "89/5s"
+            },
+            {
+              "text": "Then hands off to Final Cut Pro",
+              "start": "41/2s",
+              "end": "1139/50s"
+            },
+            {
+              "text": "Or to DaVinci Resolve",
+              "start": "51/2s",
+              "end": "681/25s"
+            },
+            {
+              "text": "A three-minute interview takes about two hours",
+              "start": "61/2s",
+              "end": "169/5s"
+            },
+            {
+              "text": "Sixty percent of it is finding repeated lines",
+              "start": "71/2s",
+              "end": "1951/50s"
+            },
+            {
+              "text": "We want the agent to take that part",
+              "start": "81/2s",
+              "end": "2151/50s"
+            },
+            {
+              "text": "So people only make the calls",
+              "start": "91/2s",
+              "end": "1187/25s"
+            },
+            {
+              "text": "Captions must follow the edit",
+              "start": "101/2s",
+              "end": "527/10s"
+            },
+            {
+              "text": "Delete a line and its caption goes too",
+              "start": "111/2s",
+              "end": "2907/50s"
+            },
+            {
+              "text": "Brand names like zsir-cut must be right",
+              "start": "121/2s",
+              "end": "314/5s"
+            },
+            {
+              "text": "Numbers like October 2026 must be right",
+              "start": "131/2s",
+              "end": "1703/25s"
+            },
+            {
+              "text": "We use Qwen3 for local recognition",
+              "start": "141/2s",
+              "end": "3629/50s"
+            },
+            {
+              "text": "With Volcano Engine as cloud fallback",
+              "start": "151/2s",
+              "end": "1937/25s"
+            },
+            {
+              "text": "Every cut must be frame accurate",
+              "start": "161/2s",
+              "end": "4121/50s"
+            },
+            {
+              "text": "Each cut point accurate to the frame",
+              "start": "171/2s",
+              "end": "2198/25s"
+            },
+            {
+              "text": "Check the loss report before handoff",
+              "start": "181/2s",
+              "end": "927/10s"
+            },
+            {
+              "text": "What survives and what must be redone",
+              "start": "191/2s",
+              "end": "977/10s"
+            },
+            {
+              "text": "The editor can keep editing the project",
+              "start": "201/2s",
+              "end": "2584/25s"
+            },
+            {
+              "text": "That is a real handoff",
+              "start": "211/2s",
+              "end": "5363/50s"
+            },
+            {
+              "text": "Phase one starts with interviews",
+              "start": "221/2s",
+              "end": "2812/25s"
+            },
+            {
+              "text": "Thank you",
+              "start": "231/2s",
+              "end": "5819/50s"
+            }
+          ]
+        }
+      ],
+      "tokens": [
+        {
+          "id": "tok_en_00",
+          "text": "Hi everyone, I'm Zhuang Sir",
+          "state": "auto",
+          "align": {
+            "start": "1/2s",
+            "end": "209/100s",
+            "run": "run_translate"
+          }
+        },
+        {
+          "id": "tok_en_01",
+          "text": "Today let's talk about zsir-cut",
+          "state": "auto",
+          "align": {
+            "start": "11/2s",
+            "end": "379/50s",
+            "run": "run_translate"
+          }
+        },
+        {
+          "id": "tok_en_02",
+          "text": "A timeline shared by editors and agents",
+          "state": "auto",
+          "align": {
+            "start": "21/2s",
+            "end": "673/50s",
+            "run": "run_translate"
+          }
+        },
+        {
+          "id": "tok_en_03",
+          "text": "The agent does the rough cut and captions first",
+          "state": "auto",
+          "align": {
+            "start": "31/2s",
+            "end": "89/5s",
+            "run": "run_translate"
+          }
+        },
+        {
+          "id": "tok_en_04",
+          "text": "Then hands off to Final Cut Pro",
+          "state": "auto",
+          "align": {
+            "start": "41/2s",
+            "end": "1139/50s",
+            "run": "run_translate"
+          }
+        },
+        {
+          "id": "tok_en_05",
+          "text": "Or to DaVinci Resolve",
+          "state": "auto",
+          "align": {
+            "start": "51/2s",
+            "end": "681/25s",
+            "run": "run_translate"
+          }
+        },
+        {
+          "id": "tok_en_06",
+          "text": "A three-minute interview takes about two hours",
+          "state": "auto",
+          "align": {
+            "start": "61/2s",
+            "end": "169/5s",
+            "run": "run_translate"
+          }
+        },
+        {
+          "id": "tok_en_07",
+          "text": "Sixty percent of it is finding repeated lines",
+          "state": "auto",
+          "align": {
+            "start": "71/2s",
+            "end": "1951/50s",
+            "run": "run_translate"
+          }
+        },
+        {
+          "id": "tok_en_08",
+          "text": "We want the agent to take that part",
+          "state": "auto",
+          "align": {
+            "start": "81/2s",
+            "end": "2151/50s",
+            "run": "run_translate"
+          }
+        },
+        {
+          "id": "tok_en_09",
+          "text": "So people only make the calls",
+          "state": "auto",
+          "align": {
+            "start": "91/2s",
+            "end": "1187/25s",
+            "run": "run_translate"
+          }
+        },
+        {
+          "id": "tok_en_10",
+          "text": "Captions must follow the edit",
+          "state": "auto",
+          "align": {
+            "start": "101/2s",
+            "end": "527/10s",
+            "run": "run_translate"
+          }
+        },
+        {
+          "id": "tok_en_11",
+          "text": "Delete a line and its caption goes too",
+          "state": "auto",
+          "align": {
+            "start": "111/2s",
+            "end": "2907/50s",
+            "run": "run_translate"
+          }
+        },
+        {
+          "id": "tok_en_12",
+          "text": "Brand names like zsir-cut must be right",
+          "state": "auto",
+          "align": {
+            "start": "121/2s",
+            "end": "314/5s",
+            "run": "run_translate"
+          }
+        },
+        {
+          "id": "tok_en_13",
+          "text": "Numbers like October 2026 must be right",
+          "state": "auto",
+          "align": {
+            "start": "131/2s",
+            "end": "1703/25s",
+            "run": "run_translate"
+          }
+        },
+        {
+          "id": "tok_en_14",
+          "text": "We use Qwen3 for local recognition",
+          "state": "auto",
+          "align": {
+            "start": "141/2s",
+            "end": "3629/50s",
+            "run": "run_translate"
+          }
+        },
+        {
+          "id": "tok_en_15",
+          "text": "With Volcano Engine as cloud fallback",
+          "state": "auto",
+          "align": {
+            "start": "151/2s",
+            "end": "1937/25s",
+            "run": "run_translate"
+          }
+        },
+        {
+          "id": "tok_en_16",
+          "text": "Every cut must be frame accurate",
+          "state": "auto",
+          "align": {
+            "start": "161/2s",
+            "end": "4121/50s",
+            "run": "run_translate"
+          }
+        },
+        {
+          "id": "tok_en_17",
+          "text": "Each cut point accurate to the frame",
+          "state": "auto",
+          "align": {
+            "start": "171/2s",
+            "end": "2198/25s",
+            "run": "run_translate"
+          }
+        },
+        {
+          "id": "tok_en_18",
+          "text": "Check the loss report before handoff",
+          "state": "auto",
+          "align": {
+            "start": "181/2s",
+            "end": "927/10s",
+            "run": "run_translate"
+          }
+        },
+        {
+          "id": "tok_en_19",
+          "text": "What survives and what must be redone",
+          "state": "auto",
+          "align": {
+            "start": "191/2s",
+            "end": "977/10s",
+            "run": "run_translate"
+          }
+        },
+        {
+          "id": "tok_en_20",
+          "text": "The editor can keep editing the project",
+          "state": "auto",
+          "align": {
+            "start": "201/2s",
+            "end": "2584/25s",
+            "run": "run_translate"
+          }
+        },
+        {
+          "id": "tok_en_21",
+          "text": "That is a real handoff",
+          "state": "auto",
+          "align": {
+            "start": "211/2s",
+            "end": "5363/50s",
+            "run": "run_translate"
+          }
+        },
+        {
+          "id": "tok_en_22",
+          "text": "Phase one starts with interviews",
+          "state": "auto",
+          "align": {
+            "start": "221/2s",
+            "end": "2812/25s",
+            "run": "run_translate"
+          }
+        },
+        {
+          "id": "tok_en_23",
+          "text": "Thank you",
+          "state": "auto",
+          "align": {
+            "start": "231/2s",
+            "end": "5819/50s",
+            "run": "run_translate"
+          }
+        }
+      ],
+      "cues": [
+        {
+          "id": "cue_en_00",
+          "first_token": "tok_en_00",
+          "last_token": "tok_en_00",
+          "state": "auto"
+        },
+        {
+          "id": "cue_en_01",
+          "first_token": "tok_en_01",
+          "last_token": "tok_en_01",
+          "state": "auto"
+        },
+        {
+          "id": "cue_en_02",
+          "first_token": "tok_en_02",
+          "last_token": "tok_en_02",
+          "state": "auto"
+        },
+        {
+          "id": "cue_en_03",
+          "first_token": "tok_en_03",
+          "last_token": "tok_en_03",
+          "state": "auto"
+        },
+        {
+          "id": "cue_en_04",
+          "first_token": "tok_en_04",
+          "last_token": "tok_en_04",
+          "state": "auto"
+        },
+        {
+          "id": "cue_en_05",
+          "first_token": "tok_en_05",
+          "last_token": "tok_en_05",
+          "state": "auto"
+        },
+        {
+          "id": "cue_en_06",
+          "first_token": "tok_en_06",
+          "last_token": "tok_en_06",
+          "state": "auto"
+        },
+        {
+          "id": "cue_en_07",
+          "first_token": "tok_en_07",
+          "last_token": "tok_en_07",
+          "state": "auto"
+        },
+        {
+          "id": "cue_en_08",
+          "first_token": "tok_en_08",
+          "last_token": "tok_en_08",
+          "state": "auto"
+        },
+        {
+          "id": "cue_en_09",
+          "first_token": "tok_en_09",
+          "last_token": "tok_en_09",
+          "state": "auto"
+        },
+        {
+          "id": "cue_en_10",
+          "first_token": "tok_en_10",
+          "last_token": "tok_en_10",
+          "state": "auto"
+        },
+        {
+          "id": "cue_en_11",
+          "first_token": "tok_en_11",
+          "last_token": "tok_en_11",
+          "state": "auto"
+        },
+        {
+          "id": "cue_en_12",
+          "first_token": "tok_en_12",
+          "last_token": "tok_en_12",
+          "state": "auto"
+        },
+        {
+          "id": "cue_en_13",
+          "first_token": "tok_en_13",
+          "last_token": "tok_en_13",
+          "state": "auto"
+        },
+        {
+          "id": "cue_en_14",
+          "first_token": "tok_en_14",
+          "last_token": "tok_en_14",
+          "state": "auto"
+        },
+        {
+          "id": "cue_en_15",
+          "first_token": "tok_en_15",
+          "last_token": "tok_en_15",
+          "state": "auto"
+        },
+        {
+          "id": "cue_en_16",
+          "first_token": "tok_en_16",
+          "last_token": "tok_en_16",
+          "state": "auto"
+        },
+        {
+          "id": "cue_en_17",
+          "first_token": "tok_en_17",
+          "last_token": "tok_en_17",
+          "state": "auto"
+        },
+        {
+          "id": "cue_en_18",
+          "first_token": "tok_en_18",
+          "last_token": "tok_en_18",
+          "state": "auto"
+        },
+        {
+          "id": "cue_en_19",
+          "first_token": "tok_en_19",
+          "last_token": "tok_en_19",
+          "state": "auto"
+        },
+        {
+          "id": "cue_en_20",
+          "first_token": "tok_en_20",
+          "last_token": "tok_en_20",
+          "state": "auto"
+        },
+        {
+          "id": "cue_en_21",
+          "first_token": "tok_en_21",
+          "last_token": "tok_en_21",
+          "state": "auto"
+        },
+        {
+          "id": "cue_en_22",
+          "first_token": "tok_en_22",
+          "last_token": "tok_en_22",
+          "state": "auto"
+        },
+        {
+          "id": "cue_en_23",
+          "first_token": "tok_en_23",
+          "last_token": "tok_en_23",
+          "state": "auto"
+        }
+      ]
+    }
+  ],
+  "subtitle_styles": [
+    {
+      "id": "sty_zh",
+      "name": "口播中文",
+      "version": 1,
+      "font_family": "PingFang SC",
+      "font_weight": 600,
+      "font_size": 0.055,
+      "color": "#FFFFFF",
+      "outline": {
+        "color": "#000000",
+        "width": 0.08
+      },
+      "position": {
+        "anchor": "bottom",
+        "margin_v": 0.12
+      },
+      "max_lines": 2
+    },
+    {
+      "id": "sty_en",
+      "name": "口播英文",
+      "version": 1,
+      "font_family": "Helvetica Neue",
+      "font_weight": 500,
+      "font_size": 0.04,
+      "color": "#FFFFFF",
+      "box": {
+        "color": "#00000099",
+        "padding": 0.2
+      },
+      "position": {
+        "anchor": "bottom",
+        "margin_v": 0.05
+      },
+      "max_lines": 1
+    },
+    {
+      "id": "sty_title",
+      "name": "标题",
+      "version": 1,
+      "font_family": "PingFang SC",
+      "font_weight": 700,
+      "font_size": 0.08,
+      "color": "#FFD200",
+      "position": {
+        "anchor": "top",
+        "margin_v": 0.1
+      },
+      "max_lines": 1
+    }
+  ]
+}

@@ -39,3 +39,6 @@ local/
 out/
 renders/
 proxies/
+
+# Generated fixtures (see docs/spec/fixtures.md)
+fixtures/.media/
