@@ -68,9 +68,25 @@ for st in [t for t in tl["tracks"] if t["kind"] == "subtitle"]:
                             return out
                         text = o["text"] if o and "text" in o else join([t["text"] for t, _ in pc])
                         cues_out.append({"track": st["id"], "cue": cue["id"], "clip": c["id"], "piece": n,
-                                         "start": str(t_a), "end": str(t_b), "text": text})
+                                         "start": str(t_a), "end": str(t_b), "text": text, "ovr": json.dumps(o, sort_keys=True) if o else None})
     for fc in st["free_cues"]:
         a = T(fc["timeline_start"])
         cues_out.append({"track": st["id"], "cue": fc["id"], "clip": None, "piece": 0, "start": str(a), "end": str(a + T(fc["duration"])), "text": fc["text"]})
 cues_out.sort(key=lambda r: (r["track"], F(r["start"]), r["cue"]))
+# step 7: merge adjacent pieces of the same cue (jump cuts)
+fd = 1 / F(tl["edit_rate"]); merged = []
+def joinw(a, b, lang):
+    if not lang.startswith("zh"): return a + " " + b
+    return a + (" " if a and b and a[-1].isascii() and a[-1].isalnum() and b[0].isascii() and b[0].isalnum() else "") + b
+langs = {t["id"]: t.get("language", "") for t in tl["tracks"]}
+for c in cues_out:
+    prev = merged[-1] if merged else None
+    same = [m for m in merged if m["track"] == c["track"] and m["cue"] == c["cue"]]
+    last = same[-1] if same else None
+    if last and c["clip"] is not None and last["clip"] is not None and abs(F(c["start"]) - F(last["end"])) <= fd and last.get("ovr") == c.get("ovr"):
+        last["end"] = c["end"]; last["text"] = joinw(last["text"], c["text"], langs[c["track"]]); last["clip"] = last["clip"] + "+" + c["clip"]
+    else:
+        merged.append(dict(c))
+for m in merged: m.pop("ovr", None)
+cues_out = merged
 print(json.dumps({"cues": cues_out, "unprojected": sorted(unproj)}, ensure_ascii=False, indent=1))
