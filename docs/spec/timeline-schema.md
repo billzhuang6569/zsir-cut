@@ -255,6 +255,7 @@ L1 和 L2 的规则编号如下，`validate` 的输出和损失报告都用这�
 
 | 编号 | 级别 | 规则 |
 |---|---|---|
+| `E_SCHEMA` | 错误（L0） | 不符合 JSON Schema。编辑操作的结果连结构校验都通不过时，`verification.issues` 用这个编号，`message` 写 schema 报告的路径和原因 |
 | `E_REF` | 错误 | 引用的 ID 不存在，或片段的 `media_id` 与所属 `occurrence_id` 的其他片段不一致 |
 | `E_ID_DUP` | 错误 | ID 在整个工程内不唯一 |
 | `E_TIME_FORM` | 错误 | 时间、帧率或速度不是最简分数（JSON Schema 的正则查不出这一条） |
