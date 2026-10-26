@@ -82,9 +82,11 @@ def check(path):
             for j in range(i + 1, len(cl)):
                 a, b = cl[i][1], cl[j][1]
                 lo = max(T(a["timeline_start"]), T(b["timeline_start"])); hi = min(T(a["timeline_start"]) + T(a["duration"]), T(b["timeline_start"]) + T(b["duration"]))
+                if a.get("sync_broken") or b.get("sync_broken"): continue
+                if lo >= hi: continue  # only clips overlapping on the timeline are compared
                 if a.get("time_map") is None and b.get("time_map") is None:
                     if T(a["timeline_start"]) - T(a["source_start"]) != T(b["timeline_start"]) - T(b["source_start"]): E("W_SYNC", f"{a['id']} {b['id']}")
-                elif lo < hi:
+                else:
                     for k in range(5):
                         x = lo + (hi - lo) * k / 4
                         if src_at(a, x) != src_at(b, x): E("W_SYNC", f"{a['id']} {b['id']} @{x}"); break

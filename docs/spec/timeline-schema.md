@@ -134,7 +134,7 @@ Project
 
 `source_start` 是片段第一帧对应的源时间。没有时间映射时，源区间就是 `[source_start, source_start + duration)`。同一轨道上的片段区间不得重叠。片段之间的空白就是空隙，不需要显式的 gap 对象，导出 OTIO 时再生成。
 
-同步规则：同一 `occurrence_id` 下的片段，同一个序列时刻必须对应同一个源时刻。都没有时间映射时，这等价于 `timeline_start − source_start` 相等。J/L cut 就是同一次使用的视频和音频起止点不同，但这个差值不变。有时间映射时，只在片段于序列上重叠的部分检查。确实要错开同步时，在片段上写 `"sync_broken": true`，校验只给提示。
+同步规则：同一 `occurrence_id` 下、**在序列上有重叠**的片段，同一个序列时刻必须对应同一个源时刻。都没有时间映射时，这等价于重叠的片段 `timeline_start − source_start` 相等。J/L cut 就是同一次使用的视频和音频起止点不同，但这个差值不变。在序列上不重叠的片段不比较：例如用 `remove_span` 从一次使用中间删掉一段并合拢后，前后两段本来就错开了。确实要错开同步时，在片段上写 `"sync_broken": true`，校验只给提示。
 
 转场 `transitions[]`：`id`、`type`（一期只有 `cross_dissolve`）、`from_clip`、`to_clip`、`duration`、`alignment`（`center`、`start`、`end`）。两段必须在同一轨道且首尾相接，两段素材在源上要有足够的余量（handles）覆盖转场：
 
