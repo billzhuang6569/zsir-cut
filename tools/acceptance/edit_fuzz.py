@@ -34,7 +34,7 @@ for i in range(steps):
     clips = [(t, c) for t in vid + aud for c in t["clips"]]
     end = max([T(c["timeline_start"]) + T(c["duration"]) for _, c in clips] or [F(0)])
     frame = lambda x: F(round(x / fd)) * fd
-    kind = rnd.choice(["remove_span", "split", "move", "remove", "set_clip", "add_marker"])
+    kind = rnd.choice(["remove_span", "split", "move", "remove", "set_clip", "add_marker", "trim", "insert"])
     op = None; sync_safe = True
     if kind == "remove_span" and end > 4 * fd:
         a = frame(F(rnd.random()) * (end - 2 * fd)); dur = max(fd, frame(F(rnd.random()) * min(end - a, 5)))
@@ -49,15 +49,31 @@ for i in range(steps):
         t, c = rnd.choice(clips); op = {"op": "remove", "clip_ids": [c["id"]], "linked": True}
     elif kind == "set_clip" and clips:
         t, c = rnd.choice(clips); op = {"op": "set_clip", "clip_id": c["id"], "label": f"fuzz {i}"}
+    elif kind == "trim" and clips:
+        t, c = rnd.choice(clips)
+        if not c.get("time_map"):
+            edge = rnd.choice(["in", "out"]); s0, du = T(c["timeline_start"]), T(c["duration"])
+            delta = rnd.choice([-1, 1]) * rnd.randint(1, 10) * fd
+            to = s0 + delta if edge == "in" else s0 + du + delta
+            op = {"op": "trim", "clip_id": c["id"], "edge": edge, "to": ts(to), "ripple": rnd.random() < 0.5}
+    elif kind == "insert":
+        med = [m for m in d["media"] if m["kind"] == "video" and m.get("audio") and not m["video"].get("vfr")]
+        if med and vid and aud:
+            m = rnd.choice(med); mr = F(m["video"]["rate"]); md = F(m["duration"][:-1])
+            dur = rnd.randint(5, 50) * fd; srcf = F(rnd.randint(0, int((md - dur) * mr) - 1)) / mr if md > dur else F(0)
+            op = {"op": "place", "media_id": m["id"], "source_start": ts(srcf), "duration": ts(dur), "at": ts(frame(F(rnd.random()) * end)),
+                  "video_track": vid[0]["id"], "audio_track": aud[0]["id"], "mode": rnd.choice(["insert", "overwrite"])}
     elif kind == "add_marker":
         op = {"op": "add_marker", "at": ts(frame(F(rnd.random()) * end)), "duration": "0s", "kind": "note", "text": f"m{i}"}
     if not op: continue
     req = {"base_revision": d["revision"]["id"], "idempotency_key": f"fuzz-{seed}-{i}", "author": {"kind": "agent", "name": "fuzz"}, "ops": [op]}
-    env = run("edit", req); st = env["status"]; stats[(op["op"], st)] = stats.get((op["op"], st), 0) + 1
+    env = run("edit", req); st = env["status"]
+    tag = st if st != "rejected" else "rejected:" + (env.get("error") or {}).get("code", "?") + ("/" + ",".join(sorted({i["code"] for i in env["verification"]["issues"] if i["severity"] == "error"})) if env["verification"]["issues"] else "")
+    stats[(op["op"], tag)] = stats.get((op["op"], tag), 0) + 1
     if st == "applied":
         applied.append(op["op"]); errs, sync = l1(proj)
         if errs: print("L1 ERROR after", op, errs[:3]); sys.exit(1)
-        if sync and op["op"] in ("remove_span", "split", "remove"): print("W_SYNC after linked/all-track op", op); sys.exit(1)
+        if sync and op["op"] in ("remove_span", "split", "remove", "trim", "place"): print("W_SYNC after linked/all-track op", op); sys.exit(1)
     elif st not in ("rejected",): print("unexpected", st, json.dumps(env)[:300]); sys.exit(1)
 print("ops:", {f"{k[0]}:{k[1]}": v for k, v in sorted(stats.items())})
 for j in range(len(applied)):
