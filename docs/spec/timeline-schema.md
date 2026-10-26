@@ -136,7 +136,13 @@ Project
 
 同步规则：同一 `occurrence_id` 下的片段，同一个序列时刻必须对应同一个源时刻。都没有时间映射时，这等价于 `timeline_start − source_start` 相等。J/L cut 就是同一次使用的视频和音频起止点不同，但这个差值不变。有时间映射时，只在片段于序列上重叠的部分检查。确实要错开同步时，在片段上写 `"sync_broken": true`，校验只给提示。
 
-转场 `transitions[]`：`id`、`type`（一期只有 `cross_dissolve`）、`from_clip`、`to_clip`、`duration`、`alignment`（`center`、`start`、`end`）。两段必须在同一轨道且首尾相接，两段素材在源上要有足够的余量（handles）覆盖转场。
+转场 `transitions[]`：`id`、`type`（一期只有 `cross_dissolve`）、`from_clip`、`to_clip`、`duration`、`alignment`（`center`、`start`、`end`）。两段必须在同一轨道且首尾相接，两段素材在源上要有足够的余量（handles）覆盖转场：
+
+- `center`：转场占剪点前后各一半。前一段要在源出点之后多出半个转场时长，后一段要在源入点之前多出半个转场时长。
+- `start`：转场从剪点开始。前一段要多出整个转场时长，后一段不需要。
+- `end`：转场在剪点结束。后一段要提前整个转场时长，前一段不需要。
+
+需要的源余量等于所需时长乘以片段边界所在段的速度绝对值；边界落在 `hold` 段时不需要余量。余量不能超出素材的 `[0, duration)`。
 
 ### 4.5 变速与时间映射
 
@@ -251,7 +257,7 @@ L1 和 L2 的规则编号如下，`validate` 的输出和损失报告都用这�
 | `W_SYNC` | 警告 | 同一次使用的片段同步差值不一致，且没有标 `sync_broken` |
 | `W_VFR` | 警告 | 素材是可变帧率 |
 | `W_TOKEN_TIME` | 警告 | token 零时长、时间倒序或与相邻 token 重叠 |
-| `W_LOW_CONF` | 警告 | 对齐置信度低于阈值 |
+| `W_LOW_CONF` | 警告 | 对齐置信度低于 0.6 |
 | `W_TIMEMAP_APPROX` | 警告 | 片段含 `smooth` 段，预览和投影按线性近似 |
 | `W_SUB_UNPROJECTED` | 警告 | 字幕落在倒放段、定格段或静帧上，没有投影 |
 | `W_SUB_TOO_WIDE` | 警告 | 单个字词宽度超过一行上限，见 `subtitle-rules.md` |
@@ -259,6 +265,7 @@ L1 和 L2 的规则编号如下，`validate` 的输出和损失报告都用这�
 | `W_SUB_CPS` | 警告 | 每秒字数超过上限且无法延长，见 `subtitle-rules.md` |
 | `E_MEDIA_MISSING` | 错误（L2） | 文件找不到 |
 | `E_MEDIA_MISMATCH` | 错误（L2） | 文件存在但大小或指纹不符 |
+| `W_PROXY_MISSING` | 警告（L2） | 声明了代理文件，但找不到，或大小、指纹不符 |
 
 ## 9. 示例
 
