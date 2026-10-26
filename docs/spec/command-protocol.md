@@ -173,13 +173,53 @@
 
 这是「Agent 剪、人接手」的交接点。
 
-1. `session_begin`：传入 `approval`（`manual` 或 `auto`）和一句意图说明。内核以当前修订为基础建一份草稿，返回 `session_id`。
-2. Agent 带着 `session_id` 发写请求，结果都是 `drafted`，只改草稿。草稿有自己的修订链，可以在会话内撤销。
-3. `session_review`：会话进入待审状态，返回汇总：剪辑改动和字幕改动分开列出，附预览渲染的任务 ID 和校验结果。
-4. 人在 UI 或 CLI 里预览，然后 `session_approve` 或 `session_reject`。`approval` 为 `auto` 时，`session_review` 之后自动批准。
-5. 批准时，草稿里的全部操作作为一个修订原子地应用到主工程。如果会话开始后主工程变了，内核按操作重放到新修订上；重放冲突就返回 `conflict`，会话保持待审，等 Agent 修正。
+### 7.1 流程
 
-不进会话的动词：`import_media`、`transcribe`、`render_preview`、`view_timeline`、`export`、`record_handoff_check`、`job_status` 和所有读动词。它们要么只追加数据，要么不改工程。
+1. `session_begin`：参数 `approval`（`manual` 或 `auto`）、`intent`（一句话说明这次要做什么）。内核以当前修订为基础建一份草稿，返回 `session_id`，`receipt` 为 null，`result` 含 `session_id`、`base_revision`、`state`。
+2. Agent 带着 `session_id` 发 `edit`、`undo`、`redo`，结果都是 `drafted`，只改草稿。草稿有自己的修订链和日志，可以在会话内撤销。`base_revision` 和幂等键都对草稿检查。
+3. `session_review`：会话进入待审状态，返回审阅汇总（见 7.3）。`approval` 为 `auto` 时，紧接着自动执行批准。
+4. 人在 UI 或 CLI 里看过之后，`session_approve` 或 `session_reject`。这两个动词带写请求的公共字段，`base_revision` 是**主工程**的当前修订。
+5. 批准：见 7.4。拒绝：会话变为 `rejected`，主工程不变，草稿保留供查阅。
+
+### 7.2 存储与状态
+
+```text
+.zcut/<project_id>/sessions/<session_id>/
+├─ session.json        会话元数据：状态、approval、intent、作者、base_revision、创建与更新时间
+├─ draft.zcut.json     草稿工程，格式与主工程相同
+└─ .zcut/…             草稿自己的锁、日志、幂等记录，规则同第 5、6 节
+```
+
+| 状态 | 可以做的 | 进入下一个状态 |
+|---|---|---|
+| `open` | `edit`、`undo`、`redo`、`session_review`、`session_reject` | `session_review` → `in_review` |
+| `in_review` | `session_approve`、`session_reject`；也可以继续 `edit`，会话回到 `open` | 批准 → `approved`；拒绝 → `rejected` |
+| `approved`、`rejected` | 只读 | 终态 |
+
+在不允许的状态下调用动词，返回 `rejected`、`E_SESSION_STATE`。
+
+### 7.3 审阅汇总
+
+`session_review` 的 `result`：
+
+- `base_revision`、`draft_revision`。
+- `timeline_changes` 和 `subtitle_changes`：从会话基础到草稿当前状态的实体级差异，分开列出。剪辑域包括媒体、时间线、轨道、片段、转场、标记；字幕域包括母稿、识别运行、字词、字幕条、覆盖值、独立字幕条、样式，以及字幕轨。
+- `ops`：草稿日志里全部写入的操作原文，按顺序。
+- `verification`：对草稿做 L1 校验的结果。
+- `preview_job`：预览渲染的任务 ID。`render_preview` 实现之前为 null。
+
+### 7.4 批准与合并
+
+1. 主工程当前修订等于会话的 `base_revision`：把草稿当前内容作为一个新修订写入主工程，日志条目的 `verb` 为 `session_approve`，`ops` 是草稿的全部操作，`changes` 是会话基础到草稿的实体差异。
+2. 主工程已经前进：把草稿日志里的写入按顺序重放到主工程当前内容上（会话内被撤销的不重放），每个操作都按当时的请求参数执行。全部成功，就把结果作为一个新修订写入。任何一个失败，或结果 L1 校验有错误，返回 `conflict`，`result` 列出失败的操作和原因；会话保持 `in_review`，主工程不变，Agent 可以继续编辑草稿后再提交审阅。
+3. 批准后的修订是一步撤销，撤销它就撤销整个会话。
+4. 带 `force` 的字幕域操作只在 `approval` 为 `manual` 的会话里有效，规则见第 8 节。
+
+不进会话的动词：`import_media`、`transcribe`、`render_preview`、`view_timeline`、`export`、`record_handoff_check`、`job_status` 和所有读动词。带 `session_id` 调用它们返回 `rejected`、`E_SESSION_STATE`。
+
+### 7.5 修订对比 `diff`
+
+参数 `from`、`to`（修订 ID，`to` 默认当前修订）。结果是两个修订之间的实体级差异，格式与日志的 `changes` 相同。计算方法：从当前工程出发，按日志倒序把每个修订的 `before` 快照还原回去，得到任意历史修订的内容，再比较。`recovered` 修订没有快照，跨越它的对比返回 `rejected`、`E_UNSUPPORTED`。
 
 ## 8. 授权边界
 
