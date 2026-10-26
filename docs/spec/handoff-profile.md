@@ -1,0 +1,161 @@
+# 交接 Profile v0.1
+
+状态：草案 · 2026-10-26 · 依赖 `timeline-schema.md`、`command-protocol.md` v0.1
+机器校验：`schema/handoff-manifest.schema.json`、`schema/loss-report.schema.json`
+依据：[调研文档](https://claude.ai/artifact/PJytj2A1kDu8Wb4aPSkNdR)「与 DaVinci Resolve / Premiere Pro / Final Cut Pro 联动」一节。
+
+本文定义 `export` 动词交出去的东西：针对哪个软件的哪个版本、交接包里有什么、损失怎么报告、怎样才算交接成功。
+
+## 1. 原则
+
+1. **按目标软件和版本导出，不按格式导出。** 用户选「Final Cut Pro 11」，不选「导出 XML」。一次导出只生成一种交换文件。
+2. **一期是单向交接。** 交出去以后，剪辑师在 NLE 里收尾。导回是第二期。
+3. **损失在导出之前就说清楚。** 带 `dry_run` 调用 `export` 只返回损失报告，不生成文件。
+4. **导出器自己能读回来，不等于目标软件兼容。** 所以验证分四级，最后两级必须在真实软件里做。
+5. **同样的输入得到同样的文件。** 同一修订、同一 profile、同一导出器版本，交换文件逐字节相同，这样 CI 才能用 golden 文件比对。
+
+## 2. Profile
+
+profile ID 的格式是「宿主-最低宿主版本-格式-格式版本」。
+
+| Profile | 宿主 | 交换文件 | 字幕 | 一期地位 |
+|---|---|---|---|---|
+| `fcp-11-fcpxml-1.13` | Final Cut Pro 11 及以上 | FCPXML 1.13 | 内嵌 `<caption>`，另附 SRT | **验收基线** |
+| `fcp-10.6-fcpxml-1.11` | Final Cut Pro 10.6 至 10.8 | FCPXML 1.11 | 同上 | 兼容旧版 |
+| `resolve-18.5-otio` | DaVinci Resolve 18.5 及以上 | OTIO JSON | SRT 旁路，手动导入字幕轨 | 第二 |
+| `premiere-25-xmeml-5` | Premiere Pro 25 及以上 | FCP7 XML（xmeml v5） | SRT 旁路，导入为字幕轨 | 第三 |
+
+选择规则：
+
+- 应用启动时探测本机已安装的宿主和版本，写进用户设置 `~/.zsir-cut/hosts.json`，不写进工程。默认 profile 按探测结果选，用户不需要自己猜版本。
+- FCP 会拒绝比自己新的 FCPXML，也会拒绝没通过 DTD 校验的文件。所以 FCP 一律选不高于本机版本的 FCPXML，并用从 FCP 应用包里取出的 DTD 校验。
+- Resolve 的默认格式在第 1 步实测后定。调研里有反馈说 Resolve 对 FCPXML 的媒体重链接比 OTIO 稳，所以 `resolve-21-fcpxml-1.11` 作为候选，和 OTIO 一起跑第 1 步的交换层测试，谁先做到逐切点零偏差谁当默认。
+- Premiere 不用 OTIO。它导入 OTIO 后的变速值目前不可信。
+- 预留给第二期的：`resolve-21-api`（Studio 版脚本 API 直接建时间线）、`premiere-26-uxp`（自研 UXP 面板）、剪映草稿。
+
+## 3. 交接包
+
+```text
+<工程名>_<时间线名>_<profile>_r<修订序号>_<YYYYMMDD-HHMM>/
+├─ manifest.json         这次交接的完整说明
+├─ loss-report.json      损失报告
+├─ 接手说明.txt           给剪辑师看：怎么导入、导入后检查什么
+├─ timeline/             交换文件，按 profile 只有一种
+├─ subtitles/            每种语言一份 SRT，加一份词级时间 JSON
+├─ preview/              参考预览：烧录字幕、源时码和版本号的代理视频
+└─ overlays/             只在需要时出现：带 handles 的透明字幕叠层
+```
+
+- 素材不复制，交换文件里写素材的绝对路径。`manifest.json` 记录每个素材的路径、指纹、是否在线、是否用了代理。
+- 参考预览给接手人核对画面、声音和字幕节奏，不是成片。
+- 透明叠层只为目标软件表达不了的元素生成，一个元素一段，不把整条时间线拍平。一期默认不生成，`overlay: true` 时才生成，格式是 ProRes 4444。
+
+### 3.1 稳定 ID 写进交换文件
+
+每个片段的 `clip_id` 和 `occurrence_id` 都写进交换文件，以后导回时靠它们重新匹配：
+
+| 格式 | 写在哪 |
+|---|---|
+| FCPXML | 片段的 `<metadata>` 里，键名 `com.zsir-cut.clip-id`、`com.zsir-cut.occurrence-id`。如果 FCP 导入时丢弃自定义键，改写进 `note` 属性，第 1 步实测决定 |
+| OTIO | 片段的 `metadata["zsir"]` |
+| xmeml | 片段的 `<logginginfo>` |
+
+### 3.2 字幕时间量化
+
+字幕在交换文件和 SRT 里都量化到目标时间线的帧网格：入点和出点各取最近的帧边界，量化后不足一帧的延长到一帧，再被所在片段的边界截断。SRT 的毫秒值由量化后的帧时间换算，四舍五入到毫秒。量化只在导出时做，工程文件里的字幕时间不变，所以多次剪辑不会累积漂移。
+
+## 4. 能力矩阵
+
+下表是各 profile 对每项能力的**预期**处理方式，依据是格式规范和调研结论，还没有实机验证。第 1 步每个导出器合并时，用实测结果更新这张表。
+
+状态含义：**保留**指在目标软件里可编辑且一致；**近似**指能用，但外观或结构有变化；**烘焙**指渲染成画面交过去，不能再编辑；**不支持**指丢失，只记录。
+
+| 能力 | FCPXML | OTIO（Resolve） | xmeml（Premiere） |
+|---|---|---|---|
+| 片段入出点、序列位置、轨道顺序 | 保留 | 保留 | 保留 |
+| 序列起始时码、丢帧 | 保留 | 保留 | 保留 |
+| 同一次使用的视音频同步、J/L cut | 保留，需按 FCP 主故事情节和连接片段建模，不能把轨道号直接当 lane | 保留 | 保留 |
+| 片段启用状态 | 保留 | 保留 | 保留 |
+| 恒定增益 | 保留 | 不支持 | 保留 |
+| 缩放、旋转、位移、裁切 | 保留 | 不支持 | 保留 |
+| 叠化转场 | 保留 | 保留 | 保留 |
+| 恒定变速 | 保留 | 保留 | 保留 |
+| 分段变速、定格 | 保留 | 近似：按段拆成多个片段 | 近似：按段拆成多个片段 |
+| 速度坡度 | 保留 | 近似：按段拆分，坡度变成阶梯 | 近似：同左 |
+| 倒放 | 保留 | 保留 | 保留 |
+| 标记 | 保留 | 保留 | 保留 |
+| 字幕文字与时间 | 保留 | 近似：文字和时间不变，但需手动导入 SRT | 近似：同左 |
+| 字幕样式 | 近似：用字幕默认外观 | 近似 | 近似 |
+| 字幕的序列层例外 | 保留，写进文字 | 保留，写进 SRT | 保留，写进 SRT |
+| 不认识的 `ext` 数据 | 不支持，只记录 | 写进 metadata | 不支持，只记录 |
+
+一期必须做到的硬指标是表里前四行和字幕文字与时间。其余各项按 profile 逐项实现，做不到的必须出现在损失报告里，不能静默丢掉。
+
+## 5. 损失报告
+
+`loss-report.json` 逐元素列出所有不是「保留」的处理，并按能力汇总保留的数量。`export` 带 `dry_run` 时，信封的 `result` 里就是这份报告。
+
+每条记录的字段：
+
+| 字段 | 说明 |
+|---|---|
+| `entity_id` / `entity_kind` | 哪个元素 |
+| `feature` | 哪项能力，取值见 schema 枚举 |
+| `status` | `approximated`、`baked`、`unsupported` |
+| `severity` | `info` 外观无变化；`warning` 看起来不同，需在宿主里调整；`error` 内容错误或缺失 |
+| `timeline_range` | 影响的序列区间，有理数时间 |
+| `reason_code` | 原因编号，见下表 |
+| `consequence` | 一句中文，告诉接手人会看到什么、该做什么 |
+| `fallback_asset` | 叠层等替代资源在交接包里的路径，没有就是 null |
+| `editable_caption_track` | 字幕仍可编辑的位置，例如 FCP 的字幕角色名 |
+| `recoverable_from_source_project` | 回到 zsir-cut 工程能否恢复 |
+
+原因编号：
+
+| 编号 | 含义 |
+|---|---|
+| `R_FORMAT_NO_FIELD` | 交换格式没有对应字段 |
+| `R_HOST_IGNORES` | 格式能写，但目标软件导入时会忽略 |
+| `R_SPLIT_FOR_RETIME` | 为表达变速把片段拆开了 |
+| `R_STYLE_NOT_REPRESENTABLE` | 字幕样式无法在目标软件里表达 |
+| `R_SUB_MANUAL_IMPORT` | 字幕需要手动导入 |
+| `R_SUB_UNPROJECTED` | 字幕落在倒放段、定格段或静帧上，没有导出 |
+| `R_BAKED_OVERLAY` | 已渲染成透明叠层 |
+| `R_MEDIA_OFFLINE` | 素材离线或指纹不符 |
+| `R_EXT_DROPPED` | 扩展数据没有写出 |
+
+报告里只要有 `error` 级的记录，`export` 就返回 `rejected`，错误码 `E_VALIDATION`，除非请求里带 `accept_losses: true`。这样接手人拿到的包，不会有没人看过的严重损失。
+
+## 6. 四级验证
+
+结果都写进 `manifest.json` 的 `validation`，每级记录状态、时间、执行者和说明。
+
+| 级别 | 检查什么 | 谁做 | 一期 |
+|---|---|---|---|
+| `schema` | 交换文件通过格式校验：FCPXML 过 DTD，OTIO 能被官方库加载，xmeml 过结构检查。再把交换文件读回来，和工程投影出的剪辑表逐切点比较，必须零帧偏差 | 导出器自动 | 必须 |
+| `media_resolved` | 交换文件引用的每个素材都存在，大小和指纹与工程一致 | 导出器自动 | 必须 |
+| `host_import` | 在真实软件里导入，按检查单核对 | Bill 手动，用 `record_handoff_check` 记录 | 每个导出器合并前必须 |
+| `host_render_comparison` | 宿主渲染的画面与参考预览逐帧比较。测试素材每帧烧了 asset ID 和源帧号，比较可以自动化 | 一期手动抽查，第 4 步做成自动 | 抽查 |
+
+### 6.1 实机导入检查单
+
+每次 `host_import` 都核对下面几项，结果逐项记录：
+
+1. 导入没有报错，离线素材数为零。
+2. 序列起始时码、总时长、帧率与 `manifest.json` 一致。
+3. 每条轨道的片段数一致。
+4. 抽三个剪点，看烧录的源帧号与工程一致。
+5. J/L cut 处，音频的提前或延后帧数一致。
+6. 叠化和变速存在，时长正确。
+7. 字幕条数一致，首条和末条的文字与时间一致。
+8. 保存、关闭、重新打开后以上不变。
+
+## 7. 宿主版本表
+
+由 Bill 填写，验收以表里的版本为准。
+
+| 宿主 | 版本 | 版别 | 机器 |
+|---|---|---|---|
+| Final Cut Pro | 待填 | — | 待填 |
+| DaVinci Resolve | 待填 | Free 或 Studio，待填 | 待填 |
+| Premiere Pro | 待填 | — | 待填 |

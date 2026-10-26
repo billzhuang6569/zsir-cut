@@ -1,0 +1,109 @@
+{
+  "schema": "zsir-cut/handoff-manifest",
+  "schema_version": "0.1",
+  "export_id": "exp_example_1",
+  "created_at": "2026-10-26T12:31:00Z",
+  "project": {
+    "id": "prj_interview",
+    "name": "采访示例",
+    "path": "examples/interview.zcut.json"
+  },
+  "timeline_id": "tl_main",
+  "source_revision": "rev_example_1",
+  "profile": {
+    "id": "resolve-18.5-otio",
+    "host": "davinci_resolve",
+    "min_host_version": "18.5",
+    "format": "otio",
+    "format_version": "0.17"
+  },
+  "exporter": {
+    "version": "0.0.0-example",
+    "git_sha": "0000000"
+  },
+  "timebase": {
+    "edit_rate": "30000/1001",
+    "drop_frame": true,
+    "start_timecode": "01:00:00;00",
+    "audio_rate": "48000",
+    "duration": "23023/1000s"
+  },
+  "options": {
+    "overlay": false,
+    "subtitle_languages": [
+      "zh-Hans"
+    ],
+    "accept_losses": false
+  },
+  "media": [
+    {
+      "media_id": "med_cam_a",
+      "path": "/Volumes/素材盘/2026-10 采访/采访 A 机.mov",
+      "size_bytes": 2147483648,
+      "fingerprint": "1111111111111111111111111111111111111111111111111111111111111111",
+      "online": true,
+      "proxy_used": false
+    },
+    {
+      "media_id": "med_cam_b",
+      "path": "/Volumes/素材盘/2026-10 采访/采访 B 机.mov",
+      "size_bytes": 1073741824,
+      "fingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
+      "online": true,
+      "proxy_used": false
+    }
+  ],
+  "files": [
+    {
+      "path": "timeline/采访粗剪 v1.otio",
+      "role": "timeline",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "path": "subtitles/zh-Hans.srt",
+      "role": "subtitle",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "language": "zh-Hans"
+    },
+    {
+      "path": "subtitles/zh-Hans.words.json",
+      "role": "subtitle_words",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "language": "zh-Hans"
+    },
+    {
+      "path": "preview/reference.mp4",
+      "role": "preview",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "path": "loss-report.json",
+      "role": "loss_report",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "path": "接手说明.txt",
+      "role": "readme",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ],
+  "validation": {
+    "schema": {
+      "status": "pass",
+      "at": "2026-10-26T12:31:05Z",
+      "by": "exporter",
+      "notes": "OTIO 加载通过；读回后与投影剪辑表逐切点比较，零帧偏差"
+    },
+    "media_resolved": {
+      "status": "pass",
+      "at": "2026-10-26T12:31:06Z",
+      "by": "exporter"
+    },
+    "host_import": {
+      "status": "not_run"
+    },
+    "host_render_comparison": {
+      "status": "not_run"
+    }
+  }
+}
