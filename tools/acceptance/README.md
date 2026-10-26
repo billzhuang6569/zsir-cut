@@ -12,3 +12,5 @@
 | `validate_compare.mjs` | 列出 core 校验器报出的规则编号；对真实素材跑 L2 和重链接 | `node tools/acceptance/validate_compare.mjs codes <工程>...` |
 | `fixtures_check.py` | 独立检查生成的测试素材：条码、白帧与脉冲、外录偏移、提示音、指纹 | `python3 -I tools/acceptance/fixtures_check.py <仓库根目录>` |
 | `edit_fuzz.py` | 对 `edit` 做随机组合压力测试：每步独立校验，联动操作不得造成失步，最后逐步撤销须回到原样 | `python3 -I tools/acceptance/edit_fuzz.py <工程> [步数] [种子]` |
+| `segment.py` | 按 subtitle-rules.md 独立实现的断句与换行 | 供 `segment_diff.py` 调用 |
+| `segment_diff.py` | 随机字词流分别交给 core 的 `resegment` 和 `segment.py`，逐条比较字幕条与换行 | `python3 -I tools/acceptance/segment_diff.py [条数] [种子] [zh\|en]` |
