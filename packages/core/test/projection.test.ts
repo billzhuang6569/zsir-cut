@@ -92,7 +92,7 @@ describe("subtitle projection", () => {
         lines: ["zsir-cut 标准测试工程"],
       });
       expect(new Set(validateProjectSemantics(project).map((issue) => issue.code))).toEqual(
-        new Set(["W_VFR", "W_TIMEMAP_APPROX", "W_SUB_UNPROJECTED"]),
+        new Set(["W_VFR", "W_TIMEMAP_APPROX", "W_SUB_UNPROJECTED", "W_SUB_TOO_WIDE", "W_SUB_SHORT"]),
       );
     });
   }

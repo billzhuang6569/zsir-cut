@@ -40,11 +40,28 @@ describe("L1 semantic validation", () => {
       const issues = validateProjectSemantics(await load(`fixtures/projects/${name}.zcut.json`));
       expect(issues.filter((issue) => issue.severity === "error")).toEqual([]);
       expect(new Set(issues.map((issue) => issue.code))).toEqual(
-        new Set(["W_VFR", "W_TIMEMAP_APPROX", "W_SUB_UNPROJECTED"]),
+        new Set(["W_VFR", "W_TIMEMAP_APPROX", "W_SUB_UNPROJECTED", "W_SUB_TOO_WIDE", "W_SUB_SHORT"]),
       );
     }
-    for (const name of ["minimal", "interview"])
-      expect(validateProjectSemantics(await load(`examples/${name}.zcut.json`))).toEqual([]);
+    expect(validateProjectSemantics(await load("examples/minimal.zcut.json"))).toEqual([]);
+    expect(validateProjectSemantics(await load("examples/interview.zcut.json"))).toEqual([
+      {
+        code: "W_SUB_SHORT",
+        severity: "warning",
+        message: "Projected subtitle is shorter than minimum duration",
+        ids: ["trk_sub_zh", "cue_3", "clp_a_2"],
+      },
+    ]);
+  });
+
+  it("warns when std-25 projection leaves 然后 and 要重做 too short", async () => {
+    const projected = validateProjectSemantics(await load()).filter(
+      (issue) => issue.code === "W_SUB_SHORT" && issue.ids.length === 3,
+    );
+    expect(projected.map((issue) => issue.ids)).toEqual([
+      ["trk_sub_zh", "cue_zh_04", "clp_a1"],
+      ["trk_sub_zh", "cue_zh_19", "clp_a8"],
+    ]);
   });
 
   it("reports one W_TIMEMAP_APPROX per clip with a smooth segment", async () => {

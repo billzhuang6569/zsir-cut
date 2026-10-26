@@ -1,0 +1,145 @@
+// biome-ignore-all lint/style/noNonNullAssertion: Fixture indexes are fixed by each case.
+import { describe, expect, it } from "vitest";
+import {
+  compare,
+  cueBreaks,
+  cueText,
+  displayRanges,
+  type Project,
+  printRational,
+  rational,
+  segmentTokens,
+  subtitleRules,
+  type Token,
+  textWidth,
+} from "../src/index.js";
+
+const s = (n: bigint, d = 1n) => rational(n, d);
+const make = (
+  texts: string[],
+  durations: bigint[] = texts.map(() => 1n),
+  gaps: bigint[] = [],
+  denominator = 10n,
+): Token[] => {
+  let at = 0n;
+  return texts.map((text, i) => {
+    at += gaps[i] ?? 0n;
+    const token: Token = {
+      id: `tok_${i}`,
+      text,
+      state: "auto",
+      align: { start: s(at, denominator), end: s(at + durations[i]!, denominator), run: "run_test" },
+    };
+    at += durations[i]!;
+    return token;
+  });
+};
+const zh = subtitleRules("zh-Hans");
+const width = (tokens: Token[]) => printRational(textWidth(tokens, zh));
+const ranges = (
+  tokens: Token[],
+  cues: { first: number; last: number; timing?: { start?: ReturnType<typeof s>; end?: ReturnType<typeof s> } }[],
+) => {
+  const project = { transcripts: [] } as unknown as Project;
+  const transcript = {
+    id: "trs_test",
+    language: "zh-Hans",
+    tokens,
+    cues: cues.map((cue, i) => ({
+      id: `cue_${i}`,
+      first_token: tokens[cue.first]!.id,
+      last_token: tokens[cue.last]!.id,
+      state: "auto" as const,
+      ...(cue.timing ? { timing: cue.timing } : {}),
+    })),
+  } as Project["transcripts"][number];
+  project.transcripts.push(transcript);
+  return displayRanges(transcript);
+};
+
+describe("subtitle rules", () => {
+  it("matches example one: one line, 15 wide, 0–3.30 and no warning", () => {
+    const tokens = make(
+      ["一条", "三", "分钟", "的", "采访", "大概", "要", "剪", "两", "小时"],
+      [44n, 22n, 44n, 22n, 44n, 44n, 22n, 22n, 22n, 44n],
+      [],
+      100n,
+    );
+    expect(width(tokens)).toBe("15");
+    expect(segmentTokens(tokens, zh)).toHaveLength(1);
+    expect(cueBreaks(tokens, zh)).toEqual([]);
+    const row = ranges(tokens, [{ first: 0, last: 9 }])[0]!;
+    expect([printRational(row.start, true), printRational(row.end, true), row.warnings]).toEqual(["0s", "33/10s", []]);
+  });
+  it("matches example two: 14/8 width and a break after 改，", () => {
+    const tokens = make(
+      ["剪辑师", "拿到", "的", "工程", "还能", "继续", "改，", "这", "才", "叫", "真正", "的", "交接"],
+      undefined,
+      [],
+    );
+    expect(width(tokens)).toBe("22");
+    expect(segmentTokens(tokens, zh)).toHaveLength(1);
+    expect(cueBreaks(tokens, zh)).toEqual(["tok_6"]);
+    expect(width(tokens.slice(0, 7))).toBe("14");
+    expect(width(tokens.slice(7))).toBe("8");
+    expect(cueText(tokens, zh, ["tok_6"])).toEqual(["剪辑师拿到的工程还能继续改", "这才叫真正的交接"]);
+  });
+  it("uses English defaults, counts mixed ASCII boundaries and joins standalone punctuation", () => {
+    const en = subtitleRules("en-US");
+    expect([en.name, en.cpl, en.cps, en.strip_end_punct]).toEqual(["en-talk", 42, 20, false]);
+    const words = make(["every", "cut", ",", "works"]);
+    expect(cueText(words, en)).toEqual(["every cut, works"]);
+    expect(printRational(textWidth(words, en))).toBe("16");
+    expect(cueText(make(["Agent", "先把"]), zh)).toEqual(["Agent先把"]);
+  });
+  it("splits sentences on final punctuation and hard pause, keeping standalone punctuation with the previous token", () => {
+    const tokens = make(
+      ["你好", "。", "继续", "说", "结束！", "再来"],
+      [2n, 1n, 2n, 2n, 2n, 2n],
+      [0n, 0n, 0n, 0n, 0n, 7n],
+    );
+    expect(segmentTokens(tokens, zh).map((group) => group.map((token) => token.text))).toEqual([
+      ["你好", "。"],
+      ["继续", "说", "结束！"],
+      ["再来"],
+    ]);
+  });
+  it("chooses soft pause before punctuation before the latest boundary", () => {
+    const tokens = make(
+      ["甲甲甲甲", "乙乙乙乙，", "丙丙丙丙", "丁丁丁丁", "戊戊戊戊"],
+      [1n, 1n, 1n, 1n, 1n],
+      [0n, 0n, 3n, 0n, 0n],
+    );
+    expect(segmentTokens(tokens, { ...zh, cpl: 8 })[0]!.map((token) => token.text)).toEqual(["甲甲甲甲", "乙乙乙乙，"]);
+    const noPause = make(["甲甲甲甲", "乙乙乙乙，", "丙丙丙丙", "丁丁丁丁", "戊戊戊戊"]);
+    expect(segmentTokens(noPause, { ...zh, cpl: 8 })[0]!.at(-1)!.text).toBe("乙乙乙乙，");
+    const plain = make(["甲甲甲甲", "乙乙乙乙", "丙丙丙丙", "丁丁丁丁", "戊戊戊丁"]);
+    expect(segmentTokens(plain, { ...zh, cpl: 8 })[0]!.at(-1)!.text).toBe("丁丁丁丁");
+  });
+  it("chooses punctuation, then balanced width, then earlier boundary for line breaks", () => {
+    const punct = make(["甲甲甲甲", "乙乙乙乙，", "丙丙丙丙", "丁丁丁丁"]);
+    expect(cueBreaks(punct, zh)).toEqual(["tok_1"]);
+    const balanced = make(["甲甲甲甲", "乙乙乙乙", "丙丙丙丙", "丁丁丁丁"]);
+    expect(cueBreaks(balanced, { ...zh, cpl: 10 })).toEqual(["tok_1"]);
+    const tie = make(["甲甲甲甲甲甲甲", "乙乙", "丙丙", "丁丁丁丁丁丁甲"]);
+    expect(cueBreaks(tie, { ...zh, cpl: 11 })).toEqual(["tok_1"]);
+  });
+  it("extends for minimum duration, then CPS, clamps for gap, and honors manual timing", () => {
+    const tokens = make(["甲", "乙乙乙乙乙乙乙乙乙乙", "丙"], [2n, 2n, 2n], [0n, 0n, 1n]);
+    const rows = ranges(tokens, [
+      { first: 0, last: 0 },
+      { first: 1, last: 1 },
+      { first: 2, last: 2 },
+    ]);
+    expect(printRational(rows[0]!.end, true)).toBe("3/25s");
+    expect(rows[0]!.warnings).toContain("W_SUB_SHORT");
+    expect(rows[1]!.warnings).toContain("W_SUB_CPS");
+    const manual = ranges(tokens, [
+      { first: 0, last: 0, timing: { start: s(0n), end: s(1n, 10n) } },
+      { first: 1, last: 1 },
+    ]);
+    expect(printRational(manual[0]!.end, true)).toBe("1/10s");
+    expect(manual[0]!.warnings).toEqual([]);
+    expect(compare(rows[0]!.end, rows[1]!.start)).toBeLessThan(0);
+  });
+});

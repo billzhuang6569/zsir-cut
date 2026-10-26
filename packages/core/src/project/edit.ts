@@ -5,12 +5,13 @@ import { add, ceil, compare, div, floor, mul, parseRational, type Rational, rati
 import { diffProjectEntities } from "./entities.js";
 import { newId } from "./id.js";
 import { projectSubtitles } from "./projection.js";
+import { applySubtitleEdit } from "./subtitle-edit.js";
 import { clipTimeMap, mapClipTimeToSource, mapSourceTimeToClip } from "./time-map.js";
 import type { Clip, Marker, MediaTrack, Project, Timeline, TimeMapPoint, Token, Track } from "./types.js";
 
 export class EditError extends Error {
   constructor(
-    readonly code: "E_VALIDATION" | "E_NOT_FOUND" | "E_UNSUPPORTED",
+    readonly code: "E_VALIDATION" | "E_NOT_FOUND" | "E_UNSUPPORTED" | "E_LOCKED" | "E_SESSION_STATE",
     message: string,
   ) {
     super(message);
@@ -626,7 +627,8 @@ export function applyEdit(
   const imageIds = new Set(project.media.filter((media) => media.kind === "image").map((media) => media.id));
   for (const op of ops) {
     const before = structuredClone(project);
-    applyOne(project, timeline, op, generate);
+    if (SUBTITLE_OPS.has(op.op)) applySubtitleEdit(project, timeline, op, generate);
+    else applyOne(project, timeline, op, generate);
     const oldClips = before.timelines.flatMap((item) => mediaTracks(item).flatMap((track) => track.clips));
     const oldById = new Map(oldClips.map((clip) => [clip.id, clip]));
     const liveClips = project.timelines.flatMap((item) => mediaTracks(item).flatMap((track) => track.clips));
@@ -655,3 +657,20 @@ export function applyEdit(
     for (const change of diffProjectEntities(before, project)) entityOps[change.key] = op.op;
   }
 }
+
+export const SUBTITLE_OPS = new Set([
+  "edit_text",
+  "hide_tokens",
+  "set_token_state",
+  "resegment",
+  "set_cue",
+  "split_cue",
+  "merge_cues",
+  "set_override",
+  "remove_override",
+  "add_free_cue",
+  "remove_free_cue",
+  "add_style",
+  "update_style",
+  "add_subtitle_track",
+]);
