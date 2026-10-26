@@ -25,7 +25,7 @@ zsir-cut（庄Sir剪辑助手）是剪辑师和 AI Agent 共用的时间线中�
 
 ## spec 是合同
 
-- `docs/spec/`、`docs/adr/`、`docs/plan.md` 和 `schema/` 下已有的文件，你只读不改。
+- `docs/spec/`、`docs/adr/`、`docs/plan.md`、`schema/` 下已有的文件，以及 `tools/acceptance/`（Claude 的独立验收工具），你只读不改。
 - 实现中发现 spec 有矛盾、遗漏或做不到的地方，不要自己绕过，也不要改 spec。在 PR 描述的「spec 问题」一节写清楚，按最保守的理解实现，或者停下来只交问题说明。
 - 例外：任务说明明确让你新建的 schema 文件，例如 `schema/command.schema.json`，按对应 spec 写。
 - 错误码、校验规则编号、状态值、动词名必须与 spec 完全一致，不新增。
