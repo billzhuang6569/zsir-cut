@@ -1,0 +1,176 @@
+// biome-ignore-all lint/style/noNonNullAssertion: Fixture IDs and indexed entries are checked by test setup.
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+import {
+  type Clip,
+  mapClipTimeToSource,
+  mapSourceTimeToClip,
+  type Project,
+  parseProject,
+  printRational,
+  projectSubtitles,
+  rational,
+  validateProjectSemantics,
+} from "../src/index.js";
+
+const seconds = (numerator: bigint, denominator = 1n) => rational(numerator, denominator);
+function fixture(name: string): Project {
+  const result = parseProject(
+    readFileSync(new URL(`../../../fixtures/projects/${name}.zcut.json`, import.meta.url), "utf8"),
+  );
+  if (!result.ok) throw new Error(JSON.stringify(result.errors));
+  return result.project;
+}
+const compact = (cue: ReturnType<typeof projectSubtitles>["cues"][number]) => ({
+  ...cue,
+  start: printRational(cue.start, true),
+  end: printRational(cue.end, true),
+});
+
+describe("time map", () => {
+  it("evaluates original speed, 200%, segmented speed, hold, reverse and smooth approximation exactly", () => {
+    const clip: Clip = {
+      id: "clp_test",
+      occurrence_id: "occ_test",
+      media_id: "med_test",
+      timeline_start: seconds(0n),
+      duration: seconds(6n),
+      source_start: seconds(10n),
+    };
+    expect(mapClipTimeToSource(clip, seconds(3n, 2n))).toEqual(seconds(23n, 2n));
+    clip.time_map = [
+      { at: seconds(0n), source: seconds(10n), interp: "linear" },
+      { at: seconds(6n), source: seconds(22n), interp: "linear" },
+    ];
+    expect(mapClipTimeToSource(clip, seconds(3n, 2n))).toEqual(seconds(13n));
+    expect(mapSourceTimeToClip(seconds(13n), clip.time_map[0]!, clip.time_map[1]!)).toEqual(seconds(3n, 2n));
+    clip.time_map = [
+      { at: seconds(0n), source: seconds(10n), interp: "linear" },
+      { at: seconds(2n), source: seconds(14n), interp: "hold" },
+      { at: seconds(3n), source: seconds(14n), interp: "smooth" },
+      { at: seconds(4n), source: seconds(15n), interp: "linear" },
+      { at: seconds(6n), source: seconds(11n), interp: "linear" },
+    ];
+    expect(mapClipTimeToSource(clip, seconds(1n))).toEqual(seconds(12n));
+    expect(mapClipTimeToSource(clip, seconds(5n, 2n))).toEqual(seconds(14n));
+    expect(mapClipTimeToSource(clip, seconds(7n, 2n))).toEqual(seconds(29n, 2n));
+    expect(mapClipTimeToSource(clip, seconds(5n))).toEqual(seconds(13n));
+    expect(mapSourceTimeToClip(seconds(29n, 2n), clip.time_map[2]!, clip.time_map[3]!)).toEqual(seconds(7n, 2n));
+    expect(mapSourceTimeToClip(seconds(14n), clip.time_map[1]!, clip.time_map[2]!)).toBeNull();
+    expect(mapSourceTimeToClip(seconds(13n), clip.time_map[3]!, clip.time_map[4]!)).toBeNull();
+  });
+});
+
+describe("subtitle projection", () => {
+  for (const name of ["std-25", "std-2997-df", "std-2997-ndf"]) {
+    it(`projects ${name} and matches its complete snapshot`, () => {
+      const project = fixture(name);
+      const result = projectSubtitles(project, "tl_std");
+      expect({ cues: result.cues.map(compact), unprojected: result.unprojected }).toMatchSnapshot();
+      expect(result.unprojected).toEqual([
+        { clip_id: "clp_a8", token_id: "tok_129" },
+        { clip_id: "clp_a8", token_id: "tok_en_19" },
+      ]);
+      expect(
+        result.cues.filter((cue) => cue.cue_id === "cue_zh_19").map((cue) => [cue.clip_id, cue.piece, cue.text]),
+      ).toEqual([
+        ["clp_a8", 0, "哪些能保留"],
+        ["clp_a8", 1, "要重做"],
+      ]);
+      expect(result.cues.find((cue) => cue.cue_id === "cue_title")).toMatchObject({
+        clip_id: null,
+        occurrence_id: null,
+        text: "zsir-cut 标准测试工程",
+        lines: ["zsir-cut 标准测试工程"],
+      });
+      expect(new Set(validateProjectSemantics(project).map((issue) => issue.code))).toEqual(
+        new Set(["W_VFR", "W_TIMEMAP_APPROX", "W_SUB_UNPROJECTED"]),
+      );
+    });
+  }
+
+  it("clips the Chinese cut, keeps English word spaces and applies occurrence text", () => {
+    const { cues } = projectSubtitles(fixture("std-25"), "tl_std");
+    expect(cues.find((cue) => cue.cue_id === "cue_zh_04")).toMatchObject({
+      clip_id: "clp_a1",
+      text: "然后",
+      end: seconds(48n, 5n),
+      token_ids: ["tok_025"],
+    });
+    expect(cues.find((cue) => cue.cue_id === "cue_zh_16")?.text).toBe("every cut must be frame accurate");
+    expect(cues.find((cue) => cue.cue_id === "cue_zh_08")?.text).toBe("我们希望把这部分交给Agent（改）");
+    expect(cues.every((cue) => !cue.text.includes("嗯"))).toBe(true);
+    expect(cues.find((cue) => cue.cue_id === "cue_zh_02")?.lines).toEqual(["剪辑师和", "Agent共用的时间线"]);
+  });
+
+  it("respects hidden and manual timing, and accepts future source display ranges", () => {
+    const project = fixture("std-25");
+    const subtitle = project.timelines[0]!.tracks.find((track) => track.id === "trk_sub_zh");
+    if (!subtitle || subtitle.kind !== "subtitle") throw new Error("Missing subtitle track");
+    subtitle.overrides.push({ occurrence_id: "occ_1", cue_id: "cue_zh_02", hidden: true });
+    const transcript = project.transcripts.find((item) => item.language === "zh-Hans")!;
+    const cue = transcript.cues.find((item) => item.id === "cue_zh_04")!;
+    cue.timing = { start: seconds(20n), end: seconds(22n) };
+    const result = projectSubtitles(project, "tl_std", (item) =>
+      item.id === "cue_zh_04" ? { start: seconds(19n), end: seconds(23n) } : undefined,
+    );
+    expect(result.cues.some((item) => item.cue_id === "cue_zh_02")).toBe(false);
+    expect(result.cues.find((item) => item.cue_id === "cue_zh_04")?.start).toEqual(seconds(222n, 25n));
+    expect(result.cues.find((item) => item.cue_id === "cue_zh_04")?.end).toEqual(seconds(48n, 5n));
+    delete cue.timing;
+    expect(
+      projectSubtitles(project, "tl_std", (item) =>
+        item.id === "cue_zh_04" ? { start: seconds(20n), end: seconds(23n) } : undefined,
+      ).cues.find((item) => item.cue_id === "cue_zh_04")?.start,
+    ).toEqual(seconds(222n, 25n));
+  });
+
+  it("uses override, cue and track styles in order, and splits override text on newlines", () => {
+    const project = fixture("std-25");
+    const subtitle = project.timelines[0]!.tracks.find((track) => track.id === "trk_sub_zh");
+    if (!subtitle || subtitle.kind !== "subtitle") throw new Error("Missing subtitle track");
+    const override = subtitle.overrides.find((item) => item.cue_id === "cue_zh_08")!;
+    const cue = project.transcripts[0]!.cues.find((item) => item.id === "cue_zh_08")!;
+    cue.style_id = "sty_en";
+    override.style_id = "sty_title";
+    override.text = "第一行\nSecond line";
+    const projected = () => projectSubtitles(project, "tl_std").cues.find((item) => item.cue_id === "cue_zh_08")!;
+    expect(projected()).toMatchObject({
+      style_id: "sty_title",
+      text: "第一行\nSecond line",
+      lines: ["第一行", "Second line"],
+    });
+    delete override.style_id;
+    expect(projected().style_id).toBe("sty_en");
+    delete cue.style_id;
+    expect(projected().style_id).toBe("sty_zh");
+  });
+
+  it("does not project a token dominated by reverse playback", () => {
+    const project = fixture("std-25");
+    const track = project.timelines[0]!.tracks.find((item) => item.id === "trk_a1");
+    if (!track || track.kind !== "audio") throw new Error("Missing audio track");
+    const clip = track.clips.find((item) => item.id === "clp_a8")!;
+    clip.source_start = seconds(98n);
+    clip.time_map = [
+      { at: seconds(0n), source: seconds(98n), interp: "linear" },
+      { at: seconds(6n), source: seconds(92n), interp: "linear" },
+    ];
+    const result = projectSubtitles(project, "tl_std");
+    expect(result.cues.filter((item) => item.clip_id === "clp_a8")).toEqual([]);
+    expect(result.unprojected).toContainEqual({ clip_id: "clp_a8", token_id: "tok_126" });
+  });
+
+  it("uses the half-overlap boundary and half-open hold instant", () => {
+    const project = fixture("std-25");
+    const transcript = project.transcripts.find((item) => item.language === "zh-Hans")!;
+    const cut = transcript.tokens.find((item) => item.id === "tok_025")!;
+    expect(projectSubtitles(project, "tl_std").cues.some((item) => item.cue_id === "cue_zh_04")).toBe(true);
+    cut.align.start = seconds(2051n, 100n);
+    expect(projectSubtitles(project, "tl_std").cues.some((item) => item.cue_id === "cue_zh_04")).toBe(false);
+    const hold = transcript.tokens.find((item) => item.id === "tok_129")!;
+    hold.align.end = seconds(484n, 5n);
+    const result = projectSubtitles(project, "tl_std");
+    expect(result.unprojected).not.toContainEqual({ clip_id: "clp_a8", token_id: "tok_129" });
+  });
+});
