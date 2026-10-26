@@ -394,7 +394,10 @@
           "then": {
             "required": [
               "video"
-            ]
+            ],
+            "properties": {
+              "video": true
+            }
           }
         },
         {
@@ -408,7 +411,10 @@
           "then": {
             "required": [
               "audio"
-            ]
+            ],
+            "properties": {
+              "audio": true
+            }
           }
         }
       ]
@@ -505,7 +511,6 @@
     "track": {
       "type": "object",
       "required": [
-        "id",
         "kind"
       ],
       "properties": {
