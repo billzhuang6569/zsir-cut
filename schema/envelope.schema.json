@@ -12,7 +12,7 @@
     "verb": {
       "enum": ["inspect", "read_transcript", "validate", "diff", "import_media", "edit", "undo", "redo", "transcribe",
                "session_begin", "session_review", "session_approve", "session_reject",
-               "render_preview", "view_timeline", "export", "job_status"]
+               "render_preview", "view_timeline", "export", "record_handoff_check", "job_status"]
     },
     "request_id": { "type": "string", "pattern": "^req_[A-Za-z0-9_-]{1,64}$" },
     "receipt": {

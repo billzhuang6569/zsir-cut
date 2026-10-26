@@ -36,7 +36,7 @@
 | `base_revision` | — | 必填 | 调用方认为的当前修订 ID |
 | `idempotency_key` | — | 必填 | 调用方生成，同一意图重试时不变 |
 | `session_id` | — | 可选 | 写进编辑会话的草稿，而不是主工程 |
-| `dry_run` | — | 可选 | 只演算，不写入 |
+| `dry_run` | — | 可选 | 只演算，不写入。`export` 也接受它，只返回损失报告，不生成交接包 |
 | `author` | 可选 | 必填 | `{kind, name}`，同 schema 里的 `revision.author` |
 
 ## 4. 结果信封
@@ -126,7 +126,7 @@
 4. 人在 UI 或 CLI 里预览，然后 `session_approve` 或 `session_reject`。`approval` 为 `auto` 时，`session_review` 之后自动批准。
 5. 批准时，草稿里的全部操作作为一个修订原子地应用到主工程。如果会话开始后主工程变了，内核按操作重放到新修订上；重放冲突就返回 `conflict`，会话保持待审，等 Agent 修正。
 
-不进会话的动词：`import_media`、`transcribe`、`render_preview`、`view_timeline`、`export`、`job_status` 和所有读动词。它们要么只追加数据，要么不改工程。
+不进会话的动词：`import_media`、`transcribe`、`render_preview`、`view_timeline`、`export`、`record_handoff_check`、`job_status` 和所有读动词。它们要么只追加数据，要么不改工程。
 
 ## 8. 授权边界
 
@@ -149,10 +149,11 @@
 | `session_begin` / `session_review` / `session_approve` / `session_reject` | 会话 | 见第 7 节 |
 | `render_preview` | 长任务 | 渲染一段代理预览，不改工程 |
 | `view_timeline` | 长任务 | 在每个剪点出胶片条 PNG 和波形，供 Agent 视觉自检 |
-| `export` | 长任务 | 按交接 profile 生成交接包，见 `handoff-profile.md` |
+| `export` | 长任务 | 按交接 profile 生成交接包，见 `handoff-profile.md`。带 `dry_run` 时只返回损失报告；报告有 `error` 级记录时，除非带 `accept_losses: true`，否则返回 `rejected` |
+| `record_handoff_check` | 写交接包 | 把 `host_import` 或 `host_render_comparison` 的检查结果写进交接包的 `manifest.json`，不改工程 |
 | `job_status` | 读 | 查长任务进度与结果 |
 
-共 17 个。新增动词要先改本文。
+共 18 个。新增动词要先改本文。
 
 ### 9.1 给 Agent 的读视图
 

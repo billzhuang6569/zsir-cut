@@ -1,0 +1,143 @@
+{
+  "schema": "zsir-cut/loss-report",
+  "schema_version": "0.1",
+  "export_id": "exp_example_1",
+  "profile": "resolve-18.5-otio",
+  "source_revision": "rev_example_1",
+  "generated_at": "2026-10-26T12:30:00Z",
+  "phase": "preview",
+  "summary": {
+    "approximated": 3,
+    "baked": 0,
+    "unsupported": 5,
+    "worst_severity": "warning",
+    "preserved_by_feature": {
+      "clip_cut": 7,
+      "timecode": 1,
+      "av_sync": 3,
+      "clip_enabled": 7,
+      "cross_dissolve": 1,
+      "marker": 2,
+      "subtitle_override": 1,
+      "media": 2
+    }
+  },
+  "items": [
+    {
+      "entity_id": "clp_v_1",
+      "entity_kind": "clip",
+      "feature": "transform",
+      "status": "unsupported",
+      "severity": "warning",
+      "timeline_range": {
+        "start": "0s",
+        "duration": "1001/200s"
+      },
+      "reason_code": "R_FORMAT_NO_FIELD",
+      "consequence": "OTIO 没有画面变换字段，Resolve 里该片段恢复为原始大小，需在检查器里重设缩放和位置",
+      "fallback_asset": null,
+      "recoverable_from_source_project": true
+    },
+    {
+      "entity_id": "clp_v_2",
+      "entity_kind": "clip",
+      "feature": "transform",
+      "status": "unsupported",
+      "severity": "warning",
+      "timeline_range": {
+        "start": "1001/200s",
+        "duration": "1001/125s"
+      },
+      "reason_code": "R_FORMAT_NO_FIELD",
+      "consequence": "OTIO 没有画面变换字段，Resolve 里该片段恢复为原始大小，需在检查器里重设缩放和位置",
+      "fallback_asset": null,
+      "recoverable_from_source_project": true
+    },
+    {
+      "entity_id": "clp_v_3",
+      "entity_kind": "clip",
+      "feature": "transform",
+      "status": "unsupported",
+      "severity": "warning",
+      "timeline_range": {
+        "start": "13013/1000s",
+        "duration": "1001/100s"
+      },
+      "reason_code": "R_FORMAT_NO_FIELD",
+      "consequence": "OTIO 没有画面变换字段，Resolve 里该片段恢复为原始大小，需在检查器里重设缩放和位置，裁切也一并丢失",
+      "fallback_asset": null,
+      "recoverable_from_source_project": true
+    },
+    {
+      "entity_id": "clp_v_b",
+      "entity_kind": "clip",
+      "feature": "transform",
+      "status": "unsupported",
+      "severity": "warning",
+      "timeline_range": {
+        "start": "1001/150s",
+        "duration": "3003/1000s"
+      },
+      "reason_code": "R_FORMAT_NO_FIELD",
+      "consequence": "OTIO 没有画面变换字段，Resolve 里该片段恢复为原始大小，需在检查器里重设缩放和位置",
+      "fallback_asset": null,
+      "recoverable_from_source_project": true
+    },
+    {
+      "entity_id": "clp_v_b",
+      "entity_kind": "clip",
+      "feature": "speed_segmented",
+      "status": "approximated",
+      "severity": "info",
+      "timeline_range": {
+        "start": "1001/150s",
+        "duration": "3003/1000s"
+      },
+      "reason_code": "R_SPLIT_FOR_RETIME",
+      "consequence": "四段变速被拆成 4 个片段（100%、50%、定格、200%），画面和时长不变，但在 Resolve 里不再是一个可整体调速的片段",
+      "fallback_asset": null,
+      "recoverable_from_source_project": true
+    },
+    {
+      "entity_id": "clp_a_3",
+      "entity_kind": "clip",
+      "feature": "gain",
+      "status": "unsupported",
+      "severity": "warning",
+      "timeline_range": {
+        "start": "3003/250s",
+        "duration": "11011/1000s"
+      },
+      "reason_code": "R_FORMAT_NO_FIELD",
+      "consequence": "-1.5 dB 增益丢失，这段采访音量会比工程里略大，需在 Resolve 调音台里重设",
+      "fallback_asset": null,
+      "recoverable_from_source_project": true
+    },
+    {
+      "entity_id": "trk_sub_zh",
+      "entity_kind": "track",
+      "feature": "subtitle_text_timing",
+      "status": "approximated",
+      "severity": "info",
+      "timeline_range": null,
+      "reason_code": "R_SUB_MANUAL_IMPORT",
+      "consequence": "字幕不在 OTIO 里。导入时间线后，用 文件 > 导入 > 字幕 导入 subtitles/zh-Hans.srt，再拖到字幕轨",
+      "fallback_asset": null,
+      "editable_caption_track": "字幕轨 ST1",
+      "recoverable_from_source_project": true
+    },
+    {
+      "entity_id": "sty_talk",
+      "entity_kind": "style",
+      "feature": "subtitle_style",
+      "status": "approximated",
+      "severity": "warning",
+      "timeline_range": null,
+      "reason_code": "R_STYLE_NOT_REPRESENTABLE",
+      "consequence": "字幕使用 Resolve 字幕轨的默认外观，苹方 600、黑色描边需在字幕轨样式里重设",
+      "fallback_asset": null,
+      "editable_caption_track": "字幕轨 ST1",
+      "recoverable_from_source_project": true
+    }
+  ]
+}

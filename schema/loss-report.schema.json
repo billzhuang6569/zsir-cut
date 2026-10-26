@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/billzhuang6569/zsir-cut/schema/loss-report.schema.json",
+  "title": "zsir-cut handoff loss report",
+  "description": "See docs/spec/handoff-profile.md section 5.",
+  "type": "object",
+  "required": ["schema", "schema_version", "export_id", "profile", "source_revision", "generated_at", "phase", "summary", "items"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "zsir-cut/loss-report" },
+    "schema_version": { "const": "0.1" },
+    "export_id": { "$ref": "#/$defs/export_id" },
+    "profile": { "$ref": "#/$defs/profile" },
+    "source_revision": { "type": "string", "pattern": "^rev_[A-Za-z0-9_-]{1,64}$" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "phase": { "enum": ["preview", "final"], "description": "preview = produced by export with dry_run." },
+    "summary": {
+      "type": "object",
+      "required": ["approximated", "baked", "unsupported", "worst_severity", "preserved_by_feature"],
+      "additionalProperties": false,
+      "properties": {
+        "approximated": { "type": "integer", "minimum": 0 },
+        "baked": { "type": "integer", "minimum": 0 },
+        "unsupported": { "type": "integer", "minimum": 0 },
+        "worst_severity": { "enum": ["none", "info", "warning", "error"] },
+        "preserved_by_feature": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/feature" },
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "items": { "type": "array", "items": { "$ref": "#/$defs/item" } }
+  },
+  "$defs": {
+    "export_id": { "type": "string", "pattern": "^exp_[A-Za-z0-9_-]{1,64}$" },
+    "profile": {
+      "enum": ["fcp-11-fcpxml-1.13", "fcp-10.6-fcpxml-1.11", "resolve-18.5-otio", "resolve-21-fcpxml-1.11", "premiere-25-xmeml-5"]
+    },
+    "time": { "type": "string", "pattern": "^(0|[1-9][0-9]*(/[1-9][0-9]*)?)s$" },
+    "duration": { "type": "string", "pattern": "^[1-9][0-9]*(/[1-9][0-9]*)?s$" },
+    "feature": {
+      "enum": [
+        "clip_cut", "timecode", "av_sync", "clip_enabled", "gain", "transform", "cross_dissolve",
+        "speed_constant", "speed_segmented", "speed_smooth", "reverse", "marker",
+        "subtitle_text_timing", "subtitle_style", "subtitle_override", "ext_data", "media"
+      ]
+    },
+    "item": {
+      "type": "object",
+      "required": ["entity_id", "entity_kind", "feature", "status", "severity", "timeline_range", "reason_code", "consequence", "fallback_asset", "recoverable_from_source_project"],
+      "additionalProperties": false,
+      "properties": {
+        "entity_id": { "type": "string", "minLength": 1 },
+        "entity_kind": { "enum": ["media", "track", "clip", "transition", "marker", "cue", "style", "timeline"] },
+        "feature": { "$ref": "#/$defs/feature" },
+        "status": { "enum": ["approximated", "baked", "unsupported"] },
+        "severity": { "enum": ["info", "warning", "error"] },
+        "timeline_range": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["start", "duration"],
+              "additionalProperties": false,
+              "properties": { "start": { "$ref": "#/$defs/time" }, "duration": { "$ref": "#/$defs/duration" } }
+            }
+          ]
+        },
+        "reason_code": {
+          "enum": ["R_FORMAT_NO_FIELD", "R_HOST_IGNORES", "R_SPLIT_FOR_RETIME", "R_STYLE_NOT_REPRESENTABLE",
+                   "R_SUB_MANUAL_IMPORT", "R_SUB_UNPROJECTED", "R_BAKED_OVERLAY", "R_MEDIA_OFFLINE", "R_EXT_DROPPED"]
+        },
+        "consequence": { "type": "string", "minLength": 1 },
+        "fallback_asset": { "type": ["string", "null"] },
+        "editable_caption_track": { "type": ["string", "null"] },
+        "recoverable_from_source_project": { "type": "boolean" }
+      },
+      "allOf": [
+        { "if": { "properties": { "status": { "const": "baked" } } },
+          "then": { "properties": { "fallback_asset": { "type": "string" } } } }
+      ]
+    }
+  }
+}
