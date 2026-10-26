@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/billzhuang6569/zsir-cut/schema/command.schema.json",
+  "title": "zsir-cut command requests",
+  "$defs": {
+    "author": {
+      "type": "object",
+      "required": ["kind", "name"],
+      "properties": { "kind": { "enum": ["human", "agent", "system"] }, "name": { "type": "string", "minLength": 1 } },
+      "additionalProperties": false
+    },
+    "read": {
+      "type": "object",
+      "required": ["project"],
+      "properties": { "project": { "type": "string", "minLength": 1 }, "author": { "$ref": "#/$defs/author" } }
+    },
+    "write": {
+      "type": "object",
+      "required": ["project", "base_revision", "idempotency_key", "author"],
+      "properties": {
+        "project": { "type": "string", "minLength": 1 },
+        "base_revision": { "type": "string", "pattern": "^rev_[A-Za-z0-9_-]{1,64}$" },
+        "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "author": { "$ref": "#/$defs/author" },
+        "session_id": { "type": "string" },
+        "dry_run": { "type": "boolean" }
+      }
+    },
+    "requests": {
+      "inspect": { "type": "object", "allOf": [{ "$ref": "#/$defs/read" }], "unevaluatedProperties": true },
+      "read_transcript": { "type": "object", "allOf": [{ "$ref": "#/$defs/read" }], "unevaluatedProperties": true },
+      "validate": {
+        "type": "object",
+        "allOf": [{ "$ref": "#/$defs/read" }],
+        "properties": { "media": { "type": "boolean" } },
+        "unevaluatedProperties": false
+      },
+      "diff": { "type": "object", "allOf": [{ "$ref": "#/$defs/read" }], "unevaluatedProperties": true },
+      "import_media": {
+        "type": "object",
+        "allOf": [{ "$ref": "#/$defs/write" }],
+        "properties": {
+          "paths": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+          "relink": {
+            "type": "object",
+            "required": ["search_roots"],
+            "properties": {
+              "search_roots": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+              "media_ids": { "type": "array", "items": { "type": "string", "pattern": "^med_[A-Za-z0-9_-]{1,64}$" } }
+            },
+            "additionalProperties": false
+          }
+        },
+        "oneOf": [
+          { "type": "object", "required": ["paths"], "properties": { "paths": true } },
+          { "type": "object", "required": ["relink"], "properties": { "relink": true } }
+        ],
+        "unevaluatedProperties": false
+      },
+      "edit": { "type": "object", "allOf": [{ "$ref": "#/$defs/write" }], "unevaluatedProperties": true },
+      "undo": {
+        "type": "object",
+        "allOf": [{ "$ref": "#/$defs/write" }],
+        "properties": { "target": { "type": "string", "pattern": "^rev_[A-Za-z0-9_-]{1,64}$" } },
+        "unevaluatedProperties": false
+      },
+      "redo": {
+        "type": "object",
+        "allOf": [{ "$ref": "#/$defs/write" }],
+        "properties": { "target": { "type": "string", "pattern": "^rev_[A-Za-z0-9_-]{1,64}$" } },
+        "unevaluatedProperties": false
+      },
+      "transcribe": { "type": "object", "allOf": [{ "$ref": "#/$defs/write" }], "unevaluatedProperties": true },
+      "session_begin": { "type": "object", "allOf": [{ "$ref": "#/$defs/write" }], "unevaluatedProperties": true },
+      "session_review": { "type": "object", "allOf": [{ "$ref": "#/$defs/write" }], "unevaluatedProperties": true },
+      "session_approve": { "type": "object", "allOf": [{ "$ref": "#/$defs/write" }], "unevaluatedProperties": true },
+      "session_reject": { "type": "object", "allOf": [{ "$ref": "#/$defs/write" }], "unevaluatedProperties": true },
+      "render_preview": { "type": "object", "allOf": [{ "$ref": "#/$defs/read" }], "unevaluatedProperties": true },
+      "view_timeline": { "type": "object", "allOf": [{ "$ref": "#/$defs/read" }], "unevaluatedProperties": true },
+      "export": { "type": "object", "allOf": [{ "$ref": "#/$defs/write" }], "unevaluatedProperties": true },
+      "record_handoff_check": { "type": "object", "allOf": [{ "$ref": "#/$defs/write" }], "unevaluatedProperties": true },
+      "job_status": { "type": "object", "allOf": [{ "$ref": "#/$defs/read" }], "unevaluatedProperties": true }
+    }
+  }
+}

@@ -28,7 +28,14 @@ export interface OpenProjectOptions {
 }
 
 type EnvelopeStatus = "applied" | "no_op" | "rejected" | "conflict" | "failed" | "committed_unverified";
-type ErrorCode = "E_CONFLICT" | "E_IDEMPOTENCY_MISMATCH" | "E_VALIDATION" | "E_UNDO_CONFLICT" | "E_IO" | "E_INTERNAL";
+type ErrorCode =
+  | "E_CONFLICT"
+  | "E_IDEMPOTENCY_MISMATCH"
+  | "E_VALIDATION"
+  | "E_UNDO_CONFLICT"
+  | "E_UNSUPPORTED"
+  | "E_IO"
+  | "E_INTERNAL";
 export interface WriteEnvelope {
   ok: boolean;
   status: EnvelopeStatus;
@@ -187,6 +194,7 @@ export function openProject(options: OpenProjectOptions) {
     kind: "write" | "undo" | "redo",
     target?: string,
     entityOps: Record<string, string> = {},
+    result: Record<string, unknown> | null = null,
   ): Promise<WriteEnvelope> {
     const envelope = (status: EnvelopeStatus, before: string, after: string | null = null): WriteEnvelope => ({
       ok: status === "applied" || status === "no_op",
@@ -349,6 +357,7 @@ export function openProject(options: OpenProjectOptions) {
       const changes = diffProjectEntities(current, check.project);
       if (changes.length === 0) {
         const output = envelope("no_op", before);
+        output.result = result;
         output.verification = { level: "L1", passed: true, issues };
         await appendSynced(idempotencyPath, {
           idempotency_key: request.idempotency_key,
@@ -367,6 +376,7 @@ export function openProject(options: OpenProjectOptions) {
       };
       const bytes = serializeProject(candidate);
       const output = envelope("applied", before, candidate.revision.id);
+      output.result = result;
       output.verification = { level: "L1", passed: true, issues };
       output.changes = changes.map((change) => ({
         op: entityOps[change.key] ?? request.verb,
@@ -504,8 +514,12 @@ export function openProject(options: OpenProjectOptions) {
   }
 
   return {
-    commitWrite: (request: WriteRequest, mutator: (project: Project) => void, entityOps?: Record<string, string>) =>
-      write(request, mutator, "write", undefined, entityOps),
+    commitWrite: (
+      request: WriteRequest,
+      mutator: (project: Project) => void,
+      entityOps?: Record<string, string>,
+      result?: Record<string, unknown>,
+    ) => write(request, mutator, "write", undefined, entityOps, result),
     undo: (request: WriteRequest) => history(request, "undo"),
     redo: (request: WriteRequest) => history(request, "redo"),
   };
