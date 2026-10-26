@@ -92,9 +92,27 @@
 
 这两条保证「重发同一个请求不会把同一段素材删两次」。
 
-**单写者**：同一个工程同一时刻只有一个写入。内核用锁文件串行化写入，读不加锁。
+**单写者**：同一个工程同一时刻只有一个写入。读不加锁。
 
-**写入步骤**：加锁，核对修订，在内存里应用全部操作，L1 校验，写临时文件，fsync，原子替换工程文件，追加日志，释放锁。L1 出现错误就整个请求 `rejected`，不写任何东西。原子替换之后的步骤失败，返回 `committed_unverified`。下次打开工程时，内核发现工程修订不在日志里，会补写日志。
+- 锁文件是 `.zcut/<project_id>/lock`，用「文件不存在才创建」的方式获取，内容是 JSON：`pid`、`hostname`、`acquired_at`、`request_id`。
+- 锁已存在时，等待最多 10 秒，每 100 毫秒重试一次。仍拿不到就返回 `failed`，错误码 `E_IO`，`retryable` 为 true，`details.reason` 为 `busy`。
+- 锁的主人进程已不存在，判断条件是同一主机且该 `pid` 不存在，就视为过期，删除后重新获取，并在日志里记一条。不同主机的锁不判断过期，按占用处理。
+
+**写入步骤**：
+
+1. 获取锁。
+2. 读工程文件，执行崩溃恢复检查（见下文）。
+3. 核对 `base_revision`，不等则释放锁并返回 `conflict`。
+4. 查幂等记录，命中则释放锁并原样返回第一次的信封，`receipt.replayed` 为 true。
+5. 在内存里应用全部操作，做 L1 校验。有错误就释放锁并返回 `rejected`，错误码 `E_VALIDATION`。
+6. 生成新修订：`seq` 加一，`id` 用新的 `rev_` ID，`parent` 是旧修订 ID，`created_at` 是当前时间，`author` 取自请求。
+7. 按规范序列化写到同目录的临时文件，fsync 文件，原子替换工程文件，fsync 目录。
+8. 追加日志条目，fsync 日志。追加幂等记录。
+9. 释放锁，返回 `applied`。
+
+第 7 步之前失败，工程文件不变，返回 `failed`。第 7 步完成之后、第 8 步完成之前失败，返回 `committed_unverified`，`receipt.after` 是新修订 ID。
+
+**崩溃恢复**：每次加锁后读工程文件时，比较工程里的修订 ID 和日志最后一条。工程修订比日志新，说明上次在第 7、8 步之间中断。此时补写一条 `kind` 为 `recovered` 的日志条目，记录修订 ID、父修订和时间，不含实体快照；这个修订不能撤销。
 
 ## 6. 修订、历史与撤销
 
@@ -103,16 +121,43 @@
 ```text
 .zcut/<project_id>/
 ├─ lock
-├─ journal.jsonl        每个修订一行：修订、父修订、作者、动词、操作、反向操作、时间
-├─ idempotency.jsonl
+├─ journal.jsonl        每个修订一行
+├─ idempotency.jsonl    每个写请求一行
 ├─ snapshots/           定期全量快照，加速回放
 ├─ sessions/<session_id>/
 └─ jobs/<job_id>/
 ```
 
+**日志条目**（`journal.jsonl` 的一行）：
+
+| 字段 | 说明 |
+|---|---|
+| `kind` | `write`、`undo`、`redo`、`recovered` |
+| `revision` / `parent` / `seq` | 修订 ID、父修订 ID、序号 |
+| `at` / `author` | 时间、作者 |
+| `verb` / `request_id` / `idempotency_key` | 产生它的请求 |
+| `ops` | 请求里的操作原文，用于审计和编辑会话重放 |
+| `changes` | 实体级快照：每个改动的实体一条，含 `key`、`before`、`after` |
+| `target` | `undo`、`redo` 条目指向的修订 |
+
+**实体与键**：
+
+| 实体 | 键 | 快照内容 |
+|---|---|---|
+| 工程头 | `project` | 除 `revision`、`media`、`timelines`、`transcripts`、`subtitle_styles` 外的字段 |
+| 媒体、片段、转场、标记、字幕条、字词、识别运行、样式、独立字幕条 | 它们自己的 ID | 整个对象 |
+| 时间线 | 时间线 ID | 除 `tracks`、`markers` 外的字段 |
+| 轨道 | 轨道 ID | 除 `clips`、`transitions`、`overrides`、`free_cues` 外的字段，加上它在 `tracks` 里的序号 |
+| 母稿 | 母稿 ID | 除 `raw_runs`、`tokens`、`cues` 外的字段 |
+| 覆盖值 | `override:<轨道ID>:<occurrence_id>:<cue_id>` | 整个对象 |
+
+`before` 为 null 表示新建，`after` 为 null 表示删除。数组里的先后顺序由规范序列化决定，所以快照里不存位置，轨道除外。
+
 **撤销粒度**：一个修订就是一步撤销。一个编辑请求或一个批准的编辑会话产生一个修订，所以撤销粒度和「用户的一条指令」一致。
 
-**撤销方式**：`undo` 不删历史，而是把目标修订的反向操作作为一个新修订应用。默认撤销最近一个修订，也可以用 `target` 指定。如果目标修订之后，别的修订改过同样的实体，返回 `rejected`，错误码 `E_UNDO_CONFLICT`。`redo` 同理。
+**撤销方式**：`undo` 不删历史。它取目标修订的 `changes`，逐个实体核对：当前内容必须等于该修订的 `after`。全部一致，就把每个实体恢复成 `before`，作为一个新修订写入，`kind` 为 `undo`。任何一个不一致，说明之后有别的修订改过它，返回 `rejected`，错误码 `E_UNDO_CONFLICT`，`details` 列出冲突的实体键。默认撤销最近一个未被撤销的 `write` 修订，也可以用 `target` 指定。`redo` 反过来：核对当前等于 `before`，恢复成 `after`。`recovered` 修订不能撤销。
+
+**幂等记录**（`idempotency.jsonl` 的一行）：`idempotency_key`、`request_hash`（去掉 `request_id` 后按规范 JSON 计算的 SHA-256）、`at`、完整的结果信封。至少保留 7 天或最近 1000 条，取较多者，清理在写入时顺带进行。
 
 **可追溯**：被删的内容永远能从日志里找到：它来自哪个修订、哪个 `occurrence_id`、谁删的。
 
