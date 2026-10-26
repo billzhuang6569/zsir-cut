@@ -152,10 +152,10 @@ profile ID 的格式是「宿主-最低宿主版本-格式-格式版本」。
 
 ## 7. 宿主版本表
 
-由 Bill 填写，验收以表里的版本为准。
+由 Bill 确认，验收以表里的版本为准。版本号由 Claude 在本机探测预填。
 
 | 宿主 | 版本 | 版别 | 机器 |
 |---|---|---|---|
-| Final Cut Pro | 待填 | — | 待填 |
-| DaVinci Resolve | 待填 | Free 或 Studio，待填 | 待填 |
-| Premiere Pro | 待填 | — | 待填 |
+| Final Cut Pro | 12.4 | — | 本机，2026-10-26 探测 |
+| DaVinci Resolve | 21.1.0 | 待 Bill 确认 Free 或 Studio | 同上 |
+| Premiere Pro | 25.5.0 | — | 同上 |

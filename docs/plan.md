@@ -57,6 +57,8 @@
 
 每个模块一个 PR，Codex 实现，CI 用 fixture 对 golden 文件比对，Claude 审 diff 和 loss report。
 
+详细拆分见 [docs/tasks/step-1.md](tasks/step-1.md)。下面七条是概要。
+
 1. 时间线读写与校验（`inspect`、`validate`）。
 2. `edit` 动词：有序操作列表、dry-run、revision 冲突检测、undo。
 3. FCPXML 导出器加损失报告。这是验收基线，字幕用 `<caption>`，用 DTD 校验。
