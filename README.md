@@ -11,3 +11,12 @@
 ## 许可证
 
 MIT，见 [LICENSE](LICENSE)。
+
+## 开发
+
+- `pnpm install`：安装 workspace 依赖。
+- `pnpm lint`：检查脚手架代码与配置格式。
+- `pnpm format`：格式化脚手架代码与配置。
+- `pnpm typecheck`：检查 TypeScript 类型。
+- `pnpm test`：运行各包的 Vitest 测试。
+- `pnpm validate:examples`：校验示例工程与交接 JSON。
