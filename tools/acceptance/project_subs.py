@@ -84,7 +84,7 @@ for c in cues_out:
     same = [m for m in merged if m["track"] == c["track"] and m["cue"] == c["cue"]]
     last = same[-1] if same else None
     if last and c["clip"] is not None and last["clip"] is not None and abs(F(c["start"]) - F(last["end"])) <= fd and last.get("ovr") == c.get("ovr"):
-        last["end"] = c["end"]; last["text"] = joinw(last["text"], c["text"], langs[c["track"]]); last["clip"] = last["clip"] + "+" + c["clip"]
+        last["end"] = c["end"]; last["text"] = last["text"] if (c.get("ovr") and "\"text\"" in c["ovr"]) else joinw(last["text"], c["text"], langs[c["track"]]); last["clip"] = last["clip"] + "+" + c["clip"]
     else:
         merged.append(dict(c))
 for m in merged: m.pop("ovr", None)
