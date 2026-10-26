@@ -36,11 +36,17 @@ export function validateCommand(verb: string, value: unknown): { valid: boolean;
 
 export function commandSchemaForVerb(verb: string): Record<string, unknown> {
   const schema = ajv.getSchema(commandId)?.schema as {
-    $defs: { author: unknown; read: unknown; write: unknown; requests: Record<string, Record<string, unknown>> };
+    $defs: {
+      author: unknown;
+      read: unknown;
+      write: unknown;
+      requests: Record<string, Record<string, unknown>>;
+      [key: string]: unknown;
+    };
   };
   return {
     type: "object",
     ...schema.$defs.requests[verb],
-    $defs: { author: schema.$defs.author, read: schema.$defs.read, write: schema.$defs.write },
+    $defs: Object.fromEntries(Object.entries(schema.$defs).filter(([key]) => key !== "requests")),
   };
 }

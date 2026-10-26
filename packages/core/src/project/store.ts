@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
+import { EditError } from "./edit.js";
 import { diffProjectEntities, type EntityChange, type EntitySnapshot, projectEntitySnapshots } from "./entities.js";
 import { newId } from "./id.js";
 import { parseProject, serializeProject } from "./io.js";
@@ -16,6 +17,7 @@ export interface WriteRequest {
   verb: WriteVerb;
   request_id: string;
   ops: unknown[];
+  timeline_id?: string;
   target?: string;
 }
 
@@ -27,13 +29,15 @@ export interface OpenProjectOptions {
   fault?: (point: "before_step_7" | "after_step_7") => void;
 }
 
-type EnvelopeStatus = "applied" | "no_op" | "rejected" | "conflict" | "failed" | "committed_unverified";
+type EnvelopeStatus = "applied" | "dry_run" | "no_op" | "rejected" | "conflict" | "failed" | "committed_unverified";
 type ErrorCode =
   | "E_CONFLICT"
   | "E_IDEMPOTENCY_MISMATCH"
   | "E_VALIDATION"
   | "E_UNDO_CONFLICT"
   | "E_UNSUPPORTED"
+  | "E_NOT_FOUND"
+  | "E_MIXED_DOMAIN"
   | "E_IO"
   | "E_INTERNAL";
 export interface WriteEnvelope {
@@ -42,8 +46,14 @@ export interface WriteEnvelope {
   verb: WriteVerb;
   request_id: string;
   receipt: { before: string; after: string | null; idempotency_key: string; replayed: boolean } | null;
-  changes: { op: string; entity: string; id: string; action: "created" | "updated" | "removed" }[];
-  verification: { level: "none" | "L1"; passed: boolean; issues: ValidationIssue[] };
+  changes: {
+    op: string;
+    entity: string;
+    id: string;
+    action: "created" | "updated" | "removed";
+    detail?: Record<string, unknown>;
+  }[];
+  verification: { level: "none" | "L0" | "L1"; passed: boolean; issues: ValidationIssue[] };
   result: Record<string, unknown> | null;
   error: { code: ErrorCode; message: string; retryable: boolean; details?: Record<string, unknown> } | null;
 }
@@ -84,6 +94,25 @@ const canonical = (value: unknown): string =>
       ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
       : item,
   );
+const schemaIssues = (errors: { instancePath: string; message?: string }[]): ValidationIssue[] =>
+  errors.map((error) => ({
+    code: "E_SCHEMA",
+    severity: "error",
+    message: `${error.instancePath || "/"}: ${error.message ?? "Invalid project"}`,
+    ids: [],
+  }));
+const describeChange = (change: EntityChange, entityOps: Record<string, string>, verb: WriteVerb) => ({
+  op: entityOps[change.key] ?? verb,
+  entity: change.entity,
+  id: change.key,
+  action: (change.before === null ? "created" : change.after === null ? "removed" : "updated") as
+    | "created"
+    | "updated"
+    | "removed",
+  ...(change.entity === "clip" && change.before === null && typeof change.after?.occurrence_id === "string"
+    ? { detail: { occurrence_id: change.after.occurrence_id } }
+    : {}),
+});
 
 async function appendSynced(path: string, value: unknown): Promise<void> {
   const handle = await open(path, "a");
@@ -197,7 +226,7 @@ export function openProject(options: OpenProjectOptions) {
     result: Record<string, unknown> | null = null,
   ): Promise<WriteEnvelope> {
     const envelope = (status: EnvelopeStatus, before: string, after: string | null = null): WriteEnvelope => ({
-      ok: status === "applied" || status === "no_op",
+      ok: status === "applied" || status === "dry_run" || status === "no_op",
       status,
       verb: request.verb,
       request_id: request.request_id,
@@ -325,35 +354,33 @@ export function openProject(options: OpenProjectOptions) {
       } catch (error) {
         if (error instanceof UndoConflict)
           return fail("rejected", before, "E_UNDO_CONFLICT", error.message, { keys: error.keys });
+        if (error instanceof EditError) return fail("rejected", before, error.code, error.message);
         throw error;
       }
       let serialized: string;
       try {
         serialized = serializeProject(candidate);
       } catch (error) {
-        const output = fail("rejected", before, "E_VALIDATION", "Project failed L1 validation");
+        const output = fail("rejected", before, "E_VALIDATION", "Project failed L0 validation");
         output.verification = {
-          level: "L1",
+          level: "L0",
           passed: false,
-          issues: [{ code: "E_VALIDATION", severity: "error", message: String(error), ids: [] }],
+          issues: schemaIssues([{ instancePath: "", message: String(error) }]),
         };
         return output;
       }
       const check = parseProject(serialized);
-      const issues: ValidationIssue[] = check.ok
-        ? validateProjectSemantics(check.project, check.issues)
-        : check.errors.map((error) => ({
-            code: "E_VALIDATION",
-            severity: "error" as const,
-            message: `${error.instancePath}: ${error.message}`,
-            ids: [],
-          }));
+      if (!check.ok) {
+        const output = fail("rejected", before, "E_VALIDATION", "Project failed L0 validation");
+        output.verification = { level: "L0", passed: false, issues: schemaIssues(check.errors) };
+        return output;
+      }
+      const issues = validateProjectSemantics(check.project, check.issues);
       if (issues.some((issue) => issue.severity === "error")) {
         const output = fail("rejected", before, "E_VALIDATION", "Project failed L1 validation");
         output.verification = { level: "L1", passed: false, issues };
         return output;
       }
-      if (!check.ok) throw new Error("Project validation disagrees with parser");
       const changes = diffProjectEntities(current, check.project);
       if (changes.length === 0) {
         const output = envelope("no_op", before);
@@ -378,12 +405,7 @@ export function openProject(options: OpenProjectOptions) {
       const output = envelope("applied", before, candidate.revision.id);
       output.result = result;
       output.verification = { level: "L1", passed: true, issues };
-      output.changes = changes.map((change) => ({
-        op: entityOps[change.key] ?? request.verb,
-        entity: change.entity,
-        id: change.key,
-        action: change.before === null ? "created" : change.after === null ? "removed" : "updated",
-      }));
+      output.changes = changes.map((change) => describeChange(change, entityOps, request.verb));
       options.fault?.("before_step_7");
       const temp = join(dirname(projectPath), `.${initial.project.id}.${randomUUID()}.tmp`);
       try {
@@ -520,6 +542,68 @@ export function openProject(options: OpenProjectOptions) {
       entityOps?: Record<string, string>,
       result?: Record<string, unknown>,
     ) => write(request, mutator, "write", undefined, entityOps, result),
+    previewWrite: async (
+      request: WriteRequest,
+      mutator: (project: Project) => void,
+      entityOps: Record<string, string> = {},
+    ): Promise<WriteEnvelope> => {
+      const parsed = parseProject(await readFile(projectPath, "utf8"));
+      if (!parsed.ok) throw new Error("Project file is invalid");
+      const before = parsed.project;
+      const output: WriteEnvelope = {
+        ok: true,
+        status: "dry_run",
+        verb: request.verb,
+        request_id: request.request_id,
+        receipt: { before: before.revision.id, after: null, idempotency_key: request.idempotency_key, replayed: false },
+        changes: [],
+        verification: { level: "none", passed: false, issues: [] },
+        result: {},
+        error: null,
+      };
+      const reject = (code: ErrorCode, message: string) => {
+        output.ok = false;
+        output.status = "rejected";
+        output.error = { code, message, retryable: false };
+        return output;
+      };
+      if (request.base_revision !== before.revision.id) {
+        output.ok = false;
+        output.status = "conflict";
+        output.error = { code: "E_CONFLICT", message: "Base revision differs from current revision", retryable: false };
+        return output;
+      }
+      const candidate = structuredClone(before);
+      try {
+        mutator(candidate);
+      } catch (error) {
+        if (error instanceof EditError) return reject(error.code, error.message);
+        throw error;
+      }
+      let serialized: string;
+      try {
+        serialized = serializeProject(candidate);
+      } catch (error) {
+        output.verification = {
+          level: "L0",
+          passed: false,
+          issues: schemaIssues([{ instancePath: "", message: String(error) }]),
+        };
+        return reject("E_VALIDATION", String(error));
+      }
+      const check = parseProject(serialized);
+      if (!check.ok) {
+        output.verification = { level: "L0", passed: false, issues: schemaIssues(check.errors) };
+        return reject("E_VALIDATION", "Project failed L0 validation");
+      }
+      const issues = validateProjectSemantics(check.project, check.issues);
+      output.verification = { level: "L1", passed: !issues.some((issue) => issue.severity === "error"), issues };
+      if (!output.verification.passed) return reject("E_VALIDATION", "Project failed L1 validation");
+      output.changes = diffProjectEntities(before, check.project).map((change) =>
+        describeChange(change, entityOps, request.verb),
+      );
+      return output;
+    },
     undo: (request: WriteRequest) => history(request, "undo"),
     redo: (request: WriteRequest) => history(request, "redo"),
   };

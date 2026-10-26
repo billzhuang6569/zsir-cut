@@ -45,6 +45,16 @@ describe("CLI and MCP", () => {
         { verb: "validate", input: { media: true } },
         { verb: "undo", input: { base_revision: "rev_fixture_1", idempotency_key: "missing-author" } },
         { verb: "inspect", input: {} },
+        {
+          verb: "edit",
+          input: {
+            base_revision: "rev_fixture_1",
+            idempotency_key: "edit-preview",
+            author,
+            dry_run: true,
+            ops: [{ op: "set_clip", clip_id: "clp_v9", label: "preview" }],
+          },
+        },
         { verb: "undo", input: base },
       ] as const;
       for (const { verb, input } of cases) {

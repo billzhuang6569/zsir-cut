@@ -5,6 +5,9 @@ exports[`subtitle projection > projects std-25 and matches its complete snapshot
   "cues": [
     {
       "clip_id": "clp_a1",
+      "clip_ids": [
+        "clp_a1",
+      ],
       "cue_id": "cue_en_02",
       "end": "117/50s",
       "lines": [
@@ -22,6 +25,9 @@ exports[`subtitle projection > projects std-25 and matches its complete snapshot
     },
     {
       "clip_id": "clp_a1",
+      "clip_ids": [
+        "clp_a1",
+      ],
       "cue_id": "cue_en_03",
       "end": "167/25s",
       "lines": [
@@ -39,6 +45,9 @@ exports[`subtitle projection > projects std-25 and matches its complete snapshot
     },
     {
       "clip_id": "clp_a2",
+      "clip_ids": [
+        "clp_a2",
+      ],
       "cue_id": "cue_en_08",
       "end": "651/50s",
       "lines": [
@@ -56,6 +65,9 @@ exports[`subtitle projection > projects std-25 and matches its complete snapshot
     },
     {
       "clip_id": "clp_a2",
+      "clip_ids": [
+        "clp_a2",
+      ],
       "cue_id": "cue_en_09",
       "end": "437/25s",
       "lines": [
@@ -73,6 +85,9 @@ exports[`subtitle projection > projects std-25 and matches its complete snapshot
     },
     {
       "clip_id": "clp_a2",
+      "clip_ids": [
+        "clp_a2",
+      ],
       "cue_id": "cue_en_10",
       "end": "22s",
       "lines": [
@@ -90,6 +105,9 @@ exports[`subtitle projection > projects std-25 and matches its complete snapshot
     },
     {
       "clip_id": "clp_a3",
+      "clip_ids": [
+        "clp_a3",
+      ],
       "cue_id": "cue_en_16",
       "end": "1221/50s",
       "lines": [
@@ -107,6 +125,9 @@ exports[`subtitle projection > projects std-25 and matches its complete snapshot
     },
     {
       "clip_id": "clp_a3",
+      "clip_ids": [
+        "clp_a3",
+      ],
       "cue_id": "cue_en_17",
       "end": "748/25s",
       "lines": [
@@ -124,6 +145,7 @@ exports[`subtitle projection > projects std-25 and matches its complete snapshot
     },
     {
       "clip_id": null,
+      "clip_ids": [],
       "cue_id": "cue_title",
       "end": "3s",
       "lines": [
@@ -139,6 +161,9 @@ exports[`subtitle projection > projects std-25 and matches its complete snapshot
     },
     {
       "clip_id": "clp_a1",
+      "clip_ids": [
+        "clp_a1",
+      ],
       "cue_id": "cue_zh_02",
       "end": "117/50s",
       "lines": [
@@ -163,6 +188,9 @@ Agent共用的时间线",
     },
     {
       "clip_id": "clp_a1",
+      "clip_ids": [
+        "clp_a1",
+      ],
       "cue_id": "cue_zh_03",
       "end": "167/25s",
       "lines": [
@@ -186,6 +214,9 @@ Agent共用的时间线",
     },
     {
       "clip_id": "clp_a1",
+      "clip_ids": [
+        "clp_a1",
+      ],
       "cue_id": "cue_zh_04",
       "end": "48/5s",
       "lines": [
@@ -203,6 +234,9 @@ Agent共用的时间线",
     },
     {
       "clip_id": "clp_a2",
+      "clip_ids": [
+        "clp_a2",
+      ],
       "cue_id": "cue_zh_08",
       "end": "651/50s",
       "lines": [
@@ -226,6 +260,9 @@ Agent共用的时间线",
     },
     {
       "clip_id": "clp_a2",
+      "clip_ids": [
+        "clp_a2",
+      ],
       "cue_id": "cue_zh_09",
       "end": "437/25s",
       "lines": [
@@ -247,6 +284,9 @@ Agent共用的时间线",
     },
     {
       "clip_id": "clp_a2",
+      "clip_ids": [
+        "clp_a2",
+      ],
       "cue_id": "cue_zh_10",
       "end": "22s",
       "lines": [
@@ -267,6 +307,9 @@ Agent共用的时间线",
     },
     {
       "clip_id": "clp_a3",
+      "clip_ids": [
+        "clp_a3",
+      ],
       "cue_id": "cue_zh_16",
       "end": "1221/50s",
       "lines": [
@@ -289,6 +332,9 @@ Agent共用的时间线",
     },
     {
       "clip_id": "clp_a3",
+      "clip_ids": [
+        "clp_a3",
+      ],
       "cue_id": "cue_zh_17",
       "end": "748/25s",
       "lines": [
@@ -312,6 +358,9 @@ Agent共用的时间线",
     },
     {
       "clip_id": "clp_a8",
+      "clip_ids": [
+        "clp_a8",
+      ],
       "cue_id": "cue_zh_19",
       "end": "288/5s",
       "lines": [
@@ -331,6 +380,9 @@ Agent共用的时间线",
     },
     {
       "clip_id": "clp_a8",
+      "clip_ids": [
+        "clp_a8",
+      ],
       "cue_id": "cue_zh_19",
       "end": "1189/20s",
       "lines": [
@@ -366,6 +418,9 @@ exports[`subtitle projection > projects std-2997-df and matches its complete sna
   "cues": [
     {
       "clip_id": "clp_a1",
+      "clip_ids": [
+        "clp_a1",
+      ],
       "cue_id": "cue_en_02",
       "end": "74773/15000s",
       "lines": [
@@ -383,6 +438,9 @@ exports[`subtitle projection > projects std-2997-df and matches its complete sna
     },
     {
       "clip_id": "clp_a2",
+      "clip_ids": [
+        "clp_a2",
+      ],
       "cue_id": "cue_en_07",
       "end": "2799/200s",
       "lines": [
@@ -400,6 +458,9 @@ exports[`subtitle projection > projects std-2997-df and matches its complete sna
     },
     {
       "clip_id": "clp_a2",
+      "clip_ids": [
+        "clp_a2",
+      ],
       "cue_id": "cue_en_08",
       "end": "3599/200s",
       "lines": [
@@ -417,6 +478,9 @@ exports[`subtitle projection > projects std-2997-df and matches its complete sna
     },
     {
       "clip_id": "clp_a3",
+      "clip_ids": [
+        "clp_a3",
+      ],
       "cue_id": "cue_en_13",
       "end": "11843/600s",
       "lines": [
@@ -434,6 +498,9 @@ exports[`subtitle projection > projects std-2997-df and matches its complete sna
     },
     {
       "clip_id": "clp_a3",
+      "clip_ids": [
+        "clp_a3",
+      ],
       "cue_id": "cue_en_14",
       "end": "14519/600s",
       "lines": [
@@ -451,6 +518,7 @@ exports[`subtitle projection > projects std-2997-df and matches its complete sna
     },
     {
       "clip_id": null,
+      "clip_ids": [],
       "cue_id": "cue_title",
       "end": "1001/400s",
       "lines": [
@@ -466,6 +534,9 @@ exports[`subtitle projection > projects std-2997-df and matches its complete sna
     },
     {
       "clip_id": "clp_a1",
+      "clip_ids": [
+        "clp_a1",
+      ],
       "cue_id": "cue_zh_02",
       "end": "74773/15000s",
       "lines": [
@@ -492,6 +563,9 @@ Agent共用的时间线",
     },
     {
       "clip_id": "clp_a1",
+      "clip_ids": [
+        "clp_a1",
+      ],
       "cue_id": "cue_zh_03",
       "end": "1001/125s",
       "lines": [
@@ -512,6 +586,9 @@ Agent共用的时间线",
     },
     {
       "clip_id": "clp_a2",
+      "clip_ids": [
+        "clp_a2",
+      ],
       "cue_id": "cue_zh_06",
       "end": "351/40s",
       "lines": [
@@ -530,6 +607,9 @@ Agent共用的时间线",
     },
     {
       "clip_id": "clp_a2",
+      "clip_ids": [
+        "clp_a2",
+      ],
       "cue_id": "cue_zh_07",
       "end": "2799/200s",
       "lines": [
@@ -556,6 +636,9 @@ Agent共用的时间线",
     },
     {
       "clip_id": "clp_a2",
+      "clip_ids": [
+        "clp_a2",
+      ],
       "cue_id": "cue_zh_08",
       "end": "3599/200s",
       "lines": [
@@ -579,6 +662,9 @@ Agent共用的时间线",
     },
     {
       "clip_id": "clp_a3",
+      "clip_ids": [
+        "clp_a3",
+      ],
       "cue_id": "cue_zh_13",
       "end": "11843/600s",
       "lines": [
@@ -603,6 +689,9 @@ Agent共用的时间线",
     },
     {
       "clip_id": "clp_a3",
+      "clip_ids": [
+        "clp_a3",
+      ],
       "cue_id": "cue_zh_14",
       "end": "14519/600s",
       "lines": [
@@ -625,6 +714,9 @@ Agent共用的时间线",
     },
     {
       "clip_id": "clp_a8",
+      "clip_ids": [
+        "clp_a8",
+      ],
       "cue_id": "cue_zh_19",
       "end": "718823/15000s",
       "lines": [
@@ -644,6 +736,9 @@ Agent共用的时间线",
     },
     {
       "clip_id": "clp_a8",
+      "clip_ids": [
+        "clp_a8",
+      ],
       "cue_id": "cue_zh_19",
       "end": "124127/2500s",
       "lines": [
@@ -679,6 +774,9 @@ exports[`subtitle projection > projects std-2997-ndf and matches its complete sn
   "cues": [
     {
       "clip_id": "clp_a1",
+      "clip_ids": [
+        "clp_a1",
+      ],
       "cue_id": "cue_en_02",
       "end": "74773/15000s",
       "lines": [
@@ -696,6 +794,9 @@ exports[`subtitle projection > projects std-2997-ndf and matches its complete sn
     },
     {
       "clip_id": "clp_a2",
+      "clip_ids": [
+        "clp_a2",
+      ],
       "cue_id": "cue_en_07",
       "end": "2799/200s",
       "lines": [
@@ -713,6 +814,9 @@ exports[`subtitle projection > projects std-2997-ndf and matches its complete sn
     },
     {
       "clip_id": "clp_a2",
+      "clip_ids": [
+        "clp_a2",
+      ],
       "cue_id": "cue_en_08",
       "end": "3599/200s",
       "lines": [
@@ -730,6 +834,9 @@ exports[`subtitle projection > projects std-2997-ndf and matches its complete sn
     },
     {
       "clip_id": "clp_a3",
+      "clip_ids": [
+        "clp_a3",
+      ],
       "cue_id": "cue_en_13",
       "end": "11843/600s",
       "lines": [
@@ -747,6 +854,9 @@ exports[`subtitle projection > projects std-2997-ndf and matches its complete sn
     },
     {
       "clip_id": "clp_a3",
+      "clip_ids": [
+        "clp_a3",
+      ],
       "cue_id": "cue_en_14",
       "end": "14519/600s",
       "lines": [
@@ -764,6 +874,7 @@ exports[`subtitle projection > projects std-2997-ndf and matches its complete sn
     },
     {
       "clip_id": null,
+      "clip_ids": [],
       "cue_id": "cue_title",
       "end": "1001/400s",
       "lines": [
@@ -779,6 +890,9 @@ exports[`subtitle projection > projects std-2997-ndf and matches its complete sn
     },
     {
       "clip_id": "clp_a1",
+      "clip_ids": [
+        "clp_a1",
+      ],
       "cue_id": "cue_zh_02",
       "end": "74773/15000s",
       "lines": [
@@ -805,6 +919,9 @@ Agent共用的时间线",
     },
     {
       "clip_id": "clp_a1",
+      "clip_ids": [
+        "clp_a1",
+      ],
       "cue_id": "cue_zh_03",
       "end": "1001/125s",
       "lines": [
@@ -825,6 +942,9 @@ Agent共用的时间线",
     },
     {
       "clip_id": "clp_a2",
+      "clip_ids": [
+        "clp_a2",
+      ],
       "cue_id": "cue_zh_06",
       "end": "351/40s",
       "lines": [
@@ -843,6 +963,9 @@ Agent共用的时间线",
     },
     {
       "clip_id": "clp_a2",
+      "clip_ids": [
+        "clp_a2",
+      ],
       "cue_id": "cue_zh_07",
       "end": "2799/200s",
       "lines": [
@@ -869,6 +992,9 @@ Agent共用的时间线",
     },
     {
       "clip_id": "clp_a2",
+      "clip_ids": [
+        "clp_a2",
+      ],
       "cue_id": "cue_zh_08",
       "end": "3599/200s",
       "lines": [
@@ -892,6 +1018,9 @@ Agent共用的时间线",
     },
     {
       "clip_id": "clp_a3",
+      "clip_ids": [
+        "clp_a3",
+      ],
       "cue_id": "cue_zh_13",
       "end": "11843/600s",
       "lines": [
@@ -916,6 +1045,9 @@ Agent共用的时间线",
     },
     {
       "clip_id": "clp_a3",
+      "clip_ids": [
+        "clp_a3",
+      ],
       "cue_id": "cue_zh_14",
       "end": "14519/600s",
       "lines": [
@@ -938,6 +1070,9 @@ Agent共用的时间线",
     },
     {
       "clip_id": "clp_a8",
+      "clip_ids": [
+        "clp_a8",
+      ],
       "cue_id": "cue_zh_19",
       "end": "718823/15000s",
       "lines": [
@@ -957,6 +1092,9 @@ Agent共用的时间线",
     },
     {
       "clip_id": "clp_a8",
+      "clip_ids": [
+        "clp_a8",
+      ],
       "cue_id": "cue_zh_19",
       "end": "124127/2500s",
       "lines": [

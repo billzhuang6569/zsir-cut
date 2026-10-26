@@ -70,7 +70,7 @@
 |---|---|---|
 | `applied` | 已写入主工程并通过校验 | 继续 |
 | `drafted` | 已写入编辑会话的草稿 | 继续，最后提交审批 |
-| `dry_run` | 只演算，`changes` 是预测结果 | 确认后去掉 `dry_run` 重发 |
+| `dry_run` | 只演算，`changes` 是预测结果。不写文件、不写日志、不记幂等，所以正式提交可以沿用同一个幂等键 | 确认后去掉 `dry_run` 重发 |
 | `no_op` | 请求合法，但没有任何改变 | 继续 |
 | `accepted` | 长任务已入队，`result.job_id` 可查 | 用 `job_status` 查进度 |
 | `rejected` | 请求不合法或违反硬约束，什么都没写 | 读 `error` 和 `issues`，改请求 |
@@ -254,14 +254,14 @@
 
 ## 10. `edit` 的操作
 
-一个 `edit` 请求带一个有序的 `ops` 数组，整体原子执行。创建实体的操作可以由调用方指定新 ID，这样同一请求里后面的操作能引用它；不指定就由内核生成，并在 `changes` 里返回。
+一个 `edit` 请求带一个有序的 `ops` 数组，整体原子执行。请求可以带 `timeline_id` 指定要编辑的时间线；工程里只有一条时间线时可以省略，有多条时省略返回 `E_VALIDATION`。新建片段时产生的 `occurrence_id` 写在该片段那条 `changes` 的 `detail.occurrence_id` 里。创建实体的操作可以由调用方指定新 ID，这样同一请求里后面的操作能引用它；不指定就由内核生成，并在 `changes` 里返回。
 
 **剪辑域**
 
 | 操作 | 主要参数 | 说明 |
 |---|---|---|
 | `place` | `media_id`、`source_start`、`duration`、`at`、`video_track`、`audio_track`、`mode` | 把一段素材放上时间线，新建一个 `occurrence_id` 和对应的视音频片段。`mode` 取 `insert` 或 `overwrite` |
-| `remove` | `clip_ids`、`ripple` | 删片段。`ripple` 为 true 时后面的片段前移 |
+| `remove` | `clip_ids`、`linked` | 删片段，留下空隙，不合拢；要合拢用 `remove_span` |
 | `remove_span` | `range` 或 `tokens`、`tracks`、`ripple`、`snap` | 删一段序列区间。可以用 token 范围指定，内核按投影换算成序列时间。`tracks` 默认全部轨道，保持同步。`snap` 取 `out`、`in`、`nearest`，默认 `out`，保证说过的字被完整删掉 |
 | `trim` | `clip_id`、`edge`、`to`、`ripple`、`linked` | 改入点或出点。`linked` 为 true 时同一次使用的视音频一起改；J/L cut 就是只改其中一个 |
 | `split` | `clip_id`、`at`、`new_id` | 在序列时刻切开，后半段拿新 ID |
