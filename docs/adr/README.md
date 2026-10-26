@@ -12,9 +12,10 @@
 | [0006](0006-three-hosts-fcp-baseline.md) | 三家 NLE 单向导出，FCP 为验收基线 | 已采纳 |
 | [0007](0007-resolve-studio.md) | Resolve 联动以 Studio 为前提 | 已采纳 |
 | [0008](0008-interview-first.md) | 首批场景：采访口播 | 已采纳 |
-| [0009](0009-division-of-labor.md) | 分工：Claude 统筹验收，Codex 实现 | 已采纳 |
+| [0009](0009-division-of-labor.md) | 分工：Claude 统筹验收，Codex 实现 | 合并规则被 0012 取代 |
 | [0010](0010-rational-time-and-time-map.md) | 有理数时间与时间映射 | 已采纳 |
 | [0011](0011-own-kernel.md) | 自建最小内核，不 fork 现有编辑器 | 已采纳 |
+| [0012](0012-continuous-delivery.md) | 连续推进：Claude 自行验收合并 | 已采纳 |
 
 模板：
 
