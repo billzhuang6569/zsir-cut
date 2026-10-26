@@ -3,6 +3,9 @@ Usage: python3 -I project_subs.py <project.zcut.json>"""
 import json, sys
 from fractions import Fraction as F
 T = lambda s: F(s[:-1])
+import os as _os
+sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from segment import display_intervals
 d = json.load(open(sys.argv[1], encoding="utf-8"))
 tl = d["timelines"][0]; tracks = {t["id"]: t for t in tl["tracks"]}
 def segs_of(c):
@@ -27,6 +30,7 @@ for st in [t for t in tl["tracks"] if t["kind"] == "subtitle"]:
             cl_lo, cl_hi = T(c["timeline_start"]), T(c["timeline_start"]) + T(c["duration"])
             for tr in [x for x in d["transcripts"] if x["language"] == st["language"] and x["media_id"] == c["media_id"]]:
                 toks = tr["tokens"]; idx = {t["id"]: i for i, t in enumerate(toks)}
+                disp = display_intervals(tr)
                 cue_of = {}
                 for cue in tr["cues"]:
                     for i in range(idx[cue["first_token"]], idx[cue["last_token"]] + 1): cue_of[toks[i]["id"]] = cue
@@ -38,7 +42,7 @@ for st in [t for t in tl["tracks"] if t["kind"] == "subtitle"]:
                     cand = [s for s in fwd if s[2] <= mid < s[3]] or [max(fwd, key=lambda s: ov(a, b, s[2], s[3]))] if fwd else []
                     if not cand or ov(a, b, cand[0][2], cand[0][3]) == 0: return "excluded"
                     s = cand[0]; m = lambda x: s[0] + (min(max(x, s[2]), s[3]) - s[2]) * (s[1] - s[0]) / (s[3] - s[2])
-                    return (m(a), m(b))
+                    return (m(a), m(b), m)
                 for cue in tr["cues"]:
                     run = []; pieces = []
                     for i in range(idx[cue["first_token"]], idx[cue["last_token"]] + 1):
@@ -56,8 +60,13 @@ for st in [t for t in tl["tracks"] if t["kind"] == "subtitle"]:
                     if run: pieces.append(run)
                     o = ovr.get((c["occurrence_id"], cue["id"]))
                     if o and o.get("hidden"): continue
+                    vis = [t for t in toks[idx[cue["first_token"]]: idx[cue["last_token"]] + 1] if t["text"]]
                     for n, pc in enumerate(pieces):
                         t_a, t_b = pc[0][1][0], pc[-1][1][1]
+                        if cue["id"] in disp and vis:
+                            ds, de = disp[cue["id"]]
+                            if pc[0][0]["id"] == vis[0]["id"]: t_a = pc[0][1][2](ds)
+                            if pc[-1][0]["id"] == vis[-1]["id"]: t_b = pc[-1][1][2](de)
                         t_a, t_b = max(t_a, cl_lo), min(t_b, cl_hi)
                         if t_b <= t_a: continue
                         def join(ws):
