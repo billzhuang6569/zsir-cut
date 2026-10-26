@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "types": ["node"]
+  },
+  "include": ["scripts/**/*.ts", "packages/core/test/**/*.ts", "vitest.config.ts"],
+  "references": [
+    { "path": "./packages/core" },
+    { "path": "./packages/exporters" },
+    { "path": "./packages/cli" },
+    { "path": "./packages/mcp" }
+  ]
+}
