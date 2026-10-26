@@ -160,10 +160,37 @@
               "timeline_start": "1001/150s",
               "duration": "3003/1000s",
               "source_start": "1001/60s",
+              "time_map": [
+                {
+                  "at": "0s",
+                  "source": "1001/60s",
+                  "interp": "linear"
+                },
+                {
+                  "at": "1001/1000s",
+                  "source": "53053/3000s",
+                  "interp": "linear"
+                },
+                {
+                  "at": "1001/500s",
+                  "source": "109109/6000s",
+                  "interp": "hold"
+                },
+                {
+                  "at": "1001/400s",
+                  "source": "109109/6000s",
+                  "interp": "linear"
+                },
+                {
+                  "at": "3003/1000s",
+                  "source": "23023/1200s",
+                  "interp": "linear"
+                }
+              ],
               "transform": {
                 "scale": 0.5
               },
-              "label": "B 机反应镜头"
+              "label": "B 机反应镜头（100%、50%、定格、200%）"
             }
           ],
           "transitions": []

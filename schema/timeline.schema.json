@@ -4,19 +4,62 @@
   "title": "zsir-cut timeline project",
   "description": "Structure (L0) of a .zcut.json project. Semantic rules (L1/L2) live in docs/spec/timeline-schema.md section 8.",
   "type": "object",
-  "required": ["schema", "schema_version", "id", "name", "revision", "media", "timelines", "transcripts", "subtitle_styles"],
+  "required": [
+    "schema",
+    "schema_version",
+    "id",
+    "name",
+    "revision",
+    "media",
+    "timelines",
+    "transcripts",
+    "subtitle_styles"
+  ],
   "additionalProperties": false,
   "properties": {
-    "schema": { "const": "zsir-cut/timeline" },
-    "schema_version": { "const": "0.1" },
-    "id": { "$ref": "#/$defs/id_prj" },
-    "name": { "type": "string", "minLength": 1 },
-    "revision": { "$ref": "#/$defs/revision" },
-    "media": { "type": "array", "items": { "$ref": "#/$defs/media" } },
-    "timelines": { "type": "array", "items": { "$ref": "#/$defs/timeline" } },
-    "transcripts": { "type": "array", "items": { "$ref": "#/$defs/transcript" } },
-    "subtitle_styles": { "type": "array", "items": { "$ref": "#/$defs/subtitle_style" } },
-    "ext": { "$ref": "#/$defs/ext" }
+    "schema": {
+      "const": "zsir-cut/timeline"
+    },
+    "schema_version": {
+      "const": "0.1"
+    },
+    "id": {
+      "$ref": "#/$defs/id_prj"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "revision": {
+      "$ref": "#/$defs/revision"
+    },
+    "media": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/media"
+      }
+    },
+    "timelines": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/timeline"
+      }
+    },
+    "transcripts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/transcript"
+      }
+    },
+    "subtitle_styles": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/subtitle_style"
+      }
+    },
+    "ext": {
+      "$ref": "#/$defs/ext"
+    }
   },
   "$defs": {
     "time": {
@@ -38,265 +81,711 @@
       "type": "string",
       "pattern": "^[1-9][0-9]*(/[1-9][0-9]*)?$"
     },
-    "speed": {
-      "description": "Signed constant speed; negative means reverse.",
-      "type": "string",
-      "pattern": "^-?[1-9][0-9]*(/[1-9][0-9]*)?$"
+    "time_map": {
+      "description": "Piecewise mapping from clip-local timeline time to source time. Absent means normal speed. See spec section 4.5.",
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": [
+          "at",
+          "source",
+          "interp"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "$ref": "#/$defs/time",
+            "description": "Clip-local timeline time; first point 0s, last point equals clip duration."
+          },
+          "source": {
+            "$ref": "#/$defs/time",
+            "description": "Source time at this point."
+          },
+          "interp": {
+            "enum": [
+              "linear",
+              "smooth",
+              "hold"
+            ],
+            "description": "How the segment starting at this point is evaluated; ignored on the last point."
+          }
+        }
+      }
     },
     "timecode": {
       "description": "HH:MM:SS:FF, ';' before frames means drop-frame.",
       "type": "string",
       "pattern": "^[0-9]{2}:[0-5][0-9]:[0-5][0-9][:;][0-9]{2}$"
     },
-    "conf": { "type": "number", "minimum": 0, "maximum": 1 },
+    "conf": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
     "ext": {
       "description": "Namespaced extension data. Unknown namespaces must be preserved verbatim.",
       "type": "object",
-      "propertyNames": { "pattern": "^[a-z][a-z0-9]*(\\.[a-z0-9_-]+)*$" }
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9]*(\\.[a-z0-9_-]+)*$"
+      }
     },
     "fingerprint": {
       "type": "object",
-      "required": ["algo", "value"],
+      "required": [
+        "algo",
+        "value"
+      ],
       "additionalProperties": false,
       "properties": {
-        "algo": { "const": "sampled-sha256-v1" },
-        "value": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        "algo": {
+          "const": "sampled-sha256-v1"
+        },
+        "value": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
       }
     },
     "rel_path": {
       "description": "Path relative to the project file directory, '/' separated, raw UTF-8, not URL-encoded.",
       "type": "string",
       "minLength": 1,
-      "not": { "pattern": "^/|\\\\" }
+      "not": {
+        "pattern": "^/|\\\\"
+      }
     },
-
-    "id_prj": { "type": "string", "pattern": "^prj_[A-Za-z0-9_-]{1,64}$" },
-    "id_tl":  { "type": "string", "pattern": "^tl_[A-Za-z0-9_-]{1,64}$" },
-    "id_trk": { "type": "string", "pattern": "^trk_[A-Za-z0-9_-]{1,64}$" },
-    "id_med": { "type": "string", "pattern": "^med_[A-Za-z0-9_-]{1,64}$" },
-    "id_occ": { "type": "string", "pattern": "^occ_[A-Za-z0-9_-]{1,64}$" },
-    "id_clp": { "type": "string", "pattern": "^clp_[A-Za-z0-9_-]{1,64}$" },
-    "id_trn": { "type": "string", "pattern": "^trn_[A-Za-z0-9_-]{1,64}$" },
-    "id_mrk": { "type": "string", "pattern": "^mrk_[A-Za-z0-9_-]{1,64}$" },
-    "id_trs": { "type": "string", "pattern": "^trs_[A-Za-z0-9_-]{1,64}$" },
-    "id_run": { "type": "string", "pattern": "^run_[A-Za-z0-9_-]{1,64}$" },
-    "id_tok": { "type": "string", "pattern": "^tok_[A-Za-z0-9_-]{1,64}$" },
-    "id_cue": { "type": "string", "pattern": "^cue_[A-Za-z0-9_-]{1,64}$" },
-    "id_sty": { "type": "string", "pattern": "^sty_[A-Za-z0-9_-]{1,64}$" },
-    "id_rev": { "type": "string", "pattern": "^rev_[A-Za-z0-9_-]{1,64}$" },
-
+    "id_prj": {
+      "type": "string",
+      "pattern": "^prj_[A-Za-z0-9_-]{1,64}$"
+    },
+    "id_tl": {
+      "type": "string",
+      "pattern": "^tl_[A-Za-z0-9_-]{1,64}$"
+    },
+    "id_trk": {
+      "type": "string",
+      "pattern": "^trk_[A-Za-z0-9_-]{1,64}$"
+    },
+    "id_med": {
+      "type": "string",
+      "pattern": "^med_[A-Za-z0-9_-]{1,64}$"
+    },
+    "id_occ": {
+      "type": "string",
+      "pattern": "^occ_[A-Za-z0-9_-]{1,64}$"
+    },
+    "id_clp": {
+      "type": "string",
+      "pattern": "^clp_[A-Za-z0-9_-]{1,64}$"
+    },
+    "id_trn": {
+      "type": "string",
+      "pattern": "^trn_[A-Za-z0-9_-]{1,64}$"
+    },
+    "id_mrk": {
+      "type": "string",
+      "pattern": "^mrk_[A-Za-z0-9_-]{1,64}$"
+    },
+    "id_trs": {
+      "type": "string",
+      "pattern": "^trs_[A-Za-z0-9_-]{1,64}$"
+    },
+    "id_run": {
+      "type": "string",
+      "pattern": "^run_[A-Za-z0-9_-]{1,64}$"
+    },
+    "id_tok": {
+      "type": "string",
+      "pattern": "^tok_[A-Za-z0-9_-]{1,64}$"
+    },
+    "id_cue": {
+      "type": "string",
+      "pattern": "^cue_[A-Za-z0-9_-]{1,64}$"
+    },
+    "id_sty": {
+      "type": "string",
+      "pattern": "^sty_[A-Za-z0-9_-]{1,64}$"
+    },
+    "id_rev": {
+      "type": "string",
+      "pattern": "^rev_[A-Za-z0-9_-]{1,64}$"
+    },
     "revision": {
       "type": "object",
-      "required": ["seq", "id", "parent", "created_at", "author"],
+      "required": [
+        "seq",
+        "id",
+        "parent",
+        "created_at",
+        "author"
+      ],
       "additionalProperties": false,
       "properties": {
-        "seq": { "type": "integer", "minimum": 0 },
-        "id": { "$ref": "#/$defs/id_rev" },
-        "parent": { "oneOf": [{ "$ref": "#/$defs/id_rev" }, { "type": "null" }] },
-        "created_at": { "type": "string", "format": "date-time" },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "id": {
+          "$ref": "#/$defs/id_rev"
+        },
+        "parent": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/id_rev"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
         "author": {
           "type": "object",
-          "required": ["kind", "name"],
+          "required": [
+            "kind",
+            "name"
+          ],
           "additionalProperties": false,
           "properties": {
-            "kind": { "enum": ["human", "agent", "system"] },
-            "name": { "type": "string", "minLength": 1 }
+            "kind": {
+              "enum": [
+                "human",
+                "agent",
+                "system"
+              ]
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         }
       }
     },
-
     "media": {
       "type": "object",
-      "required": ["id", "kind", "path", "size_bytes", "fingerprint", "duration"],
+      "required": [
+        "id",
+        "kind",
+        "path",
+        "size_bytes",
+        "fingerprint",
+        "duration"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/id_med" },
-        "kind": { "enum": ["video", "audio", "image"] },
-        "name": { "type": "string" },
-        "path": { "$ref": "#/$defs/rel_path" },
-        "original_path": { "type": "string" },
-        "size_bytes": { "type": "integer", "minimum": 0 },
-        "fingerprint": { "$ref": "#/$defs/fingerprint" },
-        "duration": { "$ref": "#/$defs/duration" },
-        "start_timecode": { "$ref": "#/$defs/timecode" },
-        "reel": { "type": "string" },
+        "id": {
+          "$ref": "#/$defs/id_med"
+        },
+        "kind": {
+          "enum": [
+            "video",
+            "audio",
+            "image"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "$ref": "#/$defs/rel_path"
+        },
+        "original_path": {
+          "type": "string"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fingerprint": {
+          "$ref": "#/$defs/fingerprint"
+        },
+        "duration": {
+          "$ref": "#/$defs/duration"
+        },
+        "start_timecode": {
+          "$ref": "#/$defs/timecode"
+        },
+        "reel": {
+          "type": "string"
+        },
         "video": {
           "type": "object",
-          "required": ["rate", "width", "height"],
+          "required": [
+            "rate",
+            "width",
+            "height"
+          ],
           "additionalProperties": false,
           "properties": {
-            "rate": { "$ref": "#/$defs/rate" },
-            "width": { "type": "integer", "minimum": 1 },
-            "height": { "type": "integer", "minimum": 1 },
-            "pixel_aspect": { "$ref": "#/$defs/rate" },
-            "vfr": { "type": "boolean" }
+            "rate": {
+              "$ref": "#/$defs/rate"
+            },
+            "width": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "height": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "pixel_aspect": {
+              "$ref": "#/$defs/rate"
+            },
+            "vfr": {
+              "type": "boolean"
+            }
           }
         },
         "audio": {
           "type": "object",
-          "required": ["sample_rate", "channels"],
+          "required": [
+            "sample_rate",
+            "channels"
+          ],
           "additionalProperties": false,
           "properties": {
-            "sample_rate": { "$ref": "#/$defs/rate" },
-            "channels": { "type": "integer", "minimum": 1 }
+            "sample_rate": {
+              "$ref": "#/$defs/rate"
+            },
+            "channels": {
+              "type": "integer",
+              "minimum": 1
+            }
           }
         },
         "proxy": {
           "type": "object",
-          "required": ["path", "fingerprint"],
+          "required": [
+            "path",
+            "fingerprint"
+          ],
           "additionalProperties": false,
           "properties": {
-            "path": { "$ref": "#/$defs/rel_path" },
-            "size_bytes": { "type": "integer", "minimum": 0 },
-            "fingerprint": { "$ref": "#/$defs/fingerprint" }
+            "path": {
+              "$ref": "#/$defs/rel_path"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "fingerprint": {
+              "$ref": "#/$defs/fingerprint"
+            }
           }
         },
-        "ext": { "$ref": "#/$defs/ext" }
+        "ext": {
+          "$ref": "#/$defs/ext"
+        }
       },
       "allOf": [
-        { "if": { "properties": { "kind": { "const": "video" } } }, "then": { "required": ["video"] } },
-        { "if": { "properties": { "kind": { "const": "audio" } } }, "then": { "required": ["audio"] } }
-      ]
-    },
-
-    "timeline": {
-      "type": "object",
-      "required": ["id", "name", "edit_rate", "drop_frame", "start_timecode", "audio_rate", "format", "tracks", "markers"],
-      "additionalProperties": false,
-      "properties": {
-        "id": { "$ref": "#/$defs/id_tl" },
-        "name": { "type": "string", "minLength": 1 },
-        "edit_rate": { "$ref": "#/$defs/rate" },
-        "drop_frame": { "type": "boolean" },
-        "start_timecode": { "$ref": "#/$defs/timecode" },
-        "audio_rate": { "const": "48000" },
-        "format": {
-          "type": "object",
-          "required": ["width", "height"],
-          "additionalProperties": false,
-          "properties": {
-            "width": { "type": "integer", "minimum": 1 },
-            "height": { "type": "integer", "minimum": 1 },
-            "pixel_aspect": { "$ref": "#/$defs/rate" }
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "video"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "video"
+            ]
           }
         },
-        "tracks": { "type": "array", "items": { "$ref": "#/$defs/track" } },
-        "markers": { "type": "array", "items": { "$ref": "#/$defs/marker" } },
-        "ext": { "$ref": "#/$defs/ext" }
-      },
-      "if": { "properties": { "drop_frame": { "const": true } } },
-      "then": { "properties": { "edit_rate": { "enum": ["30000/1001", "60000/1001"] } } }
-    },
-
-    "track": {
-      "type": "object",
-      "required": ["id", "kind"],
-      "properties": { "kind": { "enum": ["video", "audio", "subtitle"] } },
-      "oneOf": [
-        { "$ref": "#/$defs/media_track" },
-        { "$ref": "#/$defs/subtitle_track" }
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "audio"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "audio"
+            ]
+          }
+        }
       ]
     },
-
-    "media_track": {
+    "timeline": {
       "type": "object",
-      "required": ["id", "kind", "name", "enabled", "clips", "transitions"],
+      "required": [
+        "id",
+        "name",
+        "edit_rate",
+        "drop_frame",
+        "start_timecode",
+        "audio_rate",
+        "format",
+        "tracks",
+        "markers"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/id_trk" },
-        "kind": { "enum": ["video", "audio"] },
-        "name": { "type": "string" },
-        "enabled": { "type": "boolean" },
-        "clips": { "type": "array", "items": { "$ref": "#/$defs/clip" } },
-        "transitions": { "type": "array", "items": { "$ref": "#/$defs/transition" } },
-        "ext": { "$ref": "#/$defs/ext" }
+        "id": {
+          "$ref": "#/$defs/id_tl"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "edit_rate": {
+          "$ref": "#/$defs/rate"
+        },
+        "drop_frame": {
+          "type": "boolean"
+        },
+        "start_timecode": {
+          "$ref": "#/$defs/timecode"
+        },
+        "audio_rate": {
+          "const": "48000"
+        },
+        "format": {
+          "type": "object",
+          "required": [
+            "width",
+            "height"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "width": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "height": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "pixel_aspect": {
+              "$ref": "#/$defs/rate"
+            }
+          }
+        },
+        "tracks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/track"
+          }
+        },
+        "markers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/marker"
+          }
+        },
+        "ext": {
+          "$ref": "#/$defs/ext"
+        }
+      },
+      "if": {
+        "properties": {
+          "drop_frame": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "edit_rate": {
+            "enum": [
+              "30000/1001",
+              "60000/1001"
+            ]
+          }
+        }
       }
     },
-
-    "clip": {
+    "track": {
       "type": "object",
-      "required": ["id", "occurrence_id", "media_id", "timeline_start", "duration", "source_start"],
+      "required": [
+        "id",
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "video",
+            "audio",
+            "subtitle"
+          ]
+        }
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/media_track"
+        },
+        {
+          "$ref": "#/$defs/subtitle_track"
+        }
+      ]
+    },
+    "media_track": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "name",
+        "enabled",
+        "clips",
+        "transitions"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/id_clp" },
-        "occurrence_id": { "$ref": "#/$defs/id_occ" },
-        "media_id": { "$ref": "#/$defs/id_med" },
-        "timeline_start": { "$ref": "#/$defs/time" },
-        "duration": { "$ref": "#/$defs/duration" },
-        "source_start": { "$ref": "#/$defs/time" },
-        "speed": { "$ref": "#/$defs/speed" },
-        "enabled": { "type": "boolean" },
-        "sync_broken": { "type": "boolean" },
-        "gain_db": { "type": "number", "minimum": -96, "maximum": 24 },
-        "source_channels": { "type": "array", "items": { "type": "integer", "minimum": 0 }, "minItems": 1, "uniqueItems": true },
+        "id": {
+          "$ref": "#/$defs/id_trk"
+        },
+        "kind": {
+          "enum": [
+            "video",
+            "audio"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "clips": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/clip"
+          }
+        },
+        "transitions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/transition"
+          }
+        },
+        "ext": {
+          "$ref": "#/$defs/ext"
+        }
+      }
+    },
+    "clip": {
+      "type": "object",
+      "required": [
+        "id",
+        "occurrence_id",
+        "media_id",
+        "timeline_start",
+        "duration",
+        "source_start"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id_clp"
+        },
+        "occurrence_id": {
+          "$ref": "#/$defs/id_occ"
+        },
+        "media_id": {
+          "$ref": "#/$defs/id_med"
+        },
+        "timeline_start": {
+          "$ref": "#/$defs/time"
+        },
+        "duration": {
+          "$ref": "#/$defs/duration"
+        },
+        "source_start": {
+          "$ref": "#/$defs/time"
+        },
+        "time_map": {
+          "$ref": "#/$defs/time_map"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "sync_broken": {
+          "type": "boolean"
+        },
+        "gain_db": {
+          "type": "number",
+          "minimum": -96,
+          "maximum": 24
+        },
+        "source_channels": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
         "transform": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "scale": { "type": "number", "exclusiveMinimum": 0 },
-            "rotation_deg": { "type": "number" },
+            "scale": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "rotation_deg": {
+              "type": "number"
+            },
             "position": {
               "description": "Offset from frame centre, as a fraction of timeline width/height.",
-              "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "minItems": 2,
+              "maxItems": 2
             },
             "crop": {
               "description": "Fractions of the source frame removed from each edge.",
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "left": { "type": "number", "minimum": 0, "maximum": 1 },
-                "top": { "type": "number", "minimum": 0, "maximum": 1 },
-                "right": { "type": "number", "minimum": 0, "maximum": 1 },
-                "bottom": { "type": "number", "minimum": 0, "maximum": 1 }
+                "left": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "top": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "right": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "bottom": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
               }
             }
           }
         },
-        "label": { "type": "string" },
-        "ext": { "$ref": "#/$defs/ext" }
+        "label": {
+          "type": "string"
+        },
+        "ext": {
+          "$ref": "#/$defs/ext"
+        }
       }
     },
-
     "transition": {
       "type": "object",
-      "required": ["id", "type", "from_clip", "to_clip", "duration", "alignment"],
+      "required": [
+        "id",
+        "type",
+        "from_clip",
+        "to_clip",
+        "duration",
+        "alignment"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/id_trn" },
-        "type": { "const": "cross_dissolve" },
-        "from_clip": { "$ref": "#/$defs/id_clp" },
-        "to_clip": { "$ref": "#/$defs/id_clp" },
-        "duration": { "$ref": "#/$defs/duration" },
-        "alignment": { "enum": ["center", "start", "end"] },
-        "ext": { "$ref": "#/$defs/ext" }
+        "id": {
+          "$ref": "#/$defs/id_trn"
+        },
+        "type": {
+          "const": "cross_dissolve"
+        },
+        "from_clip": {
+          "$ref": "#/$defs/id_clp"
+        },
+        "to_clip": {
+          "$ref": "#/$defs/id_clp"
+        },
+        "duration": {
+          "$ref": "#/$defs/duration"
+        },
+        "alignment": {
+          "enum": [
+            "center",
+            "start",
+            "end"
+          ]
+        },
+        "ext": {
+          "$ref": "#/$defs/ext"
+        }
       }
     },
-
     "subtitle_track": {
       "type": "object",
-      "required": ["id", "kind", "name", "enabled", "language", "carrier_tracks", "default_style_id", "overrides", "free_cues"],
+      "required": [
+        "id",
+        "kind",
+        "name",
+        "enabled",
+        "language",
+        "carrier_tracks",
+        "default_style_id",
+        "overrides",
+        "free_cues"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/id_trk" },
-        "kind": { "const": "subtitle" },
-        "name": { "type": "string" },
-        "enabled": { "type": "boolean" },
-        "language": { "type": "string", "minLength": 2 },
-        "carrier_tracks": { "type": "array", "items": { "$ref": "#/$defs/id_trk" }, "minItems": 1, "uniqueItems": true },
-        "default_style_id": { "$ref": "#/$defs/id_sty" },
+        "id": {
+          "$ref": "#/$defs/id_trk"
+        },
+        "kind": {
+          "const": "subtitle"
+        },
+        "name": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "language": {
+          "type": "string",
+          "minLength": 2
+        },
+        "carrier_tracks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/id_trk"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "default_style_id": {
+          "$ref": "#/$defs/id_sty"
+        },
         "overrides": {
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["occurrence_id", "cue_id"],
+            "required": [
+              "occurrence_id",
+              "cue_id"
+            ],
             "additionalProperties": false,
             "properties": {
-              "occurrence_id": { "$ref": "#/$defs/id_occ" },
-              "cue_id": { "$ref": "#/$defs/id_cue" },
-              "hidden": { "type": "boolean" },
-              "text": { "type": "string" },
-              "style_id": { "$ref": "#/$defs/id_sty" }
+              "occurrence_id": {
+                "$ref": "#/$defs/id_occ"
+              },
+              "cue_id": {
+                "$ref": "#/$defs/id_cue"
+              },
+              "hidden": {
+                "type": "boolean"
+              },
+              "text": {
+                "type": "string"
+              },
+              "style_id": {
+                "$ref": "#/$defs/id_sty"
+              }
             }
           }
         },
@@ -304,190 +793,451 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["id", "timeline_start", "duration", "text"],
+            "required": [
+              "id",
+              "timeline_start",
+              "duration",
+              "text"
+            ],
             "additionalProperties": false,
             "properties": {
-              "id": { "$ref": "#/$defs/id_cue" },
-              "timeline_start": { "$ref": "#/$defs/time" },
-              "duration": { "$ref": "#/$defs/duration" },
-              "text": { "type": "string", "minLength": 1 },
-              "style_id": { "$ref": "#/$defs/id_sty" },
-              "ext": { "$ref": "#/$defs/ext" }
+              "id": {
+                "$ref": "#/$defs/id_cue"
+              },
+              "timeline_start": {
+                "$ref": "#/$defs/time"
+              },
+              "duration": {
+                "$ref": "#/$defs/duration"
+              },
+              "text": {
+                "type": "string",
+                "minLength": 1
+              },
+              "style_id": {
+                "$ref": "#/$defs/id_sty"
+              },
+              "ext": {
+                "$ref": "#/$defs/ext"
+              }
             }
           }
         },
-        "ext": { "$ref": "#/$defs/ext" }
+        "ext": {
+          "$ref": "#/$defs/ext"
+        }
       }
     },
-
     "marker": {
       "type": "object",
-      "required": ["id", "at", "duration", "kind", "text"],
+      "required": [
+        "id",
+        "at",
+        "duration",
+        "kind",
+        "text"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/id_mrk" },
-        "at": { "$ref": "#/$defs/time" },
-        "duration": { "$ref": "#/$defs/duration_or_zero" },
-        "kind": { "enum": ["note", "todo", "chapter", "review"] },
-        "text": { "type": "string" },
-        "ext": { "$ref": "#/$defs/ext" }
+        "id": {
+          "$ref": "#/$defs/id_mrk"
+        },
+        "at": {
+          "$ref": "#/$defs/time"
+        },
+        "duration": {
+          "$ref": "#/$defs/duration_or_zero"
+        },
+        "kind": {
+          "enum": [
+            "note",
+            "todo",
+            "chapter",
+            "review"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "ext": {
+          "$ref": "#/$defs/ext"
+        }
       }
     },
-
     "transcript": {
       "type": "object",
-      "required": ["id", "media_id", "source_channels", "language", "raw_runs", "tokens", "cues"],
+      "required": [
+        "id",
+        "media_id",
+        "source_channels",
+        "language",
+        "raw_runs",
+        "tokens",
+        "cues"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/id_trs" },
-        "media_id": { "$ref": "#/$defs/id_med" },
-        "source_channels": { "type": "array", "items": { "type": "integer", "minimum": 0 }, "minItems": 1, "uniqueItems": true },
-        "language": { "type": "string", "minLength": 2 },
-        "raw_runs": { "type": "array", "items": { "$ref": "#/$defs/raw_run" } },
-        "tokens": { "type": "array", "items": { "$ref": "#/$defs/token" } },
-        "cues": { "type": "array", "items": { "$ref": "#/$defs/cue" } },
-        "ext": { "$ref": "#/$defs/ext" }
+        "id": {
+          "$ref": "#/$defs/id_trs"
+        },
+        "media_id": {
+          "$ref": "#/$defs/id_med"
+        },
+        "source_channels": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "language": {
+          "type": "string",
+          "minLength": 2
+        },
+        "raw_runs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/raw_run"
+          }
+        },
+        "tokens": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/token"
+          }
+        },
+        "cues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/cue"
+          }
+        },
+        "ext": {
+          "$ref": "#/$defs/ext"
+        }
       }
     },
-
     "engine": {
       "type": "object",
-      "required": ["name", "model", "version"],
+      "required": [
+        "name",
+        "model",
+        "version"
+      ],
       "additionalProperties": false,
       "properties": {
-        "name": { "type": "string", "minLength": 1 },
-        "model": { "type": "string", "minLength": 1 },
-        "version": { "type": "string", "minLength": 1 },
-        "weights_digest": { "type": "string" }
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "weights_digest": {
+          "type": "string"
+        }
       }
     },
-
     "raw_run": {
       "type": "object",
-      "required": ["id", "kind", "engine", "created_at", "range", "tokens"],
+      "required": [
+        "id",
+        "kind",
+        "engine",
+        "created_at",
+        "range",
+        "tokens"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/id_run" },
-        "kind": { "enum": ["asr", "align"] },
-        "engine": { "$ref": "#/$defs/engine" },
-        "created_at": { "type": "string", "format": "date-time" },
+        "id": {
+          "$ref": "#/$defs/id_run"
+        },
+        "kind": {
+          "enum": [
+            "asr",
+            "align"
+          ]
+        },
+        "engine": {
+          "$ref": "#/$defs/engine"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
         "range": {
           "type": "object",
-          "required": ["start", "duration"],
+          "required": [
+            "start",
+            "duration"
+          ],
           "additionalProperties": false,
           "properties": {
-            "start": { "$ref": "#/$defs/time" },
-            "duration": { "$ref": "#/$defs/duration" }
+            "start": {
+              "$ref": "#/$defs/time"
+            },
+            "duration": {
+              "$ref": "#/$defs/duration"
+            }
           }
         },
         "tokens": {
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["text", "start", "end"],
+            "required": [
+              "text",
+              "start",
+              "end"
+            ],
             "additionalProperties": false,
             "properties": {
-              "text": { "type": "string" },
-              "start": { "$ref": "#/$defs/time" },
-              "end": { "$ref": "#/$defs/time" },
-              "conf": { "$ref": "#/$defs/conf" }
+              "text": {
+                "type": "string"
+              },
+              "start": {
+                "$ref": "#/$defs/time"
+              },
+              "end": {
+                "$ref": "#/$defs/time"
+              },
+              "conf": {
+                "$ref": "#/$defs/conf"
+              }
             }
           }
         }
       }
     },
-
     "token": {
       "type": "object",
-      "required": ["id", "text", "state", "align"],
+      "required": [
+        "id",
+        "text",
+        "state",
+        "align"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/id_tok" },
-        "text": { "type": "string", "description": "Displayed text; empty string hides a token that was actually spoken." },
-        "heard": { "type": "string", "description": "What was actually spoken, present only when it differs from text." },
-        "state": { "enum": ["auto", "edited", "approved"] },
+        "id": {
+          "$ref": "#/$defs/id_tok"
+        },
+        "text": {
+          "type": "string",
+          "description": "Displayed text; empty string hides a token that was actually spoken."
+        },
+        "heard": {
+          "type": "string",
+          "description": "What was actually spoken, present only when it differs from text."
+        },
+        "state": {
+          "enum": [
+            "auto",
+            "edited",
+            "approved"
+          ]
+        },
         "align": {
           "type": "object",
-          "required": ["start", "end", "run"],
+          "required": [
+            "start",
+            "end",
+            "run"
+          ],
           "additionalProperties": false,
           "properties": {
-            "start": { "$ref": "#/$defs/time" },
-            "end": { "$ref": "#/$defs/time" },
-            "conf": { "$ref": "#/$defs/conf" },
-            "run": { "$ref": "#/$defs/id_run" }
+            "start": {
+              "$ref": "#/$defs/time"
+            },
+            "end": {
+              "$ref": "#/$defs/time"
+            },
+            "conf": {
+              "$ref": "#/$defs/conf"
+            },
+            "run": {
+              "$ref": "#/$defs/id_run"
+            }
           }
         },
-        "ext": { "$ref": "#/$defs/ext" }
+        "ext": {
+          "$ref": "#/$defs/ext"
+        }
       }
     },
-
     "cue": {
       "type": "object",
-      "required": ["id", "first_token", "last_token", "state"],
+      "required": [
+        "id",
+        "first_token",
+        "last_token",
+        "state"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/id_cue" },
-        "first_token": { "$ref": "#/$defs/id_tok" },
-        "last_token": { "$ref": "#/$defs/id_tok" },
-        "breaks": { "type": "array", "items": { "$ref": "#/$defs/id_tok" }, "uniqueItems": true },
+        "id": {
+          "$ref": "#/$defs/id_cue"
+        },
+        "first_token": {
+          "$ref": "#/$defs/id_tok"
+        },
+        "last_token": {
+          "$ref": "#/$defs/id_tok"
+        },
+        "breaks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/id_tok"
+          },
+          "uniqueItems": true
+        },
         "timing": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "start": { "$ref": "#/$defs/time" },
-            "end": { "$ref": "#/$defs/time" },
-            "locked": { "type": "boolean" }
+            "start": {
+              "$ref": "#/$defs/time"
+            },
+            "end": {
+              "$ref": "#/$defs/time"
+            },
+            "locked": {
+              "type": "boolean"
+            }
           }
         },
-        "style_id": { "$ref": "#/$defs/id_sty" },
-        "state": { "enum": ["auto", "edited", "approved"] },
-        "ext": { "$ref": "#/$defs/ext" }
+        "style_id": {
+          "$ref": "#/$defs/id_sty"
+        },
+        "state": {
+          "enum": [
+            "auto",
+            "edited",
+            "approved"
+          ]
+        },
+        "ext": {
+          "$ref": "#/$defs/ext"
+        }
       }
     },
-
-    "color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$" },
-
+    "color": {
+      "type": "string",
+      "pattern": "^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$"
+    },
     "subtitle_style": {
       "type": "object",
-      "required": ["id", "name", "version", "font_family", "font_size", "color"],
+      "required": [
+        "id",
+        "name",
+        "version",
+        "font_family",
+        "font_size",
+        "color"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/id_sty" },
-        "name": { "type": "string", "minLength": 1 },
-        "version": { "type": "integer", "minimum": 1 },
-        "font_family": { "type": "string", "minLength": 1 },
-        "font_weight": { "type": "integer", "minimum": 100, "maximum": 900 },
-        "font_size": { "type": "number", "exclusiveMinimum": 0, "description": "Fraction of timeline height." },
-        "color": { "$ref": "#/$defs/color" },
+        "id": {
+          "$ref": "#/$defs/id_sty"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "font_family": {
+          "type": "string",
+          "minLength": 1
+        },
+        "font_weight": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 900
+        },
+        "font_size": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Fraction of timeline height."
+        },
+        "color": {
+          "$ref": "#/$defs/color"
+        },
         "outline": {
           "type": "object",
-          "required": ["color", "width"],
+          "required": [
+            "color",
+            "width"
+          ],
           "additionalProperties": false,
           "properties": {
-            "color": { "$ref": "#/$defs/color" },
-            "width": { "type": "number", "minimum": 0, "description": "Fraction of font size." }
+            "color": {
+              "$ref": "#/$defs/color"
+            },
+            "width": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Fraction of font size."
+            }
           }
         },
         "box": {
           "type": "object",
-          "required": ["color"],
+          "required": [
+            "color"
+          ],
           "additionalProperties": false,
           "properties": {
-            "color": { "$ref": "#/$defs/color" },
-            "padding": { "type": "number", "minimum": 0 }
+            "color": {
+              "$ref": "#/$defs/color"
+            },
+            "padding": {
+              "type": "number",
+              "minimum": 0
+            }
           }
         },
         "position": {
           "type": "object",
-          "required": ["anchor", "margin_v"],
+          "required": [
+            "anchor",
+            "margin_v"
+          ],
           "additionalProperties": false,
           "properties": {
-            "anchor": { "enum": ["bottom", "top", "middle"] },
-            "margin_v": { "type": "number", "minimum": 0, "maximum": 1, "description": "Fraction of timeline height." }
+            "anchor": {
+              "enum": [
+                "bottom",
+                "top",
+                "middle"
+              ]
+            },
+            "margin_v": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Fraction of timeline height."
+            }
           }
         },
-        "max_lines": { "type": "integer", "minimum": 1, "maximum": 3 },
-        "ext": { "$ref": "#/$defs/ext" }
+        "max_lines": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3
+        },
+        "ext": {
+          "$ref": "#/$defs/ext"
+        }
       }
     }
   }
