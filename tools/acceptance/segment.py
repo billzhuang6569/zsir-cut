@@ -87,3 +87,31 @@ def segment(tokens, profile="zh-talk", max_lines=None):
         for cue in split_sentence(s, P, ml):
             out.append({"first": cue[0]["ids"][0], "last": cue[-1]["ids"][-1], "breaks": line_breaks(cue, P)})
     return out
+
+def display_intervals(transcript, profile=None, max_lines=None):
+    """subtitle-rules.md section 7: cue_id -> (start, end) in source seconds (Fraction). Cues with no visible token are omitted."""
+    T = lambda s: F(s[:-1])
+    lang = transcript["language"]; P = dict(PROFILES[profile or ("zh-talk" if lang.startswith("zh") else "en-talk")]); zh = P["zh"]
+    toks = transcript["tokens"]; idx = {t["id"]: i for i, t in enumerate(toks)}
+    rows = []
+    for cue in transcript["cues"]:
+        vis = [t for t in toks[idx[cue["first_token"]]: idx[cue["last_token"]] + 1] if t["text"]]
+        if not vis: continue
+        tm = cue.get("timing") or {}
+        start = T(tm["start"]) if tm.get("start") else T(vis[0]["align"]["start"])
+        end = T(tm["end"]) if tm.get("end") else T(vis[-1]["align"]["end"])
+        w = seq_w([{"text": t["text"]} for t in vis], zh)
+        rows.append([cue["id"], start, end, w, bool(tm.get("start") or tm.get("end"))])
+    rows.sort(key=lambda r: r[1])
+    out = {}
+    for i, (cid, s, e, w, manual) in enumerate(rows):
+        nxt = rows[i + 1][1] if i + 1 < len(rows) else None
+        limit = (nxt - P["min_gap"]) if nxt is not None else None
+        if not manual:
+            if e - s < P["min_duration"]:
+                target = s + P["min_duration"]; e = max(e, min(target, limit) if limit is not None else target)
+            if w / (e - s) > P["cps"]:
+                target = s + w / P["cps"]; e = max(e, min(target, limit) if limit is not None else target)
+            if limit is not None and e > limit: e = limit
+        out[cid] = (s, e)
+    return out
