@@ -11,3 +11,4 @@
 | `projection_compare.mjs` | 比较 core 的投影结果和上面的独立投影器 | `node tools/acceptance/projection_compare.mjs <工程>...` |
 | `validate_compare.mjs` | 列出 core 校验器报出的规则编号；对真实素材跑 L2 和重链接 | `node tools/acceptance/validate_compare.mjs codes <工程>...` |
 | `fixtures_check.py` | 独立检查生成的测试素材：条码、白帧与脉冲、外录偏移、提示音、指纹 | `python3 -I tools/acceptance/fixtures_check.py <仓库根目录>` |
+| `edit_fuzz.py` | 对 `edit` 做随机组合压力测试：每步独立校验，联动操作不得造成失步，最后逐步撤销须回到原样 | `python3 -I tools/acceptance/edit_fuzz.py <工程> [步数] [种子]` |
