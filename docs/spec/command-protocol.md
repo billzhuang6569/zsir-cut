@@ -96,14 +96,14 @@
 
 - 锁文件是 `.zcut/<project_id>/lock`，用「文件不存在才创建」的方式获取，内容是 JSON：`pid`、`hostname`、`acquired_at`、`request_id`。
 - 锁已存在时，等待最多 10 秒，每 100 毫秒重试一次。仍拿不到就返回 `failed`，错误码 `E_IO`，`retryable` 为 true，`details.reason` 为 `busy`。
-- 锁的主人进程已不存在，判断条件是同一主机且该 `pid` 不存在，就视为过期，删除后重新获取，并在日志里记一条。不同主机的锁不判断过期，按占用处理。
+- 锁的主人进程已不存在，判断条件是同一主机且该 `pid` 不存在，就视为过期，删除后重新获取，并在 `.zcut/<project_id>/lock-events.jsonl` 里记一条：时间、被接管的锁内容、接管者。锁事件不是修订，不进 `journal.jsonl`。不同主机的锁不判断过期，按占用处理。
 
 **写入步骤**：
 
 1. 获取锁。
 2. 读工程文件，执行崩溃恢复检查（见下文）。
-3. 核对 `base_revision`，不等则释放锁并返回 `conflict`。
-4. 查幂等记录，命中则释放锁并原样返回第一次的信封，`receipt.replayed` 为 true。
+3. 查幂等记录，命中则释放锁并原样返回第一次的信封，`receipt.replayed` 为 true；同键不同请求返回 `rejected`、`E_IDEMPOTENCY_MISMATCH`。幂等必须在修订检查之前，否则一个已成功的请求重发时会因为修订已经前进而被当成冲突。
+4. 核对 `base_revision`，不等则释放锁并返回 `conflict`。
 5. 在内存里应用全部操作，做 L1 校验。有错误就释放锁并返回 `rejected`，错误码 `E_VALIDATION`。
 6. 生成新修订：`seq` 加一，`id` 用新的 `rev_` ID，`parent` 是旧修订 ID，`created_at` 是当前时间，`author` 取自请求。
 7. 按规范序列化写到同目录的临时文件，fsync 文件，原子替换工程文件，fsync 目录。
@@ -111,6 +111,8 @@
 9. 释放锁，返回 `applied`。
 
 第 7 步之前失败，工程文件不变，返回 `failed`。第 7 步完成之后、第 8 步完成之前失败，返回 `committed_unverified`，`receipt.after` 是新修订 ID。
+
+日志和幂等记录是两个文件，第 8 步中间断掉时，可能有日志条目而没有幂等记录。这时同一请求重发查不到幂等记录，会走到第 4 步，因修订已经前进而返回 `conflict`，不会被重复执行。Agent 收到 `conflict` 后按规定重新读取工程。
 
 **崩溃恢复**：每次加锁后读工程文件时，比较工程里的修订 ID 和日志最后一条。工程修订比日志新，说明上次在第 7、8 步之间中断。此时补写一条 `kind` 为 `recovered` 的日志条目，记录修订 ID、父修订和时间，不含实体快照；这个修订不能撤销。
 
@@ -137,7 +139,7 @@
 | `at` / `author` | 时间、作者 |
 | `verb` / `request_id` / `idempotency_key` | 产生它的请求 |
 | `ops` | 请求里的操作原文，用于审计和编辑会话重放 |
-| `changes` | 实体级快照：每个改动的实体一条，含 `key`、`before`、`after` |
+| `changes` | 实体级快照：每个改动的实体一条，含 `key`、`entity`、`before`、`after`、`before_parent`、`after_parent`、`before_index`、`after_index` |
 | `target` | `undo`、`redo` 条目指向的修订 |
 
 **实体与键**：
@@ -151,7 +153,9 @@
 | 母稿 | 母稿 ID | 除 `raw_runs`、`tokens`、`cues` 外的字段 |
 | 覆盖值 | `override:<轨道ID>:<occurrence_id>:<cue_id>` | 整个对象 |
 
-`before` 为 null 表示新建，`after` 为 null 表示删除。数组里的先后顺序由规范序列化决定，所以快照里不存位置，轨道除外。
+`before` 为 null 表示新建，`after` 为 null 表示删除。`*_parent` 是实体所在的上级：媒体、时间线、母稿、样式的上级是 `project`；轨道和标记是时间线 ID；片段、转场、覆盖值、独立字幕条是轨道 ID；识别运行、字词、字幕条是母稿 ID。
+
+`*_index` 是实体在上级数组里的下标，只对不按规则排序的数组记录：`media`、`timelines`、`tracks`、`transitions`、`transcripts`、`raw_runs`、`cues`、`subtitle_styles`、`overrides`、`free_cues`。`clips`、`tokens`、`markers` 由规范序列化排序，下标记为 null。撤销恢复被删实体时插回 `before_index` 的位置，这样撤销后的工程文件与修订前逐字节相同，只有 `revision` 不同。
 
 **撤销粒度**：一个修订就是一步撤销。一个编辑请求或一个批准的编辑会话产生一个修订，所以撤销粒度和「用户的一条指令」一致。
 

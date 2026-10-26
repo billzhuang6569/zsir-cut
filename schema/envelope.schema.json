@@ -40,7 +40,7 @@
         "additionalProperties": false,
         "properties": {
           "op": { "type": "string" },
-          "entity": { "enum": ["project", "media", "timeline", "track", "clip", "transition", "marker", "transcript", "token", "cue", "override", "free_cue", "style"] },
+          "entity": { "enum": ["project", "media", "timeline", "track", "clip", "transition", "marker", "transcript", "run", "token", "cue", "override", "free_cue", "style"] },
           "id": { "type": "string" },
           "action": { "enum": ["created", "updated", "trimmed", "moved", "removed", "split_from"] },
           "detail": { "type": "object" }
