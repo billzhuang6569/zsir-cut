@@ -11,7 +11,8 @@ import {
   runExport,
 } from "./export-framework.js";
 import { fingerprint } from "./fingerprint.js";
-import { jobPath, readJob, startExportJob, startTranscribeJob } from "./jobs.js";
+import { jobPath, readJob, startExportJob, startPreviewJob, startTranscribeJob } from "./jobs.js";
+import { renderPreview, timelineFrames, viewTimeline } from "./preview.js";
 import { applyEdit, SUBTITLE_OPS } from "./project/edit.js";
 import { diffProjectEntities } from "./project/entities.js";
 import { newId } from "./project/id.js";
@@ -284,6 +285,8 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
     verb !== "import_media" &&
     verb !== "transcribe" &&
     verb !== "edit" &&
+    verb !== "render_preview" &&
+    verb !== "view_timeline" &&
     verb !== "export" &&
     verb !== "record_handoff_check" &&
     verb !== "job_status" &&
@@ -317,6 +320,57 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
       output.result = (await readJob(
         jobPath(request.project as string, parsed.project.id, request.job_id as string),
       )) as unknown as Record<string, unknown>;
+      return output;
+    }
+    if (verb === "render_preview" || verb === "view_timeline") {
+      const extra = Object.keys(request).filter((key) => !["project", "author", "timeline_id", "output"].includes(key));
+      if (extra.length)
+        return errorEnvelope(
+          verb,
+          requestId,
+          "rejected",
+          "E_UNSUPPORTED",
+          `Unsupported preview fields: ${extra.join(", ")}`,
+        );
+      if (
+        (request.timeline_id !== undefined && typeof request.timeline_id !== "string") ||
+        (request.output !== undefined && (typeof request.output !== "string" || !request.output))
+      )
+        return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Invalid timeline_id or output");
+      const projectPath = request.project as string;
+      const parsed = parseProject(await readFile(projectPath, "utf8"));
+      if (!parsed.ok) return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Project file is invalid");
+      const project = parsed.project;
+      const timeline = project.timelines.find((item) => item.id === (request.timeline_id ?? project.timelines[0]?.id));
+      if (!timeline) return errorEnvelope(verb, requestId, "rejected", "E_NOT_FOUND", "Timeline not found");
+      if (timelineFrames(timeline) <= 0n)
+        return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Timeline has no frames");
+      const issues = validateProjectSemantics(project, parsed.issues);
+      if (issues.some((issue) => issue.severity === "error"))
+        return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Project has validation errors");
+      if (!options.worker) {
+        const jobId = await startPreviewJob(verb, projectPath, project.id, request);
+        const output = basic(verb, requestId);
+        output.status = "accepted";
+        output.result = { job_id: jobId };
+        return output;
+      }
+      if (!options.jobFile) return errorEnvelope(verb, requestId, "failed", "E_INTERNAL", "Missing job path");
+      const jobId = basename(dirname(options.jobFile));
+      const directory = resolve((request.output as string | undefined) ?? dirname(options.jobFile));
+      const safeName = (name: string) => name.replaceAll(/[\\/:*?"<>|]/g, "_");
+      const result =
+        verb === "render_preview"
+          ? await renderPreview(project, timeline, projectPath, {
+              output: join(directory, `${safeName(project.name)}_r${project.revision.seq}_preview_${jobId}.mov`),
+              profile: "preview",
+              exportId: jobId,
+            })
+          : await viewTimeline(project, timeline, projectPath, join(directory, `view_${jobId}`));
+      const output = basic(verb, requestId);
+      output.status = "applied";
+      output.result = result;
+      output.verification = { level: "L1", passed: true, issues };
       return output;
     }
     if (verb === "transcribe") {
@@ -483,6 +537,8 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
       const output = basic(verb, requestId);
       output.status = "applied";
       output.result = { package: result.package, report: result.report };
+      const issues = validateProjectSemantics(project, parsed.issues);
+      output.verification = { level: "L1", passed: !issues.some((item) => item.severity === "error"), issues };
       return output;
     }
     if (verb.startsWith("session_") || (request.session_id !== undefined && ["edit", "undo", "redo"].includes(verb)))

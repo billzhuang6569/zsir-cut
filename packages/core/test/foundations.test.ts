@@ -54,6 +54,15 @@ it("shows the frame immediately before an exact reverse source boundary", async 
   expect(() => sourceFrameAt(clip, clip.duration, rational(25n))).toThrow(RangeError);
 });
 
+it("keeps a hold frame when its endpoint points backward", async () => {
+  const parsed = parseProject(await readFile("fixtures/regressions/hold-falling-end-25.zcut.json", "utf8"));
+  if (!parsed.ok) throw new Error("Regression fixture invalid");
+  const track = parsed.project.timelines[0]?.tracks[0];
+  if (track?.kind !== "video" || !track.clips[0]) throw new Error("Hold clip missing");
+  expect(sourceFrameAt(track.clips[0], rational(0n), rational(25n))).toBe(25n);
+  expect(sourceFrameAt(track.clips[0], rational(24n, 25n), rational(25n))).toBe(25n);
+});
+
 describe("timecode", () => {
   it("handles known drop-frame values and inverse", () => {
     for (const [frame, code] of [

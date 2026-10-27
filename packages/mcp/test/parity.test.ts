@@ -44,6 +44,8 @@ describe("CLI and MCP", () => {
       const cases = [
         { verb: "validate", input: {} },
         { verb: "validate", input: { media: true } },
+        { verb: "render_preview", input: { timeline_id: "tl_missing" } },
+        { verb: "view_timeline", input: { timeline_id: "tl_missing" } },
         { verb: "diff", input: { from: "rev_fixture_1" } },
         {
           verb: "session_begin",

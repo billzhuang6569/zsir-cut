@@ -34,7 +34,9 @@ export function sourceFrameAt(clip: Clip, at: Rational, sourceRate: Rational): b
     (_point, index) => index < points.length - 1 && compare(at, points[index + 1]!.at) < 0,
   );
   const source = mul(mapClipTimeToSource(clip, at), sourceRate);
-  return compare(points[segment + 1]!.source, points[segment]!.source) < 0 ? ceil(source) - 1n : floor(source);
+  return points[segment]!.interp !== "hold" && compare(points[segment + 1]!.source, points[segment]!.source) < 0
+    ? ceil(source) - 1n
+    : floor(source);
 }
 
 /** Source-to-sequence inversion is defined only for a source-increasing segment. */

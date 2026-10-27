@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -18,6 +19,11 @@ import exporter from "../src/index.js";
 const fixtures = ["std-25", "std-2997-df", "std-2997-ndf"];
 const profiles = ["fcp-11-fcpxml-1.13", "fcp-10.6-fcpxml-1.11"] as const;
 const mediaRoot = pathToFileURL(resolve("fixtures/.media")).href;
+const previewStub: NonNullable<Parameters<typeof runExport>[6]> = async (_project, _timeline, _path, options) => {
+  const data = Buffer.from("preview test placeholder");
+  await writeFile(options.output, data);
+  return { path: options.output, sha256: createHash("sha256").update(data).digest("hex"), frames: "0" };
+};
 async function generate(path: string, profile: (typeof profiles)[number]) {
   const parsed = parseProject(await readFile(path, "utf8"));
   if (!parsed.ok) throw new Error(`Invalid fixture: ${path}`);
@@ -183,6 +189,7 @@ describe("FCPXML", () => {
         "exp_grid",
         "2026-10-27T00:00:00.000Z",
         profiles[0],
+        previewStub,
       );
       expect(result.rejected).toBe(false);
       expect(result.report.items.some((item) => item.reason_code === "R_GRID_ROUNDED")).toBe(true);
@@ -322,7 +329,15 @@ describe("FCPXML", () => {
       await writeFile(projectPath, serializeProject(project));
       const input = { project: projectPath, output: join(directory, "good") };
       const withSha = { ...exporter, gitSha: async () => "abcdef0" };
-      const good = await runExport(project, input, withSha, "exp_test", "2026-10-27T00:00:00.000Z", profiles[0]);
+      const good = await runExport(
+        project,
+        input,
+        withSha,
+        "exp_test",
+        "2026-10-27T00:00:00.000Z",
+        profiles[0],
+        previewStub,
+      );
       expect(good.rejected).toBe(false);
       if (good.rejected) throw new Error("Export rejected");
       expect(good.report.summary.worst_severity).toBe("warning");
@@ -340,6 +355,7 @@ describe("FCPXML", () => {
         "exp_fallback",
         "2026-10-27T00:00:00.000Z",
         profiles[0],
+        previewStub,
       );
       if (fallback.rejected) throw new Error("Fallback export rejected");
       expect(fallback.manifest.exporter.git_sha).toBe("0000000");
