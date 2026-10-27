@@ -51,11 +51,13 @@ if __name__ == "__main__":
         lr = json.load(open(sys.argv[3], encoding="utf-8")); items = lr.get("items", lr) if isinstance(lr, dict) else lr
         rounded = {x["entity_id"] for x in items if x.get("reason_code") == "R_GRID_ROUNDED"}
     ka = {(r[0], r[1], r[2]): r for r in a}; kb = {(r[0], r[1], r[2]): r for r in b}
+    R = F(d["timelines"][0]["edit_rate"]); media = {m["id"]: m for m in d["media"]}
     def close(x, y, cid):
         if x == y: return True
         if cid not in rounded: return False
-        tol = lambda p, q, u: abs(p - q) <= u
-        return x[:4] == y[:4] and all(tol(x[i], y[i], 1) for i in (4, 5)) and all(tol(x[i], y[i], 2) for i in (6, 7))
+        # R_GRID_ROUNDED: source points may move by at most half a sequence frame (+1 unit for integer rounding)
+        src_tol = media_unit(media[x[3]]) / (2 * R) + 1
+        return x[:6] == y[:6] and all(abs(x[i] - y[i]) <= src_tol for i in (6, 7))
     bad = [k for k in ka if k not in kb or not close(ka[k], kb[k], k[2])] + [k for k in kb if k not in ka]
     print(f"rows project {len(a)} xmeml {len(b)} | mismatched {len(bad)} | grid-rounded {len(rounded)}")
     for k in bad[:10]: print("  project:", fmt(ka[k]) if k in ka else None); print("  xmeml:  ", fmt(kb[k]) if k in kb else None)

@@ -482,7 +482,8 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
         (profile === "fcp-11-fcpxml-1.13" ||
         profile === "fcp-10.6-fcpxml-1.11" ||
         profile === "resolve-21-fcpxml-1.11" ||
-        profile === "resolve-18.5-otio"
+        profile === "resolve-18.5-otio" ||
+        profile === "premiere-25-xmeml-5"
           ? resolve(dirname(fileURLToPath(import.meta.url)), "../../exporters/dist/index.js")
           : undefined);
       const exporter =

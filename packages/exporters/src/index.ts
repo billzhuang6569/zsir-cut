@@ -28,6 +28,7 @@ import {
   type Timeline,
 } from "../../core/dist/index.js";
 import { otioExporter } from "./otio.js";
+import { xmemlExporter } from "./xmeml.js";
 
 const zero = rational(0n);
 const sec = (value: Rational) => printRational(value, true);
@@ -1008,20 +1009,30 @@ const exporter: Exporter & { validationNotes?: string } = {
   async generate(project, timeline, profile, paths, exportId) {
     return profile === "resolve-18.5-otio"
       ? otioExporter.generate(project, timeline, profile, paths, exportId)
-      : fcpxmlExporter.generate(project, timeline, profile, paths);
+      : profile === "premiere-25-xmeml-5"
+        ? xmemlExporter.generate(project, timeline, profile, paths, exportId)
+        : fcpxmlExporter.generate(project, timeline, profile, paths);
   },
   async readBack(data, timeline) {
     return data.toString().trimStart().startsWith("{")
       ? otioExporter.readBack(data, timeline)
-      : fcpxmlExporter.readBack(data, timeline);
+      : data.toString().includes('<xmeml version="5">')
+        ? xmemlExporter.readBack(data, timeline)
+        : fcpxmlExporter.readBack(data, timeline);
   },
   losses(project, timeline, profile) {
     return profile === "resolve-18.5-otio"
       ? otioExporter.losses(project, timeline, profile)
-      : fcpxmlExporter.losses(project, timeline, profile);
+      : profile === "premiere-25-xmeml-5"
+        ? xmemlExporter.losses(project, timeline, profile)
+        : fcpxmlExporter.losses(project, timeline, profile);
   },
   async validate(data) {
-    const selected = data.toString().trimStart().startsWith("{") ? otioExporter : fcpxmlExporter;
+    const selected = data.toString().trimStart().startsWith("{")
+      ? otioExporter
+      : data.toString().includes('<xmeml version="5">')
+        ? xmemlExporter
+        : fcpxmlExporter;
     const valid = await selected.validate(data);
     if (selected.validationNotes) this.validationNotes = selected.validationNotes;
     return valid;
