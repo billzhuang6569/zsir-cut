@@ -142,7 +142,7 @@ xmeml version="5"
 | `subtitle_text_timing` | `approximated`，`R_SUB_MANUAL_IMPORT` | 同左 |
 | `subtitle_style` | `approximated`，`R_STYLE_NOT_REPRESENTABLE` | 同左 |
 | `gain` | `unsupported`，`R_FORMAT_NO_FIELD` | 保留，不记 |
-| `transform` | `unsupported`，`R_FORMAT_NO_FIELD` | 保留，不记 |
+| `transform` | 保留：写成 Resolve 私有效果（见 2.5），不记损失 | 保留，不记 |
 | `speed_segmented` | `approximated`，`R_SPLIT_FOR_RETIME` | 同左 |
 | `speed_smooth` | `approximated`，`R_SPLIT_FOR_RETIME` | 同左 |
 | `ext_data` | 写进 `metadata.zsir`，不记 | `unsupported`，`R_EXT_DROPPED` |

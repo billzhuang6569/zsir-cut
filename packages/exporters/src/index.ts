@@ -232,17 +232,30 @@ function clipAttrs(clip: Clip, ref: string, offset: Rational, start: Rational, l
       : {}),
   };
 }
-function properties(clip: Clip, media: Media, timelineHeight: number, audio?: Clip): Node[] {
+const decimal = (value: number) => String(Number(value.toFixed(6)));
+function properties(clip: Clip, media: Media, format: Timeline["format"], audio?: Clip): Node[] {
   const result: Node[] = [];
   if (clip.transform?.crop) {
     const crop = clip.transform.crop;
     result.push(
       node("adjust-crop", { mode: "trim" }, [
         node("trim-rect", {
-          ...(crop.left === undefined ? {} : { left: String((crop.left * 100) / (media.video?.width ?? 1)) }),
-          ...(crop.top === undefined ? {} : { top: String((crop.top * 100) / (media.video?.height ?? 1)) }),
-          ...(crop.right === undefined ? {} : { right: String((crop.right * 100) / (media.video?.width ?? 1)) }),
-          ...(crop.bottom === undefined ? {} : { bottom: String((crop.bottom * 100) / (media.video?.height ?? 1)) }),
+          ...(crop.left === undefined
+            ? {}
+            : {
+                left: decimal(
+                  (crop.left * (media.video?.width ?? format.width) * 100) / (media.video?.height ?? format.height),
+                ),
+              }),
+          ...(crop.top === undefined ? {} : { top: decimal(crop.top * 100) }),
+          ...(crop.right === undefined
+            ? {}
+            : {
+                right: decimal(
+                  (crop.right * (media.video?.width ?? format.width) * 100) / (media.video?.height ?? format.height),
+                ),
+              }),
+          ...(crop.bottom === undefined ? {} : { bottom: decimal(crop.bottom * 100) }),
         }),
       ]),
     );
@@ -256,7 +269,7 @@ function properties(clip: Clip, media: Media, timelineHeight: number, audio?: Cl
         ...(t.position === undefined
           ? {}
           : {
-              position: `${(t.position[0] * 100) / timelineHeight} ${(t.position[1] * 100) / timelineHeight}`,
+              position: `${decimal((t.position[0] * format.width * 100) / format.height)} ${decimal(t.position[1] * 100)}`,
             }),
       }),
     );
@@ -272,7 +285,7 @@ function itemFor(
   media: Media,
   ref: string,
   offset: Rational,
-  timelineHeight: number,
+  format: Timeline["format"],
   sequenceFormat: string,
   mediaFormat: string | undefined,
   lane?: number,
@@ -300,7 +313,7 @@ function itemFor(
           ...(clip.label ? { name: clip.label } : {}),
           ...(clip.enabled === false ? { enabled: "0" } : {}),
         },
-        properties(clip, media, timelineHeight).filter(
+        properties(clip, media, format).filter(
           (entry) => entry.tag === "adjust-crop" || entry.tag === "adjust-transform",
         ),
       ),
@@ -315,7 +328,7 @@ function itemFor(
         ...clipAttrs(clip, ref, offset, add(origin, clip.source_start), lane, audio),
         ...(mediaFormat ? { format: mediaFormat } : {}),
       },
-      [...properties(clip, media, timelineHeight, audio), metadata(clip, audio)],
+      [...properties(clip, media, format, audio), metadata(clip, audio)],
     );
   const sources = points.map((point) => point.source);
   const low = sources.reduce(min),
@@ -352,7 +365,7 @@ function itemFor(
         srcEnable: audio ? "all" : lane !== undefined && lane < 0 ? "audio" : "video",
         ...(mediaFormat ? { format: mediaFormat } : {}),
       },
-      properties(clip, media, timelineHeight, audio),
+      properties(clip, media, format, audio),
     ),
   );
   wrapper.children.push(metadata(clip, audio));
@@ -536,7 +549,7 @@ export const fcpxmlExporter: Exporter & { validationNotes?: string } = {
         media,
         refs.get(media.id)!,
         add(tcStart, clip.timeline_start),
-        timeline.format.height,
+        timeline.format,
         sequenceFormat,
         formats.get(media.id),
         undefined,
@@ -597,7 +610,7 @@ export const fcpxmlExporter: Exporter & { validationNotes?: string } = {
               media,
               refs.get(media.id)!,
               offset,
-              timeline.format.height,
+              timeline.format,
               sequenceFormat,
               formats.get(media.id),
               kind === "video" ? index : -index - 1,
