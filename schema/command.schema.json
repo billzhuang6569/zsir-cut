@@ -75,12 +75,20 @@
     "requests": {
       "inspect": {
         "type": "object",
-        "allOf": [
-          {
-            "$ref": "#/$defs/read"
-          }
-        ],
-        "unevaluatedProperties": true
+        "required": ["project", "view"],
+        "properties": {
+          "project": { "type": "string", "minLength": 1 },
+          "author": { "$ref": "#/$defs/author" },
+          "view": { "enum": ["brief", "timeline", "entity", "history"] },
+          "timeline_id": { "$ref": "#/$defs/id" },
+          "range": { "$ref": "#/$defs/range" },
+          "id": { "$ref": "#/$defs/id" },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 200 },
+          "before": { "$ref": "#/$defs/revision_id" }
+        },
+        "if": { "properties": { "view": { "const": "entity" } } },
+        "then": { "required": ["id"], "properties": { "id": true } },
+        "additionalProperties": false
       },
       "read_transcript": {
         "type": "object",
@@ -89,7 +97,16 @@
             "$ref": "#/$defs/read"
           }
         ],
-        "unevaluatedProperties": true
+        "properties": {
+          "transcript_id": { "$ref": "#/$defs/id" },
+          "timeline_id": { "$ref": "#/$defs/id" },
+          "range": { "$ref": "#/$defs/range" }
+        },
+        "oneOf": [
+          { "required": ["transcript_id"], "properties": { "transcript_id": true } },
+          { "required": ["timeline_id"], "properties": { "timeline_id": true } }
+        ],
+        "unevaluatedProperties": false
       },
       "validate": {
         "type": "object",

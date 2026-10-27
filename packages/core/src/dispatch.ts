@@ -11,6 +11,7 @@ import { type ValidationIssue, validateProjectSemantics } from "./project/semant
 import { runSession } from "./project/session.js";
 import { HistoryError, openProject, type WriteEnvelope, type WriteRequest } from "./project/store.js";
 import type { Author, Media } from "./project/types.js";
+import { inspect, readTranscript } from "./read-views.js";
 import { validateCommand } from "./schema.js";
 
 export const VERBS = [
@@ -156,6 +157,57 @@ async function importMedia(input: Request, requestId: string, probe: Probe): Pro
   );
 }
 
+function limitBrief(output: Envelope): void {
+  const brief = output.result as Record<string, unknown>;
+  while (Buffer.byteLength(JSON.stringify(output), "utf8") > 16 * 1024) {
+    const timelines = brief.timelines as {
+      review_markers: unknown[];
+      review_markers_truncated: boolean;
+      tracks: unknown[];
+      tracks_truncated: boolean;
+    }[];
+    const markers = timelines.find((item) => item.review_markers.length);
+    if (markers) {
+      markers.review_markers.pop();
+      markers.review_markers_truncated = true;
+      continue;
+    }
+    const media = brief.media as unknown[];
+    if (media.length) {
+      media.pop();
+      brief.media_truncated = true;
+      continue;
+    }
+    const tracks = timelines.find((item) => item.tracks.length);
+    if (tracks) {
+      tracks.tracks.pop();
+      tracks.tracks_truncated = true;
+      continue;
+    }
+    for (const [list, flag] of [
+      ["transcripts", "transcripts_truncated"],
+      ["timelines", "timelines_truncated"],
+      ["sessions", "sessions_truncated"],
+      ["recent_revisions", "recent_revisions_truncated"],
+    ] as const) {
+      const values = brief[list] as unknown[];
+      if (values.length) {
+        values.pop();
+        brief[flag] = true;
+        break;
+      }
+    }
+    if (
+      Buffer.byteLength(JSON.stringify(output), "utf8") > 16 * 1024 &&
+      !(brief.transcripts as unknown[]).length &&
+      !timelines.length &&
+      !(brief.sessions as unknown[]).length &&
+      !(brief.recent_revisions as unknown[]).length
+    )
+      throw new Error("Brief metadata exceeds 16 KB");
+  }
+}
+
 export async function dispatch(verb: Verb, input: unknown, options: DispatchOptions = {}): Promise<Envelope> {
   const requestId = newId("req_");
   if (
@@ -177,6 +229,8 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
   const request = input as Request;
   if (
     verb !== "validate" &&
+    verb !== "inspect" &&
+    verb !== "read_transcript" &&
     verb !== "diff" &&
     verb !== "undo" &&
     verb !== "redo" &&
@@ -235,6 +289,21 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
     }
     const parsed = parseProject(await readFile(request.project as string, "utf8"));
     if (!parsed.ok) return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Project file is invalid");
+    if (verb === "inspect" || verb === "read_transcript") {
+      try {
+        const output = basic(verb, requestId);
+        output.result =
+          verb === "inspect"
+            ? await inspect(parsed.project, request.project as string, request)
+            : readTranscript(parsed.project, request);
+        if (verb === "inspect" && request.view === "brief") limitBrief(output);
+        return output;
+      } catch (error) {
+        if (String(error).includes("E_NOT_FOUND:"))
+          return errorEnvelope(verb, requestId, "rejected", "E_NOT_FOUND", String(error));
+        throw error;
+      }
+    }
     const issues = validateProjectSemantics(parsed.project, parsed.issues);
     if (request.media === true)
       issues.push(...(await validateProjectMedia(parsed.project, dirname(resolve(request.project as string)))));
