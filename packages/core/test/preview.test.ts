@@ -1,8 +1,9 @@
+import * as childProcess from "node:child_process";
 import { spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import type { Exporter } from "../src/export-framework.js";
 import {
   cuttingList,
@@ -20,8 +21,15 @@ import {
 } from "../src/index.js";
 import type { Clip, Project } from "../src/project/types.js";
 
+vi.mock("node:child_process", async (importOriginal) => {
+  const original = await importOriginal<typeof childProcess>();
+  return { ...original, spawn: vi.fn(original.spawn) };
+});
+
 const directories: string[] = [];
 afterEach(async () => {
+  vi.mocked(childProcess.spawn).mockReset();
+  vi.unstubAllEnvs();
   for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true });
 });
 const run = (args: string[], input?: Buffer) => {
@@ -29,7 +37,9 @@ const run = (args: string[], input?: Buffer) => {
     input,
     maxBuffer: 16_000_000,
   });
-  if (result.status !== 0) throw new Error(result.stderr.toString());
+  const error: NodeJS.ErrnoException | undefined = result.error;
+  if (error) throw new Error(`ffmpeg ${error.code === "ENOENT" ? "not found" : "failed to start"}: ${error.message}`);
+  if (result.status !== 0) throw new Error(`ffmpeg exited ${result.status}: ${result.stderr?.toString() ?? ""}`);
   return result.stdout;
 };
 const clip = (id: string, at: bigint, source: bigint, map?: Clip["time_map"]): Clip => ({
@@ -205,6 +215,43 @@ function barcode(raw: Buffer, width: number, xOffset = 0) {
   return value;
 }
 
+it("reports a missing ffmpeg in the fixture helper", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "zcut-no-ffmpeg-"));
+  directories.push(directory);
+  vi.stubEnv("PATH", directory);
+  expect(() => run(["-version"])).toThrow("ffmpeg not found");
+});
+
+it.each([false, true])("returns E_IO when ffmpeg cannot start (streaming=%s)", async (streaming) => {
+  const { directory, projectPath } = await setup();
+  const { spawn } = await vi.importActual<typeof childProcess>("node:child_process");
+  vi.mocked(childProcess.spawn).mockImplementation((command, args, options) =>
+    spawn(command, args, {
+      ...options,
+      ...(args?.includes("image2pipe") === streaming ? { env: { ...process.env, PATH: directory } } : {}),
+    }),
+  );
+  const output = await dispatch(
+    "render_preview",
+    { project: projectPath, output: directory },
+    { worker: true, jobFile: join(directory, "job_missing", "job.json") },
+  );
+  expect(output.status).toBe("failed");
+  expect(output.error).toMatchObject({ code: "E_IO", message: expect.stringContaining("ffmpeg not found") });
+});
+
+it.each(["render_preview", "view_timeline"] as const)("returns E_IO when %s cannot find ffprobe", async (verb) => {
+  const { directory, projectPath } = await setup();
+  vi.stubEnv("PATH", directory);
+  const output = await dispatch(
+    verb,
+    { project: projectPath, output: directory },
+    { worker: true, jobFile: join(directory, "job_missing", "job.json") },
+  );
+  expect(output.status).toBe("failed");
+  expect(output.error).toMatchObject({ code: "E_IO", message: expect.stringContaining("ffprobe not found") });
+});
+
 it("renders exact forward, reverse, hold frames and both sides of each cut", async () => {
   const { directory, project, projectPath } = await setup();
   const timeline = project.timelines[0];
@@ -217,7 +264,9 @@ it("renders exact forward, reverse, hold frames and both sides of each cut", asy
   const movie = join(directory, "preview.mov");
   await renderPreview(project, timeline, projectPath, { output: movie, profile: "preview", exportId: "exp_test" });
   const probe = spawnSync("ffprobe", ["-v", "error", "-show_streams", "-show_format", "-of", "json", movie]);
-  if (probe.status !== 0) throw new Error(probe.stderr.toString());
+  const error: NodeJS.ErrnoException | undefined = probe.error;
+  if (error) throw new Error(`ffprobe ${error.code === "ENOENT" ? "not found" : "failed to start"}: ${error.message}`);
+  if (probe.status !== 0) throw new Error(`ffprobe exited ${probe.status}: ${probe.stderr?.toString() ?? ""}`);
   const container = JSON.parse(probe.stdout.toString()) as {
     streams: {
       codec_name: string;

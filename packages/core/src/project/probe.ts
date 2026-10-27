@@ -56,7 +56,9 @@ const runFfprobe: Runner = async (args, onLine) => {
     stderr = (stderr + chunk).slice(-4096);
   });
   const closed = new Promise<void>((resolve, reject) => {
-    child.once("error", reject);
+    child.once("error", (error: NodeJS.ErrnoException) =>
+      reject(new Error(`ffprobe ${error.code === "ENOENT" ? "not found" : "failed to start"}: ${error.message}`)),
+    );
     child.once("close", (code) => (code === 0 ? resolve() : reject(new Error(stderr || `ffprobe exited ${code}`))));
   });
   try {

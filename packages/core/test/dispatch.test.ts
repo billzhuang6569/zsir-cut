@@ -1,7 +1,7 @@
 import { copyFile, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   dispatch,
   ffprobe,
@@ -79,10 +79,21 @@ beforeEach(async () => {
   await writeFile(join(directory, "voice.wav"), "audio bytes");
 });
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await rm(directory, { recursive: true, force: true });
 });
 
 describe("dispatcher import_media", () => {
+  it("returns E_IO with a clear message when ffprobe is missing", async () => {
+    const before = await readFile(project, "utf8");
+    vi.stubEnv("PATH", directory);
+    const output = await dispatch("import_media", request("missing-ffprobe", { paths: ["video.mov"] }));
+    expect(output.status).toBe("failed");
+    expect(output.error).toMatchObject({ code: "E_IO", message: expect.stringContaining("ffprobe not found") });
+    expect(validateEnvelope(output).valid).toBe(true);
+    expect(await readFile(project, "utf8")).toBe(before);
+  });
+
   it("maps video, VFR, image and audio metadata; skips duplicate content", async () => {
     const input = request("import-all", { paths: ["video.mov", "still.png", "voice.wav"] });
     expect(validateCommand("import_media", input).valid).toBe(true);

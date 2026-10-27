@@ -31,6 +31,9 @@ async function ffmpeg(args: string[], input?: AsyncIterable<Buffer>): Promise<vo
     errors += part;
   });
   const exit = new Promise<number | null>((done) => child.once("close", done));
+  await once(child, "spawn").catch((error: NodeJS.ErrnoException) => {
+    throw new Error(`ffmpeg ${error.code === "ENOENT" ? "not found" : "failed to start"}: ${error.message}`);
+  });
   if (input) {
     const stdin = child.stdin;
     if (!stdin) throw new Error("ffmpeg input pipe missing");
@@ -119,7 +122,9 @@ async function sourceFrames(project: Project, timeline: Timeline, projectPath: s
       "-of",
       "default=noprint_wrappers=1:nokey=1",
       source,
-    ]);
+    ]).catch((error: NodeJS.ErrnoException) => {
+      throw new Error(`ffprobe ${error.code === "ENOENT" ? "not found" : "failed"}: ${error.message}`);
+    });
     const alpha = /^(?:yuva|rgba|bgra|argb|abgr|gbrap)/.test(stdout.trim());
     const extension = alpha ? "png" : "jpg";
     await ffmpeg([
