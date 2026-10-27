@@ -6,7 +6,9 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { fingerprint } from "./fingerprint.js";
+import type { renderPreview } from "./preview.js";
 import { projectSubtitles } from "./project/projection.js";
+import { validateProjectSemantics } from "./project/semantics.js";
 import { clipTimeMap, mapSourceTimeToClip } from "./project/time-map.js";
 import type { Project, Timeline } from "./project/types.js";
 import {
@@ -436,6 +438,7 @@ export async function runExport(
   exportId: string,
   at: string,
   profile: ProfileId,
+  previewRenderer?: typeof renderPreview,
 ) {
   const timeline = project.timelines.find((item) => item.id === (input.timeline_id ?? project.timelines[0]?.id));
   if (!timeline) throw new Error("Timeline not found");
@@ -525,6 +528,19 @@ export async function runExport(
       proxy_used: false,
     });
   }
+  if (media.every((item) => item.online)) {
+    const previewName = `${safeName(project.name)}_r${project.revision.seq}_${profile}_${exportId}.mov`;
+    const previewPath = `preview/${previewName}`;
+    await mkdir(join(root, "preview"));
+    const renderer = previewRenderer ?? (await import("./preview.js")).renderPreview;
+    const preview = await renderer(project, timeline, input.project, {
+      output: join(root, previewPath),
+      profile,
+      exportId,
+      ...(input.subtitle_languages ? { subtitleLanguages: input.subtitle_languages } : {}),
+    });
+    files.push({ path: previewPath, role: "preview", sha256: preview.sha256 });
+  }
   const check = (status: string, notes: string) => ({ status, at, by: "zsir-cut", notes });
   const end = timeline.tracks
     .flatMap((track) => (track.kind === "subtitle" ? [] : track.clips))
@@ -560,7 +576,11 @@ export async function runExport(
           cutCheck.zero_frame_deviation
             ? (exporter.validationNotes ?? "格式校验与剪辑表读回通过")
             : JSON.stringify(cutCheck.differences)
-        }${gitShaUnavailable ? "；无法读取仓库当前提交，git_sha=0000000" : ""}`,
+        }${gitShaUnavailable ? "；无法读取仓库当前提交，git_sha=0000000" : ""}${
+          validateProjectSemantics(project).some((issue) => issue.code === "W_TIMEMAP_APPROX")
+            ? "；W_TIMEMAP_APPROX：参考预览的平滑变速按线性近似"
+            : ""
+        }`,
       ),
       media_resolved: check(media.every((item) => item.online) ? "pass" : "fail", "素材路径、大小与指纹检查"),
       host_import: { status: "not_run" },

@@ -7,7 +7,7 @@ import { newId } from "./project/id.js";
 
 export interface Job {
   job_id: string;
-  verb: "export" | "transcribe";
+  verb: "export" | "transcribe" | "render_preview" | "view_timeline";
   request: Record<string, unknown>;
   state: "queued" | "running" | "succeeded" | "failed";
   progress: number;
@@ -68,6 +68,36 @@ export async function startExportJob(
   const child = spawn(process.execPath, [worker, path, exporterModule], { stdio: "ignore", detached: true });
   child.unref();
   if (!child.pid) throw new Error("Failed to start export worker");
+  job.pid = child.pid;
+  await writeJob(path, job);
+  return jobId;
+}
+
+export async function startPreviewJob(
+  verb: "render_preview" | "view_timeline",
+  project: string,
+  projectId: string,
+  request: Record<string, unknown>,
+) {
+  const jobId = newId("job_");
+  const path = jobPath(project, projectId, jobId);
+  const now = new Date().toISOString();
+  const job: Job = {
+    job_id: jobId,
+    verb,
+    request,
+    state: "queued",
+    progress: 0,
+    message: "排队中",
+    created_at: now,
+    updated_at: now,
+    envelope: null,
+  };
+  await writeJob(path, job);
+  const worker = fileURLToPath(new URL("./preview-worker.js", import.meta.url).href.replace("/src/", "/dist/"));
+  const child = spawn(process.execPath, [worker, path], { stdio: "ignore", detached: true });
+  child.unref();
+  if (!child.pid) throw new Error("Failed to start preview worker");
   job.pid = child.pid;
   await writeJob(path, job);
   return jobId;

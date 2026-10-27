@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -23,6 +24,11 @@ const files = [
   "examples/interview.zcut.json",
 ];
 const mediaRoot = pathToFileURL(resolve("fixtures/.media")).href;
+const previewStub: NonNullable<Parameters<typeof runExport>[6]> = async (_project, _timeline, _path, options) => {
+  const data = Buffer.from("preview test placeholder");
+  await writeFile(options.output, data);
+  return { path: options.output, sha256: createHash("sha256").update(data).digest("hex"), frames: "0" };
+};
 
 async function generate(path: string, profile: "resolve-18.5-otio" | "resolve-21-fcpxml-1.11") {
   const parsed = parseProject(await readFile(path, "utf8"));
@@ -233,6 +239,7 @@ describe("Resolve FCPXML candidate", () => {
         "exp_candidate",
         "2026-10-27T00:00:00.000Z",
         "resolve-21-fcpxml-1.11",
+        previewStub,
       );
       const fcp = await runExport(
         project,
@@ -241,6 +248,7 @@ describe("Resolve FCPXML candidate", () => {
         "exp_fcp",
         "2026-10-27T00:00:00.000Z",
         "fcp-10.6-fcpxml-1.11",
+        previewStub,
       );
       if (candidate.rejected || fcp.rejected) throw new Error("Export rejected");
       expect(candidate.manifest.profile.id).toBe("resolve-21-fcpxml-1.11");
@@ -256,6 +264,7 @@ describe("Resolve FCPXML candidate", () => {
         "exp_otio",
         "2026-10-27T00:00:00.000Z",
         "resolve-18.5-otio",
+        previewStub,
       );
       if (otio.rejected) throw new Error("OTIO export rejected");
       const exchange = JSON.parse(
