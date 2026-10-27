@@ -6,7 +6,8 @@
 
 ## 1. 运行环境
 
-- Python 3.12，依赖用 `workers/asr/pyproject.toml` 声明并锁定版本，许可证按 ADR-0002 筛选。
+- Python 3.13，依赖用 `workers/asr/pyproject.toml` 声明，精确版本锁在 `workers/asr/requirements.lock`，许可证按 ADR-0002 筛选。虚拟环境放在 `workers/asr/.venv`，不进仓库。
+- MLX 推理用 `mlx-audio`（MIT）0.5.8，模型权重用 `mlx-community/Qwen3-ASR-1.7B-8bit` 和 `mlx-community/Qwen3-ForcedAligner-0.6B-8bit`，存放在 `~/.zsir-cut/models/<模型名>/`。
 - 本地引擎：Qwen3-ASR（1.7B，内存 16 GB 及以下的机器用 0.6B）识别，Qwen3-ForcedAligner 对齐，在 Apple Silicon 上走 MLX。中文对齐结果按 jieba 分词聚成词。
 - 云端引擎：火山引擎语音识别。凭据从环境变量 `ZSIR_VOLC_APP_ID`、`ZSIR_VOLC_ACCESS_TOKEN` 读取，不写进任何文件，不进仓库。
 - 模型权重放在用户目录 `~/.zsir-cut/models/`，首次使用时下载，下载前核对许可证。
