@@ -1,5 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
-import { basename, dirname, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   defaultProfile,
   type Exporter,
@@ -10,7 +11,7 @@ import {
   runExport,
 } from "./export-framework.js";
 import { fingerprint } from "./fingerprint.js";
-import { jobPath, readJob, startExportJob } from "./jobs.js";
+import { jobPath, readJob, startExportJob, startTranscribeJob } from "./jobs.js";
 import { applyEdit, SUBTITLE_OPS } from "./project/edit.js";
 import { diffProjectEntities } from "./project/entities.js";
 import { newId } from "./project/id.js";
@@ -19,10 +20,18 @@ import { relinkMedia, validateProjectMedia } from "./project/media.js";
 import { ffprobe, mediaFromProbe, type Probe } from "./project/probe.js";
 import { type ValidationIssue, validateProjectSemantics } from "./project/semantics.js";
 import { runSession } from "./project/session.js";
-import { HistoryError, openProject, type WriteEnvelope, type WriteRequest } from "./project/store.js";
+import {
+  findIdempotentWrite,
+  HistoryError,
+  openProject,
+  type WriteEnvelope,
+  type WriteRequest,
+} from "./project/store.js";
 import type { Author, Media } from "./project/types.js";
+import { add, compare, parseRational, rational } from "./rational.js";
 import { inspect, readTranscript } from "./read-views.js";
 import { validateCommand } from "./schema.js";
+import { AsrError, applyTranscription, invokeAsr, type TranscribeRequest, workerMilliseconds } from "./transcribe.js";
 
 export const VERBS = [
   "inspect",
@@ -57,6 +66,9 @@ export interface DispatchOptions {
   exporter?: Exporter;
   exporterModule?: string;
   worker?: boolean;
+  asrPython?: string;
+  asrWorkerDirectory?: string;
+  jobFile?: string;
 }
 
 type Request = Record<string, unknown>;
@@ -78,8 +90,17 @@ function basic(verb: Verb, requestId: string): Envelope {
 function errorEnvelope(
   verb: Verb,
   requestId: string,
-  status: "rejected" | "failed",
-  code: "E_VALIDATION" | "E_UNSUPPORTED" | "E_MIXED_DOMAIN" | "E_IO" | "E_INTERNAL" | "E_SESSION_STATE" | "E_NOT_FOUND",
+  status: "rejected" | "failed" | "conflict",
+  code:
+    | "E_VALIDATION"
+    | "E_UNSUPPORTED"
+    | "E_MIXED_DOMAIN"
+    | "E_IO"
+    | "E_INTERNAL"
+    | "E_SESSION_STATE"
+    | "E_NOT_FOUND"
+    | "E_CONFLICT"
+    | "E_IDEMPOTENCY_MISMATCH",
   message: string,
   retryable = false,
 ): Envelope {
@@ -91,7 +112,7 @@ function errorEnvelope(
 }
 
 function writeRequest(
-  verb: "edit" | "import_media" | "undo" | "redo",
+  verb: "edit" | "import_media" | "transcribe" | "undo" | "redo",
   requestId: string,
   input: Request,
 ): WriteRequest {
@@ -102,11 +123,23 @@ function writeRequest(
     idempotency_key: input.idempotency_key as string,
     author: input.author as Author,
     ops:
-      verb === "import_media"
-        ? [{ paths: input.paths, relink: input.relink }]
-        : verb === "edit"
-          ? (input.ops as unknown[])
-          : [],
+      verb === "transcribe"
+        ? [
+            {
+              media_id: input.media_id,
+              source_channels: input.source_channels,
+              range: input.range,
+              language: input.language,
+              engine: input.engine,
+              hotwords: input.hotwords,
+              rules: input.rules,
+            },
+          ]
+        : verb === "import_media"
+          ? [{ paths: input.paths, relink: input.relink }]
+          : verb === "edit"
+            ? (input.ops as unknown[])
+            : [],
     ...(typeof input.timeline_id === "string" ? { timeline_id: input.timeline_id } : {}),
     ...(typeof input.target === "string" ? { target: input.target } : {}),
   };
@@ -249,6 +282,7 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
     verb !== "undo" &&
     verb !== "redo" &&
     verb !== "import_media" &&
+    verb !== "transcribe" &&
     verb !== "edit" &&
     verb !== "export" &&
     verb !== "record_handoff_check" &&
@@ -284,6 +318,99 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
         jobPath(request.project as string, parsed.project.id, request.job_id as string),
       )) as unknown as Record<string, unknown>;
       return output;
+    }
+    if (verb === "transcribe") {
+      const parsed = parseProject(await readFile(request.project as string, "utf8"));
+      if (!parsed.ok) return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Project file is invalid");
+      if (!options.worker) {
+        const replay = await findIdempotentWrite(
+          request.project as string,
+          parsed.project.id,
+          writeRequest("transcribe", requestId, request),
+        );
+        if (replay === "mismatch")
+          return errorEnvelope(
+            verb,
+            requestId,
+            "rejected",
+            "E_IDEMPOTENCY_MISMATCH",
+            "Idempotency key was used for another request",
+          );
+        if (replay) return replay;
+      }
+      if (!options.worker && request.base_revision !== parsed.project.revision.id)
+        return errorEnvelope(verb, requestId, "conflict", "E_CONFLICT", "Base revision differs from current revision");
+      if (request.dry_run === true)
+        return errorEnvelope(verb, requestId, "rejected", "E_UNSUPPORTED", "Transcribe dry run is not supported");
+      const media = parsed.project.media.find((item) => item.id === request.media_id);
+      if (!media) return errorEnvelope(verb, requestId, "rejected", "E_NOT_FOUND", "Media not found");
+      if (
+        !media.audio ||
+        ((request.source_channels as number[] | undefined)?.length !== undefined &&
+          (request.source_channels as number[]).length !== 1)
+      )
+        return errorEnvelope(verb, requestId, "rejected", "E_UNSUPPORTED", "ASR worker requires one audio channel");
+      if (((request.source_channels as number[] | undefined)?.[0] ?? 0) >= media.audio.channels)
+        return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Source channel is unavailable");
+      if (
+        typeof request.language === "string" &&
+        request.language !== "auto" &&
+        !/^(zh|en)(-|$)/u.test(request.language)
+      )
+        return errorEnvelope(verb, requestId, "rejected", "E_UNSUPPORTED", "ASR worker supports Chinese and English");
+      if (request.range) {
+        const range = request.range as { start: string; duration: string };
+        try {
+          workerMilliseconds(range.start);
+          workerMilliseconds(range.duration);
+        } catch {
+          return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "ASR range must use whole milliseconds");
+        }
+        const start = parseRational(range.start, true);
+        const duration = parseRational(range.duration, true);
+        if (compare(duration, rational(0n)) <= 0 || compare(add(start, duration), media.duration) > 0)
+          return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "ASR range is outside media");
+      }
+      if (!options.worker) {
+        const directory =
+          options.asrWorkerDirectory ?? fileURLToPath(new URL("../../../workers/asr/", import.meta.url));
+        const python = options.asrPython ?? resolve(directory, ".venv/bin/python");
+        const jobId = await startTranscribeJob(
+          request.project as string,
+          parsed.project.id,
+          request,
+          python,
+          directory,
+        );
+        const output = basic(verb, requestId);
+        output.status = "accepted";
+        output.result = { job_id: jobId };
+        return output;
+      }
+      if (!options.jobFile || !options.asrPython || !options.asrWorkerDirectory)
+        return errorEnvelope(verb, requestId, "failed", "E_INTERNAL", "Missing ASR worker configuration");
+      try {
+        const result = await invokeAsr(
+          parsed.project,
+          request as TranscribeRequest,
+          join(dirname(options.jobFile), "asr-result.json"),
+          options.asrPython,
+          options.asrWorkerDirectory,
+        );
+        return await openProject({ projectPath: request.project as string }).commitWrite(
+          writeRequest("transcribe", requestId, request),
+          (project) => applyTranscription(project, request as TranscribeRequest, result),
+          {},
+          { warnings: result.warnings },
+        );
+      } catch (error) {
+        if (error instanceof AsrError) {
+          const output = errorEnvelope(verb, requestId, "failed", "E_INTERNAL", error.message, error.retryable);
+          if (output.error) output.error.details = { code: error.code };
+          return output;
+        }
+        throw error;
+      }
     }
     if (verb === "export") {
       const parsed = parseProject(await readFile(request.project as string, "utf8"));
