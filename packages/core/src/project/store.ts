@@ -136,6 +136,28 @@ async function readLines<T>(path: string): Promise<T[]> {
   }
 }
 
+const requestHash = (request: WriteRequest) => {
+  const { request_id: _requestId, ...hashInput } = request;
+  return createHash("sha256").update(canonical(hashInput)).digest("hex");
+};
+
+export async function findIdempotentWrite(
+  projectPath: string,
+  projectId: string,
+  request: WriteRequest,
+): Promise<WriteEnvelope | "mismatch" | null> {
+  const records = await readLines<IdempotencyEntry>(
+    join(dirname(projectPath), ".zcut", projectId, "idempotency.jsonl"),
+  );
+  const prior = records.findLast((record) => record.idempotency_key === request.idempotency_key);
+  if (!prior) return null;
+  if (prior.request_hash !== requestHash(request)) return "mismatch";
+  return {
+    ...prior.envelope,
+    receipt: prior.envelope.receipt ? { ...prior.envelope.receipt, replayed: true } : null,
+  };
+}
+
 function restoreEntities(project: Project, changes: EntityChange[], side: "before" | "after"): Project {
   const snapshots = projectEntitySnapshots(project);
   const group = (item: EntitySnapshot) => `${item.parent}\0${item.entity}`;
@@ -329,8 +351,7 @@ export function openProject(options: OpenProjectOptions) {
         journal.push(recovered);
       }
       const records = await readLines<IdempotencyEntry>(idempotencyPath);
-      const { request_id: _requestId, ...hashInput } = request;
-      const hash = createHash("sha256").update(canonical(hashInput)).digest("hex");
+      const hash = requestHash(request);
       const prior = records.findLast((record) => record.idempotency_key === request.idempotency_key);
       if (prior) {
         if (prior.request_hash !== hash)
