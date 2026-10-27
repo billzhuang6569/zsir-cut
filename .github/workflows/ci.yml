@@ -15,6 +15,11 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install opentimelineio==0.18.1
+      - run: echo "ZSIR_OTIO_PYTHON=$(command -v python)" >> "$GITHUB_ENV"
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck

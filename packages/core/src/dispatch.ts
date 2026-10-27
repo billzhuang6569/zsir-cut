@@ -425,7 +425,10 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
         return errorEnvelope(verb, requestId, "rejected", "E_UNSUPPORTED", "Overlay export is not implemented");
       const exporterModule =
         options.exporterModule ??
-        (profile === "fcp-11-fcpxml-1.13" || profile === "fcp-10.6-fcpxml-1.11"
+        (profile === "fcp-11-fcpxml-1.13" ||
+        profile === "fcp-10.6-fcpxml-1.11" ||
+        profile === "resolve-21-fcpxml-1.11" ||
+        profile === "resolve-18.5-otio"
           ? resolve(dirname(fileURLToPath(import.meta.url)), "../../exporters/dist/index.js")
           : undefined);
       const exporter =

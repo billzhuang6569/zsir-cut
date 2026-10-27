@@ -27,6 +27,7 @@ import {
   subtitleFiles,
   type Timeline,
 } from "../../core/dist/index.js";
+import { otioExporter } from "./otio.js";
 
 const zero = rational(0n);
 const sec = (value: Rational) => printRational(value, true);
@@ -443,7 +444,7 @@ export const fcpxmlExporter: Exporter & { validationNotes?: string } = {
     return (await promisify(execFile)("git", ["rev-parse", "--short", "HEAD"], { cwd: root })).stdout.trim();
   },
   async generate(project, timeline, profile, mediaPaths) {
-    if (profile !== "fcp-11-fcpxml-1.13" && profile !== "fcp-10.6-fcpxml-1.11")
+    if (profile !== "fcp-11-fcpxml-1.13" && profile !== "fcp-10.6-fcpxml-1.11" && profile !== "resolve-21-fcpxml-1.11")
       throw new Error(`Unsupported FCPXML profile: ${profile}`);
     const version = profile.endsWith("1.13") ? "1.13" : "1.11";
     let next = 1;
@@ -989,5 +990,29 @@ export const fcpxmlExporter: Exporter & { validationNotes?: string } = {
     }
   },
 };
-export default fcpxmlExporter;
+const exporter: Exporter & { validationNotes?: string } = {
+  ...fcpxmlExporter,
+  async generate(project, timeline, profile, paths, exportId) {
+    return profile === "resolve-18.5-otio"
+      ? otioExporter.generate(project, timeline, profile, paths, exportId)
+      : fcpxmlExporter.generate(project, timeline, profile, paths);
+  },
+  async readBack(data, timeline) {
+    return data.toString().trimStart().startsWith("{")
+      ? otioExporter.readBack(data, timeline)
+      : fcpxmlExporter.readBack(data, timeline);
+  },
+  losses(project, timeline, profile) {
+    return profile === "resolve-18.5-otio"
+      ? otioExporter.losses(project, timeline, profile)
+      : fcpxmlExporter.losses(project, timeline, profile);
+  },
+  async validate(data) {
+    const selected = data.toString().trimStart().startsWith("{") ? otioExporter : fcpxmlExporter;
+    const valid = await selected.validate(data);
+    if (selected.validationNotes) this.validationNotes = selected.validationNotes;
+    return valid;
+  },
+};
+export default exporter;
 export type { CutRow, Exporter, LossItem, ProfileId } from "../../core/dist/index.js";

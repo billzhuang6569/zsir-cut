@@ -1,9 +1,9 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFile, mkdtemp, readFile, rm } from "node:fs/promises";
+import { copyFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import {
   compareCuttingLists,
@@ -45,7 +45,11 @@ const project = async () => {
 const finish = async (jobId: string) => {
   for (let i = 0; i < 100; i++) {
     const status = await dispatch("job_status", { project: projectPath, job_id: jobId });
-    const job = status.result as { state: string; envelope: { status: string; result: { package: string } } };
+    const job = status.result as {
+      state: string;
+      message: string;
+      envelope: { status: string; result: { package: string }; error?: { message: string } };
+    };
     if (job.state === "succeeded" || job.state === "failed") return job;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
@@ -281,6 +285,21 @@ it("reports a killed export worker as failed", async () => {
   const job = await finish(id);
   expect(job.state).toBe("failed");
   expect(job.envelope).toBeNull();
+});
+
+it("includes the mismatched clip and values in a failed export job", async () => {
+  const modulePath = join(directory, "mismatch.mjs");
+  await writeFile(
+    modulePath,
+    `import base from ${JSON.stringify(pathToFileURL(fake).href)}; export default { ...base, async readBack(data) { const rows = await base.readBack(data); rows[0].source_out++; return rows; } };`,
+  );
+  const accepted = await dispatch("export", request(), { exporterModule: modulePath });
+  expect(accepted.status).toBe("accepted");
+  const job = await finish((accepted.result as { job_id: string }).job_id);
+  expect(job.state).toBe("failed");
+  expect(job.message).toContain("clp_v1");
+  expect(job.message).toContain("source_out");
+  expect(job.envelope?.error?.message).toBe(job.message);
 });
 
 it("CLI --wait prints the final envelope", () => {
