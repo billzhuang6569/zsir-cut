@@ -176,7 +176,14 @@ export function cuttingList(project: Project, timeline: Timeline, profile: Profi
             : media.kind === "audio"
               ? rational(48000n)
               : (media.video?.rate ?? rational(48000n));
-        const source = (time: Rational) => count(mul(time, sourceRate));
+        const source = (time: Rational) => {
+          // xmeml quantizes source cuts to sequence frames before the common native-unit comparison.
+          const exported =
+            PROFILES[profile].format === "xmeml"
+              ? div(rational(round(mul(time, timeline.edit_rate))), timeline.edit_rate)
+              : time;
+          return count(mul(exported, sourceRate));
+        };
         rows.push({
           track_type: track.kind,
           track_number: number,

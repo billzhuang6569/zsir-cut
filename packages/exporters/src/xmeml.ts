@@ -95,6 +95,13 @@ const rateXml = (rate: Rational) =>
     t("timebase", floor(add(rate, rational(1n, 2n))).toString()),
     t("ntsc", rate.denominator === 1001n ? "TRUE" : "FALSE"),
   ]);
+const readRate = (item: Xml) => {
+  const rate = required(item, "rate");
+  const timebase = number(rate, "timebase");
+  const ntsc = value(rate, "ntsc");
+  if (timebase < 1 || !["TRUE", "FALSE"].includes(ntsc ?? "")) throw new Error("Invalid rate");
+  return rational(BigInt(timebase) * (ntsc === "TRUE" ? 1000n : 1n), ntsc === "TRUE" ? 1001n : 1n);
+};
 const decimal = (value: Rational) => {
   const scaled = floor(add(mul(value, rational(1000000000n)), rational(1n, 2n)));
   return `${scaled / 1000000000n}.${String(scaled % 1000000000n).padStart(9, "0")}`.replace(/\.?0+$/, "");
@@ -143,7 +150,13 @@ function effects(clip: Clip, kind: "video" | "audio", speed: Rational): Xml[] {
         ...(transform.rotation_deg === undefined ? [] : [parameter("rotation", "Rotation", transform.rotation_deg)]),
         ...(transform.position === undefined
           ? []
-          : [parameter("center", "Center", `${transform.position[0]} ${transform.position[1]}`)]),
+          : [
+              n("parameter", [
+                t("parameterid", "center"),
+                t("name", "Center"),
+                n("value", [t("horiz", transform.position[0] * 2), t("vert", transform.position[1] * 2)]),
+              ]),
+            ]),
       ]),
     );
     if (transform.crop)
@@ -152,7 +165,7 @@ function effects(clip: Clip, kind: "video" | "audio", speed: Rational): Xml[] {
           "Crop",
           "crop",
           "video",
-          Object.entries(transform.crop).map(([side, amount]) => parameter(side, side, amount)),
+          Object.entries(transform.crop).map(([side, amount]) => parameter(side, side, amount * 100)),
         ),
       );
   }
@@ -236,8 +249,8 @@ export const xmemlExporter: Exporter & { validationNotes?: string } = {
         const pairs = points.slice(0, -1).map((first, segment) => [first, points[segment + 1]!, segment] as const);
         for (const [first, last, segment] of pairs) {
           const speed = div(sub(last.source, first.source), sub(last.at, first.at));
-          const sourceIn = count(first.source, sourceRate(media));
-          const sourceOut = count(last.source, sourceRate(media));
+          const sourceIn = count(first.source, timeline.edit_rate);
+          const sourceOut = count(last.source, timeline.edit_rate);
           const id = `${clip.id}${split ? `-s${segment}` : ""}`;
           const file = files.has(media.id) ? n("file", [], { id: media.id }) : fileNode(media, path, timeline);
           files.add(media.id);
@@ -373,6 +386,7 @@ export const xmemlExporter: Exporter & { validationNotes?: string } = {
   async readBack(data, _timeline) {
     const root = parse(data.toString());
     const sequence = required(root, "sequence");
+    const sequenceRate = readRate(sequence);
     const media = required(sequence, "media");
     const rows: CutRow[] = [];
     const files = new Map<string, Xml>();
@@ -382,8 +396,8 @@ export const xmemlExporter: Exporter & { validationNotes?: string } = {
         for (const item of children(track, "clipitem")) {
           const file = required(item, "file");
           if (file.children.length) files.set(file.attrs.id!, file);
-          const source = files.get(file.attrs.id!);
-          if (!source) throw new Error(`Missing file definition ${file.attrs.id}`);
+          const sourceFile = files.get(file.attrs.id!);
+          if (!sourceFile) throw new Error(`Missing file definition ${file.attrs.id}`);
           const note = value(required(item, "logginginfo"), "lognote") ?? "";
           const match = /^zsir-cut clip=(\S+) occ=(\S+) media=(\S+)(?: segment=(\d+))? speed=(-?\d+(?:\/\d+)?)$/.exec(
             note,
@@ -391,6 +405,7 @@ export const xmemlExporter: Exporter & { validationNotes?: string } = {
           if (!match) throw new Error("Missing xmeml stable IDs");
           const originalIn = number(item, "in"),
             originalOut = number(item, "out");
+          const source = (frame: number) => count(div(rational(BigInt(frame)), sequenceRate), readRate(sourceFile));
           const speed = match[5]!;
           const reverse = speed.startsWith("-");
           rows.push({
@@ -400,8 +415,8 @@ export const xmemlExporter: Exporter & { validationNotes?: string } = {
             media_id: match[3]!,
             timeline_in: number(item, "start"),
             timeline_out: number(item, "end"),
-            source_in: reverse ? originalOut : originalIn,
-            source_out: speed === "0" ? originalIn : reverse ? originalIn : originalOut,
+            source_in: source(reverse ? originalOut : originalIn),
+            source_out: source(speed === "0" ? originalIn : reverse ? originalIn : originalOut),
             speed: match[4] === undefined ? speed : "split",
           });
         }
@@ -497,9 +512,8 @@ export const xmemlExporter: Exporter & { validationNotes?: string } = {
       for (const clip of track.clips) {
         ext(clip, "clip", clip.timeline_start, clip.duration);
         const points = clipTimeMap(clip);
-        const media = project.media.find((entry) => entry.id === clip.media_id)!;
-        const sourceRounded = points.some((point) => mul(point.source, sourceRate(media)).denominator !== 1n);
-        if (track.kind === "video" && sourceRounded)
+        const sourceRounded = points.some((point) => mul(point.source, timeline.edit_rate).denominator !== 1n);
+        if (sourceRounded)
           items.push(
             loss(
               clip.id,
@@ -508,7 +522,7 @@ export const xmemlExporter: Exporter & { validationNotes?: string } = {
               "approximated",
               "warning",
               "R_GRID_ROUNDED",
-              "源入出点已取整到素材帧网格，需在 Premiere 核对源帧",
+              "源入出点已取整到序列帧网格，需在 Premiere 核对源帧",
               clip.timeline_start,
               clip.duration,
             ),
@@ -547,7 +561,7 @@ export const xmemlExporter: Exporter & { validationNotes?: string } = {
           const timelineRounded =
             compare(clip.timeline_start, div(rational(BigInt(start)), timeline.edit_rate)) !== 0 ||
             compare(add(clip.timeline_start, clip.duration), div(rational(BigInt(end)), timeline.edit_rate)) !== 0;
-          if (timelineRounded || sourceRounded)
+          if (timelineRounded)
             items.push(
               loss(
                 clip.id,
@@ -556,7 +570,7 @@ export const xmemlExporter: Exporter & { validationNotes?: string } = {
                 "approximated",
                 "warning",
                 "R_GRID_ROUNDED",
-                `${timelineRounded ? "序列" : "源"}音频边界已取整到最近帧，需在 Premiere 核对同步`,
+                "序列音频边界已取整到最近帧，需在 Premiere 核对同步",
                 clip.timeline_start,
                 clip.duration,
               ),
@@ -590,9 +604,7 @@ export const xmemlExporter: Exporter & { validationNotes?: string } = {
       if (root.tag !== "xmeml" || root.attrs.version !== "5") throw new Error("xmeml v5 root required");
       const sequence = required(root, "sequence");
       const media = required(sequence, "media");
-      const rate = required(sequence, "rate");
-      if (number(rate, "timebase") < 1 || !["TRUE", "FALSE"].includes(value(rate, "ntsc") ?? ""))
-        throw new Error("Invalid sequence rate");
+      const sequenceRate = readRate(sequence);
       if (number(sequence, "duration") < 0) throw new Error("Invalid duration");
       const tc = required(sequence, "timecode");
       if (!value(tc, "string") || !["DF", "NDF"].includes(value(tc, "displayformat") ?? ""))
@@ -608,6 +620,7 @@ export const xmemlExporter: Exporter & { validationNotes?: string } = {
           for (const item of children(track, "clipitem")) {
             if (!item.attrs.id || ids.has(item.attrs.id)) throw new Error("Duplicate clipitem ID");
             ids.add(item.attrs.id);
+            if (compare(readRate(item), sequenceRate) !== 0) throw new Error("Clipitem rate differs from sequence");
             if (number(item, "end") <= number(item, "start") || number(item, "out") <= number(item, "in"))
               throw new Error("Invalid clip range");
             const file = required(item, "file");
@@ -616,8 +629,10 @@ export const xmemlExporter: Exporter & { validationNotes?: string } = {
               if (known.has(file.attrs.id)) throw new Error("Duplicate file definition");
               known.add(file.attrs.id);
               if (!value(file, "pathurl")?.startsWith("file://localhost/")) throw new Error("Invalid media URL");
-              if (number(required(file, "rate"), "timebase") < 1) throw new Error("Invalid file rate");
-              limits.set(file.attrs.id, number(file, "duration"));
+              limits.set(
+                file.attrs.id,
+                count(div(rational(BigInt(number(file, "duration"))), readRate(file)), sequenceRate),
+              );
               required(file, "timecode");
               required(file, "media");
             } else if (!known.has(file.attrs.id)) throw new Error("File referenced before definition");

@@ -731,7 +731,10 @@
                 <parameter>
                   <parameterid>center</parameterid>
                   <name>Center</name>
-                  <value>0.2 -0.2</value>
+                  <value>
+                    <horiz>0.4</horiz>
+                    <vert>-0.4</vert>
+                  </value>
                 </parameter>
               </effect>
             </filter>
@@ -744,22 +747,22 @@
                 <parameter>
                   <parameterid>left</parameterid>
                   <name>left</name>
-                  <value>0.1</value>
+                  <value>10</value>
                 </parameter>
                 <parameter>
                   <parameterid>top</parameterid>
                   <name>top</name>
-                  <value>0.05</value>
+                  <value>5</value>
                 </parameter>
                 <parameter>
                   <parameterid>right</parameterid>
                   <name>right</name>
-                  <value>0.1</value>
+                  <value>10</value>
                 </parameter>
                 <parameter>
                   <parameterid>bottom</parameterid>
                   <name>bottom</name>
-                  <value>0.05</value>
+                  <value>5</value>
                 </parameter>
               </effect>
             </filter>
@@ -870,7 +873,7 @@
             <start>900</start>
             <end>1000</end>
             <in>0</in>
-            <out>120</out>
+            <out>100</out>
             <file id="med_VFR">
               <name>手机录屏_vfr.mp4</name>
               <pathurl>file://localhost/__MEDIA_ROOT__/shared/%E6%89%8B%E6%9C%BA%E5%BD%95%E5%B1%8F_vfr.mp4</pathurl>
@@ -1332,8 +1335,8 @@
             </rate>
             <start>0</start>
             <end>240</end>
-            <in>629760</in>
-            <out>1090560</out>
+            <in>328</in>
+            <out>568</out>
             <file id="med_EXT">
               <name>外录音频.wav</name>
               <pathurl>file://localhost/__MEDIA_ROOT__/shared/%E5%A4%96%E5%BD%95%E9%9F%B3%E9%A2%91.wav</pathurl>

@@ -12,12 +12,25 @@ import {
   parseProject,
   runExport,
   serializeProject,
+  sub,
 } from "../../core/src/index.js";
 import exporter from "../src/index.js";
 
 const profile = "premiere-25-xmeml-5";
 const fixtures = ["std-25", "std-2997-df", "std-2997-ndf"];
 const mediaRoot = pathToFileURL(resolve("fixtures/.media")).href.replace("file:///", "file://localhost/");
+const clipitem = (xml: string, id: string) => {
+  const item = xml.match(new RegExp(`<clipitem id="${id}">[\\s\\S]*?</clipitem>`))?.[0];
+  if (!item) throw new Error(`Missing clipitem ${id}`);
+  return item;
+};
+const parameterValue = (xml: string, id: string) => {
+  const raw = xml.match(
+    new RegExp(`<parameterid>${id}</parameterid>\\s*<name>[^<]*</name>\\s*<value>([^<]+)</value>`),
+  )?.[1];
+  if (raw === undefined) throw new Error(`Missing parameter ${id}`);
+  return raw;
+};
 
 async function generate(path: string) {
   const parsed = parseProject(await readFile(path, "utf8"));
@@ -48,6 +61,7 @@ describe("Premiere xmeml v5", () => {
   for (const path of [
     "fixtures/regressions/parent-25-on-2997.zcut.json",
     "fixtures/regressions/otio-2997-fcpxml-grid.zcut.json",
+    "fixtures/regressions/xmeml-sequence-grid.zcut.json",
     "examples/minimal.zcut.json",
     "examples/interview.zcut.json",
   ]) {
@@ -60,7 +74,7 @@ describe("Premiere xmeml v5", () => {
       expect(await exporter.validate(xml)).toBe(true);
     });
   }
-  it("writes native frame rates, links, filters, marker, transition, and fixed losses", async () => {
+  it("writes native file rates, links, filters, marker, transition, and fixed losses", async () => {
     const { project, timeline, xml } = await generate("fixtures/projects/std-25.zcut.json");
     expect(xml).toContain('<xmeml version="5">');
     expect(xml).toContain("<pathurl>file://localhost/");
@@ -70,6 +84,18 @@ describe("Premiere xmeml v5", () => {
     expect(xml).toContain("<effectid>audiolevels</effectid>");
     expect(xml).toContain("<effectid>basic</effectid>");
     expect(xml).toContain("<effectid>crop</effectid>");
+    expect(clipitem(xml, "clp_vfr")).toMatch(/<in>0<\/in>\s*<out>100<\/out>/);
+    expect(clipitem(xml, "clp_ext")).toMatch(/<in>328<\/in>\s*<out>568<\/out>/);
+    for (const [id, speed, reverse, freeze] of [
+      ["clp_v6", "200", "FALSE", "FALSE"],
+      ["clp_v7", "100", "TRUE", "FALSE"],
+      ["clp_v8-s2", "0", "FALSE", "TRUE"],
+    ]) {
+      const item = clipitem(xml, id);
+      expect(parameterValue(item, "speed")).toBe(speed);
+      expect(parameterValue(item, "reverse")).toBe(reverse);
+      expect(parameterValue(item, "freeze")).toBe(freeze);
+    }
     expect(xml).toContain("<marker id=");
     expect(xml).toContain("segment=3");
     const losses = exporter.losses(project, timeline, profile);
@@ -82,6 +108,81 @@ describe("Premiere xmeml v5", () => {
       ]),
     );
     expect(losses.some((item) => item.feature === "gain" || item.feature === "transform")).toBe(false);
+  });
+  it("rounds video and audio source cuts on the sequence grid, with half frames upward", async () => {
+    const { project, timeline, xml } = await generate("fixtures/regressions/xmeml-sequence-grid.zcut.json");
+    for (const id of ["clp_vfr", "clp_ext"]) {
+      const item = clipitem(xml, id);
+      expect(item).toMatch(/<rate>\s*<timebase>25<\/timebase>\s*<ntsc>FALSE<\/ntsc>\s*<\/rate>/);
+      expect(item).toMatch(/<in>1<\/in>\s*<out>26<\/out>/);
+    }
+    expect(clipitem(xml, "clp_vfr")).toMatch(/<file id="med_VFR">[\s\S]*?<timebase>30<\/timebase>/);
+    expect(clipitem(xml, "clp_ext")).toMatch(/<file id="med_EXT">[\s\S]*?<timebase>48000<\/timebase>/);
+    const losses = exporter.losses(project, timeline, profile).filter((item) => item.reason_code === "R_GRID_ROUNDED");
+    expect(losses).toHaveLength(2);
+    for (const id of ["clp_vfr", "clp_ext"])
+      expect(losses).toContainEqual(
+        expect.objectContaining({
+          entity_id: id,
+          feature: "clip_cut",
+          status: "approximated",
+          severity: "warning",
+        }),
+      );
+    const rows = await exporter.readBack(xml, timeline);
+    expect(rows.find((row) => row.clip_id === "clp_ext")).toMatchObject({ source_in: 1920, source_out: 49920 });
+  });
+  it("converts motion and crop ratios into FCP7 units and keeps audio level linear", async () => {
+    const { xml } = await generate("fixtures/regressions/xmeml-sequence-grid.zcut.json");
+    const motion = clipitem(xml, "clp_vfr");
+    expect(parameterValue(motion, "scale")).toBe("50");
+    expect(parameterValue(motion, "rotation")).toBe("-15");
+    expect(motion).toMatch(
+      /<parameterid>center<\/parameterid>\s*<name>Center<\/name>\s*<value>\s*<horiz>-0.4<\/horiz>\s*<vert>0.5<\/vert>\s*<\/value>/,
+    );
+    for (const [side, amount] of [
+      ["left", "10"],
+      ["right", "20"],
+      ["top", "5"],
+      ["bottom", "15"],
+    ])
+      expect(parameterValue(motion, side)).toBe(amount);
+    expect(Number(parameterValue(clipitem(xml, "clp_ext"), "level"))).toBeCloseTo(0.5011872336272722);
+  });
+  it("rejects noninteger source frames and clip rates different from the sequence", async () => {
+    const { xml } = await generate("fixtures/regressions/xmeml-sequence-grid.zcut.json");
+    for (const [from, to] of [
+      ["<in>1</in>", "<in>1.5</in>"],
+      ["<out>26</out>", "<out>26.5</out>"],
+      ["<timebase>25</timebase>", "<timebase>30</timebase>"],
+      ["<ntsc>FALSE</ntsc>", "<ntsc>TRUE</ntsc>"],
+    ]) {
+      const item = clipitem(xml, "clp_vfr");
+      const altered = xml.replace(item, item.replace(from, to));
+      expect(altered).not.toBe(xml);
+      expect(await exporter.validate(altered)).toBe(false);
+    }
+    const item = clipitem(xml, "clp_vfr");
+    expect(await exporter.validate(xml.replace(item, item.replace(/<rate>[\s\S]*?<\/rate>/, "")))).toBe(false);
+  });
+  it("checks mixed-rate source limits in sequence frames, including file references", async () => {
+    const { project, timeline, paths } = await generate("fixtures/regressions/parent-25-on-2997.zcut.json");
+    const track = timeline.tracks[0];
+    const media = project.media.find((entry) => entry.id === "med_DUP1");
+    if (track?.kind !== "video" || !track.clips[0] || !media) throw new Error("Missing mixed-rate clip");
+    const clip = track.clips[0];
+    clip.source_start = sub(media.duration, clip.duration);
+    const xml = (await exporter.generate(project, timeline, profile, paths)).data.toString();
+    const item = clipitem(xml, clip.id);
+    expect(item).toMatch(/<in>298<\/in>\s*<out>300<\/out>/);
+    expect(await exporter.validate(xml)).toBe(true);
+    expect(await exporter.validate(xml.replace(item, item.replace("<out>300</out>", "<out>301</out>")))).toBe(false);
+    const { xml: referenced } = await generate("fixtures/regressions/xmeml-sequence-grid.zcut.json");
+    const tail = clipitem(referenced, "clp_tail");
+    expect(tail).toContain('<file id="med_VFR"/>');
+    expect(await exporter.validate(referenced.replace(tail, tail.replace("<out>750</out>", "<out>751</out>")))).toBe(
+      false,
+    );
   });
   it("reports audio and source grid rounding plus dropped extension data", async () => {
     const { project, timeline, paths } = await generate("fixtures/projects/std-2997-df.zcut.json");

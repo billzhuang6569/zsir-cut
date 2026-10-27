@@ -106,6 +106,20 @@ it("counts still sources at 25 fps and rounds source samples at a half upward", 
   expect(cuttingList(p, timeline, "fcp-11-fcpxml-1.13").find((row) => row.clip_id === "clp_ext")?.source_in).toBe(1);
 });
 
+it("compares xmeml source cuts in native units after sequence-frame rounding", async () => {
+  const parsed = parseProject(await readFile("fixtures/regressions/xmeml-sequence-grid.zcut.json", "utf8"));
+  if (!parsed.ok || !parsed.project.timelines[0]) throw new Error("Grid fixture invalid");
+  const p = parsed.project;
+  const timeline = parsed.project.timelines[0];
+  const rows = cuttingList(p, timeline, "premiere-25-xmeml-5");
+  expect(rows.find((row) => row.clip_id === "clp_ext")).toMatchObject({ source_in: 1920, source_out: 49920 });
+  for (const profile of ["resolve-18.5-otio", "fcp-11-fcpxml-1.13"] as const)
+    expect(cuttingList(p, timeline, profile).find((row) => row.clip_id === "clp_ext")).toMatchObject({
+      source_in: 960,
+      source_out: 48960,
+    });
+});
+
 it("chooses and caches a supported host profile through an injectable detector", async () => {
   expect(PROFILES["resolve-18.5-otio"].format_version).toBe("0.17");
   const settings = join(directory, "hosts.json");
