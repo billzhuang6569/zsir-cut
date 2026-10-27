@@ -29,7 +29,7 @@ profile ID 的格式是「宿主-最低宿主版本-格式-格式版本」。
 
 - 应用启动时探测本机已安装的宿主和版本，写进用户设置 `~/.zsir-cut/hosts.json`，不写进工程。默认 profile 按探测结果选，用户不需要自己猜版本。
 - FCP 会拒绝比自己新的 FCPXML，也会拒绝没通过 DTD 校验的文件。所以 FCP 一律选不高于本机版本的 FCPXML，并用从 FCP 应用包里取出的 DTD 校验。
-- Resolve 的默认格式在第 1 步实测后定。调研里有反馈说 Resolve 对 FCPXML 的媒体重链接比 OTIO 稳，所以 `resolve-21-fcpxml-1.11` 作为候选，和 OTIO 一起跑第 1 步的交换层测试，谁先做到逐切点零偏差谁当默认。
+- Resolve 的默认格式定为 `resolve-18.5-otio`（2026-10-27，Resolve 21.1 实测）。两种格式读回都是逐切点零偏差，但实机导入差别明显：FCPXML 素材在线，可 Resolve 把分层读乱，主画面被放到最上层，若干音频片段被当成画面，片段名丢失，分段变速导入时有告警；OTIO 保留轨道名和分层，素材离线和丢帧起点的问题按 export-otio-xmeml 2.2 修正后解决。`resolve-21-fcpxml-1.11` 保留为备选 profile。
 - Premiere 不用 OTIO。它导入 OTIO 后的变速值目前不可信。
 - 预留给第二期的：`resolve-21-api`（Studio 版脚本 API 直接建时间线）、`premiere-26-uxp`（自研 UXP 面板）、剪映草稿。
 

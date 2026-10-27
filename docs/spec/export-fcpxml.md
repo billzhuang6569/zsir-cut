@@ -92,8 +92,8 @@
 | `source_channels` | `<audio-channel-source srcCh="1, 2"/>`，声道号从 1 开始 |
 | `transform.scale` | `<adjust-transform scale="0.5 0.5"/>` |
 | `transform.rotation_deg` | `<adjust-transform rotation="5"/>`，与缩放写在同一个元素里 |
-| `transform.position` | `<adjust-transform position="x y"/>`，单位换算见第 11 节 |
-| `transform.crop` | `<adjust-crop mode="trim"><trim-rect left top right bottom/></adjust-crop>`，单位换算见第 11 节 |
+| `transform.position` | `<adjust-transform position="x y"/>`。FCPXML 的位移单位是画面高度的百分比：`x = position[0] × 时间线宽 ÷ 时间线高 × 100`，`y = position[1] × 100` |
+| `transform.crop` | `<adjust-crop mode="trim"><trim-rect left top right bottom/></adjust-crop>`。裁切单位同样是画面高度的百分比：`left = crop.left × 源宽 ÷ 源高 × 100`，`right` 同理，`top = crop.top × 100`，`bottom` 同理 |
 | `label` | 片段的 `name` |
 | ID | 片段末尾 `<metadata>` 里两条 `<md>`：`com.zsir-cut.clip-id`、`com.zsir-cut.occurrence-id`；配对时再加 `com.zsir-cut.audio-clip-id` |
 
@@ -154,8 +154,8 @@
 
 | 项 | 当前写法 | 要核实的 |
 |---|---|---|
-| 位移单位 | `position` 暂按「时间线高度的百分比」换算 | FCP 的实际单位 |
-| 裁切单位 | `trim-rect` 暂按「源画面尺寸的百分比」 | FCP 的实际单位 |
+| 位移单位 | 按画面高度的百分比，见第 7 节 | 第一版把工程里的比例值当成像素再换算，导出值小了一百多倍；Resolve 读入后的数值证明它按「高度百分比」解释。改后待 FCP 复测 |
+| 裁切单位 | 按画面高度的百分比，见第 7 节 | 同上，改后待 FCP 复测 |
 | 字幕语言代码 | `SRT.zh-Hans`、`SRT.en` | 已实测通过（2026-10-27，FCP 12.4，三个工程字幕条数和起点正确） |
 | 静帧素材 | `FFVideoFormatRateUndefined` 格式、`duration="0s"` asset、`<clip><video/></clip>` 引用 | 已实测能导入（2026-10-27）。第一版用 `<asset-clip>` 引用静帧会让 FCP 崩溃。29.97 工程里外壳 `<clip>` 未写 `format` 时报「不在编辑帧边界上」，已改为写时间线格式，第三版实测无提示 |
 | 声道选择 | `audio-channel-source srcCh` | 只取声道 1 是否生效 |
