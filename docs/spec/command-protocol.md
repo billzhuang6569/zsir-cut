@@ -175,9 +175,9 @@
 
 ### 7.1 流程
 
-1. `session_begin`：参数 `approval`（`manual` 或 `auto`）、`intent`（一句话说明这次要做什么）。内核以当前修订为基础建一份草稿，返回 `session_id`，`receipt` 为 null，`result` 含 `session_id`、`base_revision`、`state`。
+1. `session_begin`：参数 `approval`（`manual` 或 `auto`）、`intent`（一句话说明这次要做什么），加上写请求的公共字段，`base_revision` 是主工程的当前修订，幂等键防止重发时开出两个会话。内核以这个修订为基础建一份草稿，不改主工程，返回 `no_op`，`result` 含 `session_id`、`base_revision`、`state`。
 2. Agent 带着 `session_id` 发 `edit`、`undo`、`redo`，结果都是 `drafted`，只改草稿。草稿有自己的修订链和日志，可以在会话内撤销。`base_revision` 和幂等键都对草稿检查。
-3. `session_review`：会话进入待审状态，返回审阅汇总（见 7.3）。`approval` 为 `auto` 时，紧接着自动执行批准。
+3. `session_review`：带写请求的公共字段，`base_revision` 是**草稿**的当前修订。会话进入待审状态，返回审阅汇总（见 7.3）。`approval` 为 `auto` 时，紧接着自动执行批准，批准的结果信封放在 `result.approval` 里。
 4. 人在 UI 或 CLI 里看过之后，`session_approve` 或 `session_reject`。这两个动词带写请求的公共字段，`base_revision` 是**主工程**的当前修订。
 5. 批准：见 7.4。拒绝：会话变为 `rejected`，主工程不变，草稿保留供查阅。
 
@@ -212,7 +212,7 @@
 
 1. 主工程当前修订等于会话的 `base_revision`：把草稿当前内容作为一个新修订写入主工程，日志条目的 `verb` 为 `session_approve`，`ops` 是草稿的全部操作，`changes` 是会话基础到草稿的实体差异。
 2. 主工程已经前进：把草稿日志里的写入按顺序重放到主工程当前内容上（会话内被撤销的不重放），每个操作都按当时的请求参数执行。全部成功，就把结果作为一个新修订写入。任何一个失败，或结果 L1 校验有错误，返回 `conflict`，`result` 列出失败的操作和原因；会话保持 `in_review`，主工程不变，Agent 可以继续编辑草稿后再提交审阅。
-3. 批准后的修订是一步撤销，撤销它就撤销整个会话。
+3. 批准后的修订是一步撤销，撤销它就撤销整个会话。草稿相对主工程没有净改动时，批准不产生修订，返回 `no_op`，会话照常变为 `approved`。
 4. 带 `force` 的字幕域操作只在 `approval` 为 `manual` 的会话里有效，规则见第 8 节。
 
 不进会话的动词：`import_media`、`transcribe`、`render_preview`、`view_timeline`、`export`、`record_handoff_check`、`job_status` 和所有读动词。带 `session_id` 调用它们返回 `rejected`、`E_SESSION_STATE`。

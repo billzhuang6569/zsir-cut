@@ -47,7 +47,8 @@ const span = (item: Transcript, first: unknown, last: unknown): [number, number]
   return [a, b];
 };
 const cueSpan = (item: Transcript, cue: Cue) => span(item, cue.first_token, cue.last_token);
-const protect = (item: Transcript, first: number, last: number) => {
+const protect = (item: Transcript, first: number, last: number, force = false) => {
+  if (force) return;
   if (item.tokens.slice(first, last + 1).some((token) => token.state === "approved"))
     fail("E_LOCKED", "Approved token cannot be edited");
   if (
@@ -101,13 +102,15 @@ export function applySubtitleEdit(
   timeline: Timeline,
   op: Op,
   generate: (prefix: string) => string,
+  allowForce = false,
 ): void {
-  if (op.force === true) fail("E_SESSION_STATE", "force requires a manual approval session");
+  if (op.force === true && !allowForce) fail("E_SESSION_STATE", "force requires a manual approval session");
+  const force = op.force === true && allowForce;
   switch (op.op) {
     case "edit_text": {
       const item = transcript(project, op.transcript_id);
       const [first, last] = span(item, op.from_token, op.to_token);
-      protect(item, first, last);
+      protect(item, first, last, force);
       const old = item.tokens.slice(first, last + 1);
       const pieces = (op.text as string).includes(" ")
         ? (op.text as string).trim().split(/\s+/u)
@@ -162,7 +165,7 @@ export function applySubtitleEdit(
       for (const tokenId of op.tokens as string[]) {
         const index = item.tokens.findIndex((entry) => entry.id === tokenId);
         if (index < 0) fail("E_NOT_FOUND", `Token ${tokenId} not found`);
-        protect(item, index, index);
+        protect(item, index, index, force);
         const token = item.tokens[index]!;
         if (op.op === "hide_tokens") {
           token.heard ??= token.text;
@@ -191,16 +194,19 @@ export function applySubtitleEdit(
         item.subtitle_rules = stored;
       }
       const rules = styleRules(project, timeline, item, first, last);
-      const protectedCues = item.cues.filter((cue) => {
-        const [a, b] = cueSpan(item, cue);
-        return (
-          cue.timing?.locked ||
-          cue.state === "approved" ||
-          item.tokens.slice(a, b + 1).some((token) => token.state === "approved")
-        );
-      });
+      const protectedCues = force
+        ? []
+        : item.cues.filter((cue) => {
+            const [a, b] = cueSpan(item, cue);
+            return (
+              cue.timing?.locked ||
+              cue.state === "approved" ||
+              item.tokens.slice(a, b + 1).some((token) => token.state === "approved")
+            );
+          });
       const blocked = new Set<number>();
       item.tokens.forEach((token, index) => {
+        if (force) return;
         if (token.state === "approved") blocked.add(index);
       });
       for (const cue of protectedCues) {
@@ -267,7 +273,7 @@ export function applySubtitleEdit(
     case "set_cue": {
       const { transcript: item, cue } = cueOwner(project, op.cue_id);
       const [a, b] = cueSpan(item, cue);
-      protect(item, a, b);
+      protect(item, a, b, force);
       const fields = ["breaks", "timing", "style_id", "state"];
       setFields(cue as unknown as Record<string, unknown>, op, fields);
       if (cue.timing && typeof cue.timing === "object") {
@@ -279,7 +285,7 @@ export function applySubtitleEdit(
     case "split_cue": {
       const { transcript: item, cue } = cueOwner(project, op.cue_id);
       const [a, b] = cueSpan(item, cue);
-      protect(item, a, b);
+      protect(item, a, b, force);
       const at = item.tokens.findIndex((token) => token.id === op.after_token);
       if (at < a || at >= b) fail("E_VALIDATION", "Split point is outside cue");
       const right: Cue = {
@@ -310,7 +316,7 @@ export function applySubtitleEdit(
         const current = item.cues[at + index];
         if (!current || current.id !== id) fail("E_VALIDATION", "Cues must be adjacent in order");
         const [a, b] = cueSpan(item, current as Cue);
-        protect(item, a, b);
+        protect(item, a, b, force);
         return current as Cue;
       });
       for (let i = 1; i < selected.length; i++)
@@ -338,7 +344,7 @@ export function applySubtitleEdit(
       const track = subtitleTrack(timeline, op.track_id);
       const { transcript: item, cue } = cueOwner(project, op.cue_id);
       const [a, b] = cueSpan(item, cue);
-      protect(item, a, b);
+      protect(item, a, b, force);
       const occurrence = timeline.tracks.some(
         (entry) => entry.kind !== "subtitle" && entry.clips.some((clip) => clip.occurrence_id === op.occurrence_id),
       );

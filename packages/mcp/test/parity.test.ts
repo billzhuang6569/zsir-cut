@@ -43,6 +43,11 @@ describe("CLI and MCP", () => {
       const cases = [
         { verb: "validate", input: {} },
         { verb: "validate", input: { media: true } },
+        { verb: "diff", input: { from: "rev_fixture_1" } },
+        {
+          verb: "session_begin",
+          input: { ...base, idempotency_key: "begin-parity", approval: "manual", intent: "Parity test" },
+        },
         { verb: "undo", input: { base_revision: "rev_fixture_1", idempotency_key: "missing-author" } },
         { verb: "inspect", input: {} },
         {

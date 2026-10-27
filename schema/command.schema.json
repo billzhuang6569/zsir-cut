@@ -3,6 +3,8 @@
   "$id": "https://github.com/billzhuang6569/zsir-cut/schema/command.schema.json",
   "title": "zsir-cut command requests",
   "$defs": {
+    "revision_id": { "type": "string", "pattern": "^rev_[A-Za-z0-9_-]{1,64}$" },
+    "session_id": { "type": "string", "pattern": "^ses_[A-Za-z0-9_-]{1,64}$" },
     "author": {
       "type": "object",
       "required": [
@@ -64,9 +66,7 @@
         "author": {
           "$ref": "#/$defs/author"
         },
-        "session_id": {
-          "type": "string"
-        },
+        "session_id": { "$ref": "#/$defs/session_id" },
         "dry_run": {
           "type": "boolean"
         }
@@ -99,6 +99,7 @@
           }
         ],
         "properties": {
+          "session_id": { "type": "string" },
           "media": {
             "type": "boolean"
           }
@@ -107,12 +108,14 @@
       },
       "diff": {
         "type": "object",
-        "allOf": [
-          {
-            "$ref": "#/$defs/read"
-          }
-        ],
-        "unevaluatedProperties": true
+        "allOf": [{ "$ref": "#/$defs/read" }],
+        "required": ["from"],
+        "properties": {
+          "from": { "$ref": "#/$defs/revision_id" },
+          "to": { "$ref": "#/$defs/revision_id" },
+          "session_id": { "type": "string" }
+        },
+        "unevaluatedProperties": false
       },
       "import_media": {
         "type": "object",
@@ -243,39 +246,31 @@
       },
       "session_begin": {
         "type": "object",
-        "allOf": [
-          {
-            "$ref": "#/$defs/write"
-          }
-        ],
-        "unevaluatedProperties": true
+        "allOf": [{ "$ref": "#/$defs/write" }],
+        "required": ["approval", "intent"],
+        "properties": { "approval": { "enum": ["manual", "auto"] }, "intent": { "type": "string", "minLength": 1 } },
+        "unevaluatedProperties": false
       },
       "session_review": {
         "type": "object",
-        "allOf": [
-          {
-            "$ref": "#/$defs/write"
-          }
-        ],
-        "unevaluatedProperties": true
+        "allOf": [{ "$ref": "#/$defs/write" }],
+        "required": ["session_id"],
+        "properties": { "session_id": { "$ref": "#/$defs/session_id" } },
+        "unevaluatedProperties": false
       },
       "session_approve": {
         "type": "object",
-        "allOf": [
-          {
-            "$ref": "#/$defs/write"
-          }
-        ],
-        "unevaluatedProperties": true
+        "allOf": [{ "$ref": "#/$defs/write" }],
+        "required": ["session_id"],
+        "properties": { "session_id": { "$ref": "#/$defs/session_id" } },
+        "unevaluatedProperties": false
       },
       "session_reject": {
         "type": "object",
-        "allOf": [
-          {
-            "$ref": "#/$defs/write"
-          }
-        ],
-        "unevaluatedProperties": true
+        "allOf": [{ "$ref": "#/$defs/write" }],
+        "required": ["session_id"],
+        "properties": { "session_id": { "$ref": "#/$defs/session_id" } },
+        "unevaluatedProperties": false
       },
       "render_preview": {
         "type": "object",

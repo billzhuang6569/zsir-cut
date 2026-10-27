@@ -612,11 +612,13 @@ export function applyEdit(
   entityOps: Record<string, string>,
   seed: string,
   timelineId?: string,
+  allowForce = false,
+  idTime?: string,
 ): void {
   let serial = 0;
   const generate = (prefix: string) =>
     newId(prefix, {
-      now: () => Date.parse(project.revision.created_at),
+      now: () => Date.parse(idTime ?? project.revision.created_at),
       randomBytes: () => createHash("sha256").update(`${seed}:${serial++}:${prefix}`).digest().subarray(0, 10),
     });
   if (!timelineId && project.timelines.length !== 1)
@@ -627,7 +629,7 @@ export function applyEdit(
   const imageIds = new Set(project.media.filter((media) => media.kind === "image").map((media) => media.id));
   for (const op of ops) {
     const before = structuredClone(project);
-    if (SUBTITLE_OPS.has(op.op)) applySubtitleEdit(project, timeline, op, generate);
+    if (SUBTITLE_OPS.has(op.op)) applySubtitleEdit(project, timeline, op, generate, allowForce);
     else applyOne(project, timeline, op, generate);
     const oldClips = before.timelines.flatMap((item) => mediaTracks(item).flatMap((track) => track.clips));
     const oldById = new Map(oldClips.map((clip) => [clip.id, clip]));
