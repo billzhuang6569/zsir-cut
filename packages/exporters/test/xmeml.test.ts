@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -19,6 +20,11 @@ import exporter from "../src/index.js";
 const profile = "premiere-25-xmeml-5";
 const fixtures = ["std-25", "std-2997-df", "std-2997-ndf"];
 const mediaRoot = pathToFileURL(resolve("fixtures/.media")).href.replace("file:///", "file://localhost/");
+const previewStub: NonNullable<Parameters<typeof runExport>[6]> = async (_project, _timeline, _path, options) => {
+  const data = Buffer.from("preview test placeholder");
+  await writeFile(options.output, data);
+  return { path: options.output, sha256: createHash("sha256").update(data).digest("hex"), frames: "0" };
+};
 const clipitem = (xml: string, id: string) => {
   const item = xml.match(new RegExp(`<clipitem id="${id}">[\\s\\S]*?</clipitem>`))?.[0];
   if (!item) throw new Error(`Missing clipitem ${id}`);
@@ -247,6 +253,7 @@ describe("Premiere xmeml v5", () => {
         "exp_xmeml_test",
         "2026-10-27T00:00:00.000Z",
         profile,
+        previewStub,
       );
       if (result.rejected) throw new Error("Export rejected");
       expect(result.manifest.profile.id).toBe(profile);
