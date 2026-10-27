@@ -1,5 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import { basename, dirname, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   defaultProfile,
   type Exporter,
@@ -296,9 +297,13 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
         return errorEnvelope(verb, requestId, "rejected", "E_UNSUPPORTED", "No supported profile selected");
       if (request.overlay === true)
         return errorEnvelope(verb, requestId, "rejected", "E_UNSUPPORTED", "Overlay export is not implemented");
+      const exporterModule =
+        options.exporterModule ??
+        (profile === "fcp-11-fcpxml-1.13" || profile === "fcp-10.6-fcpxml-1.11"
+          ? resolve(dirname(fileURLToPath(import.meta.url)), "../../exporters/dist/index.js")
+          : undefined);
       const exporter =
-        options.exporter ??
-        (options.exporterModule ? ((await import(resolve(options.exporterModule))).default as Exporter) : undefined);
+        options.exporter ?? (exporterModule ? ((await import(exporterModule)).default as Exporter) : undefined);
       if (!exporter)
         return errorEnvelope(
           verb,
@@ -328,9 +333,9 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
         return output;
       }
       if (!options.worker) {
-        if (!options.exporterModule)
+        if (!exporterModule)
           return errorEnvelope(verb, requestId, "rejected", "E_UNSUPPORTED", "Exporter worker module is required");
-        const jobId = await startExportJob(request.project as string, project.id, request, options.exporterModule);
+        const jobId = await startExportJob(request.project as string, project.id, request, exporterModule);
         const output = basic(verb, requestId);
         output.status = "accepted";
         output.result = { job_id: jobId };

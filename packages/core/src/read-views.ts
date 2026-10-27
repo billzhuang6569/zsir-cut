@@ -32,6 +32,11 @@ const time = (value: Rational, rate: Rational, start?: string) => ({
 const sequenceTime = (value: Rational, timeline: Timeline) => time(value, timeline.edit_rate, timeline.start_timecode);
 const sourceTime = (value: Rational, media?: Media) =>
   time(value, media?.video?.rate ?? rational(25n), media?.start_timecode);
+const sourceClock = (value: Rational) => {
+  const ms = floor(add(mul(value, rational(1000n)), rational(1n, 2n)));
+  const pad = (part: bigint, length = 2) => part.toString().padStart(length, "0");
+  return `${pad(ms / 3600000n)}:${pad((ms / 60000n) % 60n)}:${pad((ms / 1000n) % 60n)}.${pad(ms % 1000n, 3)}`;
+};
 const durationTime = (value: Rational, rate: Rational, startTimecode?: string) =>
   time(value, rate, startTimecode ? `00:00:00${startTimecode.includes(";") ? ";" : ":"}00` : undefined);
 const within = (start: Rational, end: Rational, range?: Range) =>
@@ -311,7 +316,7 @@ export function readTranscript(project: Project, input: Input): { text: string; 
       if (!tokens.length) continue;
       const ids = `${tokens[0]!.id}..${tokens.at(-1)!.id}`;
       rows.push(
-        `[${item.cue.id} ${ids}]${item.cue.state === "auto" ? "" : ` !${item.cue.state}`} ${sourceTime(item.start, media).tc ?? printRational(item.start, true)} ${joinWords(tokens.map((token) => token.text))}`,
+        `[${item.cue.id} ${ids}]${item.cue.state === "auto" ? "" : ` !${item.cue.state}`} ${media?.start_timecode ? sourceTime(item.start, media).tc : sourceClock(item.start)} ${joinWords(tokens.map((token) => token.text))}`,
       );
     }
   } else {

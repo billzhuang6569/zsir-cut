@@ -116,8 +116,8 @@ it("chooses and caches a supported host profile through an injectable detector",
   expect(JSON.parse(await readFile(settings, "utf8"))).toEqual({ final_cut_pro: "10.8", davinci_resolve: "21.1" });
 });
 
-it("reports built-in profiles as unsupported until their exchange exporters land", async () => {
-  expect((await dispatch("export", request({ dry_run: true }))).error?.code).toBe("E_UNSUPPORTED");
+it("registers the FCPXML exporter and keeps overlays unsupported", async () => {
+  expect((await dispatch("export", request({ dry_run: true }))).status).toBe("dry_run");
   expect(
     (await dispatch("export", request({ overlay: true, dry_run: true }), { exporterModule: fake })).error?.code,
   ).toBe("E_UNSUPPORTED");

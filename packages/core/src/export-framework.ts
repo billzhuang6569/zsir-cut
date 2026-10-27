@@ -52,6 +52,8 @@ export type LossItem = {
 export interface Exporter {
   readonly version: string;
   readonly git_sha: string;
+  validationNotes?: string;
+  gitSha?(): Promise<string>;
   generate(
     project: Project,
     timeline: Timeline,
@@ -436,6 +438,17 @@ export async function runExport(
   );
   const formatValid = await exporter.validate(exchange.data);
   if (!formatValid || !cutCheck.zero_frame_deviation) throw new Error("Exchange validation failed");
+  let gitSha = exporter.git_sha;
+  let gitShaUnavailable = false;
+  if (exporter.gitSha) {
+    try {
+      gitSha = await exporter.gitSha();
+      if (!/^[0-9a-f]{7,40}$/.test(gitSha) || /^0+$/.test(gitSha)) throw new Error("Invalid Git SHA");
+    } catch {
+      gitSha = "0000000";
+      gitShaUnavailable = true;
+    }
+  }
   const safeName = (text: string) => text.replaceAll(/[\\/:*?"<>|]/g, "_");
   if (basename(exchange.name) !== exchange.name) throw new Error("Exchange file name must be a basename");
   const stamp = at.replaceAll(/[-:]/g, "").slice(0, 13).replace("T", "-");
@@ -491,7 +504,7 @@ export async function runExport(
     timeline_id: timeline.id,
     source_revision: project.revision.id,
     profile: { id: profile, ...PROFILES[profile] },
-    exporter: { version: exporter.version, git_sha: exporter.git_sha },
+    exporter: { version: exporter.version, git_sha: gitSha },
     timebase: {
       edit_rate: printRational(timeline.edit_rate),
       drop_frame: timeline.drop_frame,
@@ -509,7 +522,11 @@ export async function runExport(
     validation: {
       schema: check(
         formatValid && cutCheck.zero_frame_deviation ? "pass" : "fail",
-        cutCheck.zero_frame_deviation ? "格式校验与剪辑表读回通过" : JSON.stringify(cutCheck.differences),
+        `${
+          cutCheck.zero_frame_deviation
+            ? (exporter.validationNotes ?? "格式校验与剪辑表读回通过")
+            : JSON.stringify(cutCheck.differences)
+        }${gitShaUnavailable ? "；无法读取仓库当前提交，git_sha=0000000" : ""}`,
       ),
       media_resolved: check(media.every((item) => item.online) ? "pass" : "fail", "素材路径、大小与指纹检查"),
       host_import: { status: "not_run" },
