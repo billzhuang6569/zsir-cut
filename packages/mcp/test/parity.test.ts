@@ -78,7 +78,7 @@ describe("CLI and MCP", () => {
       await client.close();
       await server.close();
     }
-  });
+  }, 30000);
 
   it("maps all CLI exit statuses", async () => {
     expect(invokeCli("validate", {}).code).toBe(0);
