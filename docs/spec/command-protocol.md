@@ -289,6 +289,16 @@
 
 `result` 另含 `lines`（行数）和 `truncated`（超过 256 KB 时截断为 true）。
 
+### 9.1.1 长任务
+
+`transcribe`、`render_preview`、`view_timeline`、`export` 是长任务。
+
+1. 请求先按普通规则检查（`dry_run` 的 `export` 除外，它同步返回损失报告）。检查通过后，内核在 `.zcut/<project_id>/jobs/<job_id>/` 下建任务目录，写 `job.json`，启动一个独立的子进程执行，然后立即返回 `accepted`，`result` 含 `job_id`。`job_id` 格式为 `job_` 加小写 UUIDv7。
+2. `job.json` 字段：`job_id`、`verb`、`request`、`state`（`queued`、`running`、`succeeded`、`failed`）、`progress`（0 到 1）、`message`、`created_at`、`updated_at`、`envelope`（结束后的最终结果信封）。子进程每次更新都原子替换这个文件。
+3. `job_status`：参数 `job_id`，读动词，`result` 就是 `job.json` 的内容。子进程已不存在而状态仍是 `running` 时，状态改报 `failed`，`message` 写明进程意外退出。
+4. 长任务产生的工程写入（例如 `transcribe` 写母稿）在子进程里走第 5 节的写入流程，`base_revision` 用请求里的值，幂等键用请求里的键。
+5. CLI 加 `--wait` 时，提交后每 500 毫秒查一次 `job_status`，结束后输出最终结果信封，退出码按最终状态。MCP 不等待，由 Agent 调用 `zcut_job_status`。
+
 ### 9.2 导入素材
 
 `import_media` 的导入模式：`paths: [文件…]`，加上写请求的公共字段。对每个文件用 ffprobe 探测，在 `media[]` 末尾追加一条：
