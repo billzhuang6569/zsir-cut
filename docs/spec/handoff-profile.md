@@ -121,7 +121,7 @@ profile ID 的格式是「宿主-最低宿主版本-格式-格式版本」。
 | `R_SPLIT_FOR_RETIME` | 为表达变速把片段拆开了 |
 | `R_STYLE_NOT_REPRESENTABLE` | 字幕样式无法在目标软件里表达 |
 | `R_SUB_MANUAL_IMPORT` | 字幕需要手动导入 |
-| `R_SUB_UNPROJECTED` | 字幕落在倒放段、定格段或静帧上，没有导出 |
+| `R_SUB_UNPROJECTED` | 字幕落在倒放段、定格段或静帧上，没有导出。这是按规则有意不显示，内容并没有丢，严重程度为 `warning` |
 | `R_BAKED_OVERLAY` | 已渲染成透明叠层 |
 | `R_MEDIA_OFFLINE` | 素材离线或指纹不符 |
 | `R_EXT_DROPPED` | 扩展数据没有写出 |

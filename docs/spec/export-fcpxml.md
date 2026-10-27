@@ -49,7 +49,7 @@
 | `format` | 该素材的格式 ID |
 | `audioSources`、`audioChannels`、`audioRate` | 有音频时写 `1`、声道数、`48000` |
 
-`<asset>` 内放 `<media-rep kind="original-media" src="file:///绝对路径"/>`。路径按 RFC 3986 百分号编码，中文、空格和 `%` 都要编码，`/` 不编码。
+`<asset>` 内放 `<media-rep kind="original-media" src="file:///绝对路径"/>`。素材的 `media_id` 写在 `<asset>` 末尾的 `<metadata>` 里，键名 `com.zsir-cut.media-id`，读回时靠它对应素材，不靠文件名。路径按 RFC 3986 百分号编码，中文、空格和 `%` 都要编码，`/` 不编码。
 
 **效果**：用到叠化时声明 `<effect id name="Cross Dissolve" uid="FxPlug:4731E73A-8DAC-4113-9A30-AE85B1761265"/>`。
 
