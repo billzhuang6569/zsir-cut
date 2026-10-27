@@ -1,0 +1,78 @@
+{
+  "schema": "zsir-cut/timeline",
+  "schema_version": "0.1",
+  "id": "prj_otio_grid",
+  "name": "OTIO 29.97 grid isolation",
+  "revision": {
+    "seq": 1,
+    "id": "rev_fixture_1",
+    "parent": null,
+    "created_at": "2026-10-26T00:00:00Z",
+    "author": { "kind": "system", "name": "fixtures" }
+  },
+  "media": [
+    {
+      "id": "med_VFR",
+      "kind": "video",
+      "name": "VFR 30 fps",
+      "path": "../.media/shared/手机录屏_vfr.mp4",
+      "size_bytes": 0,
+      "fingerprint": {
+        "algo": "sampled-sha256-v1",
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "duration": "10s",
+      "video": { "rate": "30", "width": 960, "height": 540, "pixel_aspect": "1", "vfr": true }
+    }
+  ],
+  "timelines": [
+    {
+      "id": "tl_otio_grid",
+      "name": "otio-grid",
+      "edit_rate": "30000/1001",
+      "drop_frame": false,
+      "start_timecode": "01:00:00:00",
+      "audio_rate": "48000",
+      "format": { "width": 960, "height": 540, "pixel_aspect": "1" },
+      "tracks": [
+        {
+          "id": "trk_v1",
+          "kind": "video",
+          "name": "V1",
+          "enabled": true,
+          "clips": [
+            {
+              "id": "clp_primary",
+              "occurrence_id": "occ_primary",
+              "media_id": "med_VFR",
+              "timeline_start": "0s",
+              "duration": "1001/15000s",
+              "source_start": "0s"
+            }
+          ],
+          "transitions": []
+        },
+        {
+          "id": "trk_v2",
+          "kind": "video",
+          "name": "V2",
+          "enabled": true,
+          "clips": [
+            {
+              "id": "clp_connected",
+              "occurrence_id": "occ_connected",
+              "media_id": "med_VFR",
+              "timeline_start": "1001/30000s",
+              "duration": "1001/30000s",
+              "source_start": "0s"
+            }
+          ],
+          "transitions": []
+        }
+      ],
+      "markers": []
+    }
+  ],
+  "transcripts": [],
+  "subtitle_styles": []
+}

@@ -7,6 +7,7 @@ import {
   compareCuttingLists,
   cuttingList,
   fingerprint,
+  lossReport,
   parseProject,
   runExport,
   serializeProject,
@@ -16,6 +17,8 @@ import exporter from "../src/index.js";
 const fixtures = ["std-25", "std-2997-df", "std-2997-ndf"];
 const files = [
   ...fixtures.map((name) => `fixtures/projects/${name}.zcut.json`),
+  "fixtures/regressions/parent-25-on-2997.zcut.json",
+  "fixtures/regressions/otio-2997-fcpxml-grid.zcut.json",
   "examples/minimal.zcut.json",
   "examples/interview.zcut.json",
 ];
@@ -103,11 +106,59 @@ describe("Resolve OTIO", () => {
       ).zero_frame_deviation,
     ).toBe(false);
   });
+  it("keeps a mixed-rate connected cut on the exact timeline grid", async () => {
+    const { project, timeline, data } = await generate(
+      "fixtures/regressions/parent-25-on-2997.zcut.json",
+      "resolve-18.5-otio",
+    );
+    const expected = cuttingList(project, timeline, "resolve-18.5-otio");
+    expect(await exporter.readBack(data, timeline)).toEqual(expected);
+    expect(expected.find((row) => row.clip_id === "clp_connected_still")).toMatchObject({
+      timeline_in: 1,
+      timeline_out: 2,
+    });
+    expect(
+      exporter.losses(project, timeline, "resolve-18.5-otio").some((item) => item.reason_code === "R_GRID_ROUNDED"),
+    ).toBe(false);
+  });
+  it("exports a 29.97 connected clip without FCPXML grid tolerance and reports a real mismatch", async () => {
+    const path = "fixtures/regressions/otio-2997-fcpxml-grid.zcut.json";
+    const { project, timeline } = await generate(path, "resolve-18.5-otio");
+    expect([...exporter.gridTolerances(project, timeline).keys()]).toEqual(["clp_connected"]);
+    const directory = await mkdtemp(join(tmpdir(), "zcut-otio-grid-"));
+    try {
+      const withSha = { ...exporter, gitSha: async () => "abcdef0" };
+      const request = { project: path, output: directory, accept_losses: true };
+      const result = await runExport(
+        project,
+        request,
+        withSha,
+        "exp_otio_grid",
+        "2026-10-27T00:00:00.000Z",
+        "resolve-18.5-otio",
+      );
+      expect(result.rejected).toBe(false);
+      const mismatched = {
+        ...withSha,
+        async readBack(data: string | Uint8Array, selected: typeof timeline) {
+          const rows = await exporter.readBack(data, selected);
+          return rows.map((row) =>
+            row.clip_id === "clp_connected" ? { ...row, source_out: row.source_out + 1 } : row,
+          );
+        },
+      };
+      await expect(
+        runExport(project, request, mismatched, "exp_otio_bad", "2026-10-27T00:00:00.000Z", "resolve-18.5-otio"),
+      ).rejects.toThrow(/cutting list:.*clp_connected.*source_out/);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("Resolve FCPXML candidate", () => {
   for (const path of files) {
-    it(`${path} matches the FCP 1.11 body and reads back exactly`, async () => {
+    it(`${path} matches the FCP 1.11 body and reads back within reported grid rounding`, async () => {
       const candidate = await generate(path, "resolve-21-fcpxml-1.11");
       const fcp = await exporter.generate(
         candidate.project,
@@ -116,12 +167,50 @@ describe("Resolve FCPXML candidate", () => {
         candidate.paths,
       );
       expect(candidate.data).toBe(fcp.data);
-      expect(await exporter.readBack(candidate.data, candidate.timeline)).toEqual(
-        cuttingList(candidate.project, candidate.timeline, "resolve-21-fcpxml-1.11"),
+      const expected = cuttingList(candidate.project, candidate.timeline, "resolve-21-fcpxml-1.11");
+      const actual = await exporter.readBack(candidate.data, candidate.timeline);
+      const tolerances = exporter.gridTolerances(candidate.project, candidate.timeline);
+      expect([...tolerances.keys()].sort()).toEqual(
+        exporter
+          .losses(candidate.project, candidate.timeline, "resolve-21-fcpxml-1.11")
+          .filter((item) => item.reason_code === "R_GRID_ROUNDED")
+          .map((item) => item.entity_id)
+          .sort(),
       );
+      expect(actual.map(({ timeline_in_exact: _in, timeline_out_exact: _out, ...row }) => row)).toEqual(expected);
+      expect(compareCuttingLists(expected, actual, new Set(), tolerances).zero_frame_deviation).toBe(true);
       expect(await exporter.validate(candidate.data)).toBe(true);
     });
   }
+  it("records the same mixed-rate grid rounding in the Resolve loss report", async () => {
+    const path = "fixtures/regressions/parent-25-on-2997.zcut.json";
+    const { project, timeline } = await generate(path, "resolve-21-fcpxml-1.11");
+    const candidate = await lossReport(
+      project,
+      "resolve-21-fcpxml-1.11",
+      exporter,
+      "exp_grid",
+      "preview",
+      timeline,
+      "2026-10-27T00:00:00.000Z",
+      path,
+    );
+    const fcp = await lossReport(
+      project,
+      "fcp-10.6-fcpxml-1.11",
+      exporter,
+      "exp_grid",
+      "preview",
+      timeline,
+      "2026-10-27T00:00:00.000Z",
+      path,
+    );
+    const rounded = candidate.items.filter((item) => item.reason_code === "R_GRID_ROUNDED");
+    expect(rounded).toMatchObject([
+      { entity_id: "clp_connected_still", feature: "clip_cut", status: "approximated", severity: "warning" },
+    ]);
+    expect(rounded).toEqual(fcp.items.filter((item) => item.reason_code === "R_GRID_ROUNDED"));
+  });
   it("changes the handoff manifest profile while keeping the FCPXML body", async () => {
     const directory = await mkdtemp(join(tmpdir(), "zcut-resolve-profile-"));
     try {
@@ -136,10 +225,11 @@ describe("Resolve FCPXML candidate", () => {
       }
       const projectPath = join(directory, "minimal.zcut.json");
       await writeFile(projectPath, serializeProject(project));
+      const withSha = { ...exporter, gitSha: async () => "abcdef0" };
       const candidate = await runExport(
         project,
         { project: projectPath, output: join(directory, "candidate") },
-        exporter,
+        withSha,
         "exp_candidate",
         "2026-10-27T00:00:00.000Z",
         "resolve-21-fcpxml-1.11",
@@ -147,7 +237,7 @@ describe("Resolve FCPXML candidate", () => {
       const fcp = await runExport(
         project,
         { project: projectPath, output: join(directory, "fcp") },
-        exporter,
+        withSha,
         "exp_fcp",
         "2026-10-27T00:00:00.000Z",
         "fcp-10.6-fcpxml-1.11",
@@ -162,7 +252,7 @@ describe("Resolve FCPXML candidate", () => {
       const otio = await runExport(
         project,
         { project: projectPath, output: join(directory, "otio") },
-        exporter,
+        withSha,
         "exp_otio",
         "2026-10-27T00:00:00.000Z",
         "resolve-18.5-otio",

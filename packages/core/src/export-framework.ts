@@ -462,10 +462,16 @@ export async function runExport(
         .filter((item) => item.status === "unsupported" && item.entity_kind === "clip" && item.feature === "clip_cut")
         .map((item) => item.entity_id),
     ),
-    exporter.gridTolerances?.(project, timeline),
+    PROFILES[profile].format === "fcpxml" ? exporter.gridTolerances?.(project, timeline) : undefined,
   );
   const formatValid = await exporter.validate(exchange.data);
-  if (!formatValid || !cutCheck.zero_frame_deviation) throw new Error("Exchange validation failed");
+  if (!formatValid || !cutCheck.zero_frame_deviation)
+    throw new Error(
+      `Exchange validation failed: ${[
+        ...(!formatValid ? [`format: ${exporter.validationNotes ?? "validation returned false"}`] : []),
+        ...(!cutCheck.zero_frame_deviation ? [`cutting list: ${JSON.stringify(cutCheck.differences)}`] : []),
+      ].join("; ")}`,
+    );
   let gitSha = exporter.git_sha;
   let gitShaUnavailable = false;
   if (exporter.gitSha) {
