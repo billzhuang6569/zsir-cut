@@ -1,6 +1,6 @@
-import { readFile, stat } from "node:fs/promises";
-import { basename, dirname, join, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { readdir, readFile, stat } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   defaultProfile,
   type Exporter,
@@ -73,6 +73,28 @@ export interface DispatchOptions {
 }
 
 type Request = Record<string, unknown>;
+
+async function checkExporterBuild(modulePath: string): Promise<void> {
+  // shortcut: mtime detects stale builds; use build fingerprints if preserved timestamps must be verified.
+  const source = resolve(dirname(modulePath), "../src");
+  let files: string[];
+  try {
+    files = await readdir(source, { recursive: true });
+  } catch (error) {
+    // Published packages can contain only dist.
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  for (const file of files.filter((name) => name.endsWith(".ts"))) {
+    const compiled = resolve(dirname(modulePath), file.replace(/\.ts$/, ".js"));
+    try {
+      if ((await stat(join(source, file))).mtimeMs <= (await stat(compiled)).mtimeMs) continue;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    throw new Error(`导出器编译产物缺失或已过期（${file}），请先在项目根目录运行 pnpm typecheck 构建后重试`);
+  }
+}
 
 function basic(verb: Verb, requestId: string): Envelope {
   return {
@@ -477,6 +499,7 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
         return errorEnvelope(verb, requestId, "rejected", "E_UNSUPPORTED", "No supported profile selected");
       if (request.overlay === true)
         return errorEnvelope(verb, requestId, "rejected", "E_UNSUPPORTED", "Overlay export is not implemented");
+      const builtinModule = resolve(dirname(fileURLToPath(import.meta.url)), "../../exporters/dist/index.js");
       const exporterModule =
         options.exporterModule ??
         (profile === "fcp-11-fcpxml-1.13" ||
@@ -484,10 +507,14 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
         profile === "resolve-21-fcpxml-1.11" ||
         profile === "resolve-18.5-otio" ||
         profile === "premiere-25-xmeml-5"
-          ? resolve(dirname(fileURLToPath(import.meta.url)), "../../exporters/dist/index.js")
+          ? builtinModule
           : undefined);
-      const exporter =
-        options.exporter ?? (exporterModule ? ((await import(exporterModule)).default as Exporter) : undefined);
+      let exporter = options.exporter;
+      if (!exporter && exporterModule) {
+        if (exporterModule === builtinModule) await checkExporterBuild(builtinModule);
+        const loaded = await import(isAbsolute(exporterModule) ? pathToFileURL(exporterModule).href : exporterModule);
+        exporter = exporterModule === builtinModule ? loaded[`${PROFILES[profile].format}Exporter`] : loaded.default;
+      }
       if (!exporter)
         return errorEnvelope(
           verb,
