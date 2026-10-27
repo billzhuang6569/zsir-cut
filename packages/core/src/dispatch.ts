@@ -1,6 +1,16 @@
 import { readFile, stat } from "node:fs/promises";
 import { basename, dirname, relative, resolve } from "node:path";
+import {
+  defaultProfile,
+  type Exporter,
+  lossReport,
+  PROFILES,
+  type ProfileId,
+  recordHandoffCheck,
+  runExport,
+} from "./export-framework.js";
 import { fingerprint } from "./fingerprint.js";
+import { jobPath, readJob, startExportJob } from "./jobs.js";
 import { applyEdit, SUBTITLE_OPS } from "./project/edit.js";
 import { diffProjectEntities } from "./project/entities.js";
 import { newId } from "./project/id.js";
@@ -36,13 +46,17 @@ export const VERBS = [
 ] as const;
 export type Verb = (typeof VERBS)[number];
 
-export type Envelope = Omit<WriteEnvelope, "verb" | "verification"> & {
+export type Envelope = Omit<WriteEnvelope, "verb" | "verification" | "status"> & {
   verb: Verb;
+  status: WriteEnvelope["status"] | "accepted";
   verification: { level: "none" | "L0" | "L1" | "L2"; passed: boolean; issues: ValidationIssue[] };
 };
 
 export interface DispatchOptions {
   probe?: Probe;
+  exporter?: Exporter;
+  exporterModule?: string;
+  worker?: boolean;
 }
 
 type Request = Record<string, unknown>;
@@ -236,10 +250,107 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
     verb !== "redo" &&
     verb !== "import_media" &&
     verb !== "edit" &&
+    verb !== "export" &&
+    verb !== "record_handoff_check" &&
+    verb !== "job_status" &&
     !verb.startsWith("session_")
   )
     return errorEnvelope(verb, requestId, "rejected", "E_UNSUPPORTED", `Verb ${verb} is not implemented`);
   try {
+    if (verb === "record_handoff_check") {
+      const value = {
+        status: request.status,
+        at: new Date().toISOString(),
+        ...(request.by ? { by: request.by } : {}),
+        ...(request.host_version ? { host_version: request.host_version } : {}),
+        ...(request.notes ? { notes: request.notes } : {}),
+        ...(request.items ? { items: request.items } : {}),
+      };
+      const manifest = await recordHandoffCheck(
+        request.package as string,
+        request.check as "host_import" | "host_render_comparison",
+        value,
+      );
+      const output = basic(verb, requestId);
+      output.status = "applied";
+      output.result = { manifest };
+      return output;
+    }
+    if (verb === "job_status") {
+      const parsed = parseProject(await readFile(request.project as string, "utf8"));
+      if (!parsed.ok) return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Project file is invalid");
+      const output = basic(verb, requestId);
+      output.result = (await readJob(
+        jobPath(request.project as string, parsed.project.id, request.job_id as string),
+      )) as unknown as Record<string, unknown>;
+      return output;
+    }
+    if (verb === "export") {
+      const parsed = parseProject(await readFile(request.project as string, "utf8"));
+      if (!parsed.ok) return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Project file is invalid");
+      const project = parsed.project;
+      if (request.base_revision !== project.revision.id)
+        return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Base revision differs from project");
+      const profile = (request.profile as ProfileId | undefined) ?? (await defaultProfile());
+      if (!profile || !Object.hasOwn(PROFILES, profile))
+        return errorEnvelope(verb, requestId, "rejected", "E_UNSUPPORTED", "No supported profile selected");
+      if (request.overlay === true)
+        return errorEnvelope(verb, requestId, "rejected", "E_UNSUPPORTED", "Overlay export is not implemented");
+      const exporter =
+        options.exporter ??
+        (options.exporterModule ? ((await import(resolve(options.exporterModule))).default as Exporter) : undefined);
+      if (!exporter)
+        return errorEnvelope(
+          verb,
+          requestId,
+          "rejected",
+          "E_UNSUPPORTED",
+          `Exporter for ${profile} is not implemented`,
+        );
+      const timeline = project.timelines.find((item) => item.id === (request.timeline_id ?? project.timelines[0]?.id));
+      if (!timeline) return errorEnvelope(verb, requestId, "rejected", "E_NOT_FOUND", "Timeline not found");
+      const report = await lossReport(
+        project,
+        profile,
+        exporter,
+        newId("exp_"),
+        request.dry_run ? "preview" : "final",
+        timeline,
+        new Date().toISOString(),
+        request.project as string,
+      );
+      if (report.summary.worst_severity === "error" && !request.accept_losses)
+        return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Export has error-level losses");
+      if (request.dry_run) {
+        const output = basic(verb, requestId);
+        output.status = "dry_run";
+        output.result = report;
+        return output;
+      }
+      if (!options.worker) {
+        if (!options.exporterModule)
+          return errorEnvelope(verb, requestId, "rejected", "E_UNSUPPORTED", "Exporter worker module is required");
+        const jobId = await startExportJob(request.project as string, project.id, request, options.exporterModule);
+        const output = basic(verb, requestId);
+        output.status = "accepted";
+        output.result = { job_id: jobId };
+        return output;
+      }
+      const result = await runExport(
+        project,
+        request as unknown as Parameters<typeof runExport>[1],
+        exporter,
+        newId("exp_"),
+        new Date().toISOString(),
+        profile,
+      );
+      if (result.rejected)
+        return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Export has error-level losses");
+      const output = basic(verb, requestId);
+      output.status = "applied";
+      output.result = { package: result.package, report: result.report };
+      return output;
+    }
     if (verb.startsWith("session_") || (request.session_id !== undefined && ["edit", "undo", "redo"].includes(verb)))
       return await runSession(verb, request, requestId);
     if (verb === "edit") {
@@ -316,6 +427,8 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
     output.result = {};
     return output;
   } catch (error) {
+    if (verb === "job_status" && (error as NodeJS.ErrnoException).code === "ENOENT")
+      return errorEnvelope(verb, requestId, "rejected", "E_NOT_FOUND", "Job not found");
     return errorEnvelope(verb, requestId, "failed", "E_IO", String(error), true);
   }
 }

@@ -309,30 +309,37 @@
       },
       "export": {
         "type": "object",
-        "allOf": [
-          {
-            "$ref": "#/$defs/write"
-          }
-        ],
-        "unevaluatedProperties": true
+        "allOf": [{ "$ref": "#/$defs/write" }],
+        "properties": {
+          "timeline_id": { "type": "string", "pattern": "^tl_[A-Za-z0-9_-]{1,64}$" },
+          "profile": { "enum": ["fcp-11-fcpxml-1.13", "fcp-10.6-fcpxml-1.11", "resolve-18.5-otio", "resolve-21-fcpxml-1.11", "premiere-25-xmeml-5"] },
+          "output": { "type": "string", "minLength": 1 },
+          "accept_losses": { "type": "boolean" },
+          "overlay": { "type": "boolean" },
+          "subtitle_languages": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
+        },
+        "unevaluatedProperties": false
       },
       "record_handoff_check": {
         "type": "object",
-        "allOf": [
-          {
-            "$ref": "#/$defs/write"
-          }
-        ],
-        "unevaluatedProperties": true
+        "required": ["package", "check", "status"],
+        "properties": {
+          "package": { "type": "string", "minLength": 1 },
+          "check": { "enum": ["host_import", "host_render_comparison"] },
+          "status": { "enum": ["pass", "fail", "warn", "not_run"] },
+          "host_version": { "type": "string" },
+          "by": { "type": "string", "minLength": 1 },
+          "notes": { "type": "string" },
+          "items": { "type": "array", "items": { "type": "object", "required": ["check", "status"], "properties": { "check": { "type": "string" }, "status": { "enum": ["pass", "fail", "warn", "not_run"] }, "notes": { "type": "string" } }, "additionalProperties": false } }
+        },
+        "additionalProperties": false
       },
       "job_status": {
         "type": "object",
-        "allOf": [
-          {
-            "$ref": "#/$defs/read"
-          }
-        ],
-        "unevaluatedProperties": true
+        "allOf": [{ "$ref": "#/$defs/read" }],
+        "required": ["job_id"],
+        "properties": { "job_id": { "type": "string", "pattern": "^job_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" } },
+        "unevaluatedProperties": false
       }
     },
     "seconds": {

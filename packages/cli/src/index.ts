@@ -21,7 +21,7 @@ async function main(): Promise<void> {
   try {
     const parsed = parseArgs({
       args: process.argv.slice(2),
-      options: { input: { type: "string" } },
+      options: { input: { type: "string" }, wait: { type: "boolean" } },
       allowPositionals: true,
     });
     inputPath = parsed.values.input;
@@ -54,7 +54,37 @@ async function main(): Promise<void> {
     request = undefined;
   }
   const input = request && typeof request === "object" && !Array.isArray(request) ? request : {};
-  const envelope = await dispatch(verb as Verb, positionals.length === 2 ? { ...input, project } : {});
+  let envelope = await dispatch(
+    verb as Verb,
+    verb === "record_handoff_check" && positionals.length === 1
+      ? input
+      : positionals.length === 2
+        ? { ...input, project }
+        : {},
+    process.env.ZSIR_CUT_EXPORTER_MODULE ? { exporterModule: process.env.ZSIR_CUT_EXPORTER_MODULE } : {},
+  );
+  if (process.argv.includes("--wait") && envelope.status === "accepted" && project) {
+    const jobId = (envelope.result as { job_id: string }).job_id;
+    for (;;) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const status = await dispatch("job_status", { project, job_id: jobId });
+      if (!status.ok) {
+        envelope = status;
+        break;
+      }
+      const job = status.result as { state: string; envelope: typeof envelope | null };
+      if (job.state === "succeeded" || job.state === "failed") {
+        envelope = job.envelope ?? {
+          ...envelope,
+          ok: false,
+          status: "failed",
+          error: { code: "E_IO", message: "Export worker exited unexpectedly", retryable: true },
+          result: null,
+        };
+        break;
+      }
+    }
+  }
   process.stdout.write(`${JSON.stringify(envelope)}\n`);
   process.exitCode = codes[envelope.status];
 }
