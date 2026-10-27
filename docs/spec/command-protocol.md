@@ -243,7 +243,7 @@
 | `render_preview` | 长任务 | 渲染一段代理预览，不改工程 |
 | `view_timeline` | 长任务 | 在每个剪点出胶片条 PNG 和波形，供 Agent 视觉自检 |
 | `export` | 长任务 | 按交接 profile 生成交接包，见 `handoff-profile.md`。带 `dry_run` 时只返回损失报告；报告有 `error` 级记录时，除非带 `accept_losses: true`，否则返回 `rejected` |
-| `record_handoff_check` | 写交接包 | 把 `host_import` 或 `host_render_comparison` 的检查结果写进交接包的 `manifest.json`，不改工程 |
+| `record_handoff_check` | 写交接包 | 把 `host_import` 或 `host_render_comparison` 的检查结果写进交接包的 `manifest.json`，不改工程。参数：`package`（交接包目录）、`check`（两者之一）、`status`、`host_version`、`by`、`notes`、`items`（逐项的 `check`、`status`、`notes`）。不需要 `base_revision`，不写工程日志；同一项检查再次记录时整体覆盖，所以天然幂等 |
 | `job_status` | 读 | 查长任务进度与结果 |
 
 共 18 个。新增动词要先改本文。
