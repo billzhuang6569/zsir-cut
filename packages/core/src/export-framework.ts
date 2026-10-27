@@ -73,6 +73,7 @@ export interface Exporter {
     timeline: Timeline,
     profile: ProfileId,
     mediaPaths: ReadonlyMap<string, string>,
+    exportId?: string,
   ): Promise<{ name: string; data: string | Uint8Array }>;
   readBack(data: string | Uint8Array, timeline: Timeline): Promise<CutRow[]>;
   losses(project: Project, timeline: Timeline, profile: ProfileId): LossItem[];
@@ -452,13 +453,13 @@ export async function runExport(
   if (report.summary.worst_severity === "error" && !input.accept_losses) return { rejected: true as const, report };
   if (input.dry_run) return { rejected: false as const, report };
   const paths = new Map(project.media.map((media) => [media.id, resolve(dirname(input.project), media.path)]));
-  const exchange = await exporter.generate(project, timeline, profile, paths);
+  const exchange = await exporter.generate(project, timeline, profile, paths, exportId);
   const cutCheck = compareCuttingLists(
     cuttingList(project, timeline, profile),
     await exporter.readBack(exchange.data, timeline),
     new Set(
       report.items
-        .filter((item) => item.status === "unsupported" && item.entity_kind === "clip")
+        .filter((item) => item.status === "unsupported" && item.entity_kind === "clip" && item.feature === "clip_cut")
         .map((item) => item.entity_id),
     ),
     exporter.gridTolerances?.(project, timeline),
