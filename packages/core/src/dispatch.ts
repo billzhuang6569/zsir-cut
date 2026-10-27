@@ -1,4 +1,4 @@
-import { readdir, readFile, stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -73,28 +73,6 @@ export interface DispatchOptions {
 }
 
 type Request = Record<string, unknown>;
-
-async function checkExporterBuild(modulePath: string): Promise<void> {
-  // shortcut: mtime detects stale builds; use build fingerprints if preserved timestamps must be verified.
-  const source = resolve(dirname(modulePath), "../src");
-  let files: string[];
-  try {
-    files = await readdir(source, { recursive: true });
-  } catch (error) {
-    // Published packages can contain only dist.
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
-    throw error;
-  }
-  for (const file of files.filter((name) => name.endsWith(".ts"))) {
-    const compiled = resolve(dirname(modulePath), file.replace(/\.ts$/, ".js"));
-    try {
-      if ((await stat(join(source, file))).mtimeMs <= (await stat(compiled)).mtimeMs) continue;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
-    throw new Error(`导出器编译产物缺失或已过期（${file}），请先在项目根目录运行 pnpm typecheck 构建后重试`);
-  }
-}
 
 function basic(verb: Verb, requestId: string): Envelope {
   return {
@@ -499,7 +477,10 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
         return errorEnvelope(verb, requestId, "rejected", "E_UNSUPPORTED", "No supported profile selected");
       if (request.overlay === true)
         return errorEnvelope(verb, requestId, "rejected", "E_UNSUPPORTED", "Overlay export is not implemented");
-      const builtinModule = resolve(dirname(fileURLToPath(import.meta.url)), "../../exporters/dist/index.js");
+      const exporters = resolve(dirname(fileURLToPath(import.meta.url)), "../../exporters");
+      const sourceModule = join(exporters, "src/index.ts");
+      const distModule = join(exporters, "dist/index.js");
+      const builtinModule = import.meta.url.endsWith(".ts") ? sourceModule : distModule;
       const exporterModule =
         options.exporterModule ??
         (profile === "fcp-11-fcpxml-1.13" ||
@@ -511,9 +492,19 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
           : undefined);
       let exporter = options.exporter;
       if (!exporter && exporterModule) {
-        if (exporterModule === builtinModule) await checkExporterBuild(builtinModule);
-        const loaded = await import(isAbsolute(exporterModule) ? pathToFileURL(exporterModule).href : exporterModule);
-        exporter = exporterModule === builtinModule ? loaded[`${PROFILES[profile].format}Exporter`] : loaded.default;
+        let loaded: Record<string, Exporter>;
+        try {
+          loaded = await import(isAbsolute(exporterModule) ? pathToFileURL(exporterModule).href : exporterModule);
+        } catch (error) {
+          if (exporterModule === distModule && (error as NodeJS.ErrnoException).code === "ERR_MODULE_NOT_FOUND")
+            throw new Error(`导出器编译产物缺失，请先在项目根目录运行 pnpm typecheck 构建后重试：${String(error)}`);
+          throw error;
+        }
+        // Source dispatch passes its selected module to the compiled job worker.
+        exporter =
+          exporterModule === sourceModule || exporterModule === distModule
+            ? loaded[`${PROFILES[profile].format}Exporter`]
+            : loaded.default;
       }
       if (!exporter)
         return errorEnvelope(

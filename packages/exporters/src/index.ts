@@ -27,8 +27,8 @@ import {
   subtitleFiles,
   type Timeline,
 } from "../../core/dist/index.js";
-import { otioExporter } from "./otio.js";
-import { xmemlExporter } from "./xmeml.js";
+import { otioExporter } from "./otio.ts";
+import { xmemlExporter } from "./xmeml.ts";
 
 const zero = rational(0n);
 const sec = (value: Rational) => printRational(value, true);
