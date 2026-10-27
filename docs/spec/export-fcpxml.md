@@ -36,7 +36,7 @@
 
 资源 ID 按出现顺序编为 `r1`、`r2`……：先时间线格式，再按 `media[]` 顺序为视频和静帧生成格式（纯音频跳过），然后素材，最后效果。
 
-**格式**：时间线和视频素材用 `<format id name frameDuration width height colorSpace>`。`frameDuration` 是帧率的倒数，例如 25 帧写 `1/25s`，29.97 写 `1001/30000s`。`colorSpace` 一律写 `1-1-1 (Rec. 709)`。`name` 只在尺寸和帧率都是 FCP 预设时写。预设尺寸只有 1280×720、1920×1080、3840×2160、4096×2160，分别写成 `720p`、`1080p`、`3840x2160p`、`4096x2160p`；预设帧率记号为 `2398`、`24`、`25`、`2997`、`30`、`50`、`5994`、`60`。拼起来形如 `FFVideoFormat1080p25`、`FFVideoFormat3840x2160p2997`。其他尺寸（例如测试工程的 960×540）或其他帧率不写 `name`，这与 FCP 对自定义格式的写法一致。第二版导入时 FCP 对序列 `format` 报「遇到意外值」，最可能的原因是缺 `colorSpace`，改后待复测。静帧图片用 `<format id name="FFVideoFormatRateUndefined" width height>`，不写 `frameDuration`；宽高优先取素材的 `video` 信息，没有则取时间线宽高。纯音频素材不生成格式资源。
+**格式**：时间线和视频素材用 `<format id name frameDuration width height colorSpace>`。`frameDuration` 是帧率的倒数，例如 25 帧写 `1/25s`，29.97 写 `1001/30000s`。`colorSpace` 一律写 `1-1-1 (Rec. 709)`。`name` 只在尺寸和帧率都是 FCP 预设时写。预设尺寸只有 1280×720、1920×1080、3840×2160、4096×2160，分别写成 `720p`、`1080p`、`3840x2160p`、`4096x2160p`；预设帧率记号为 `2398`、`24`、`25`、`2997`、`30`、`50`、`5994`、`60`。拼起来形如 `FFVideoFormat1080p25`、`FFVideoFormat3840x2160p2997`。其他尺寸（例如测试工程的 960×540）或其他帧率不写 `name`，这与 FCP 对自定义格式的写法一致。第二版导入时 FCP 对序列 `format` 报「遇到意外值」，补上 `colorSpace` 后第三版不再提示（2026-10-27 实测）。静帧图片用 `<format id name="FFVideoFormatRateUndefined" width height>`，不写 `frameDuration`；宽高优先取素材的 `video` 信息，没有则取时间线宽高。纯音频素材不生成格式资源。
 
 **素材**：每个 `media[]` 条目一个 `<asset>`：
 
@@ -157,9 +157,9 @@
 | 位移单位 | `position` 暂按「时间线高度的百分比」换算 | FCP 的实际单位 |
 | 裁切单位 | `trim-rect` 暂按「源画面尺寸的百分比」 | FCP 的实际单位 |
 | 字幕语言代码 | `SRT.zh-Hans`、`SRT.en` | 已实测通过（2026-10-27，FCP 12.4，三个工程字幕条数和起点正确） |
-| 静帧素材 | `FFVideoFormatRateUndefined` 格式、`duration="0s"` asset、`<clip><video/></clip>` 引用 | 已实测能导入（2026-10-27）。第一版用 `<asset-clip>` 引用静帧会让 FCP 崩溃。29.97 工程里外壳 `<clip>` 未写 `format` 时报「不在编辑帧边界上」，已改为写时间线格式，待复测 |
+| 静帧素材 | `FFVideoFormatRateUndefined` 格式、`duration="0s"` asset、`<clip><video/></clip>` 引用 | 已实测能导入（2026-10-27）。第一版用 `<asset-clip>` 引用静帧会让 FCP 崩溃。29.97 工程里外壳 `<clip>` 未写 `format` 时报「不在编辑帧边界上」，已改为写时间线格式，第三版实测无提示 |
 | 声道选择 | `audio-channel-source srcCh` | 只取声道 1 是否生效 |
-| 混合帧率 | 不写 `conform-rate`；片段写素材自己的 `format`；连接片段 offset 按父元素帧网格取整 | 第二版实测：父元素是 25 帧素材时，按 29.97 网格算的 offset 被 FCP 报「不在编辑帧边界上」。已改，待复测 |
+| 混合帧率 | 不写 `conform-rate`；片段写素材自己的 `format`；连接片段 offset 按父元素帧网格取整 | 第二版实测：父元素是 25 帧素材时，按 29.97 网格算的 offset 被 FCP 报「不在编辑帧边界上」。按父元素帧网格取整后，第三版实测无提示（2026-10-27） |
 | 自定义元数据 | `com.zsir-cut.*` 的 `md` 键 | 导入后再从 FCP 导出，这些键是否保留 |
 | 包装变速 | 第 8 节的 `<clip>` 结构 | 已实测通过（2026-10-27）。倒放段取帧规则见 timeline-schema 4.5，FCP 与之一致 |
 | 叠化位置 | 两侧片段位置不变 | 已实测通过（2026-10-27） |
