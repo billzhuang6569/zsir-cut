@@ -125,6 +125,7 @@ profile ID 的格式是「宿主-最低宿主版本-格式-格式版本」。
 | `R_BAKED_OVERLAY` | 已渲染成透明叠层 |
 | `R_MEDIA_OFFLINE` | 素材离线或指纹不符 |
 | `R_EXT_DROPPED` | 扩展数据没有写出 |
+| `R_GRID_ROUNDED` | 目标格式要求时间落在某个帧网格上，原值被取整到最近一帧。用于混合帧率下的连接片段 |
 
 报告里只要有 `error` 级的记录，`export` 就返回 `rejected`，错误码 `E_VALIDATION`，除非请求里带 `accept_losses: true`。这样接手人拿到的包，不会有没人看过的严重损失。
 

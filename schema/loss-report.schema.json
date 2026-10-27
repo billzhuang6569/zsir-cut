@@ -68,7 +68,7 @@
           ]
         },
         "reason_code": {
-          "enum": ["R_FORMAT_NO_FIELD", "R_HOST_IGNORES", "R_SPLIT_FOR_RETIME", "R_STYLE_NOT_REPRESENTABLE",
+          "enum": ["R_FORMAT_NO_FIELD", "R_GRID_ROUNDED", "R_HOST_IGNORES", "R_SPLIT_FOR_RETIME", "R_STYLE_NOT_REPRESENTABLE",
                    "R_SUB_MANUAL_IMPORT", "R_SUB_UNPROJECTED", "R_BAKED_OVERLAY", "R_MEDIA_OFFLINE", "R_EXT_DROPPED"]
         },
         "consequence": { "type": "string", "minLength": 1 },
