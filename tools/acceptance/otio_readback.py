@@ -27,7 +27,9 @@ def otio_rows(path, d):
                 for e in it.effects:
                     if isinstance(e, otio.schema.FreezeFrame): scalar = F(0)
                     elif isinstance(e, otio.schema.LinearTimeWarp): scalar = F(e.time_scalar).limit_denominator(1000)
-                pieces.setdefault((kind, idx, z["clip_id"]), []).append((pos, pos + dur, s0, s0 + scalar * dur, mid))
+                # export-otio-xmeml 2.2: a reverse piece's start_time is its LOWEST source time
+                a, b = (s0, s0 + scalar * dur) if scalar >= 0 else (s0 - scalar * dur, s0)
+                pieces.setdefault((kind, idx, z["clip_id"]), []).append((pos, pos + dur, a, b, mid))
             pos += dur
     rows = []
     for (kind, idx, cid), ps in pieces.items():

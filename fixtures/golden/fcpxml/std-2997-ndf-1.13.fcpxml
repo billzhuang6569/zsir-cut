@@ -68,9 +68,9 @@
             <asset-clip ref="r9" offset="18018/5s" start="540126587/15000s" duration="1001/120s" srcEnable="all" name="A 第一次使用" audioStart="540126587/15000s" audioDuration="1001/125s" format="r2">
               <asset-clip ref="r10" lane="1" offset="180058879/5000s" start="180056877/5000s" duration="1001/400s" srcEnable="video" name="插入镜头 带变换" format="r3">
                 <adjust-crop mode="trim">
-                  <trim-rect left="0.010416666666666666" top="0.009259259259259259" right="0.010416666666666666" bottom="0.009259259259259259"/>
+                  <trim-rect left="17.777778" top="5" right="17.777778" bottom="5"/>
                 </adjust-crop>
-                <adjust-transform scale="0.5 0.5" rotation="5" position="0.037037037037037035 -0.037037037037037035"/>
+                <adjust-transform scale="0.5 0.5" rotation="5" position="35.555556 -20"/>
                 <metadata>
                   <md key="com.zsir-cut.clip-id" value="clp_b1"/>
                   <md key="com.zsir-cut.occurrence-id" value="occ_4"/>

@@ -1,0 +1,126 @@
+{
+  "schema": "zsir-cut/timeline",
+  "schema_version": "0.1",
+  "id": "prj_resolve_otio_fix",
+  "name": "Resolve OTIO path, DF, reverse and transform",
+  "revision": {
+    "seq": 1,
+    "id": "rev_fixture_1",
+    "parent": null,
+    "created_at": "2026-10-26T00:00:00Z",
+    "author": {
+      "kind": "system",
+      "name": "fixtures"
+    }
+  },
+  "media": [
+    {
+      "id": "med_probe",
+      "kind": "video",
+      "name": "素材 100% literal%20.mov",
+      "path": "../.media/素材 盘/100% 原片/literal%20.mov",
+      "size_bytes": 0,
+      "fingerprint": {
+        "algo": "sampled-sha256-v1",
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "duration": "1001/10s",
+      "start_timecode": "10:00:00;00",
+      "video": {
+        "rate": "30000/1001",
+        "width": 1920,
+        "height": 1080,
+        "pixel_aspect": "1"
+      }
+    }
+  ],
+  "timelines": [
+    {
+      "id": "tl_resolve_fix",
+      "name": "resolve-fix",
+      "edit_rate": "30000/1001",
+      "drop_frame": true,
+      "start_timecode": "01:00:00;00",
+      "audio_rate": "48000",
+      "format": {
+        "width": 1080,
+        "height": 1920,
+        "pixel_aspect": "1"
+      },
+      "tracks": [
+        {
+          "id": "trk_v1",
+          "kind": "video",
+          "name": "V1",
+          "enabled": true,
+          "clips": [
+            {
+              "id": "clp_reverse",
+              "occurrence_id": "occ_reverse",
+              "media_id": "med_probe",
+              "timeline_start": "0s",
+              "duration": "1001/500s",
+              "source_start": "1001/250s",
+              "time_map": [
+                {
+                  "at": "0s",
+                  "source": "1001/250s",
+                  "interp": "linear"
+                },
+                {
+                  "at": "1001/500s",
+                  "source": "1001/500s",
+                  "interp": "linear"
+                }
+              ],
+              "transform": {
+                "scale": 0.5,
+                "rotation_deg": 5,
+                "position": [
+                  0.2,
+                  -0.2
+                ],
+                "crop": {
+                  "left": 0.1,
+                  "right": 0.2,
+                  "top": 0.05,
+                  "bottom": 0.15
+                }
+              }
+            },
+            {
+              "id": "clp_segmented",
+              "occurrence_id": "occ_segmented",
+              "media_id": "med_probe",
+              "timeline_start": "1001/500s",
+              "duration": "1001/250s",
+              "source_start": "3003/500s",
+              "time_map": [
+                {
+                  "at": "0s",
+                  "source": "3003/500s",
+                  "interp": "linear"
+                },
+                {
+                  "at": "1001/500s",
+                  "source": "1001/250s",
+                  "interp": "linear"
+                },
+                {
+                  "at": "1001/250s",
+                  "source": "3003/500s",
+                  "interp": "linear"
+                }
+              ],
+              "transform": {}
+            }
+          ],
+          "transitions": []
+        }
+      ],
+      "markers": []
+    }
+  ],
+  "transcripts": [],
+  "subtitle_styles": []
+}

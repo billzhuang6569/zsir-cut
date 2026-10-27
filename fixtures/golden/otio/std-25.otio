@@ -168,7 +168,7 @@
                   }
                 },
                 "available_image_bounds": null,
-                "target_url": "file:///__MEDIA_ROOT__/25/A_25.mov"
+                "target_url": "/__MEDIA_ROOT__/25/A_25.mov"
               }
             },
             "active_media_reference_key": "DEFAULT_MEDIA"
@@ -224,7 +224,7 @@
                   }
                 },
                 "available_image_bounds": null,
-                "target_url": "file:///__MEDIA_ROOT__/25/A_25.mov"
+                "target_url": "/__MEDIA_ROOT__/25/A_25.mov"
               }
             },
             "active_media_reference_key": "DEFAULT_MEDIA"
@@ -300,7 +300,7 @@
                   }
                 },
                 "available_image_bounds": null,
-                "target_url": "file:///__MEDIA_ROOT__/25/A_25.mov"
+                "target_url": "/__MEDIA_ROOT__/25/A_25.mov"
               }
             },
             "active_media_reference_key": "DEFAULT_MEDIA"
@@ -372,7 +372,7 @@
                   }
                 },
                 "available_image_bounds": null,
-                "target_url": "file:///__MEDIA_ROOT__/shared/%E7%B4%A0%E6%9D%90%20%E7%9B%98/100%25%20%E5%8E%9F%E7%89%87/%E6%89%B9%E6%AC%A11/%E5%90%8C%E5%90%8D%E7%B4%A0%E6%9D%90.mov"
+                "target_url": "/__MEDIA_ROOT__/shared/素材 盘/100% 原片/批次1/同名素材.mov"
               }
             },
             "active_media_reference_key": "DEFAULT_MEDIA"
@@ -428,7 +428,7 @@
                   }
                 },
                 "available_image_bounds": null,
-                "target_url": "file:///__MEDIA_ROOT__/shared/%E7%B4%A0%E6%9D%90%20%E7%9B%98/100%25%20%E5%8E%9F%E7%89%87/%E6%89%B9%E6%AC%A12/%E5%90%8C%E5%90%8D%E7%B4%A0%E6%9D%90.mov"
+                "target_url": "/__MEDIA_ROOT__/shared/素材 盘/100% 原片/批次2/同名素材.mov"
               }
             },
             "active_media_reference_key": "DEFAULT_MEDIA"
@@ -493,7 +493,7 @@
                   }
                 },
                 "available_image_bounds": null,
-                "target_url": "file:///__MEDIA_ROOT__/25/B_25.mov"
+                "target_url": "/__MEDIA_ROOT__/25/B_25.mov"
               }
             },
             "active_media_reference_key": "DEFAULT_MEDIA"
@@ -513,7 +513,7 @@
               "start_time": {
                 "OTIO_SCHEMA": "RationalTime.1",
                 "rate": 25,
-                "value": 901137
+                "value": 901037
               },
               "duration": {
                 "OTIO_SCHEMA": "RationalTime.1",
@@ -558,7 +558,7 @@
                   }
                 },
                 "available_image_bounds": null,
-                "target_url": "file:///__MEDIA_ROOT__/25/B_25.mov"
+                "target_url": "/__MEDIA_ROOT__/25/B_25.mov"
               }
             },
             "active_media_reference_key": "DEFAULT_MEDIA"
@@ -615,7 +615,7 @@
                   }
                 },
                 "available_image_bounds": null,
-                "target_url": "file:///__MEDIA_ROOT__/25/A_25.mov"
+                "target_url": "/__MEDIA_ROOT__/25/A_25.mov"
               }
             },
             "active_media_reference_key": "DEFAULT_MEDIA"
@@ -681,7 +681,7 @@
                   }
                 },
                 "available_image_bounds": null,
-                "target_url": "file:///__MEDIA_ROOT__/25/A_25.mov"
+                "target_url": "/__MEDIA_ROOT__/25/A_25.mov"
               }
             },
             "active_media_reference_key": "DEFAULT_MEDIA"
@@ -747,7 +747,7 @@
                   }
                 },
                 "available_image_bounds": null,
-                "target_url": "file:///__MEDIA_ROOT__/25/A_25.mov"
+                "target_url": "/__MEDIA_ROOT__/25/A_25.mov"
               }
             },
             "active_media_reference_key": "DEFAULT_MEDIA"
@@ -813,7 +813,7 @@
                   }
                 },
                 "available_image_bounds": null,
-                "target_url": "file:///__MEDIA_ROOT__/25/A_25.mov"
+                "target_url": "/__MEDIA_ROOT__/25/A_25.mov"
               }
             },
             "active_media_reference_key": "DEFAULT_MEDIA"
@@ -879,7 +879,7 @@
                   }
                 },
                 "available_image_bounds": null,
-                "target_url": "file:///__MEDIA_ROOT__/25/B_25.mov"
+                "target_url": "/__MEDIA_ROOT__/25/B_25.mov"
               }
             },
             "active_media_reference_key": "DEFAULT_MEDIA"
@@ -945,7 +945,7 @@
                   }
                 },
                 "available_image_bounds": null,
-                "target_url": "file:///__MEDIA_ROOT__/25/B_25.mov"
+                "target_url": "/__MEDIA_ROOT__/25/B_25.mov"
               }
             },
             "active_media_reference_key": "DEFAULT_MEDIA"
@@ -1020,7 +1020,121 @@
                 "value": 75
               }
             },
-            "effects": [],
+            "effects": [
+              {
+                "OTIO_SCHEMA": "Effect.1",
+                "name": "",
+                "effect_name": "Resolve Effect",
+                "metadata": {
+                  "Resolve_OTIO": {
+                    "Effect Name": "Transform",
+                    "Name": "变换",
+                    "Enabled": true,
+                    "Display Type": 1,
+                    "Type": 2,
+                    "Parameters": [
+                      {
+                        "Parameter ID": "transformationZoomX",
+                        "Parameter Value": 0.5,
+                        "Default Parameter Value": 1,
+                        "Variant Type": "Double",
+                        "Key Frames": {},
+                        "minValue": 0,
+                        "maxValue": 100
+                      },
+                      {
+                        "Parameter ID": "transformationZoomY",
+                        "Parameter Value": 0.5,
+                        "Default Parameter Value": 1,
+                        "Variant Type": "Double",
+                        "Key Frames": {},
+                        "minValue": 0,
+                        "maxValue": 100
+                      },
+                      {
+                        "Parameter ID": "transformationPan",
+                        "Parameter Value": 0.2,
+                        "Default Parameter Value": 0,
+                        "Variant Type": "Double",
+                        "Key Frames": {},
+                        "minValue": -4,
+                        "maxValue": 4
+                      },
+                      {
+                        "Parameter ID": "transformationTilt",
+                        "Parameter Value": -0.2,
+                        "Default Parameter Value": 0,
+                        "Variant Type": "Double",
+                        "Key Frames": {},
+                        "minValue": -4,
+                        "maxValue": 4
+                      },
+                      {
+                        "Parameter ID": "transformationRotationAngle",
+                        "Parameter Value": 5,
+                        "Default Parameter Value": 0,
+                        "Variant Type": "Double",
+                        "Key Frames": {},
+                        "minValue": -100000,
+                        "maxValue": 100000
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "OTIO_SCHEMA": "Effect.1",
+                "name": "",
+                "effect_name": "Resolve Effect",
+                "metadata": {
+                  "Resolve_OTIO": {
+                    "Effect Name": "Cropping",
+                    "Name": "裁切",
+                    "Enabled": true,
+                    "Display Type": 1,
+                    "Type": 3,
+                    "Parameters": [
+                      {
+                        "Parameter ID": "cropLeft",
+                        "Parameter Value": 0.1,
+                        "Default Parameter Value": 0,
+                        "Variant Type": "Double",
+                        "Key Frames": {},
+                        "minValue": -1,
+                        "maxValue": 1
+                      },
+                      {
+                        "Parameter ID": "cropRight",
+                        "Parameter Value": 0.1,
+                        "Default Parameter Value": 0,
+                        "Variant Type": "Double",
+                        "Key Frames": {},
+                        "minValue": -1,
+                        "maxValue": 1
+                      },
+                      {
+                        "Parameter ID": "cropTop",
+                        "Parameter Value": 0.05,
+                        "Default Parameter Value": 0,
+                        "Variant Type": "Double",
+                        "Key Frames": {},
+                        "minValue": -1,
+                        "maxValue": 1
+                      },
+                      {
+                        "Parameter ID": "cropBottom",
+                        "Parameter Value": 0.05,
+                        "Default Parameter Value": 0,
+                        "Variant Type": "Double",
+                        "Key Frames": {},
+                        "minValue": -1,
+                        "maxValue": 1
+                      }
+                    ]
+                  }
+                }
+              }
+            ],
             "markers": [],
             "enabled": true,
             "color": null,
@@ -1048,7 +1162,7 @@
                   }
                 },
                 "available_image_bounds": null,
-                "target_url": "file:///__MEDIA_ROOT__/25/B_25.mov"
+                "target_url": "/__MEDIA_ROOT__/25/B_25.mov"
               }
             },
             "active_media_reference_key": "DEFAULT_MEDIA"
@@ -1120,7 +1234,7 @@
                   }
                 },
                 "available_image_bounds": null,
-                "target_url": "file:///__MEDIA_ROOT__/shared/%E9%9D%99%E5%B8%A7.png"
+                "target_url": "/__MEDIA_ROOT__/shared/静帧.png"
               }
             },
             "active_media_reference_key": "DEFAULT_MEDIA"
@@ -1192,7 +1306,7 @@
                   }
                 },
                 "available_image_bounds": null,
-                "target_url": "file:///__MEDIA_ROOT__/shared/%E5%9B%BE%E5%BD%A2_alpha.mov"
+                "target_url": "/__MEDIA_ROOT__/shared/图形_alpha.mov"
               }
             },
             "active_media_reference_key": "DEFAULT_MEDIA"
@@ -1264,7 +1378,7 @@
                   }
                 },
                 "available_image_bounds": null,
-                "target_url": "file:///__MEDIA_ROOT__/shared/%E6%89%8B%E6%9C%BA%E5%BD%95%E5%B1%8F_vfr.mp4"
+                "target_url": "/__MEDIA_ROOT__/shared/手机录屏_vfr.mp4"
               }
             },
             "active_media_reference_key": "DEFAULT_MEDIA"
@@ -1356,7 +1470,7 @@
                   }
                 },
                 "available_image_bounds": null,
-                "target_url": "file:///__MEDIA_ROOT__/25/A_25.mov"
+                "target_url": "/__MEDIA_ROOT__/25/A_25.mov"
               }
             },
             "active_media_reference_key": "DEFAULT_MEDIA"
@@ -1416,7 +1530,7 @@
                   }
                 },
                 "available_image_bounds": null,
-                "target_url": "file:///__MEDIA_ROOT__/25/A_25.mov"
+                "target_url": "/__MEDIA_ROOT__/25/A_25.mov"
               }
             },
             "active_media_reference_key": "DEFAULT_MEDIA"
@@ -1475,7 +1589,7 @@
                   }
                 },
                 "available_image_bounds": null,
-                "target_url": "file:///__MEDIA_ROOT__/25/A_25.mov"
+                "target_url": "/__MEDIA_ROOT__/25/A_25.mov"
               }
             },
             "active_media_reference_key": "DEFAULT_MEDIA"
@@ -1551,7 +1665,7 @@
                   }
                 },
                 "available_image_bounds": null,
-                "target_url": "file:///__MEDIA_ROOT__/25/A_25.mov"
+                "target_url": "/__MEDIA_ROOT__/25/A_25.mov"
               }
             },
             "active_media_reference_key": "DEFAULT_MEDIA"
@@ -1620,7 +1734,7 @@
                   }
                 },
                 "available_image_bounds": null,
-                "target_url": "file:///__MEDIA_ROOT__/25/A_25.mov"
+                "target_url": "/__MEDIA_ROOT__/25/A_25.mov"
               }
             },
             "active_media_reference_key": "DEFAULT_MEDIA"
@@ -1689,7 +1803,7 @@
                   }
                 },
                 "available_image_bounds": null,
-                "target_url": "file:///__MEDIA_ROOT__/25/A_25.mov"
+                "target_url": "/__MEDIA_ROOT__/25/A_25.mov"
               }
             },
             "active_media_reference_key": "DEFAULT_MEDIA"
@@ -1758,7 +1872,7 @@
                   }
                 },
                 "available_image_bounds": null,
-                "target_url": "file:///__MEDIA_ROOT__/25/A_25.mov"
+                "target_url": "/__MEDIA_ROOT__/25/A_25.mov"
               }
             },
             "active_media_reference_key": "DEFAULT_MEDIA"
@@ -1875,7 +1989,7 @@
                   }
                 },
                 "available_image_bounds": null,
-                "target_url": "file:///__MEDIA_ROOT__/25/B_25.mov"
+                "target_url": "/__MEDIA_ROOT__/25/B_25.mov"
               }
             },
             "active_media_reference_key": "DEFAULT_MEDIA"
@@ -1968,7 +2082,7 @@
                   }
                 },
                 "available_image_bounds": null,
-                "target_url": "file:///__MEDIA_ROOT__/shared/%E5%A4%96%E5%BD%95%E9%9F%B3%E9%A2%91.wav"
+                "target_url": "/__MEDIA_ROOT__/shared/外录音频.wav"
               }
             },
             "active_media_reference_key": "DEFAULT_MEDIA"
@@ -2077,7 +2191,7 @@
                   }
                 },
                 "available_image_bounds": null,
-                "target_url": "file:///__MEDIA_ROOT__/shared/%E7%B4%A0%E6%9D%90%20%E7%9B%98/100%25%20%E5%8E%9F%E7%89%87/%E6%89%B9%E6%AC%A11/%E5%90%8C%E5%90%8D%E7%B4%A0%E6%9D%90.mov"
+                "target_url": "/__MEDIA_ROOT__/shared/素材 盘/100% 原片/批次1/同名素材.mov"
               }
             },
             "active_media_reference_key": "DEFAULT_MEDIA"
@@ -2137,7 +2251,7 @@
                   }
                 },
                 "available_image_bounds": null,
-                "target_url": "file:///__MEDIA_ROOT__/shared/%E7%B4%A0%E6%9D%90%20%E7%9B%98/100%25%20%E5%8E%9F%E7%89%87/%E6%89%B9%E6%AC%A12/%E5%90%8C%E5%90%8D%E7%B4%A0%E6%9D%90.mov"
+                "target_url": "/__MEDIA_ROOT__/shared/素材 盘/100% 原片/批次2/同名素材.mov"
               }
             },
             "active_media_reference_key": "DEFAULT_MEDIA"

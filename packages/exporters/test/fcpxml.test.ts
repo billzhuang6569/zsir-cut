@@ -215,6 +215,28 @@ describe("FCPXML", () => {
       '<format id="r1" frameDuration="1/25s" width="960" height="540" colorSpace="1-1-1 (Rec. 709)"/>',
     );
   });
+  for (const profile of [...profiles, "resolve-21-fcpxml-1.11"] as const) {
+    it(`${profile} converts position and crop ratios to height percentages`, async () => {
+      const parsed = parseProject(await readFile("fixtures/regressions/resolve-otio-transform.zcut.json", "utf8"));
+      if (!parsed.ok) throw new Error("Invalid regression fixture");
+      const project = parsed.project;
+      const timeline = project.timelines[0];
+      if (!timeline) throw new Error("Missing timeline");
+      const xml = (await exporter.generate(project, timeline, profile, new Map([["med_probe", "/probe.mov"]]))).data;
+      // Portrait timeline and landscape source use different width/height ratios.
+      expect(xml).toContain('<adjust-transform scale="0.5 0.5" rotation="5" position="11.25 -20"/>');
+      expect(xml).toContain('<trim-rect left="17.777778" top="5" right="35.555556" bottom="15"/>');
+      expect(await exporter.validate(xml)).toBe(true);
+      expect(await exporter.readBack(xml, timeline)).toEqual(cuttingList(project, timeline, profile));
+      const standard = await generate("fixtures/projects/std-25.zcut.json", profiles[0]);
+      const paths = new Map(
+        standard.project.media.map((media) => [media.id, resolve("fixtures/projects", media.path)]),
+      );
+      const output = (await exporter.generate(standard.project, standard.timeline, profile, paths)).data;
+      expect(output).toContain('<adjust-transform scale="0.5 0.5" rotation="5" position="35.555556 -20"/>');
+      expect(output).toContain('<trim-rect left="17.777778" top="5" right="17.777778" bottom="5"/>');
+    });
+  }
   it("uses video for a static frame on the primary storyline", async () => {
     const { project, timeline } = await generate("fixtures/projects/std-25.zcut.json", profiles[0]);
     const primary = timeline.tracks.find((track) => track.id === "trk_v1");

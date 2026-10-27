@@ -1,11 +1,12 @@
 import { execFile } from "node:child_process";
 import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import {
   add,
+  type Clip,
   type CutRow,
   clipTimeMap,
   compare,
@@ -45,6 +46,47 @@ function sourceOrigin(media: Media, rate: Rational) {
   if (!media.start_timecode) return 0;
   const tcRate = media.kind === "audio" ? rational(25n) : rate;
   return count(mul(div(rational(timecodeToFrame(media.start_timecode, printRational(tcRate))), tcRate), rate));
+}
+function resolveEffects(transform: NonNullable<Clip["transform"]>) {
+  const parameter = (id: string, value: number, defaultValue: number, min: number, max: number) => ({
+    "Parameter ID": id,
+    "Parameter Value": value,
+    "Default Parameter Value": defaultValue,
+    "Variant Type": "Double",
+    "Key Frames": {},
+    minValue: min,
+    maxValue: max,
+  });
+  const effect = (name: string, label: string, type: number, parameters: ReturnType<typeof parameter>[]) => ({
+    OTIO_SCHEMA: "Effect.1",
+    name: "",
+    effect_name: "Resolve Effect",
+    metadata: {
+      Resolve_OTIO: {
+        "Effect Name": name,
+        Name: label,
+        Enabled: true,
+        "Display Type": 1,
+        Type: type,
+        Parameters: parameters,
+      },
+    },
+  });
+  return [
+    effect("Transform", "变换", 2, [
+      parameter("transformationZoomX", transform.scale ?? 1, 1, 0, 100),
+      parameter("transformationZoomY", transform.scale ?? 1, 1, 0, 100),
+      parameter("transformationPan", transform.position?.[0] ?? 0, 0, -4, 4),
+      parameter("transformationTilt", transform.position?.[1] ?? 0, 0, -4, 4),
+      parameter("transformationRotationAngle", transform.rotation_deg ?? 0, 0, -100000, 100000),
+    ]),
+    effect("Cropping", "裁切", 3, [
+      parameter("cropLeft", transform.crop?.left ?? 0, 0, -1, 1),
+      parameter("cropRight", transform.crop?.right ?? 0, 0, -1, 1),
+      parameter("cropTop", transform.crop?.top ?? 0, 0, -1, 1),
+      parameter("cropBottom", transform.crop?.bottom ?? 0, 0, -1, 1),
+    ]),
+  ];
 }
 function item(
   entity_id: string,
@@ -153,10 +195,14 @@ export const otioExporter: Exporter & { validationNotes?: string } = {
             name: clip.label ?? media.name ?? media.id,
             source_range: {
               OTIO_SCHEMA: "TimeRange.1",
-              start_time: rt(sourceOrigin(media, mediaRate) + count(mul(first.source, mediaRate)), nativeRate),
+              start_time: rt(
+                sourceOrigin(media, mediaRate) +
+                  count(mul(compare(first.source, last.source) < 0 ? first.source : last.source, mediaRate)),
+                nativeRate,
+              ),
               duration: rt(end - start, editRate),
             },
-            effects: effect ? [effect] : [],
+            effects: [...(effect ? [effect] : []), ...(clip.transform ? resolveEffects(clip.transform) : [])],
             markers: [],
             enabled: clip.enabled !== false,
             color: null,
@@ -177,7 +223,7 @@ export const otioExporter: Exporter & { validationNotes?: string } = {
                   nativeRate,
                 ),
                 available_image_bounds: null,
-                target_url: pathToFileURL(path).href,
+                target_url: path,
               },
             },
             active_media_reference_key: "DEFAULT_MEDIA",
@@ -238,7 +284,8 @@ export const otioExporter: Exporter & { validationNotes?: string } = {
       },
       name: timeline.name,
       global_start_time: rt(
-        Number(timecodeToFrame(timeline.start_timecode, printRational(timeline.edit_rate))),
+        // Resolve imports DF timeline origins as literal nominal frames; media origins remain true frames.
+        Number(timecodeToFrame(timeline.start_timecode.replace(";", ":"), printRational(timeline.edit_rate))),
         editRate,
       ),
       tracks: {
@@ -278,16 +325,19 @@ export const otioExporter: Exporter & { validationNotes?: string } = {
         const zsir = child.metadata.zsir;
         const mediaRef = (
           child as OtioChild & {
-            media_references: { DEFAULT_MEDIA: { metadata: { zsir: { source_origin: number } } } };
+            media_references: {
+              DEFAULT_MEDIA: { target_url: string; metadata: { zsir: { source_origin: number } } };
+            };
           }
         ).media_references.DEFAULT_MEDIA;
+        if (!isAbsolute(mediaRef.target_url)) throw new Error("OTIO media path must be a local absolute path");
         const origin = mediaRef.metadata.zsir.source_origin;
         const speed =
           child.effects?.find((effect) => effect.OTIO_SCHEMA === "LinearTimeWarp.1")?.time_scalar ??
           (child.effects?.some((effect) => effect.OTIO_SCHEMA === "FreezeFrame.1") ? 0 : 1);
-        const first = source.start_time.value - origin;
-        const last =
-          first + Math.round((source.duration.value * source.start_time.rate * speed) / source.duration.rate);
+        const delta = Math.round((source.duration.value * source.start_time.rate * speed) / source.duration.rate);
+        const first = source.start_time.value - origin - Math.min(0, delta);
+        const last = first + delta;
         rows.push({
           track_type: kind,
           track_number: number,
@@ -382,20 +432,6 @@ export const otioExporter: Exporter & { validationNotes?: string } = {
               "warning",
               "R_FORMAT_NO_FIELD",
               "声道选择保存在 OTIO 元数据中，需在 Resolve 中重设",
-              at,
-              duration,
-            ),
-          );
-        if (clip.transform)
-          items.push(
-            item(
-              clip.id,
-              "clip",
-              "transform",
-              "unsupported",
-              "warning",
-              "R_FORMAT_NO_FIELD",
-              "画面变换保存在 OTIO 元数据中，需在 Resolve 中重设",
               at,
               duration,
             ),

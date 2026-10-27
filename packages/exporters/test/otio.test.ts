@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   compareCuttingLists,
@@ -20,10 +19,11 @@ const files = [
   ...fixtures.map((name) => `fixtures/projects/${name}.zcut.json`),
   "fixtures/regressions/parent-25-on-2997.zcut.json",
   "fixtures/regressions/otio-2997-fcpxml-grid.zcut.json",
+  "fixtures/regressions/resolve-otio-transform.zcut.json",
   "examples/minimal.zcut.json",
   "examples/interview.zcut.json",
 ];
-const mediaRoot = pathToFileURL(resolve("fixtures/.media")).href;
+const mediaRoot = resolve("fixtures/.media");
 const previewStub: NonNullable<Parameters<typeof runExport>[6]> = async (_project, _timeline, _path, options) => {
   const data = Buffer.from("preview test placeholder");
   await writeFile(options.output, data);
@@ -56,7 +56,7 @@ describe("Resolve OTIO", () => {
   for (const name of fixtures) {
     it(`${name} matches normalized OTIO golden`, async () => {
       const { data } = await generate(`fixtures/projects/${name}.zcut.json`, "resolve-18.5-otio");
-      expect(data.replaceAll(mediaRoot, "file:///__MEDIA_ROOT__")).toBe(
+      expect(data.replaceAll(mediaRoot, "/__MEDIA_ROOT__")).toBe(
         await readFile(`fixtures/golden/otio/${name}.otio`, "utf8"),
       );
     });
@@ -86,17 +86,132 @@ describe("Resolve OTIO", () => {
     expect(losses).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ feature: "speed_smooth", entity_id: "clp_v9", reason_code: "R_SPLIT_FOR_RETIME" }),
-        expect.objectContaining({ feature: "transform", status: "unsupported" }),
         expect.objectContaining({ feature: "gain", status: "unsupported" }),
         expect.objectContaining({ feature: "subtitle_text_timing", reason_code: "R_SUB_MANUAL_IMPORT" }),
       ]),
     );
+    expect(losses.some((item) => item.feature === "transform")).toBe(false);
   });
   it("uses the exact 30000/1001 double rate", async () => {
     const { data } = await generate("fixtures/projects/std-2997-df.zcut.json", "resolve-18.5-otio");
-    const root = JSON.parse(data) as { global_start_time: { rate: number } };
+    const root = JSON.parse(data) as { global_start_time: { rate: number; value: number } };
     expect(root.global_start_time.rate).toBe(30000 / 1001);
+    expect(root.global_start_time.value).toBe(108000);
   });
+  it("writes raw local paths, nominal DF timeline origin, true media frames, reverse minima and Resolve effects", async () => {
+    const path = "fixtures/regressions/resolve-otio-transform.zcut.json";
+    const { project, timeline, paths, data } = await generate(path, "resolve-18.5-otio");
+    const root = JSON.parse(data);
+    expect(root.global_start_time).toMatchObject({ value: 108000, rate: 30000 / 1001 });
+    const clips = root.tracks.children[0].children;
+    expect(
+      clips.map((clip: { source_range: { start_time: { value: number } } }) => clip.source_range.start_time.value),
+    ).toEqual([1078980, 1079040, 1079040]);
+    const reference = clips[0].media_references.DEFAULT_MEDIA;
+    expect(reference.target_url).toBe(paths.get("med_probe"));
+    expect(reference.target_url).toContain("素材 盘/100% 原片/literal%20.mov");
+    expect(reference.target_url).not.toContain("file:");
+    expect(reference.available_range.start_time.value).toBe(1078920);
+    expect(reference.available_range.duration.value).toBe(3000);
+    const effects = clips[0].effects;
+    expect(effects[0]).toMatchObject({ OTIO_SCHEMA: "LinearTimeWarp.1", time_scalar: -1 });
+    expect(effects.slice(1)).toEqual([
+      expect.objectContaining({
+        OTIO_SCHEMA: "Effect.1",
+        name: "",
+        effect_name: "Resolve Effect",
+        metadata: {
+          Resolve_OTIO: {
+            "Effect Name": "Transform",
+            Name: "变换",
+            Enabled: true,
+            "Display Type": 1,
+            Type: 2,
+            Parameters: expect.any(Array),
+          },
+        },
+      }),
+      expect.objectContaining({
+        OTIO_SCHEMA: "Effect.1",
+        name: "",
+        effect_name: "Resolve Effect",
+        metadata: {
+          Resolve_OTIO: {
+            "Effect Name": "Cropping",
+            Name: "裁切",
+            Enabled: true,
+            "Display Type": 1,
+            Type: 3,
+            Parameters: expect.any(Array),
+          },
+        },
+      }),
+    ]);
+    const parameters = effects
+      .slice(1)
+      .flatMap(
+        (effect: { metadata: { Resolve_OTIO: { Parameters: unknown[] } } }) => effect.metadata.Resolve_OTIO.Parameters,
+      );
+    const expected = [
+      ["transformationZoomX", 0.5, 1, 0, 100],
+      ["transformationZoomY", 0.5, 1, 0, 100],
+      ["transformationPan", 0.2, 0, -4, 4],
+      ["transformationTilt", -0.2, 0, -4, 4],
+      ["transformationRotationAngle", 5, 0, -100000, 100000],
+      ["cropLeft", 0.1, 0, -1, 1],
+      ["cropRight", 0.2, 0, -1, 1],
+      ["cropTop", 0.05, 0, -1, 1],
+      ["cropBottom", 0.15, 0, -1, 1],
+    ];
+    expect(parameters).toEqual(
+      expected.map(([id, value, defaultValue, min, max]) => ({
+        "Parameter ID": id,
+        "Parameter Value": value,
+        "Default Parameter Value": defaultValue,
+        "Variant Type": "Double",
+        "Key Frames": {},
+        minValue: min,
+        maxValue: max,
+      })),
+    );
+    expect(clips[0].metadata.zsir.transform).toEqual(
+      timeline.tracks[0]?.kind === "video" ? timeline.tracks[0].clips[0]?.transform : undefined,
+    );
+    for (const clip of clips.slice(1)) {
+      const defaults = clip.effects
+        .slice(-2)
+        .flatMap(
+          (effect: { metadata: { Resolve_OTIO: { Parameters: Record<string, unknown>[] } } }) =>
+            effect.metadata.Resolve_OTIO.Parameters,
+        );
+      expect(defaults).toHaveLength(9);
+      for (const parameter of defaults) expect(parameter["Parameter Value"]).toBe(parameter["Default Parameter Value"]);
+    }
+    expect(await exporter.readBack(data, timeline)).toEqual(cuttingList(project, timeline, "resolve-18.5-otio"));
+    const report = await lossReport(
+      project,
+      "resolve-18.5-otio",
+      exporter,
+      "exp_fix",
+      "preview",
+      timeline,
+      "2026-10-27T00:00:00Z",
+      path,
+    );
+    expect(report.items.some((item) => item.feature === "transform")).toBe(false);
+    expect(report.summary.preserved_by_feature.transform).toBe(2);
+    reference.target_url = "file:///encoded%20path.mov";
+    await expect(exporter.readBack(JSON.stringify(root), timeline)).rejects.toThrow("local absolute path");
+  });
+  for (const [name, value] of [
+    ["std-25", 90000],
+    ["std-2997-ndf", 108000],
+  ] as const) {
+    it(`${name} keeps its non-drop-frame origin`, async () => {
+      const { data } = await generate(`fixtures/projects/${name}.zcut.json`, "resolve-18.5-otio");
+      expect(JSON.parse(data).global_start_time.value).toBe(value);
+    });
+  }
   it("readBack notices a changed source frame", async () => {
     const { project, timeline, data } = await generate("fixtures/projects/std-25.zcut.json", "resolve-18.5-otio");
     const root = JSON.parse(data) as {
