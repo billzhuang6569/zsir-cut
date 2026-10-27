@@ -2,8 +2,8 @@
 import { execFile } from "node:child_process";
 import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { basename, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import {
   add,
@@ -451,12 +451,8 @@ function loss(
 const dtdDir = "/Applications/Final Cut Pro.app/Contents/Frameworks/Interchange.framework/Versions/A/Resources";
 export const fcpxmlExporter: Exporter & { validationNotes?: string } = {
   version: "1.11.0",
+  // A runtime repository HEAD cannot identify the loaded build or uncommitted source.
   git_sha: "0000000",
-  async gitSha() {
-    const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-    await stat(join(root, ".git"));
-    return (await promisify(execFile)("git", ["rev-parse", "--short", "HEAD"], { cwd: root })).stdout.trim();
-  },
   async generate(project, timeline, profile, mediaPaths) {
     if (profile !== "fcp-11-fcpxml-1.13" && profile !== "fcp-10.6-fcpxml-1.11" && profile !== "resolve-21-fcpxml-1.11")
       throw new Error(`Unsupported FCPXML profile: ${profile}`);
@@ -1039,4 +1035,5 @@ const exporter: Exporter & { validationNotes?: string } = {
   },
 };
 export default exporter;
+export { otioExporter, xmemlExporter };
 export type { CutRow, Exporter, LossItem, ProfileId } from "../../core/dist/index.js";
