@@ -2,12 +2,14 @@ import { readFile, stat } from "node:fs/promises";
 import { basename, dirname, relative, resolve } from "node:path";
 import { fingerprint } from "./fingerprint.js";
 import { applyEdit, SUBTITLE_OPS } from "./project/edit.js";
+import { diffProjectEntities } from "./project/entities.js";
 import { newId } from "./project/id.js";
 import { parseProject } from "./project/io.js";
 import { relinkMedia, validateProjectMedia } from "./project/media.js";
 import { ffprobe, mediaFromProbe, type Probe } from "./project/probe.js";
 import { type ValidationIssue, validateProjectSemantics } from "./project/semantics.js";
-import { openProject, type WriteEnvelope, type WriteRequest } from "./project/store.js";
+import { runSession } from "./project/session.js";
+import { HistoryError, openProject, type WriteEnvelope, type WriteRequest } from "./project/store.js";
 import type { Author, Media } from "./project/types.js";
 import { validateCommand } from "./schema.js";
 
@@ -62,7 +64,7 @@ function errorEnvelope(
   verb: Verb,
   requestId: string,
   status: "rejected" | "failed",
-  code: "E_VALIDATION" | "E_UNSUPPORTED" | "E_MIXED_DOMAIN" | "E_IO" | "E_INTERNAL",
+  code: "E_VALIDATION" | "E_UNSUPPORTED" | "E_MIXED_DOMAIN" | "E_IO" | "E_INTERNAL" | "E_SESSION_STATE" | "E_NOT_FOUND",
   message: string,
   retryable = false,
 ): Envelope {
@@ -156,6 +158,13 @@ async function importMedia(input: Request, requestId: string, probe: Probe): Pro
 
 export async function dispatch(verb: Verb, input: unknown, options: DispatchOptions = {}): Promise<Envelope> {
   const requestId = newId("req_");
+  if (
+    input &&
+    typeof input === "object" &&
+    "session_id" in input &&
+    !["edit", "undo", "redo", "session_review", "session_approve", "session_reject"].includes(verb)
+  )
+    return errorEnvelope(verb, requestId, "rejected", "E_SESSION_STATE", "Verb cannot enter a session");
   const check = validateCommand(verb, input);
   if (!check.valid)
     return errorEnvelope(
@@ -166,9 +175,19 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
       check.errors.map((item) => `${item.instancePath || "/"}: ${item.message}`).join("; ") || "Invalid request",
     );
   const request = input as Request;
-  if (verb !== "validate" && verb !== "undo" && verb !== "redo" && verb !== "import_media" && verb !== "edit")
+  if (
+    verb !== "validate" &&
+    verb !== "diff" &&
+    verb !== "undo" &&
+    verb !== "redo" &&
+    verb !== "import_media" &&
+    verb !== "edit" &&
+    !verb.startsWith("session_")
+  )
     return errorEnvelope(verb, requestId, "rejected", "E_UNSUPPORTED", `Verb ${verb} is not implemented`);
   try {
+    if (verb.startsWith("session_") || (request.session_id !== undefined && ["edit", "undo", "redo"].includes(verb)))
+      return await runSession(verb, request, requestId);
     if (verb === "edit") {
       const ops = request.ops as ({ op: string } & Record<string, unknown>)[];
       if (ops.some((op) => SUBTITLE_OPS.has(op.op)) && !ops.every((op) => SUBTITLE_OPS.has(op.op)))
@@ -199,6 +218,21 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
       return await store[verb](writeRequest(verb, requestId, request));
     }
     if (verb === "import_media") return await importMedia(request, requestId, options.probe ?? ffprobe);
+    if (verb === "diff") {
+      const store = openProject({ projectPath: request.project as string });
+      try {
+        const current = parseProject(await readFile(request.project as string, "utf8"));
+        if (!current.ok) return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Project file is invalid");
+        const from = await store.snapshotAt(request.from as string);
+        const to = await store.snapshotAt((request.to as string | undefined) ?? current.project.revision.id);
+        const result = basic(verb, requestId);
+        result.result = { from: request.from, to: to.revision.id, changes: diffProjectEntities(from, to) };
+        return result;
+      } catch (error) {
+        if (error instanceof HistoryError) return errorEnvelope(verb, requestId, "rejected", error.code, error.message);
+        throw error;
+      }
+    }
     const parsed = parseProject(await readFile(request.project as string, "utf8"));
     if (!parsed.ok) return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Project file is invalid");
     const issues = validateProjectSemantics(parsed.project, parsed.issues);

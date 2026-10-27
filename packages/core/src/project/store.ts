@@ -60,7 +60,7 @@ export interface WriteEnvelope {
   error: { code: ErrorCode; message: string; retryable: boolean; details?: Record<string, unknown> } | null;
 }
 
-interface JournalEntry {
+export interface JournalEntry {
   kind: "write" | "undo" | "redo" | "recovered";
   revision: string;
   parent: string | null;
@@ -71,6 +71,7 @@ interface JournalEntry {
   request_id?: string;
   idempotency_key?: string;
   ops?: unknown[];
+  timeline_id?: string;
   changes?: EntityChange[];
   target?: string;
 }
@@ -441,6 +442,7 @@ export function openProject(options: OpenProjectOptions) {
         request_id: request.request_id,
         idempotency_key: request.idempotency_key,
         ops: request.ops,
+        ...(request.timeline_id ? { timeline_id: request.timeline_id } : {}),
         changes,
         ...(target ? { target } : {}),
       };
@@ -608,7 +610,36 @@ export function openProject(options: OpenProjectOptions) {
     },
     undo: (request: WriteRequest) => history(request, "undo"),
     redo: (request: WriteRequest) => history(request, "redo"),
+    journal: async () => {
+      const parsed = parseProject(await readFile(projectPath, "utf8"));
+      if (!parsed.ok) throw new Error("Project file is invalid");
+      return readLines<JournalEntry>(join(dirname(projectPath), ".zcut", parsed.project.id, "journal.jsonl"));
+    },
+    snapshotAt: async (revision: string): Promise<Project> => {
+      const parsed = parseProject(await readFile(projectPath, "utf8"));
+      if (!parsed.ok) throw new Error("Project file is invalid");
+      let project = parsed.project;
+      if (project.revision.id === revision) return project;
+      const entries = await readLines<JournalEntry>(join(dirname(projectPath), ".zcut", project.id, "journal.jsonl"));
+      if (project.revision.seq > (entries.at(-1)?.seq ?? 1)) throw new HistoryError("E_UNSUPPORTED");
+      if (!entries.some((entry) => entry.revision === revision || entry.parent === revision))
+        throw new HistoryError("E_NOT_FOUND");
+      for (const entry of entries.reverse()) {
+        if (entry.revision !== project.revision.id) continue;
+        if (entry.kind === "recovered" || !entry.changes) throw new HistoryError("E_UNSUPPORTED");
+        project = restoreEntities(project, entry.changes, "before");
+        project.revision = { ...project.revision, id: entry.parent ?? "", seq: entry.seq - 1 };
+        if (project.revision.id === revision) return project;
+      }
+      throw new HistoryError("E_NOT_FOUND");
+    },
   };
+}
+
+export class HistoryError extends Error {
+  constructor(readonly code: "E_UNSUPPORTED" | "E_NOT_FOUND") {
+    super(code);
+  }
 }
 
 class UndoConflict extends Error {
