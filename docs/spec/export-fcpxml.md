@@ -11,6 +11,7 @@
 2. 以 FCP 的主故事情节为骨架：第一条视频轨是主故事情节，其余轨道都是挂在它上面的连接片段。
 3. 每个片段、字幕都带上 zsir-cut 的 ID，导回时靠它重新匹配。
 4. 同一个工程、同一个 profile、同一个导出器版本，输出逐字节相同。
+5. 资源与元素写法以 FCP 自己导出的结构为准；DTD 通过不等于能导入。
 
 ## 2. 文档骨架
 
@@ -33,9 +34,9 @@
 
 ## 3. 资源
 
-资源 ID 按出现顺序编为 `r1`、`r2`……：先时间线格式，再按 `media[]` 顺序的各素材格式，然后素材，最后效果。
+资源 ID 按出现顺序编为 `r1`、`r2`……：先时间线格式，再按 `media[]` 顺序为视频和静帧生成格式（纯音频跳过），然后素材，最后效果。
 
-**格式**：`<format id frameDuration width height>`。`frameDuration` 是帧率的倒数，例如 25 帧写 `1/25s`，29.97 写 `1001/30000s`。不写 `name`。静帧图片用不带 `frameDuration` 的格式。
+**格式**：时间线和视频素材用 `<format id frameDuration width height>`。`frameDuration` 是帧率的倒数，例如 25 帧写 `1/25s`，29.97 写 `1001/30000s`。静帧图片用 `<format id name="FFVideoFormatRateUndefined" width height>`，不写 `frameDuration`；宽高优先取素材的 `video` 信息，没有则取时间线宽高。纯音频素材不生成格式资源。
 
 **素材**：每个 `media[]` 条目一个 `<asset>`：
 
@@ -45,8 +46,9 @@
 | `name` | `media.name`，没有就取文件名 |
 | `start` | 源起始时码换算成的秒数，按素材自己的帧率和丢帧规则换算。没有起始时码写 `0s` |
 | `duration` | `media.duration`；静帧图片写 `0s` |
-| `hasVideo`、`hasAudio` | 按 `media.video`、`media.audio` 是否存在 |
-| `format` | 该素材的格式 ID |
+| `hasVideo`、`videoSources` | 有视频或是静帧时都写 `1`；纯音频不写 `hasVideo` 和 `videoSources` |
+| `hasAudio` | 有音频时写 `1`；没有时省略 |
+| `format` | 视频和静帧素材的格式 ID；纯音频不写 |
 | `audioSources`、`audioChannels`、`audioRate` | 有音频时写 `1`、声道数、`48000` |
 
 `<asset>` 内放 `<media-rep kind="original-media" src="file:///绝对路径"/>`。素材的 `media_id` 写在 `<asset>` 末尾的 `<metadata>` 里，键名 `com.zsir-cut.media-id`，读回时靠它对应素材，不靠文件名。路径按 RFC 3986 百分号编码，中文、空格和 `%` 都要编码，`/` 不编码。
@@ -65,7 +67,7 @@
 
 第一条视频轨的片段按时间顺序放进 `<spine>`。片段之间、开头和末尾的空白用 `<gap>` 填满，保证主故事情节覆盖整个 `[0, duration)`，这样任何连接片段都有可挂靠的对象。`<gap>` 的 `start` 写成和它的 `offset` 相同。
 
-每个主故事情节片段写成 `<asset-clip>`：`ref` 指向素材，`offset` 是 `tcStart + timeline_start`，`start` 是 `asset.start + source_start`，`duration` 是片段时长。
+视频或音频主故事情节片段写成 `<asset-clip>`：`ref` 指向素材，`offset` 是 `tcStart + timeline_start`，`start` 是 `asset.start + source_start`，`duration` 是片段时长。静帧图片的 `asset.duration` 是 `0s`，必须用 `<video ref offset start="0s" duration>` 引用，不得用 `<asset-clip>`；为保存片段 ID 元数据，外层用 `<clip offset duration>` 包住 `<video>`，并把 `<metadata>` 放在外层末尾。静帧的时间线时长由 `<video>` 和外层 `<clip>` 的 `duration` 表达。
 
 **音视频配对**：同一个 `occurrence_id` 在第一条音频轨上有且只有一个音频片段，并且两者的时间映射相同时，把它们写成同一个 `<asset-clip>`，`srcEnable="all"`。音频的入出点和视频不同时，就是 J/L cut，用 `audioStart` 和 `audioDuration` 表示：`audioStart` 是 `asset.start + 音频片段的 source_start`，`audioDuration` 是音频片段时长。不满足配对条件时，主故事情节片段写 `srcEnable="video"`，音频作为连接片段另写。
 
@@ -75,8 +77,10 @@
 
 - **lane**：第 2、3……条视频轨依次是 `1`、`2`……。第 1、2……条音频轨上没配对的片段依次是 `-1`、`-2`……。
 - **offset**：按父元素的本地时间计算，等于 `父元素的 start + (t − 父元素的序列入点)`。
-- 视频连接片段写 `srcEnable="video"`，音频连接片段写 `srcEnable="audio"`。
+- 视频连接片段写 `srcEnable="video"`，音频连接片段写 `srcEnable="audio"`；静帧连接片段使用带 `lane` 的外层 `<clip>` 和内层 `<video>`，不写 `srcEnable`。
 - 其余属性与主故事情节片段相同。
+
+`<video>` 的子元素按 1.13/1.11 DTD 顺序为：`param*`、`note?`、时间参数、视频画面调整、连接片段、标记、视频滤镜、`reserved?`。它不允许 `<metadata>`、`<audio-channel-source>` 或音频调整；静帧的 ID 元数据由外层 `<clip>` 保存。
 
 ## 7. 片段属性
 
@@ -152,7 +156,7 @@
 | 位移单位 | `position` 暂按「时间线高度的百分比」换算 | FCP 的实际单位 |
 | 裁切单位 | `trim-rect` 暂按「源画面尺寸的百分比」 | FCP 的实际单位 |
 | 字幕语言代码 | `SRT.zh-Hans`、`SRT.en` | FCP 是否接受 `zh-Hans`，不接受时的替代写法 |
-| 静帧素材 | 不带 `frameDuration` 的格式、`duration="0s"` | 能否正常导入 |
+| 静帧素材 | `FFVideoFormatRateUndefined` 格式、`duration="0s"` asset、`<clip><video/></clip>` 引用 | FCP 12.4 是否能正常导入和编辑 |
 | 声道选择 | `audio-channel-source srcCh` | 只取声道 1 是否生效 |
 | 混合帧率 | 不写 `conform-rate` | 25 帧素材在 29.97 时间线里的取帧是否符合预期 |
 | 自定义元数据 | `com.zsir-cut.*` 的 `md` 键 | 导入后再从 FCP 导出，这些键是否保留 |
@@ -162,3 +166,5 @@
 ## 12. 读回比对
 
 导出器测试必须把生成的 FCPXML 解析回「剪辑表」：每个视频和音频片段的序列入点、出点、源入点、源出点、素材 ID。再与工程投影出的剪辑表逐条比较，必须零帧偏差。这一步在 CI 里跑，DTD 校验只在本地跑，因为 DTD 是 Apple 的文件，不能进公开仓库。
+
+导出自检还必须拒绝：`asset-clip` 引用 `duration="0s"` 素材、没有 `frameDuration` 也没有 `name` 的空格式、带 `format` 的纯音频 asset，以及非静帧的 `asset-clip` 或 `video` 源区间超出对应 asset 源区间。`<clip>` 包装内的元素按其源时长检查。
