@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -12,9 +12,11 @@ import {
   floor,
   frameToTimecode,
   mul,
+  parseProject,
   parseRational,
   printRational,
   rational,
+  sourceFrameAt,
   sub,
   timecodeToFrame,
 } from "../src/index.js";
@@ -39,6 +41,17 @@ describe("rational", () => {
     expect(ceil(rational(-4n, 3n))).toBe(-1n);
     expect(() => div(a, rational(0n))).toThrow();
   });
+});
+
+it("shows the frame immediately before an exact reverse source boundary", async () => {
+  const parsed = parseProject(await readFile("fixtures/projects/std-25.zcut.json", "utf8"));
+  if (!parsed.ok) throw new Error("Fixture invalid");
+  const track = parsed.project.timelines[0]?.tracks.find((entry) => entry.id === "trk_v1");
+  const clip = track?.kind === "video" ? track.clips.find((entry) => entry.id === "clp_v7") : undefined;
+  if (!clip) throw new Error("Reverse clip missing");
+  expect(sourceFrameAt(clip, rational(2n), rational(25n))).toBe(1049n);
+  expect(sourceFrameAt(clip, rational(1n, 25n), rational(25n))).toBe(1098n);
+  expect(() => sourceFrameAt(clip, clip.duration, rational(25n))).toThrow(RangeError);
 });
 
 describe("timecode", () => {

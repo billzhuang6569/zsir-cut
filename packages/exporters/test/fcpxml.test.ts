@@ -40,8 +40,11 @@ describe("FCPXML", () => {
         const { project, timeline, xml } = await generate(file, profile);
         const expected = cuttingList(project, timeline, profile);
         const actual = await exporter.readBack(xml, timeline);
-        expect(actual).toEqual(expected);
-        expect(compareCuttingLists(expected, actual).zero_frame_deviation).toBe(true);
+        expect(actual.map(({ timeline_in_exact: _in, timeline_out_exact: _out, ...row }) => row)).toEqual(expected);
+        expect(
+          compareCuttingLists(expected, actual, new Set(), exporter.gridTolerances(project, timeline))
+            .zero_frame_deviation,
+        ).toBe(true);
         expect(await exporter.validate(xml)).toBe(true);
         expect(
           (
@@ -81,6 +84,112 @@ describe("FCPXML", () => {
       expect(exporter.validationNotes).toContain("导入安全检查失败");
     }
   });
+  for (const [hazard, mutate, note] of [
+    [
+      "video format without colorSpace",
+      (xml: string) => xml.replace(' colorSpace="1-1-1 (Rec. 709)"', ""),
+      "视频 format 缺少 colorSpace",
+    ],
+    [
+      "video asset-clip without format",
+      (xml: string) => xml.replace(/(<asset-clip ref="r5"[^>]*?) format="r3"/, "$1"),
+      "视频 asset-clip 缺少 format",
+    ],
+    [
+      "wrapper clip without format",
+      (xml: string) => xml.replace(/(<clip lane="1"[^>]*?) format="r1"/, "$1"),
+      "包装 clip 缺少 format",
+    ],
+    [
+      "connected offset outside parent grid",
+      (xml: string) => xml.replace('offset="990001/25s"', 'offset="1001/30000s"'),
+      "不在父元素帧网格上",
+    ],
+  ] as const) {
+    it(`rejects ${hazard}`, async () => {
+      const { xml } = await generate("fixtures/regressions/parent-25-on-2997.zcut.json", profiles[0]);
+      const candidate = mutate(xml);
+      expect(candidate).not.toBe(xml);
+      expect(await exporter.validate(candidate)).toBe(false);
+      expect(exporter.validationNotes).toContain(note);
+    });
+  }
+  it("rounds a connected still to its 25 fps parent and reports the exact displacement", async () => {
+    const { project, timeline, xml } = await generate("fixtures/regressions/parent-25-on-2997.zcut.json", profiles[0]);
+    expect(xml).toContain('offset="990001/25s" duration="1001/30000s" format="r1"');
+    const rounding = exporter
+      .losses(project, timeline, profiles[0])
+      .filter((item) => item.reason_code === "R_GRID_ROUNDED");
+    expect(rounding).toMatchObject([
+      {
+        entity_id: "clp_connected_still",
+        feature: "clip_cut",
+        status: "approximated",
+        severity: "warning",
+        consequence: "连接片段入点移动了 199/30000s（向后）",
+      },
+    ]);
+    const expected = cuttingList(project, timeline, profiles[0]);
+    const actual = await exporter.readBack(xml, timeline);
+    expect(
+      compareCuttingLists(expected, actual, new Set(), exporter.gridTolerances(project, timeline)).zero_frame_deviation,
+    ).toBe(true);
+    const shifted = xml.replace('offset="990001/25s"', 'offset="990002/25s"');
+    expect(
+      compareCuttingLists(
+        expected,
+        await exporter.readBack(shifted, timeline),
+        new Set(),
+        exporter.gridTolerances(project, timeline),
+      ).zero_frame_deviation,
+    ).toBe(false);
+  });
+  it("rounds an exact half-parent-frame tie upward", async () => {
+    const { project, timeline } = await generate("fixtures/regressions/parent-25-on-2997.zcut.json", profiles[0]);
+    timeline.edit_rate = { numerator: 50n, denominator: 1n };
+    const primary = timeline.tracks.find((track) => track.id === "trk_v1");
+    const connected = timeline.tracks.find((track) => track.id === "trk_v2");
+    if (primary?.kind !== "video" || connected?.kind !== "video" || !primary.clips[0] || !connected.clips[0])
+      throw new Error("Missing video clips");
+    primary.clips[0].duration = { numerator: 1n, denominator: 25n };
+    connected.clips[0].timeline_start = { numerator: 1n, denominator: 50n };
+    connected.clips[0].duration = { numerator: 1n, denominator: 50n };
+    const paths = new Map(project.media.map((media) => [media.id, resolve("fixtures/regressions", media.path)]));
+    const xml = (await exporter.generate(project, timeline, profiles[0], paths)).data;
+    expect(xml).toContain('offset="990001/25s" duration="1/50s" format="r1"');
+    expect(
+      exporter.losses(project, timeline, profiles[0]).find((item) => item.reason_code === "R_GRID_ROUNDED")
+        ?.consequence,
+    ).toContain("1/50s（向后）");
+  });
+  it("accepts the grid-rounded regression through the handoff export", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "zcut-grid-export-"));
+    try {
+      const { project } = await generate("fixtures/regressions/parent-25-on-2997.zcut.json", profiles[0]);
+      for (const media of project.media) {
+        media.path = `${media.id}.bin`;
+        const bytes = Buffer.from(media.id);
+        const path = join(directory, media.path);
+        await writeFile(path, bytes);
+        media.size_bytes = bytes.length;
+        media.fingerprint = await fingerprint(path);
+      }
+      const path = join(directory, "regression.zcut.json");
+      await writeFile(path, serializeProject(project));
+      const result = await runExport(
+        project,
+        { project: path, output: join(directory, "out") },
+        { ...exporter, gitSha: async () => "abcdef0" },
+        "exp_grid",
+        "2026-10-27T00:00:00.000Z",
+        profiles[0],
+      );
+      expect(result.rejected).toBe(false);
+      expect(result.report.items.some((item) => item.reason_code === "R_GRID_ROUNDED")).toBe(true);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
   it("reads static frame IDs from its clip metadata", async () => {
     const { timeline, xml } = await generate("fixtures/projects/std-25.zcut.json", profiles[0]);
     expect(xml).toMatch(
@@ -89,6 +198,14 @@ describe("FCPXML", () => {
     expect((await exporter.readBack(xml, timeline)).some((row) => row.clip_id === "clp_still")).toBe(true);
     await expect(exporter.readBack(xml.replace('value="occ_11"', 'value=""'), timeline)).rejects.toThrow(
       "Missing occurrence ID metadata",
+    );
+  });
+  it("names preset video formats but leaves custom formats unnamed", async () => {
+    const preset = await generate("examples/minimal.zcut.json", profiles[0]);
+    expect(preset.xml).toContain('name="FFVideoFormat1080p25"');
+    const custom = await generate("fixtures/projects/std-25.zcut.json", profiles[0]);
+    expect(custom.xml).toContain(
+      '<format id="r1" frameDuration="1/25s" width="960" height="540" colorSpace="1-1-1 (Rec. 709)"/>',
     );
   });
   it("uses video for a static frame on the primary storyline", async () => {
@@ -108,7 +225,7 @@ describe("FCPXML", () => {
   it("writes J cut, connected lane, hold, dissolve, captions, and encoded media URL", async () => {
     const { xml } = await generate("fixtures/projects/std-25.zcut.json", profiles[0]);
     expect(xml).toMatch(
-      /<asset-clip[^>]*audioStart="180198\/5s" audioDuration="62\/5s">[\s\S]*?<md key="com.zsir-cut.clip-id" value="clp_v2"\/>/,
+      /<asset-clip[^>]*audioStart="180198\/5s" audioDuration="62\/5s"[^>]*>[\s\S]*?<md key="com.zsir-cut.clip-id" value="clp_v2"\/>/,
     );
     expect(xml).toMatch(
       /<asset-clip[^>]*lane="1"[^>]*offset="900378\/25s"[\s\S]*?<md key="com.zsir-cut.clip-id" value="clp_b1"\/>/,
