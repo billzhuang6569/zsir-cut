@@ -11,6 +11,7 @@ import { createServer } from "../src/index.js";
 
 const cli = fileURLToPath(new URL("../../cli/dist/index.js", import.meta.url));
 const fixture = new URL("../../../fixtures/projects/std-25.zcut.json", import.meta.url);
+const fake = fileURLToPath(new URL("../../exporters/test/fake-exporter.mjs", import.meta.url));
 const author = { kind: "agent" as const, name: "test" };
 let directory: string;
 let project: string;
@@ -118,5 +119,51 @@ describe("CLI and MCP", () => {
     });
     expect(malformed.status).toBe(2);
     expect(validateEnvelope(JSON.parse(malformed.stdout)).valid).toBe(true);
+  });
+
+  it("matches export dry run and job status across CLI and MCP", async () => {
+    const server = createServer({ exporterModule: fake });
+    const client = new Client({ name: "test", version: "1" });
+    const [left, right] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(left), client.connect(right)]);
+    try {
+      const input = {
+        project,
+        base_revision: "rev_fixture_1",
+        idempotency_key: "parity-export",
+        author,
+        profile: "fcp-11-fcpxml-1.13",
+        dry_run: true,
+        accept_losses: true,
+      };
+      const run = spawnSync(process.execPath, [cli, "export", project], {
+        input: JSON.stringify(input),
+        encoding: "utf8",
+        env: { ...process.env, ZSIR_CUT_EXPORTER_MODULE: fake },
+      });
+      const cliDry = JSON.parse(run.stdout);
+      const mcpDry = (await client.callTool({ name: "zcut_export", arguments: input })).structuredContent as Record<
+        string,
+        unknown
+      >;
+      expect(cliDry.status).toBe("dry_run");
+      expect(mcpDry.status).toBe("dry_run");
+      const normalize = (envelope: Record<string, unknown>) => {
+        const result = envelope.result as Record<string, unknown>;
+        return {
+          ...withoutRequestId(envelope),
+          result: { ...result, export_id: "exp_ignored", generated_at: "ignored" },
+        };
+      };
+      expect(normalize(cliDry)).toEqual(normalize(mcpDry));
+      const statusInput = { project, job_id: "job_00000000-0000-7000-8000-000000000000" };
+      const cliStatus = invokeCli("job_status", { job_id: statusInput.job_id }).envelope;
+      const mcpStatus = (await client.callTool({ name: "zcut_job_status", arguments: statusInput }))
+        .structuredContent as Record<string, unknown>;
+      expect(withoutRequestId(cliStatus)).toEqual(withoutRequestId(mcpStatus));
+    } finally {
+      await client.close();
+      await server.close();
+    }
   });
 });

@@ -1,0 +1,74 @@
+import { spawn } from "node:child_process";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import type { Envelope } from "./dispatch.js";
+import { newId } from "./project/id.js";
+
+export interface Job {
+  job_id: string;
+  verb: "export";
+  request: Record<string, unknown>;
+  state: "queued" | "running" | "succeeded" | "failed";
+  progress: number;
+  message: string;
+  created_at: string;
+  updated_at: string;
+  envelope: Envelope | null;
+  pid?: number;
+}
+export function jobPath(project: string, projectId: string, jobId: string) {
+  return join(dirname(resolve(project)), ".zcut", projectId, "jobs", jobId, "job.json");
+}
+export async function writeJob(path: string, job: Job) {
+  await mkdir(dirname(path), { recursive: true });
+  const temporary = `${path}.${process.pid}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(job, null, 2)}\n`);
+  await rename(temporary, path);
+}
+export async function readJob(path: string): Promise<Job> {
+  const job = JSON.parse(await readFile(path, "utf8")) as Job;
+  if ((job.state === "running" || job.state === "queued") && job.pid) {
+    try {
+      process.kill(job.pid, 0);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") {
+        job.state = "failed";
+        job.progress = 1;
+        job.message = "子进程意外退出";
+        job.updated_at = new Date().toISOString();
+        await writeJob(path, job);
+      }
+    }
+  }
+  return job;
+}
+export async function startExportJob(
+  project: string,
+  projectId: string,
+  request: Record<string, unknown>,
+  exporterModule: string,
+) {
+  const jobId = newId("job_");
+  const path = jobPath(project, projectId, jobId);
+  const now = new Date().toISOString();
+  const job: Job = {
+    job_id: jobId,
+    verb: "export",
+    request,
+    state: "queued",
+    progress: 0,
+    message: "排队中",
+    created_at: now,
+    updated_at: now,
+    envelope: null,
+  };
+  await writeJob(path, job);
+  const worker = fileURLToPath(new URL("./export-worker.js", import.meta.url).href.replace("/src/", "/dist/"));
+  const child = spawn(process.execPath, [worker, path, exporterModule], { stdio: "ignore", detached: true });
+  child.unref();
+  if (!child.pid) throw new Error("Failed to start export worker");
+  job.pid = child.pid;
+  await writeJob(path, job);
+  return jobId;
+}
