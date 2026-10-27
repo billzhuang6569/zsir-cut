@@ -9,7 +9,18 @@ import { fingerprint } from "./fingerprint.js";
 import { projectSubtitles } from "./project/projection.js";
 import { clipTimeMap, mapSourceTimeToClip } from "./project/time-map.js";
 import type { Project, Timeline } from "./project/types.js";
-import { add, compare, div, floor, mul, printRational, type Rational, rational, sub } from "./rational.js";
+import {
+  add,
+  compare,
+  div,
+  floor,
+  mul,
+  parseRational,
+  printRational,
+  type Rational,
+  rational,
+  sub,
+} from "./rational.js";
 import { validateLossReport, validateManifest } from "./schema.js";
 
 export const PROFILES = {
@@ -35,7 +46,10 @@ export type CutRow = {
   source_in: number;
   source_out: number;
   speed: string;
+  timeline_in_exact?: string;
+  timeline_out_exact?: string;
 };
+export type GridTolerance = { start: Rational; end: Rational; halfFrame: Rational };
 export type LossItem = {
   entity_id: string;
   entity_kind: "media" | "track" | "clip" | "transition" | "marker" | "cue" | "style" | "timeline";
@@ -63,6 +77,7 @@ export interface Exporter {
   readBack(data: string | Uint8Array, timeline: Timeline): Promise<CutRow[]>;
   losses(project: Project, timeline: Timeline, profile: ProfileId): LossItem[];
   validate(data: string | Uint8Array): Promise<boolean>;
+  gridTolerances?(project: Project, timeline: Timeline): Map<string, GridTolerance>;
 }
 export type HostVersions = Partial<Record<"final_cut_pro" | "davinci_resolve" | "premiere_pro", string>>;
 export type HostDetector = () => Promise<HostVersions>;
@@ -185,18 +200,29 @@ export function cuttingList(project: Project, timeline: Timeline, profile: Profi
       a.clip_id.localeCompare(b.clip_id),
   );
 }
-export function compareCuttingLists(expected: CutRow[], actual: CutRow[], unsupported = new Set<string>()) {
+export function compareCuttingLists(
+  expected: CutRow[],
+  actual: CutRow[],
+  unsupported = new Set<string>(),
+  gridTolerances = new Map<string, GridTolerance>(),
+) {
   expected = expected.filter((row) => !unsupported.has(row.clip_id));
   actual = actual.filter((row) => !unsupported.has(row.clip_id));
   const differences: { row: number; expected: CutRow | null; actual: CutRow | null }[] = [];
   for (let i = 0; i < Math.max(expected.length, actual.length); i++) {
     const a = expected[i],
       b = actual[i];
+    const grid = a && gridTolerances.get(a.clip_id);
+    const within = (exact: string | undefined, target: Rational) => {
+      if (!exact || !grid) return false;
+      const difference = sub(parseRational(exact, true), target);
+      return compare(difference, grid.halfFrame) <= 0 && compare(difference, mul(grid.halfFrame, rational(-1n))) >= 0;
+    };
     if (
       !a ||
       !b ||
-      a.timeline_in !== b.timeline_in ||
-      a.timeline_out !== b.timeline_out ||
+      (grid ? !within(b.timeline_in_exact, grid.start) : a.timeline_in !== b.timeline_in) ||
+      (grid ? !within(b.timeline_out_exact, grid.end) : a.timeline_out !== b.timeline_out) ||
       a.source_in !== b.source_in ||
       a.source_out !== b.source_out
     )
@@ -435,6 +461,7 @@ export async function runExport(
         .filter((item) => item.status === "unsupported" && item.entity_kind === "clip")
         .map((item) => item.entity_id),
     ),
+    exporter.gridTolerances?.(project, timeline),
   );
   const formatValid = await exporter.validate(exchange.data);
   if (!formatValid || !cutCheck.zero_frame_deviation) throw new Error("Exchange validation failed");

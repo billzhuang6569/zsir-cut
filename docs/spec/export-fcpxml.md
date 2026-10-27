@@ -36,7 +36,7 @@
 
 资源 ID 按出现顺序编为 `r1`、`r2`……：先时间线格式，再按 `media[]` 顺序为视频和静帧生成格式（纯音频跳过），然后素材，最后效果。
 
-**格式**：时间线和视频素材用 `<format id frameDuration width height>`。`frameDuration` 是帧率的倒数，例如 25 帧写 `1/25s`，29.97 写 `1001/30000s`。静帧图片用 `<format id name="FFVideoFormatRateUndefined" width height>`，不写 `frameDuration`；宽高优先取素材的 `video` 信息，没有则取时间线宽高。纯音频素材不生成格式资源。
+**格式**：时间线和视频素材用 `<format id name frameDuration width height colorSpace>`。`frameDuration` 是帧率的倒数，例如 25 帧写 `1/25s`，29.97 写 `1001/30000s`。`colorSpace` 一律写 `1-1-1 (Rec. 709)`。`name` 只在尺寸和帧率都是 FCP 预设时写。预设尺寸只有 1280×720、1920×1080、3840×2160、4096×2160，分别写成 `720p`、`1080p`、`3840x2160p`、`4096x2160p`；预设帧率记号为 `2398`、`24`、`25`、`2997`、`30`、`50`、`5994`、`60`。拼起来形如 `FFVideoFormat1080p25`、`FFVideoFormat3840x2160p2997`。其他尺寸（例如测试工程的 960×540）或其他帧率不写 `name`，这与 FCP 对自定义格式的写法一致。第二版导入时 FCP 对序列 `format` 报「遇到意外值」，最可能的原因是缺 `colorSpace`，改后待复测。静帧图片用 `<format id name="FFVideoFormatRateUndefined" width height>`，不写 `frameDuration`；宽高优先取素材的 `video` 信息，没有则取时间线宽高。纯音频素材不生成格式资源。
 
 **素材**：每个 `media[]` 条目一个 `<asset>`：
 
@@ -67,7 +67,7 @@
 
 第一条视频轨的片段按时间顺序放进 `<spine>`。片段之间、开头和末尾的空白用 `<gap>` 填满，保证主故事情节覆盖整个 `[0, duration)`，这样任何连接片段都有可挂靠的对象。`<gap>` 的 `start` 写成和它的 `offset` 相同。
 
-视频或音频主故事情节片段写成 `<asset-clip>`：`ref` 指向素材，`offset` 是 `tcStart + timeline_start`，`start` 是 `asset.start + source_start`，`duration` 是片段时长。静帧图片的 `asset.duration` 是 `0s`，必须用 `<video ref offset start="0s" duration>` 引用，不得用 `<asset-clip>`；为保存片段 ID 元数据，外层用 `<clip offset duration>` 包住 `<video>`，并把 `<metadata>` 放在外层末尾。静帧的时间线时长由 `<video>` 和外层 `<clip>` 的 `duration` 表达。
+视频或音频主故事情节片段写成 `<asset-clip>`：`ref` 指向素材，引用有视频的素材时加 `format`，取该素材的格式 ID（FCP 自己导出时也这样写，片段本地时间按这个格式的帧网格计），`offset` 是 `tcStart + timeline_start`，`start` 是 `asset.start + source_start`，`duration` 是片段时长。静帧图片的 `asset.duration` 是 `0s`，必须用 `<video ref offset start="0s" duration>` 引用，不得用 `<asset-clip>`；为保存片段 ID 元数据，外层用 `<clip offset duration format>` 包住 `<video>`，并把 `<metadata>` 放在外层末尾。静帧的时间线时长由 `<video>` 和外层 `<clip>` 的 `duration` 表达。
 
 **音视频配对**：同一个 `occurrence_id` 在第一条音频轨上有且只有一个音频片段，并且两者的时间映射相同时，把它们写成同一个 `<asset-clip>`，`srcEnable="all"`。音频的入出点和视频不同时，就是 J/L cut，用 `audioStart` 和 `audioDuration` 表示：`audioStart` 是 `asset.start + 音频片段的 source_start`，`audioDuration` 是音频片段时长。不满足配对条件时，主故事情节片段写 `srcEnable="video"`，音频作为连接片段另写。
 
@@ -76,7 +76,8 @@
 除主故事情节片段和已配对的音频外，所有片段都写成连接片段，挂在「包含它入点的那个主故事情节元素」上。入点正好落在两个元素交界时，挂在后一个上。
 
 - **lane**：第 2、3……条视频轨依次是 `1`、`2`……。第 1、2……条音频轨上没配对的片段依次是 `-1`、`-2`……。
-- **offset**：按父元素的本地时间计算，等于 `父元素的 start + (t − 父元素的序列入点)`。
+- **offset**：按父元素的本地时间计算，等于 `父元素的 start + (t − 父元素的序列入点)`。父元素的帧率与时间线不同时（例如 25 帧素材放在 29.97 时间线上），FCP 要求 offset 落在父元素格式的帧网格上：把 `t − 父元素的序列入点` 四舍五入到父元素的整帧，正好在中间时取较大的一帧。实际取整了的连接片段，在损失报告里记一条：`feature` 为 `clip_cut`，`status` 为 `approximated`，`severity` 为 `warning`，`reason_code` 为 `R_GRID_ROUNDED`，`consequence` 写明移动了多少时间。读回比对对这类片段允许不超过父元素半帧的偏差。
+- 包装元素 `<clip>`（静帧外壳、第 8 节的变速外壳）写 `format`，取时间线格式 ID。不写时 FCP 不按时间线帧网格看待其内部时间，会报「不在编辑帧边界上」。
 - 视频连接片段写 `srcEnable="video"`，音频连接片段写 `srcEnable="audio"`；静帧连接片段使用带 `lane` 的外层 `<clip>` 和内层 `<video>`，不写 `srcEnable`。
 - 其余属性与主故事情节片段相同。
 
@@ -155,16 +156,16 @@
 |---|---|---|
 | 位移单位 | `position` 暂按「时间线高度的百分比」换算 | FCP 的实际单位 |
 | 裁切单位 | `trim-rect` 暂按「源画面尺寸的百分比」 | FCP 的实际单位 |
-| 字幕语言代码 | `SRT.zh-Hans`、`SRT.en` | FCP 是否接受 `zh-Hans`，不接受时的替代写法 |
-| 静帧素材 | `FFVideoFormatRateUndefined` 格式、`duration="0s"` asset、`<clip><video/></clip>` 引用 | FCP 12.4 是否能正常导入和编辑 |
+| 字幕语言代码 | `SRT.zh-Hans`、`SRT.en` | 已实测通过（2026-10-27，FCP 12.4，三个工程字幕条数和起点正确） |
+| 静帧素材 | `FFVideoFormatRateUndefined` 格式、`duration="0s"` asset、`<clip><video/></clip>` 引用 | 已实测能导入（2026-10-27）。第一版用 `<asset-clip>` 引用静帧会让 FCP 崩溃。29.97 工程里外壳 `<clip>` 未写 `format` 时报「不在编辑帧边界上」，已改为写时间线格式，待复测 |
 | 声道选择 | `audio-channel-source srcCh` | 只取声道 1 是否生效 |
-| 混合帧率 | 不写 `conform-rate` | 25 帧素材在 29.97 时间线里的取帧是否符合预期 |
+| 混合帧率 | 不写 `conform-rate`；片段写素材自己的 `format`；连接片段 offset 按父元素帧网格取整 | 第二版实测：父元素是 25 帧素材时，按 29.97 网格算的 offset 被 FCP 报「不在编辑帧边界上」。已改，待复测 |
 | 自定义元数据 | `com.zsir-cut.*` 的 `md` 键 | 导入后再从 FCP 导出，这些键是否保留 |
-| 包装变速 | 第 8 节的 `<clip>` 结构 | 分段、定格、倒放的画面是否与条码一致 |
-| 叠化位置 | 两侧片段位置不变 | 剪点位置是否保持 |
+| 包装变速 | 第 8 节的 `<clip>` 结构 | 已实测通过（2026-10-27）。倒放段取帧规则见 timeline-schema 4.5，FCP 与之一致 |
+| 叠化位置 | 两侧片段位置不变 | 已实测通过（2026-10-27） |
 
 ## 12. 读回比对
 
 导出器测试必须把生成的 FCPXML 解析回「剪辑表」：每个视频和音频片段的序列入点、出点、源入点、源出点、素材 ID。再与工程投影出的剪辑表逐条比较，必须零帧偏差。这一步在 CI 里跑，DTD 校验只在本地跑，因为 DTD 是 Apple 的文件，不能进公开仓库。
 
-导出自检还必须拒绝：`asset-clip` 引用 `duration="0s"` 素材、没有 `frameDuration` 也没有 `name` 的空格式、带 `format` 的纯音频 asset，以及非静帧的 `asset-clip` 或 `video` 源区间超出对应 asset 源区间。`<clip>` 包装内的元素按其源时长检查。
+导出自检还必须拒绝：视频格式缺 `colorSpace`、有视频素材的 `asset-clip` 缺 `format`、包装 `<clip>` 缺 `format`、连接片段 offset 不在父元素格式帧网格上，`asset-clip` 引用 `duration="0s"` 素材、没有 `frameDuration` 也没有 `name` 的空格式、带 `format` 的纯音频 asset，以及非静帧的 `asset-clip` 或 `video` 源区间超出对应 asset 源区间。`<clip>` 包装内的元素按其源时长检查。

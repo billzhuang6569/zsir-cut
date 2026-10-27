@@ -17,6 +17,7 @@ import {
   type Media,
   type MediaTrack,
   mul,
+  type Project,
   parseRational,
   printRational,
   projectSubtitles,
@@ -84,16 +85,29 @@ const child = (item: Node, tag: string) => children(item, tag)[0];
 function importSafety(root: Node): string | undefined {
   const resources = child(root, "resources");
   if (!resources) return "缺少 resources";
+  const formats = new Map(children(resources, "format").map((format) => [format.attrs.id, format]));
   const assets = new Map(children(resources, "asset").map((asset) => [asset.attrs.id, asset]));
+  const sequence = child(child(child(root, "library") ?? node("library"), "event") ?? node("event"), "project")
+    ?.children[0];
+  const sequenceFormat = formats.get(sequence?.attrs.format);
   if (children(resources, "format").some((format) => !format.attrs.frameDuration && !format.attrs.name))
     return "存在空 format";
+  if (
+    children(resources, "format").some(
+      (format) => format.attrs.name !== "FFVideoFormatRateUndefined" && !format.attrs.colorSpace,
+    )
+  )
+    return "视频 format 缺少 colorSpace";
   for (const asset of assets.values())
     if (asset.attrs.hasAudio === "1" && asset.attrs.hasVideo !== "1" && asset.attrs.format)
       return `纯音频素材 ${asset.attrs.id} 带有 format`;
   const visit = (item: Node): string | undefined => {
+    if (item.tag === "clip" && !item.attrs.format) return "包装 clip 缺少 format";
     if (item.tag === "asset-clip" || item.tag === "video") {
       const asset = assets.get(item.attrs.ref);
       if (!asset) return `${item.tag} 引用了不存在的素材`;
+      if (item.tag === "asset-clip" && asset.attrs.hasVideo === "1" && !item.attrs.format)
+        return `视频 asset-clip 缺少 format：${asset.attrs.id}`;
       const assetStart = r(asset.attrs.start ?? "0s");
       const assetDuration = r(asset.attrs.duration ?? "0s");
       if (compare(assetDuration, zero) === 0) {
@@ -112,6 +126,15 @@ function importSafety(root: Node): string | undefined {
             return `${item.tag} 音频区间超出素材 ${asset.attrs.id}`;
         }
       }
+    }
+    const parentFormat = formats.get(item.attrs.format);
+    for (const connected of item.children.filter(
+      (entry) => (entry.tag === "asset-clip" || entry.tag === "clip" || entry.tag === "video") && entry.attrs.lane,
+    )) {
+      const parentFrame = (item.tag === "gap" ? sequenceFormat : parentFormat)?.attrs.frameDuration;
+      const rate = parentFrame ? div(rational(1n), r(parentFrame)) : undefined;
+      if (rate && mul(sub(r(connected.attrs.offset ?? "0s"), r(item.attrs.start ?? "0s")), rate).denominator !== 1n)
+        return `连接片段 ${connected.attrs.offset} 不在父元素帧网格上`;
     }
     for (const entry of item.children) {
       const issue = visit(entry);
@@ -137,6 +160,32 @@ function insertBeforeMetadata(parent: Node, item: Node) {
   parent.children.splice(index < 0 ? parent.children.length : index, 0, item);
 }
 const frameDuration = (rate: Rational) => sec(div(rational(1n), rate));
+function videoFormat(width: number, height: number, rate: Rational) {
+  const size = new Map([
+    ["1280x720", "720p"],
+    ["1920x1080", "1080p"],
+    ["3840x2160", "3840x2160p"],
+    ["4096x2160", "4096x2160p"],
+  ]).get(`${width}x${height}`);
+  const rates = new Map([
+    ["24000/1001", "2398"],
+    ["24", "24"],
+    ["25", "25"],
+    ["30000/1001", "2997"],
+    ["30", "30"],
+    ["50", "50"],
+    ["60000/1001", "5994"],
+    ["60", "60"],
+  ]).get(printRational(rate));
+  return {
+    ...(size && rates ? { name: `FFVideoFormat${size}${rates}` } : {}),
+    frameDuration: frameDuration(rate),
+    width: String(width),
+    height: String(height),
+    colorSpace: "1-1-1 (Rec. 709)",
+  };
+}
+const roundedDelta = (delta: Rational, rate: Rational) => div(rational(BigInt(round(mul(delta, rate)))), rate);
 function sourceOrigin(media: Media): Rational {
   const rate = media.video?.rate ?? rational(25n);
   return media.start_timecode ? timecodeSeconds(media.start_timecode, rate) : zero;
@@ -223,6 +272,8 @@ function itemFor(
   ref: string,
   offset: Rational,
   timelineHeight: number,
+  sequenceFormat: string,
+  mediaFormat: string | undefined,
   lane?: number,
   audio?: Clip,
 ): Node {
@@ -233,6 +284,7 @@ function itemFor(
       ...(lane === undefined ? {} : { lane: String(lane) }),
       offset: sec(offset),
       duration: sec(clip.duration),
+      format: sequenceFormat,
       ...(clip.label ? { name: clip.label } : {}),
       ...(clip.enabled === false ? { enabled: "0" } : {}),
     });
@@ -256,10 +308,14 @@ function itemFor(
     return wrapper;
   }
   if (!points)
-    return node("asset-clip", clipAttrs(clip, ref, offset, add(origin, clip.source_start), lane, audio), [
-      ...properties(clip, media, timelineHeight, audio),
-      metadata(clip, audio),
-    ]);
+    return node(
+      "asset-clip",
+      {
+        ...clipAttrs(clip, ref, offset, add(origin, clip.source_start), lane, audio),
+        ...(mediaFormat ? { format: mediaFormat } : {}),
+      },
+      [...properties(clip, media, timelineHeight, audio), metadata(clip, audio)],
+    );
   const sources = points.map((point) => point.source);
   const low = sources.reduce(min),
     high = sources.reduce(max);
@@ -267,6 +323,7 @@ function itemFor(
     ...(lane === undefined ? {} : { lane: String(lane) }),
     offset: sec(offset),
     duration: sec(clip.duration),
+    format: sequenceFormat,
     ...(clip.label ? { name: clip.label } : {}),
     ...(clip.enabled === false ? { enabled: "0" } : {}),
   });
@@ -292,6 +349,7 @@ function itemFor(
         start: sec(add(origin, low)),
         duration: sec(sub(high, low)),
         srcEnable: audio ? "all" : lane !== undefined && lane < 0 ? "audio" : "video",
+        ...(mediaFormat ? { format: mediaFormat } : {}),
       },
       properties(clip, media, timelineHeight, audio),
     ),
@@ -299,8 +357,53 @@ function itemFor(
   wrapper.children.push(metadata(clip, audio));
   return wrapper;
 }
-function parentFor(items: { start: Rational; end: Rational; item: Node }[], at: Rational) {
+function parentFor<T extends { start: Rational; end: Rational; item: Node }>(items: T[], at: Rational): T | undefined {
   return items.find((entry) => compare(entry.start, at) <= 0 && compare(at, entry.end) < 0) ?? items.at(-1);
+}
+function pairedAudio(clip: Clip, audio: MediaTrack[]): Clip | undefined {
+  return audio[0]?.clips.find(
+    (candidate) =>
+      candidate.occurrence_id === clip.occurrence_id &&
+      candidate.media_id === clip.media_id &&
+      (candidate.enabled !== false) === (clip.enabled !== false) &&
+      JSON.stringify(candidate.time_map?.map((point) => [sec(point.at), sec(point.source), point.interp])) ===
+        JSON.stringify(clip.time_map?.map((point) => [sec(point.at), sec(point.source), point.interp])) &&
+      (candidate.time_map
+        ? compare(candidate.timeline_start, clip.timeline_start) === 0 &&
+          compare(candidate.duration, clip.duration) === 0
+        : compare(
+            sub(candidate.timeline_start, clip.timeline_start),
+            sub(candidate.source_start, clip.source_start),
+          ) === 0),
+  );
+}
+function gridRounded(project: Project, timeline: Timeline) {
+  const video = timeline.tracks.filter((track): track is MediaTrack => track.kind === "video");
+  const audio = timeline.tracks.filter((track): track is MediaTrack => track.kind === "audio");
+  const primary = video[0]?.clips ?? [];
+  const paired = new Set(primary.map((clip) => pairedAudio(clip, audio)?.id).filter((id): id is string => !!id));
+  const result = new Map<string, { start: Rational; end: Rational; halfFrame: Rational; delta: Rational }>();
+  for (const clip of [...video.slice(1).flatMap((track) => track.clips), ...audio.flatMap((track) => track.clips)]) {
+    if (paired.has(clip.id)) continue;
+    const parent = primary.find(
+      (entry) =>
+        compare(entry.timeline_start, clip.timeline_start) <= 0 &&
+        compare(clip.timeline_start, add(entry.timeline_start, entry.duration)) < 0,
+    );
+    if (!parent || parent.time_map) continue;
+    const rate = project.media.find((media) => media.id === parent.media_id)?.video?.rate;
+    if (!rate || compare(rate, timeline.edit_rate) === 0) continue;
+    const elapsed = sub(clip.timeline_start, parent.timeline_start);
+    const delta = sub(roundedDelta(elapsed, rate), elapsed);
+    if (compare(delta, zero) !== 0)
+      result.set(clip.id, {
+        start: clip.timeline_start,
+        end: add(clip.timeline_start, clip.duration),
+        halfFrame: div(rational(1n), mul(rate, rational(2n))),
+        delta,
+      });
+  }
+  return result;
 }
 function extent(timeline: Timeline): Rational {
   return timeline.tracks
@@ -349,9 +452,7 @@ export const fcpxmlExporter: Exporter & { validationNotes?: string } = {
     resources.children.push(
       node("format", {
         id: sequenceFormat,
-        frameDuration: frameDuration(timeline.edit_rate),
-        width: String(timeline.format.width),
-        height: String(timeline.format.height),
+        ...videoFormat(timeline.format.width, timeline.format.height, timeline.edit_rate),
       }),
     );
     const formats = new Map<string, string>();
@@ -364,9 +465,13 @@ export const fcpxmlExporter: Exporter & { validationNotes?: string } = {
           id,
           ...(media.kind === "image"
             ? { name: "FFVideoFormatRateUndefined" }
-            : { frameDuration: frameDuration(media.video!.rate) }),
-          width: String(media.video?.width ?? timeline.format.width),
-          height: String(media.video?.height ?? timeline.format.height),
+            : videoFormat(media.video!.width, media.video!.height, media.video!.rate)),
+          ...(media.kind === "image"
+            ? {
+                width: String(media.video?.width ?? timeline.format.width),
+                height: String(media.video?.height ?? timeline.format.height),
+              }
+            : {}),
         }),
       );
     }
@@ -410,7 +515,7 @@ export const fcpxmlExporter: Exporter & { validationNotes?: string } = {
     const tcStart = timecodeSeconds(timeline.start_timecode, timeline.edit_rate);
     const end = extent(timeline);
     const spine = node("spine");
-    const anchors: { start: Rational; end: Rational; item: Node }[] = [];
+    const anchors: { start: Rational; end: Rational; item: Node; rate: Rational }[] = [];
     const paired = new Set<string>();
     const primary = [...(video[0]?.clips ?? [])].sort((a, b) => compare(a.timeline_start, b.timeline_start));
     let cursor = zero;
@@ -418,25 +523,11 @@ export const fcpxmlExporter: Exporter & { validationNotes?: string } = {
       const offset = add(tcStart, start);
       const item = node("gap", { offset: sec(offset), start: sec(offset), duration: sec(sub(stop, start)) });
       spine.children.push(item);
-      anchors.push({ start, end: stop, item });
+      anchors.push({ start, end: stop, item, rate: timeline.edit_rate });
     };
     for (const clip of primary) {
       if (compare(cursor, clip.timeline_start) < 0) gap(cursor, clip.timeline_start);
-      const match = audio[0]?.clips.find(
-        (candidate) =>
-          candidate.occurrence_id === clip.occurrence_id &&
-          candidate.media_id === clip.media_id &&
-          (candidate.enabled !== false) === (clip.enabled !== false) &&
-          JSON.stringify(candidate.time_map?.map((point) => [sec(point.at), sec(point.source), point.interp])) ===
-            JSON.stringify(clip.time_map?.map((point) => [sec(point.at), sec(point.source), point.interp])) &&
-          (candidate.time_map
-            ? compare(candidate.timeline_start, clip.timeline_start) === 0 &&
-              compare(candidate.duration, clip.duration) === 0
-            : compare(
-                sub(candidate.timeline_start, clip.timeline_start),
-                sub(candidate.source_start, clip.source_start),
-              ) === 0),
-      );
+      const match = pairedAudio(clip, audio);
       if (match) paired.add(match.id);
       const media = project.media.find((entry) => entry.id === clip.media_id)!;
       const item = itemFor(
@@ -445,11 +536,18 @@ export const fcpxmlExporter: Exporter & { validationNotes?: string } = {
         refs.get(media.id)!,
         add(tcStart, clip.timeline_start),
         timeline.format.height,
+        sequenceFormat,
+        formats.get(media.id),
         undefined,
         match,
       );
       spine.children.push(item);
-      anchors.push({ start: clip.timeline_start, end: add(clip.timeline_start, clip.duration), item });
+      anchors.push({
+        start: clip.timeline_start,
+        end: add(clip.timeline_start, clip.duration),
+        item,
+        rate: clip.time_map ? timeline.edit_rate : (media.video?.rate ?? timeline.edit_rate),
+      });
       cursor = add(clip.timeline_start, clip.duration);
       for (const transition of transitions.filter((entry) => entry.from_clip === clip.id)) {
         const cut = cursor;
@@ -472,7 +570,14 @@ export const fcpxmlExporter: Exporter & { validationNotes?: string } = {
     const attach = (at: Rational) => {
       const parent = parentFor(anchors, at);
       if (!parent) throw new Error("No primary story element for anchor");
-      return { parent: parent.item, offset: add(r(parent.item.attrs.start ?? "0s"), sub(at, parent.start)) };
+      const delta = sub(at, parent.start);
+      return {
+        parent: parent.item,
+        offset: add(
+          r(parent.item.attrs.start ?? "0s"),
+          compare(parent.rate, timeline.edit_rate) === 0 ? delta : roundedDelta(delta, parent.rate),
+        ),
+      };
     };
     for (const [kind, tracks] of [
       ["video", video],
@@ -492,6 +597,8 @@ export const fcpxmlExporter: Exporter & { validationNotes?: string } = {
               refs.get(media.id)!,
               offset,
               timeline.format.height,
+              sequenceFormat,
+              formats.get(media.id),
               kind === "video" ? index : -index - 1,
             ),
           );
@@ -579,6 +686,7 @@ export const fcpxmlExporter: Exporter & { validationNotes?: string } = {
   async readBack(data, timeline) {
     const root = parseXml(data.toString());
     const resources = child(root, "resources")!;
+    const formats = new Map(children(resources, "format").map((format) => [format.attrs.id, format]));
     const assets = new Map(children(resources, "asset").map((asset) => [asset.attrs.id!, asset]));
     const sequence = child(child(child(root, "library")!, "event")!, "project")!.children[0]!;
     const spine = child(sequence, "spine")!;
@@ -599,6 +707,7 @@ export const fcpxmlExporter: Exporter & { validationNotes?: string } = {
       trackNumber: number,
       id: string,
       audioPair = false,
+      exact = false,
     ) => {
       const inside =
         item.tag === "clip"
@@ -641,25 +750,35 @@ export const fcpxmlExporter: Exporter & { validationNotes?: string } = {
         source_out: round(mul(sourceOut, rate)),
         speed:
           points.length > 2 ? "map" : sec(div(sub(sourceOut, sourceIn), sub(timelineOut, timelineIn))).slice(0, -1),
+        ...(exact ? { timeline_in_exact: sec(timelineIn), timeline_out_exact: sec(timelineOut) } : {}),
       });
     };
-    const walk = (item: Node, seqAt: Rational, parentStart: Rational, primary = false) => {
+    const walk = (item: Node, seqAt: Rational, parentStart: Rational, primary = false, exact = false) => {
       if (item.tag === "asset-clip" || item.tag === "clip" || item.tag === "video") {
         const id = md(item, "com.zsir-cut.clip-id");
         if (!id) throw new Error("Missing clip ID metadata");
         if (!md(item, "com.zsir-cut.occurrence-id")) throw new Error("Missing occurrence ID metadata");
         const lane = Number(item.attrs.lane ?? 0);
         const kind = primary || lane > 0 ? "video" : "audio";
-        readItem(item, seqAt, kind, primary ? 1 : lane > 0 ? lane + 1 : -lane, id);
+        readItem(item, seqAt, kind, primary ? 1 : lane > 0 ? lane + 1 : -lane, id, false, exact);
         const pair = md(item, "com.zsir-cut.audio-clip-id");
-        if (pair) readItem(item, seqAt, "audio", 1, pair, true);
+        if (pair) readItem(item, seqAt, "audio", 1, pair, true, exact);
       }
       for (const anchored of item.children.filter(
         (entry) =>
           (entry.tag === "asset-clip" || entry.tag === "clip" || entry.tag === "video") &&
           entry.attrs.lane !== undefined,
       )) {
-        walk(anchored, add(seqAt, sub(r(anchored.attrs.offset ?? "0s"), parentStart)), r(anchored.attrs.start ?? "0s"));
+        const parentFrame = (item.tag === "gap" ? formats.get(sequence.attrs.format) : formats.get(item.attrs.format))
+          ?.attrs.frameDuration;
+        const parentRate = parentFrame ? div(rational(1n), r(parentFrame)) : timeline.edit_rate;
+        walk(
+          anchored,
+          add(seqAt, sub(r(anchored.attrs.offset ?? "0s"), parentStart)),
+          r(anchored.attrs.start ?? "0s"),
+          false,
+          compare(parentRate, timeline.edit_rate) !== 0,
+        );
       }
     };
     for (const item of spine.children)
@@ -677,6 +796,19 @@ export const fcpxmlExporter: Exporter & { validationNotes?: string } = {
   },
   losses(project, timeline) {
     const items: LossItem[] = [];
+    for (const [id, rounding] of gridRounded(project, timeline))
+      items.push(
+        loss(
+          id,
+          "clip",
+          "clip_cut",
+          "approximated",
+          "warning",
+          "R_GRID_ROUNDED",
+          `连接片段入点移动了 ${sec(rounding.delta)}（${compare(rounding.delta, zero) > 0 ? "向后" : "向前"}）`,
+          { start: rounding.start, duration: sub(rounding.end, rounding.start) },
+        ),
+      );
     for (const style of project.subtitle_styles)
       items.push(
         loss(
@@ -815,6 +947,11 @@ export const fcpxmlExporter: Exporter & { validationNotes?: string } = {
         ),
       );
     return items;
+  },
+  gridTolerances(project, timeline) {
+    return new Map(
+      [...gridRounded(project, timeline)].map(([id, { start, end, halfFrame }]) => [id, { start, end, halfFrame }]),
+    );
   },
   async validate(data) {
     const source = data.toString();
