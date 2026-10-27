@@ -1,0 +1,369 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE fcpxml>
+<fcpxml version="1.13">
+  <resources>
+    <format id="r1" frameDuration="1001/30000s" width="960" height="540"/>
+    <format id="r2" frameDuration="1001/30000s" width="960" height="540"/>
+    <format id="r3" frameDuration="1001/30000s" width="960" height="540"/>
+    <format id="r4"/>
+    <format id="r5"/>
+    <format id="r6" frameDuration="1/25s" width="960" height="540"/>
+    <format id="r7" frameDuration="1/30s" width="960" height="540"/>
+    <format id="r8" frameDuration="1/25s" width="960" height="540"/>
+    <format id="r9" frameDuration="1/25s" width="960" height="540"/>
+    <asset id="r10" name="A_2997.mov" start="8999991/250s" duration="1200199/10000s" hasVideo="1" hasAudio="1" format="r2" audioSources="1" audioChannels="2" audioRate="48000">
+      <media-rep kind="original-media" src="file:///__MEDIA_ROOT__/2997/A_2997.mov"/>
+      <metadata>
+        <md key="com.zsir-cut.media-id" value="med_A"/>
+      </metadata>
+    </asset>
+    <asset id="r11" name="B_2997.mov" start="180006827/5000s" duration="1350349/15000s" hasVideo="1" hasAudio="1" format="r3" audioSources="1" audioChannels="2" audioRate="48000">
+      <media-rep kind="original-media" src="file:///__MEDIA_ROOT__/2997/B_2997.mov"/>
+      <metadata>
+        <md key="com.zsir-cut.media-id" value="med_B"/>
+      </metadata>
+    </asset>
+    <asset id="r12" name="外录音频.wav" start="35998s" duration="125s" hasVideo="0" hasAudio="1" format="r4" audioSources="1" audioChannels="1" audioRate="48000">
+      <media-rep kind="original-media" src="file:///__MEDIA_ROOT__/shared/%E5%A4%96%E5%BD%95%E9%9F%B3%E9%A2%91.wav"/>
+      <metadata>
+        <md key="com.zsir-cut.media-id" value="med_EXT"/>
+      </metadata>
+    </asset>
+    <asset id="r13" name="静帧.png" start="0s" duration="0s" hasVideo="1" hasAudio="0" format="r5">
+      <media-rep kind="original-media" src="file:///__MEDIA_ROOT__/shared/%E9%9D%99%E5%B8%A7.png"/>
+      <metadata>
+        <md key="com.zsir-cut.media-id" value="med_STILL"/>
+      </metadata>
+    </asset>
+    <asset id="r14" name="图形_alpha.mov" start="0s" duration="5s" hasVideo="1" hasAudio="0" format="r6">
+      <media-rep kind="original-media" src="file:///__MEDIA_ROOT__/shared/%E5%9B%BE%E5%BD%A2_alpha.mov"/>
+      <metadata>
+        <md key="com.zsir-cut.media-id" value="med_ALPHA"/>
+      </metadata>
+    </asset>
+    <asset id="r15" name="手机录屏_vfr.mp4" start="0s" duration="30s" hasVideo="1" hasAudio="1" format="r7" audioSources="1" audioChannels="1" audioRate="48000">
+      <media-rep kind="original-media" src="file:///__MEDIA_ROOT__/shared/%E6%89%8B%E6%9C%BA%E5%BD%95%E5%B1%8F_vfr.mp4"/>
+      <metadata>
+        <md key="com.zsir-cut.media-id" value="med_VFR"/>
+      </metadata>
+    </asset>
+    <asset id="r16" name="同名素材.mov" start="39600s" duration="10s" hasVideo="1" hasAudio="1" format="r8" audioSources="1" audioChannels="2" audioRate="48000">
+      <media-rep kind="original-media" src="file:///__MEDIA_ROOT__/shared/%E7%B4%A0%E6%9D%90%20%E7%9B%98/100%25%20%E5%8E%9F%E7%89%87/%E6%89%B9%E6%AC%A11/%E5%90%8C%E5%90%8D%E7%B4%A0%E6%9D%90.mov"/>
+      <metadata>
+        <md key="com.zsir-cut.media-id" value="med_DUP1"/>
+      </metadata>
+    </asset>
+    <asset id="r17" name="同名素材.mov" start="43200s" duration="10s" hasVideo="1" hasAudio="1" format="r9" audioSources="1" audioChannels="2" audioRate="48000">
+      <media-rep kind="original-media" src="file:///__MEDIA_ROOT__/shared/%E7%B4%A0%E6%9D%90%20%E7%9B%98/100%25%20%E5%8E%9F%E7%89%87/%E6%89%B9%E6%AC%A12/%E5%90%8C%E5%90%8D%E7%B4%A0%E6%9D%90.mov"/>
+      <metadata>
+        <md key="com.zsir-cut.media-id" value="med_DUP2"/>
+      </metadata>
+    </asset>
+    <effect id="r18" name="Cross Dissolve" uid="FxPlug:4731E73A-8DAC-4113-9A30-AE85B1761265"/>
+  </resources>
+  <library>
+    <event name="zsir-cut">
+      <project name="标准测试工程 std-2997-ndf · std-2997-ndf">
+        <sequence format="r1" duration="4004/75s" tcStart="18018/5s" tcFormat="NDF" audioLayout="stereo" audioRate="48k">
+          <spine>
+            <asset-clip ref="r10" offset="18018/5s" start="540126587/15000s" duration="1001/120s" srcEnable="all" name="A 第一次使用" audioStart="540126587/15000s" audioDuration="1001/125s">
+              <asset-clip ref="r11" lane="1" offset="180058879/5000s" start="180056877/5000s" duration="1001/400s" srcEnable="video" name="插入镜头 带变换">
+                <adjust-crop mode="trim">
+                  <trim-rect left="0.010416666666666666" top="0.009259259259259259" right="0.010416666666666666" bottom="0.009259259259259259"/>
+                </adjust-crop>
+                <adjust-transform scale="0.5 0.5" rotation="5" position="0.037037037037037035 -0.037037037037037035"/>
+                <metadata>
+                  <md key="com.zsir-cut.clip-id" value="clp_b1"/>
+                  <md key="com.zsir-cut.occurrence-id" value="occ_4"/>
+                </metadata>
+              </asset-clip>
+              <asset-clip ref="r12" lane="-3" offset="540126587/15000s" start="540127127/15000s" duration="1001/125s" srcEnable="audio" name="双系统外录，与 occ_1 同步">
+                <adjust-volume amount="-6dB"/>
+                <audio-channel-source srcCh="1"/>
+                <metadata>
+                  <md key="com.zsir-cut.clip-id" value="clp_ext"/>
+                  <md key="com.zsir-cut.occurrence-id" value="occ_14"/>
+                </metadata>
+              </asset-clip>
+              <caption lane="3" offset="72020949/2000s" duration="11011/3750s" start="0s" role="SRT?captionFormat=SRT.en">
+                <text>
+                  <text-style ref="ts1">A timeline shared by editors and agents</text-style>
+                </text>
+                <text-style-def id="ts1">
+                  <text-style/>
+                </text-style-def>
+                <note>zsir-cut cue=cue_en_02 occ=occ_1</note>
+              </caption>
+              <caption lane="2" offset="540126587/15000s" duration="1001/400s" start="0s" role="SRT?captionFormat=SRT.zh-Hans">
+                <text>
+                  <text-style ref="ts6">zsir-cut 标准测试工程</text-style>
+                </text>
+                <text-style-def id="ts6">
+                  <text-style/>
+                </text-style-def>
+                <note>zsir-cut cue=cue_title</note>
+              </caption>
+              <caption lane="2" offset="72020949/2000s" duration="11011/3750s" start="0s" role="SRT?captionFormat=SRT.zh-Hans">
+                <text>
+                  <text-style ref="ts7">它是剪辑师和
+Agent共用的时间线</text-style>
+                </text>
+                <text-style-def id="ts7">
+                  <text-style/>
+                </text-style-def>
+                <note>zsir-cut cue=cue_zh_02 occ=occ_1</note>
+              </caption>
+              <caption lane="2" offset="72030959/2000s" duration="29029/30000s" start="0s" role="SRT?captionFormat=SRT.zh-Hans">
+                <text>
+                  <text-style ref="ts8">Agent先把粗剪</text-style>
+                </text>
+                <text-style-def id="ts8">
+                  <text-style/>
+                </text-style-def>
+                <note>zsir-cut cue=cue_zh_03 occ=occ_1</note>
+              </caption>
+              <caption lane="2" offset="1080496417/30000s" duration="1001/1500s" start="0s" role="SRT?captionFormat=SRT.zh-Hans">
+                <text>
+                  <text-style ref="ts9">两小时</text-style>
+                </text>
+                <text-style-def id="ts9">
+                  <text-style/>
+                </text-style-def>
+                <note>zsir-cut cue=cue_zh_06 occ=occ_2</note>
+              </caption>
+              <marker start="270120851/7500s" duration="1001/1500s" value="S16：字词「粗剪」跨过 A1 剪点"/>
+              <audio-channel-source srcCh="1"/>
+              <metadata>
+                <md key="com.zsir-cut.clip-id" value="clp_v1"/>
+                <md key="com.zsir-cut.occurrence-id" value="occ_1"/>
+                <md key="com.zsir-cut.audio-clip-id" value="clp_a1"/>
+              </metadata>
+            </asset-clip>
+            <asset-clip ref="r10" offset="433433/120s" start="13512499/375s" duration="1001/100s" srcEnable="all" name="A 第二次使用" audioStart="36032997/1000s" audioDuration="31031/3000s">
+              <adjust-volume amount="-3dB"/>
+              <asset-clip ref="r13" lane="1" offset="108115007/3000s" start="0s" duration="1001/400s" srcEnable="video" name="静帧">
+                <metadata>
+                  <md key="com.zsir-cut.clip-id" value="clp_still"/>
+                  <md key="com.zsir-cut.occurrence-id" value="occ_11"/>
+                </metadata>
+              </asset-clip>
+              <caption lane="3" offset="67566499/1875s" duration="7007/2000s" start="0s" role="SRT?captionFormat=SRT.en">
+                <text>
+                  <text-style ref="ts2">Sixty percent of it is finding repeated lines</text-style>
+                </text>
+                <text-style-def id="ts2">
+                  <text-style/>
+                </text-style-def>
+                <note>zsir-cut cue=cue_en_07 occ=occ_2</note>
+              </caption>
+              <caption lane="3" offset="540607067/15000s" duration="1001/400s" start="0s" role="SRT?captionFormat=SRT.en">
+                <text>
+                  <text-style ref="ts3">We want the agent to take that part</text-style>
+                </text>
+                <text-style-def id="ts3">
+                  <text-style/>
+                </text-style-def>
+                <note>zsir-cut cue=cue_en_08 occ=occ_2</note>
+              </caption>
+              <caption lane="2" offset="67566499/1875s" duration="7007/2000s" start="0s" role="SRT?captionFormat=SRT.zh-Hans">
+                <text>
+                  <text-style ref="ts10">其中百分之六十的时间在找重复的话（改）</text-style>
+                </text>
+                <text-style-def id="ts10">
+                  <text-style/>
+                </text-style-def>
+                <note>zsir-cut cue=cue_zh_07 occ=occ_2</note>
+              </caption>
+              <caption lane="2" offset="540607067/15000s" duration="1001/400s" start="0s" role="SRT?captionFormat=SRT.zh-Hans">
+                <text>
+                  <text-style ref="ts11">我们希望把这部分交给Agent</text-style>
+                </text>
+                <text-style-def id="ts11">
+                  <text-style/>
+                </text-style-def>
+                <note>zsir-cut cue=cue_zh_08 occ=occ_2</note>
+              </caption>
+              <chapter-marker start="13512499/375s" value="第二段"/>
+              <audio-channel-source srcCh="1"/>
+              <metadata>
+                <md key="com.zsir-cut.clip-id" value="clp_v2"/>
+                <md key="com.zsir-cut.occurrence-id" value="occ_2"/>
+                <md key="com.zsir-cut.audio-clip-id" value="clp_a2"/>
+              </metadata>
+            </asset-clip>
+            <transition name="Cross Dissolve" offset="6790784/1875s" duration="1001/2500s">
+              <filter-video ref="r18" name="Cross Dissolve"/>
+            </transition>
+            <asset-clip ref="r10" offset="2173171/600s" start="27050023/750s" duration="1001/120s" srcEnable="all" name="A 第三次使用" audioStart="27050023/750s" audioDuration="53053/6000s">
+              <asset-clip ref="r14" lane="1" offset="108205097/3000s" start="0s" duration="1001/300s" srcEnable="video" name="透明图形">
+                <metadata>
+                  <md key="com.zsir-cut.clip-id" value="clp_alpha"/>
+                  <md key="com.zsir-cut.occurrence-id" value="occ_12"/>
+                </metadata>
+              </asset-clip>
+              <caption lane="3" offset="27050023/750s" duration="7007/5000s" start="0s" role="SRT?captionFormat=SRT.en">
+                <text>
+                  <text-style ref="ts4">Numbers like October 2026 must be right</text-style>
+                </text>
+                <text-style-def id="ts4">
+                  <text-style/>
+                </text-style-def>
+                <note>zsir-cut cue=cue_en_13 occ=occ_3</note>
+              </caption>
+              <caption lane="3" offset="1082114033/30000s" duration="31031/15000s" start="0s" role="SRT?captionFormat=SRT.en">
+                <text>
+                  <text-style ref="ts5">We use Qwen3 for local recognition</text-style>
+                </text>
+                <text-style-def id="ts5">
+                  <text-style/>
+                </text-style-def>
+                <note>zsir-cut cue=cue_en_14 occ=occ_3</note>
+              </caption>
+              <caption lane="2" offset="27050023/750s" duration="7007/5000s" start="0s" role="SRT?captionFormat=SRT.zh-Hans">
+                <text>
+                  <text-style ref="ts12">年
+10月也要对</text-style>
+                </text>
+                <text-style-def id="ts12">
+                  <text-style/>
+                </text-style-def>
+                <note>zsir-cut cue=cue_zh_13 occ=occ_3</note>
+              </caption>
+              <caption lane="2" offset="1082114033/30000s" duration="31031/15000s" start="0s" role="SRT?captionFormat=SRT.zh-Hans">
+                <text>
+                  <text-style ref="ts13">我们用Qwen3做本地识别</text-style>
+                </text>
+                <text-style-def id="ts13">
+                  <text-style/>
+                </text-style-def>
+                <note>zsir-cut cue=cue_zh_14 occ=occ_3</note>
+              </caption>
+              <audio-channel-source srcCh="1"/>
+              <metadata>
+                <md key="com.zsir-cut.clip-id" value="clp_v3"/>
+                <md key="com.zsir-cut.occurrence-id" value="occ_3"/>
+                <md key="com.zsir-cut.audio-clip-id" value="clp_a3"/>
+              </metadata>
+            </asset-clip>
+            <gap offset="272272/75s" start="272272/75s" duration="1001/600s"/>
+            <asset-clip ref="r16" offset="2179177/600s" start="39600s" duration="1001/300s" srcEnable="video" name="批次1 同名素材">
+              <asset-clip ref="r15" lane="1" offset="23761001/600s" start="0s" duration="1001/300s" srcEnable="video" name="可变帧率">
+                <metadata>
+                  <md key="com.zsir-cut.clip-id" value="clp_vfr"/>
+                  <md key="com.zsir-cut.occurrence-id" value="occ_13"/>
+                </metadata>
+              </asset-clip>
+              <asset-clip ref="r16" lane="-4" offset="39600s" start="39600s" duration="1001/300s" srcEnable="audio">
+                <audio-channel-source srcCh="1, 2"/>
+                <metadata>
+                  <md key="com.zsir-cut.clip-id" value="clp_d1"/>
+                  <md key="com.zsir-cut.occurrence-id" value="occ_5"/>
+                </metadata>
+              </asset-clip>
+              <metadata>
+                <md key="com.zsir-cut.clip-id" value="clp_v4"/>
+                <md key="com.zsir-cut.occurrence-id" value="occ_5"/>
+              </metadata>
+            </asset-clip>
+            <asset-clip ref="r17" offset="2181179/600s" start="43200s" duration="1001/300s" srcEnable="video" name="批次2 同名素材">
+              <asset-clip ref="r17" lane="-4" offset="43200s" start="43200s" duration="1001/300s" srcEnable="audio">
+                <audio-channel-source srcCh="1, 2"/>
+                <metadata>
+                  <md key="com.zsir-cut.clip-id" value="clp_d2"/>
+                  <md key="com.zsir-cut.occurrence-id" value="occ_6"/>
+                </metadata>
+              </asset-clip>
+              <metadata>
+                <md key="com.zsir-cut.clip-id" value="clp_v5"/>
+                <md key="com.zsir-cut.occurrence-id" value="occ_6"/>
+              </metadata>
+            </asset-clip>
+            <clip offset="727727/200s" duration="1001/150s" name="200% 变速">
+              <timeMap>
+                <timept time="0s" value="0s" interp="linear"/>
+                <timept time="1001/150s" value="1001/75s" interp="linear"/>
+              </timeMap>
+              <asset-clip ref="r11" offset="0s" start="180257077/5000s" duration="1001/75s" srcEnable="video"/>
+              <clip lane="-2" offset="0s" duration="1001/150s">
+                <timeMap>
+                  <timept time="0s" value="0s" interp="linear"/>
+                  <timept time="1001/150s" value="1001/75s" interp="linear"/>
+                </timeMap>
+                <asset-clip ref="r11" offset="0s" start="180257077/5000s" duration="1001/75s" srcEnable="audio">
+                  <audio-channel-source srcCh="1"/>
+                </asset-clip>
+                <metadata>
+                  <md key="com.zsir-cut.clip-id" value="clp_ab6"/>
+                  <md key="com.zsir-cut.occurrence-id" value="occ_7"/>
+                </metadata>
+              </clip>
+              <metadata>
+                <md key="com.zsir-cut.clip-id" value="clp_v6"/>
+                <md key="com.zsir-cut.occurrence-id" value="occ_7"/>
+              </metadata>
+            </clip>
+            <clip offset="437437/120s" duration="1001/300s" name="倒放">
+              <timeMap>
+                <timept time="0s" value="1001/300s" interp="linear"/>
+                <timept time="1001/300s" value="0s" interp="linear"/>
+              </timeMap>
+              <asset-clip ref="r11" offset="0s" start="540520981/15000s" duration="1001/300s" srcEnable="video"/>
+              <metadata>
+                <md key="com.zsir-cut.clip-id" value="clp_v7"/>
+                <md key="com.zsir-cut.occurrence-id" value="occ_8"/>
+              </metadata>
+            </clip>
+            <clip offset="729729/200s" duration="1001/200s" name="分段变速 100% 50% 定格 200%">
+              <timeMap>
+                <timept time="0s" value="0s" interp="linear"/>
+                <timept time="1001/600s" value="1001/600s" interp="linear"/>
+                <timept time="1001/300s" value="1001/400s" interp="linear"/>
+                <timept time="1001/240s" value="1001/400s" interp="linear"/>
+                <timept time="1001/200s" value="1001/240s" interp="linear"/>
+              </timeMap>
+              <asset-clip ref="r10" offset="0s" start="1082828747/30000s" duration="1001/240s" srcEnable="all">
+                <audio-channel-source srcCh="1"/>
+              </asset-clip>
+              <caption lane="2" offset="7007/6000s" duration="17017/10000s" start="0s" role="SRT?captionFormat=SRT.zh-Hans">
+                <text>
+                  <text-style ref="ts14">哪些能保留</text-style>
+                </text>
+                <text-style-def id="ts14">
+                  <text-style/>
+                </text-style-def>
+                <note>zsir-cut cue=cue_zh_19 occ=occ_9</note>
+              </caption>
+              <caption lane="2" offset="8008/1875s" duration="1001/3000s" start="0s" role="SRT?captionFormat=SRT.zh-Hans">
+                <text>
+                  <text-style ref="ts15">要重做</text-style>
+                </text>
+                <text-style-def id="ts15">
+                  <text-style/>
+                </text-style-def>
+                <note>zsir-cut cue=cue_zh_19 occ=occ_9</note>
+              </caption>
+              <marker start="0s" duration="1001/200s" value="S7：定格段上的字词「哪些」不投影"/>
+              <metadata>
+                <md key="com.zsir-cut.clip-id" value="clp_v8"/>
+                <md key="com.zsir-cut.occurrence-id" value="occ_9"/>
+                <md key="com.zsir-cut.audio-clip-id" value="clp_a8"/>
+              </metadata>
+            </clip>
+            <clip offset="73073/20s" duration="1001/300s" name="平滑速度坡度">
+              <timeMap>
+                <timept time="0s" value="0s" interp="smooth2"/>
+                <timept time="1001/600s" value="1001/750s" interp="smooth2"/>
+                <timept time="1001/300s" value="1001/200s" interp="linear"/>
+              </timeMap>
+              <asset-clip ref="r11" offset="0s" start="180106927/5000s" duration="1001/200s" srcEnable="video"/>
+              <metadata>
+                <md key="com.zsir-cut.clip-id" value="clp_v9"/>
+                <md key="com.zsir-cut.occurrence-id" value="occ_10"/>
+              </metadata>
+            </clip>
+          </spine>
+        </sequence>
+      </project>
+    </event>
+  </library>
+</fcpxml>

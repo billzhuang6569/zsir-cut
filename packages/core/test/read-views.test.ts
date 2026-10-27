@@ -190,6 +190,22 @@ describe("read views", () => {
     expect(ranged.lines).toBe(1);
   });
 
+  it("uses milliseconds for source cues when media has no start timecode", async () => {
+    const current = await project();
+    const media = current.media.find((item) => item.id === "med_A");
+    const cue = current.transcripts
+      .find((item) => item.id === "trs_A_zh")
+      ?.cues.find((item) => item.id === "cue_zh_01");
+    if (!media || !cue?.timing) throw new Error("Missing fixture media or cue");
+    delete media.start_timecode;
+    cue.timing.start = rational(136n, 25n);
+    await writeFile(path, serializeProject(current));
+    const packed = (await result("read_transcript", { transcript_id: "trs_A_zh" })).result as { text: string };
+    expect(packed.text.split("\n")[0]).toContain("00:00:00.500");
+    expect(packed.text.split("\n")[1]).toContain("00:00:05.440");
+    expect(packed.text).not.toContain("136/25s");
+  });
+
   it("measures a 60-minute, 9000-word, 1200-cue transcript", async () => {
     const large = await project();
     const transcript = large.transcripts[0]!;
