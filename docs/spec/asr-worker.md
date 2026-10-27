@@ -62,6 +62,7 @@ python -m zsir_asr eval        --manifest <评测清单> --out <报告目录>
 
 - 时间是相对于媒体文件开头的源时间，整数毫秒。内核把它换算成规格里的有理数时间，写进母稿第 1 层 `raw_runs` 和第 3 层 `align`。
 - `tokens` 按 `start_ms` 递增，不重叠，不含空文本。
+- 引擎不提供置信度时 `conf` 为 null，例如 MLX 的强制对齐器。内核写入母稿时省略 `conf`，schema 允许。
 - 同一份输入、同一组模型和参数，输出的 `tokens` 必须相同。
 
 失败时退出码非零，并写出：
