@@ -20,3 +20,14 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm validate:examples
+
+  asr-worker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      # MLX 只在 Apple Silicon 上可用；单元测试不加载模型，只需要这三个包
+      - run: pip install pytest==8.4.2 jieba==0.42.1 numpy==2.5.4
+      - run: python -m pytest -q workers/asr/tests
