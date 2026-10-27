@@ -13,7 +13,10 @@ import { baseFrame, HEIGHT, isWhiteFrame, overlayText, WIDTH } from "./picture.t
 const root = resolve("fixtures/.media");
 const temp = join(root, ".tmp");
 const font = "/System/Library/Fonts/Hiragino Sans GB.ttc";
-const script = JSON.parse(readFileSync("fixtures/synth/script.json", "utf8")) as { tokens: Token[] };
+const script = JSON.parse(readFileSync("fixtures/synth/script.json", "utf8")) as {
+  tokens: Token[];
+  sentences: Array<{ text: string; start_ms: number }>;
+};
 type Media = {
   id: number;
   path: string;
@@ -38,6 +41,7 @@ const media: Media[] = [
   },
   { id: 12, path: "2997/B_2997.mov", rate: "30000/1001", frames: 2698, seconds: 90, start: "10:00:01;12", channels: 2 },
   { id: 21, path: "shared/外录音频.wav", seconds: 125, start: "09:59:58:00", channels: 1 },
+  { id: 41, path: "shared/台词朗读.wav", seconds: 120, channels: 1 },
   { id: 22, path: "shared/静帧.png", kind: "still" },
   { id: 23, path: "shared/图形_alpha.mov", kind: "alpha", rate: "25", frames: 125, seconds: 5, start: "00:00:00:00" },
   { id: 24, path: "shared/手机录屏_vfr.mp4", kind: "vfr", rate: "30", frames: 900, seconds: 30, channels: 1 },
@@ -232,6 +236,10 @@ async function encode(
 ): Promise<void> {
   const destination = join(root, item.path);
   await mkdir(dirname(destination), { recursive: true });
+  if (item.id === 41) {
+    await generateSpoken();
+    return;
+  }
   if (item.id === 21) {
     const source = join(temp, "external.wav");
     await writeFile(source, wavPcm24(125, 21, 1, script.tokens, true));
@@ -330,6 +338,42 @@ async function encode(
   console.log(`generated ${item.path}`);
 }
 
+async function generateSpoken(): Promise<void> {
+  await mkdir(temp, { recursive: true });
+  const destination = join(root, "shared/台词朗读.wav");
+  await mkdir(dirname(destination), { recursive: true });
+  const inputs: string[] = [];
+  const filters: string[] = [];
+  for (const sentence of script.sentences) {
+    const clip = join(temp, `spoken-${inputs.length}.aiff`);
+    run("say", ["-v", "Tingting", "-o", clip, sentence.text]);
+    filters.push(`[${inputs.length}:a]adelay=${sentence.start_ms}:all=1[s${inputs.length}]`);
+    inputs.push(clip);
+  }
+  const args = [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    ...inputs.flatMap((input) => ["-i", input]),
+    "-filter_complex",
+    `${filters.join(";")};${inputs.map((_, index) => `[s${index}]`).join("")}amix=inputs=${inputs.length}:duration=longest:normalize=0,atrim=0:120,apad=whole_dur=120[a]`,
+    "-map",
+    "[a]",
+    "-ac",
+    "1",
+    "-ar",
+    "48000",
+    "-c:a",
+    "pcm_s24le",
+    "-t",
+    "120",
+    "-y",
+    destination,
+  ];
+  run("ffmpeg", args);
+  console.log("generated shared/台词朗读.wav");
+}
+
 async function generate(): Promise<void> {
   const labels = await renderLabels();
   try {
@@ -388,6 +432,13 @@ async function main(): Promise<void> {
     case "gen":
       await generate();
       break;
+    case "spoken":
+      try {
+        await generateSpoken();
+      } finally {
+        await rm(temp, { recursive: true, force: true });
+      }
+      break;
     case "bind":
       await bind();
       break;
@@ -398,7 +449,7 @@ async function main(): Promise<void> {
       await relocate(process.argv[3]);
       break;
     default:
-      throw new Error("Usage: node fixtures/synth/cli.ts gen|bind|check|relocate");
+      throw new Error("Usage: node fixtures/synth/cli.ts gen|spoken|bind|check|relocate");
   }
 }
 
@@ -440,7 +491,7 @@ async function check(): Promise<void> {
       if (video) fail("streams", "unexpected video");
       if (probe.format.tags?.time_reference !== "1727904000")
         fail("start timecode", "missing 09:59:58:00 BWF time reference");
-    } else {
+    } else if (item.id !== 41) {
       const pictureStream = video ?? fail("video", "missing stream");
       if (pictureStream.width !== WIDTH || pictureStream.height !== HEIGHT)
         fail("dimensions", `${pictureStream.width}x${pictureStream.height}`);
@@ -577,6 +628,10 @@ async function check(): Promise<void> {
           fail("frame timestamps", `${frameTimes.length} instead of ${item.frames}`);
       }
     }
+    if (item.id === 41) {
+      if (video) fail("streams", "unexpected video");
+      if (probe.format.duration !== "120.000000") fail("duration", `${probe.format.duration} instead of 120.000000`);
+    }
     if (item.channels) {
       if (
         !audio ||
@@ -586,6 +641,10 @@ async function check(): Promise<void> {
         audio.bits_per_raw_sample !== "24"
       ) {
         fail("audio", `expected ${item.channels} channel 48 kHz 24 bit PCM`);
+      }
+      if (item.id === 41) {
+        console.log(`checked ${item.path}`);
+        continue;
       }
       const pcm = run("ffmpeg", [
         "-v",
