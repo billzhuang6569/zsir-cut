@@ -81,6 +81,45 @@ function parseXml(data: string): Node {
 }
 const children = (item: Node, tag: string) => item.children.filter((child) => child.tag === tag);
 const child = (item: Node, tag: string) => children(item, tag)[0];
+function importSafety(root: Node): string | undefined {
+  const resources = child(root, "resources");
+  if (!resources) return "缺少 resources";
+  const assets = new Map(children(resources, "asset").map((asset) => [asset.attrs.id, asset]));
+  if (children(resources, "format").some((format) => !format.attrs.frameDuration && !format.attrs.name))
+    return "存在空 format";
+  for (const asset of assets.values())
+    if (asset.attrs.hasAudio === "1" && asset.attrs.hasVideo !== "1" && asset.attrs.format)
+      return `纯音频素材 ${asset.attrs.id} 带有 format`;
+  const visit = (item: Node): string | undefined => {
+    if (item.tag === "asset-clip" || item.tag === "video") {
+      const asset = assets.get(item.attrs.ref);
+      if (!asset) return `${item.tag} 引用了不存在的素材`;
+      const assetStart = r(asset.attrs.start ?? "0s");
+      const assetDuration = r(asset.attrs.duration ?? "0s");
+      if (compare(assetDuration, zero) === 0) {
+        if (item.tag === "asset-clip") return `asset-clip 引用了零时长素材 ${asset.attrs.id}`;
+      } else {
+        const start = r(item.attrs.start ?? "0s");
+        const duration = r(item.attrs.duration ?? "0s");
+        if (compare(start, assetStart) < 0 || compare(add(start, duration), add(assetStart, assetDuration)) > 0)
+          return `${item.tag} 超出素材 ${asset.attrs.id} 的源区间`;
+        if (item.attrs.audioStart && item.attrs.audioDuration) {
+          const audioStart = r(item.attrs.audioStart);
+          if (
+            compare(audioStart, assetStart) < 0 ||
+            compare(add(audioStart, r(item.attrs.audioDuration)), add(assetStart, assetDuration)) > 0
+          )
+            return `${item.tag} 音频区间超出素材 ${asset.attrs.id}`;
+        }
+      }
+    }
+    for (const entry of item.children) {
+      const issue = visit(entry);
+      if (issue) return issue;
+    }
+  };
+  return visit(root);
+}
 const metadata = (clip: Clip, audio?: Clip) =>
   node("metadata", {}, [
     node("md", { key: "com.zsir-cut.clip-id", value: clip.id }),
@@ -189,6 +228,33 @@ function itemFor(
 ): Node {
   const origin = sourceOrigin(media);
   const points = clip.time_map;
+  if (media.kind === "image") {
+    const wrapper = node("clip", {
+      ...(lane === undefined ? {} : { lane: String(lane) }),
+      offset: sec(offset),
+      duration: sec(clip.duration),
+      ...(clip.label ? { name: clip.label } : {}),
+      ...(clip.enabled === false ? { enabled: "0" } : {}),
+    });
+    wrapper.children.push(
+      node(
+        "video",
+        {
+          ref,
+          offset: "0s",
+          start: "0s",
+          duration: sec(clip.duration),
+          ...(clip.label ? { name: clip.label } : {}),
+          ...(clip.enabled === false ? { enabled: "0" } : {}),
+        },
+        properties(clip, media, timelineHeight).filter(
+          (entry) => entry.tag === "adjust-crop" || entry.tag === "adjust-transform",
+        ),
+      ),
+      metadata(clip),
+    );
+    return wrapper;
+  }
   if (!points)
     return node("asset-clip", clipAttrs(clip, ref, offset, add(origin, clip.source_start), lane, audio), [
       ...properties(clip, media, timelineHeight, audio),
@@ -290,13 +356,17 @@ export const fcpxmlExporter: Exporter & { validationNotes?: string } = {
     );
     const formats = new Map<string, string>();
     for (const media of project.media) {
+      if (media.kind === "audio") continue;
       const id = `r${next++}`;
       formats.set(media.id, id);
       resources.children.push(
         node("format", {
           id,
-          ...(media.video ? { frameDuration: frameDuration(media.video.rate) } : {}),
-          ...(media.video ? { width: String(media.video.width), height: String(media.video.height) } : {}),
+          ...(media.kind === "image"
+            ? { name: "FFVideoFormatRateUndefined" }
+            : { frameDuration: frameDuration(media.video!.rate) }),
+          width: String(media.video?.width ?? timeline.format.width),
+          height: String(media.video?.height ?? timeline.format.height),
         }),
       );
     }
@@ -314,9 +384,8 @@ export const fcpxmlExporter: Exporter & { validationNotes?: string } = {
             name: media.name ?? basename(path),
             start: sec(sourceOrigin(media)),
             duration: media.kind === "image" ? "0s" : sec(media.duration),
-            hasVideo: media.video || media.kind === "image" ? "1" : "0",
-            hasAudio: media.audio ? "1" : "0",
-            format: formats.get(media.id)!,
+            ...(media.kind === "audio" ? {} : { hasVideo: "1", videoSources: "1", format: formats.get(media.id)! }),
+            ...(media.audio ? { hasAudio: "1" } : {}),
             ...(media.audio
               ? { audioSources: "1", audioChannels: String(media.audio.channels), audioRate: "48000" }
               : {}),
@@ -531,7 +600,10 @@ export const fcpxmlExporter: Exporter & { validationNotes?: string } = {
       id: string,
       audioPair = false,
     ) => {
-      const inside = item.tag === "clip" ? child(item, "asset-clip")! : item;
+      const inside =
+        item.tag === "clip"
+          ? item.children.find((entry) => entry.tag === "asset-clip" || entry.tag === "video")!
+          : item;
       const asset = assets.get(inside.attrs.ref!);
       if (!asset) throw new Error("Unknown FCPXML asset reference");
       const sourceOrigin = r(asset.attrs.start ?? "0s");
@@ -572,9 +644,10 @@ export const fcpxmlExporter: Exporter & { validationNotes?: string } = {
       });
     };
     const walk = (item: Node, seqAt: Rational, parentStart: Rational, primary = false) => {
-      if (item.tag === "asset-clip" || item.tag === "clip") {
+      if (item.tag === "asset-clip" || item.tag === "clip" || item.tag === "video") {
         const id = md(item, "com.zsir-cut.clip-id");
         if (!id) throw new Error("Missing clip ID metadata");
+        if (!md(item, "com.zsir-cut.occurrence-id")) throw new Error("Missing occurrence ID metadata");
         const lane = Number(item.attrs.lane ?? 0);
         const kind = primary || lane > 0 ? "video" : "audio";
         readItem(item, seqAt, kind, primary ? 1 : lane > 0 ? lane + 1 : -lane, id);
@@ -582,13 +655,15 @@ export const fcpxmlExporter: Exporter & { validationNotes?: string } = {
         if (pair) readItem(item, seqAt, "audio", 1, pair, true);
       }
       for (const anchored of item.children.filter(
-        (entry) => (entry.tag === "asset-clip" || entry.tag === "clip") && entry.attrs.lane !== undefined,
+        (entry) =>
+          (entry.tag === "asset-clip" || entry.tag === "clip" || entry.tag === "video") &&
+          entry.attrs.lane !== undefined,
       )) {
         walk(anchored, add(seqAt, sub(r(anchored.attrs.offset ?? "0s"), parentStart)), r(anchored.attrs.start ?? "0s"));
       }
     };
     for (const item of spine.children)
-      if (item.tag === "asset-clip" || item.tag === "clip" || item.tag === "gap") {
+      if (item.tag === "asset-clip" || item.tag === "clip" || item.tag === "video" || item.tag === "gap") {
         const at = sub(r(item.attrs.offset ?? "0s"), tcStart);
         walk(item, at, r(item.attrs.start ?? "0s"), item.tag !== "gap");
       }
@@ -746,6 +821,11 @@ export const fcpxmlExporter: Exporter & { validationNotes?: string } = {
     const root = parseXml(source);
     const version = root.attrs.version;
     if (root.tag !== "fcpxml" || !["1.13", "1.11"].includes(version ?? "")) return false;
+    const safetyIssue = importSafety(root);
+    if (safetyIssue) {
+      this.validationNotes = `FCP 导入安全检查失败：${safetyIssue}`;
+      return false;
+    }
     const dtd = join(dtdDir, `FCPXMLv${version?.replace(".", "_")}.dtd`);
     try {
       await stat(dtd);

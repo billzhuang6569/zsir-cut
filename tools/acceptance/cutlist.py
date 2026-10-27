@@ -68,6 +68,11 @@ def fcpxml_rows(path, d):
     # video track index from lane: spine -> V1, lane k>0 -> V(k+1); audio: paired -> A1, lane -k -> A k
     def emit(el, tl_in, dur, parent_kind_lane):
         kind, idx = parent_kind_lane
+        if el.tag == "clip" and el.find("timeMap") is None and el.find("video") is not None:  # still wrapper
+            v = el.find("video"); mid = mid_of(v); u = media_unit(media[mid])
+            s_in = T(v.get("start", "0s"))
+            rows.append((kind, idx, md(el, "com.zsir-cut.clip-id"), mid, rnd(tl_in * R), rnd((tl_in + dur) * R), rnd(s_in * u), rnd((s_in + dur) * u)))
+            return
         if el.tag == "clip":  # retime wrapper
             inner = el.find("asset-clip"); src_el = inner
             tm = el.find("timeMap"); vals = [T(p.get("value")) for p in tm.findall("timept")]

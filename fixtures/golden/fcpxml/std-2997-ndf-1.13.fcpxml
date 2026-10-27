@@ -5,69 +5,68 @@
     <format id="r1" frameDuration="1001/30000s" width="960" height="540"/>
     <format id="r2" frameDuration="1001/30000s" width="960" height="540"/>
     <format id="r3" frameDuration="1001/30000s" width="960" height="540"/>
-    <format id="r4"/>
-    <format id="r5"/>
-    <format id="r6" frameDuration="1/25s" width="960" height="540"/>
-    <format id="r7" frameDuration="1/30s" width="960" height="540"/>
+    <format id="r4" name="FFVideoFormatRateUndefined" width="960" height="540"/>
+    <format id="r5" frameDuration="1/25s" width="960" height="540"/>
+    <format id="r6" frameDuration="1/30s" width="960" height="540"/>
+    <format id="r7" frameDuration="1/25s" width="960" height="540"/>
     <format id="r8" frameDuration="1/25s" width="960" height="540"/>
-    <format id="r9" frameDuration="1/25s" width="960" height="540"/>
-    <asset id="r10" name="A_2997.mov" start="8999991/250s" duration="1200199/10000s" hasVideo="1" hasAudio="1" format="r2" audioSources="1" audioChannels="2" audioRate="48000">
+    <asset id="r9" name="A_2997.mov" start="8999991/250s" duration="1200199/10000s" hasVideo="1" videoSources="1" format="r2" hasAudio="1" audioSources="1" audioChannels="2" audioRate="48000">
       <media-rep kind="original-media" src="file:///__MEDIA_ROOT__/2997/A_2997.mov"/>
       <metadata>
         <md key="com.zsir-cut.media-id" value="med_A"/>
       </metadata>
     </asset>
-    <asset id="r11" name="B_2997.mov" start="180006827/5000s" duration="1350349/15000s" hasVideo="1" hasAudio="1" format="r3" audioSources="1" audioChannels="2" audioRate="48000">
+    <asset id="r10" name="B_2997.mov" start="180006827/5000s" duration="1350349/15000s" hasVideo="1" videoSources="1" format="r3" hasAudio="1" audioSources="1" audioChannels="2" audioRate="48000">
       <media-rep kind="original-media" src="file:///__MEDIA_ROOT__/2997/B_2997.mov"/>
       <metadata>
         <md key="com.zsir-cut.media-id" value="med_B"/>
       </metadata>
     </asset>
-    <asset id="r12" name="外录音频.wav" start="35998s" duration="125s" hasVideo="0" hasAudio="1" format="r4" audioSources="1" audioChannels="1" audioRate="48000">
+    <asset id="r11" name="外录音频.wav" start="35998s" duration="125s" hasAudio="1" audioSources="1" audioChannels="1" audioRate="48000">
       <media-rep kind="original-media" src="file:///__MEDIA_ROOT__/shared/%E5%A4%96%E5%BD%95%E9%9F%B3%E9%A2%91.wav"/>
       <metadata>
         <md key="com.zsir-cut.media-id" value="med_EXT"/>
       </metadata>
     </asset>
-    <asset id="r13" name="静帧.png" start="0s" duration="0s" hasVideo="1" hasAudio="0" format="r5">
+    <asset id="r12" name="静帧.png" start="0s" duration="0s" hasVideo="1" videoSources="1" format="r4">
       <media-rep kind="original-media" src="file:///__MEDIA_ROOT__/shared/%E9%9D%99%E5%B8%A7.png"/>
       <metadata>
         <md key="com.zsir-cut.media-id" value="med_STILL"/>
       </metadata>
     </asset>
-    <asset id="r14" name="图形_alpha.mov" start="0s" duration="5s" hasVideo="1" hasAudio="0" format="r6">
+    <asset id="r13" name="图形_alpha.mov" start="0s" duration="5s" hasVideo="1" videoSources="1" format="r5">
       <media-rep kind="original-media" src="file:///__MEDIA_ROOT__/shared/%E5%9B%BE%E5%BD%A2_alpha.mov"/>
       <metadata>
         <md key="com.zsir-cut.media-id" value="med_ALPHA"/>
       </metadata>
     </asset>
-    <asset id="r15" name="手机录屏_vfr.mp4" start="0s" duration="30s" hasVideo="1" hasAudio="1" format="r7" audioSources="1" audioChannels="1" audioRate="48000">
+    <asset id="r14" name="手机录屏_vfr.mp4" start="0s" duration="30s" hasVideo="1" videoSources="1" format="r6" hasAudio="1" audioSources="1" audioChannels="1" audioRate="48000">
       <media-rep kind="original-media" src="file:///__MEDIA_ROOT__/shared/%E6%89%8B%E6%9C%BA%E5%BD%95%E5%B1%8F_vfr.mp4"/>
       <metadata>
         <md key="com.zsir-cut.media-id" value="med_VFR"/>
       </metadata>
     </asset>
-    <asset id="r16" name="同名素材.mov" start="39600s" duration="10s" hasVideo="1" hasAudio="1" format="r8" audioSources="1" audioChannels="2" audioRate="48000">
+    <asset id="r15" name="同名素材.mov" start="39600s" duration="10s" hasVideo="1" videoSources="1" format="r7" hasAudio="1" audioSources="1" audioChannels="2" audioRate="48000">
       <media-rep kind="original-media" src="file:///__MEDIA_ROOT__/shared/%E7%B4%A0%E6%9D%90%20%E7%9B%98/100%25%20%E5%8E%9F%E7%89%87/%E6%89%B9%E6%AC%A11/%E5%90%8C%E5%90%8D%E7%B4%A0%E6%9D%90.mov"/>
       <metadata>
         <md key="com.zsir-cut.media-id" value="med_DUP1"/>
       </metadata>
     </asset>
-    <asset id="r17" name="同名素材.mov" start="43200s" duration="10s" hasVideo="1" hasAudio="1" format="r9" audioSources="1" audioChannels="2" audioRate="48000">
+    <asset id="r16" name="同名素材.mov" start="43200s" duration="10s" hasVideo="1" videoSources="1" format="r8" hasAudio="1" audioSources="1" audioChannels="2" audioRate="48000">
       <media-rep kind="original-media" src="file:///__MEDIA_ROOT__/shared/%E7%B4%A0%E6%9D%90%20%E7%9B%98/100%25%20%E5%8E%9F%E7%89%87/%E6%89%B9%E6%AC%A12/%E5%90%8C%E5%90%8D%E7%B4%A0%E6%9D%90.mov"/>
       <metadata>
         <md key="com.zsir-cut.media-id" value="med_DUP2"/>
       </metadata>
     </asset>
-    <effect id="r18" name="Cross Dissolve" uid="FxPlug:4731E73A-8DAC-4113-9A30-AE85B1761265"/>
+    <effect id="r17" name="Cross Dissolve" uid="FxPlug:4731E73A-8DAC-4113-9A30-AE85B1761265"/>
   </resources>
   <library>
     <event name="zsir-cut">
       <project name="标准测试工程 std-2997-ndf · std-2997-ndf">
         <sequence format="r1" duration="4004/75s" tcStart="18018/5s" tcFormat="NDF" audioLayout="stereo" audioRate="48k">
           <spine>
-            <asset-clip ref="r10" offset="18018/5s" start="540126587/15000s" duration="1001/120s" srcEnable="all" name="A 第一次使用" audioStart="540126587/15000s" audioDuration="1001/125s">
-              <asset-clip ref="r11" lane="1" offset="180058879/5000s" start="180056877/5000s" duration="1001/400s" srcEnable="video" name="插入镜头 带变换">
+            <asset-clip ref="r9" offset="18018/5s" start="540126587/15000s" duration="1001/120s" srcEnable="all" name="A 第一次使用" audioStart="540126587/15000s" audioDuration="1001/125s">
+              <asset-clip ref="r10" lane="1" offset="180058879/5000s" start="180056877/5000s" duration="1001/400s" srcEnable="video" name="插入镜头 带变换">
                 <adjust-crop mode="trim">
                   <trim-rect left="0.010416666666666666" top="0.009259259259259259" right="0.010416666666666666" bottom="0.009259259259259259"/>
                 </adjust-crop>
@@ -77,7 +76,7 @@
                   <md key="com.zsir-cut.occurrence-id" value="occ_4"/>
                 </metadata>
               </asset-clip>
-              <asset-clip ref="r12" lane="-3" offset="540126587/15000s" start="540127127/15000s" duration="1001/125s" srcEnable="audio" name="双系统外录，与 occ_1 同步">
+              <asset-clip ref="r11" lane="-3" offset="540126587/15000s" start="540127127/15000s" duration="1001/125s" srcEnable="audio" name="双系统外录，与 occ_1 同步">
                 <adjust-volume amount="-6dB"/>
                 <audio-channel-source srcCh="1"/>
                 <metadata>
@@ -139,14 +138,15 @@ Agent共用的时间线</text-style>
                 <md key="com.zsir-cut.audio-clip-id" value="clp_a1"/>
               </metadata>
             </asset-clip>
-            <asset-clip ref="r10" offset="433433/120s" start="13512499/375s" duration="1001/100s" srcEnable="all" name="A 第二次使用" audioStart="36032997/1000s" audioDuration="31031/3000s">
+            <asset-clip ref="r9" offset="433433/120s" start="13512499/375s" duration="1001/100s" srcEnable="all" name="A 第二次使用" audioStart="36032997/1000s" audioDuration="31031/3000s">
               <adjust-volume amount="-3dB"/>
-              <asset-clip ref="r13" lane="1" offset="108115007/3000s" start="0s" duration="1001/400s" srcEnable="video" name="静帧">
+              <clip lane="1" offset="108115007/3000s" duration="1001/400s" name="静帧">
+                <video ref="r12" offset="0s" start="0s" duration="1001/400s" name="静帧"/>
                 <metadata>
                   <md key="com.zsir-cut.clip-id" value="clp_still"/>
                   <md key="com.zsir-cut.occurrence-id" value="occ_11"/>
                 </metadata>
-              </asset-clip>
+              </clip>
               <caption lane="3" offset="67566499/1875s" duration="7007/2000s" start="0s" role="SRT?captionFormat=SRT.en">
                 <text>
                   <text-style ref="ts2">Sixty percent of it is finding repeated lines</text-style>
@@ -192,10 +192,10 @@ Agent共用的时间线</text-style>
               </metadata>
             </asset-clip>
             <transition name="Cross Dissolve" offset="6790784/1875s" duration="1001/2500s">
-              <filter-video ref="r18" name="Cross Dissolve"/>
+              <filter-video ref="r17" name="Cross Dissolve"/>
             </transition>
-            <asset-clip ref="r10" offset="2173171/600s" start="27050023/750s" duration="1001/120s" srcEnable="all" name="A 第三次使用" audioStart="27050023/750s" audioDuration="53053/6000s">
-              <asset-clip ref="r14" lane="1" offset="108205097/3000s" start="0s" duration="1001/300s" srcEnable="video" name="透明图形">
+            <asset-clip ref="r9" offset="2173171/600s" start="27050023/750s" duration="1001/120s" srcEnable="all" name="A 第三次使用" audioStart="27050023/750s" audioDuration="53053/6000s">
+              <asset-clip ref="r13" lane="1" offset="108205097/3000s" start="0s" duration="1001/300s" srcEnable="video" name="透明图形">
                 <metadata>
                   <md key="com.zsir-cut.clip-id" value="clp_alpha"/>
                   <md key="com.zsir-cut.occurrence-id" value="occ_12"/>
@@ -246,14 +246,14 @@ Agent共用的时间线</text-style>
               </metadata>
             </asset-clip>
             <gap offset="272272/75s" start="272272/75s" duration="1001/600s"/>
-            <asset-clip ref="r16" offset="2179177/600s" start="39600s" duration="1001/300s" srcEnable="video" name="批次1 同名素材">
-              <asset-clip ref="r15" lane="1" offset="23761001/600s" start="0s" duration="1001/300s" srcEnable="video" name="可变帧率">
+            <asset-clip ref="r15" offset="2179177/600s" start="39600s" duration="1001/300s" srcEnable="video" name="批次1 同名素材">
+              <asset-clip ref="r14" lane="1" offset="23761001/600s" start="0s" duration="1001/300s" srcEnable="video" name="可变帧率">
                 <metadata>
                   <md key="com.zsir-cut.clip-id" value="clp_vfr"/>
                   <md key="com.zsir-cut.occurrence-id" value="occ_13"/>
                 </metadata>
               </asset-clip>
-              <asset-clip ref="r16" lane="-4" offset="39600s" start="39600s" duration="1001/300s" srcEnable="audio">
+              <asset-clip ref="r15" lane="-4" offset="39600s" start="39600s" duration="1001/300s" srcEnable="audio">
                 <audio-channel-source srcCh="1, 2"/>
                 <metadata>
                   <md key="com.zsir-cut.clip-id" value="clp_d1"/>
@@ -265,8 +265,8 @@ Agent共用的时间线</text-style>
                 <md key="com.zsir-cut.occurrence-id" value="occ_5"/>
               </metadata>
             </asset-clip>
-            <asset-clip ref="r17" offset="2181179/600s" start="43200s" duration="1001/300s" srcEnable="video" name="批次2 同名素材">
-              <asset-clip ref="r17" lane="-4" offset="43200s" start="43200s" duration="1001/300s" srcEnable="audio">
+            <asset-clip ref="r16" offset="2181179/600s" start="43200s" duration="1001/300s" srcEnable="video" name="批次2 同名素材">
+              <asset-clip ref="r16" lane="-4" offset="43200s" start="43200s" duration="1001/300s" srcEnable="audio">
                 <audio-channel-source srcCh="1, 2"/>
                 <metadata>
                   <md key="com.zsir-cut.clip-id" value="clp_d2"/>
@@ -283,13 +283,13 @@ Agent共用的时间线</text-style>
                 <timept time="0s" value="0s" interp="linear"/>
                 <timept time="1001/150s" value="1001/75s" interp="linear"/>
               </timeMap>
-              <asset-clip ref="r11" offset="0s" start="180257077/5000s" duration="1001/75s" srcEnable="video"/>
+              <asset-clip ref="r10" offset="0s" start="180257077/5000s" duration="1001/75s" srcEnable="video"/>
               <clip lane="-2" offset="0s" duration="1001/150s">
                 <timeMap>
                   <timept time="0s" value="0s" interp="linear"/>
                   <timept time="1001/150s" value="1001/75s" interp="linear"/>
                 </timeMap>
-                <asset-clip ref="r11" offset="0s" start="180257077/5000s" duration="1001/75s" srcEnable="audio">
+                <asset-clip ref="r10" offset="0s" start="180257077/5000s" duration="1001/75s" srcEnable="audio">
                   <audio-channel-source srcCh="1"/>
                 </asset-clip>
                 <metadata>
@@ -307,7 +307,7 @@ Agent共用的时间线</text-style>
                 <timept time="0s" value="1001/300s" interp="linear"/>
                 <timept time="1001/300s" value="0s" interp="linear"/>
               </timeMap>
-              <asset-clip ref="r11" offset="0s" start="540520981/15000s" duration="1001/300s" srcEnable="video"/>
+              <asset-clip ref="r10" offset="0s" start="540520981/15000s" duration="1001/300s" srcEnable="video"/>
               <metadata>
                 <md key="com.zsir-cut.clip-id" value="clp_v7"/>
                 <md key="com.zsir-cut.occurrence-id" value="occ_8"/>
@@ -321,7 +321,7 @@ Agent共用的时间线</text-style>
                 <timept time="1001/240s" value="1001/400s" interp="linear"/>
                 <timept time="1001/200s" value="1001/240s" interp="linear"/>
               </timeMap>
-              <asset-clip ref="r10" offset="0s" start="1082828747/30000s" duration="1001/240s" srcEnable="all">
+              <asset-clip ref="r9" offset="0s" start="1082828747/30000s" duration="1001/240s" srcEnable="all">
                 <audio-channel-source srcCh="1"/>
               </asset-clip>
               <caption lane="2" offset="7007/6000s" duration="17017/10000s" start="0s" role="SRT?captionFormat=SRT.zh-Hans">
@@ -355,7 +355,7 @@ Agent共用的时间线</text-style>
                 <timept time="1001/600s" value="1001/750s" interp="smooth2"/>
                 <timept time="1001/300s" value="1001/200s" interp="linear"/>
               </timeMap>
-              <asset-clip ref="r11" offset="0s" start="180106927/5000s" duration="1001/200s" srcEnable="video"/>
+              <asset-clip ref="r10" offset="0s" start="180106927/5000s" duration="1001/200s" srcEnable="video"/>
               <metadata>
                 <md key="com.zsir-cut.clip-id" value="clp_v9"/>
                 <md key="com.zsir-cut.occurrence-id" value="occ_10"/>

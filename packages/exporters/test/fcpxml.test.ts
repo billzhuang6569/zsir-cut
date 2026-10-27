@@ -63,6 +63,48 @@ describe("FCPXML", () => {
       expect(xml.replaceAll(mediaRoot, "file:///__MEDIA_ROOT__")).toBe(expected);
     });
   }
+  it("rejects FCP import hazards in a standard project", async () => {
+    const { xml } = await generate("fixtures/projects/std-25.zcut.json", profiles[0]);
+    const bad = [
+      xml.replace('<video ref="r12"', '<asset-clip ref="r12"'),
+      xml.replace('<format id="r4" name="FFVideoFormatRateUndefined" width="960" height="540"/>', '<format id="r4"/>'),
+      xml.replace(
+        'id="r11" name="外录音频.wav" start="35998s" duration="125s" hasAudio="1"',
+        'id="r11" name="外录音频.wav" start="35998s" duration="125s" hasAudio="1" format="r4"',
+      ),
+      xml.replace('start="900278/25s" duration="10s"', 'start="900278/25s" duration="1000s"'),
+      xml.replace('start="901537/25s" duration="16s"', 'start="901537/25s" duration="1000s"'),
+    ];
+    for (const candidate of bad) {
+      expect(candidate).not.toBe(xml);
+      expect(await exporter.validate(candidate)).toBe(false);
+      expect(exporter.validationNotes).toContain("导入安全检查失败");
+    }
+  });
+  it("reads static frame IDs from its clip metadata", async () => {
+    const { timeline, xml } = await generate("fixtures/projects/std-25.zcut.json", profiles[0]);
+    expect(xml).toMatch(
+      /<clip lane="1"[^>]*name="静帧">\s*<video ref="r12"[^>]*\/>\s*<metadata>\s*<md key="com.zsir-cut.clip-id" value="clp_still"\/>\s*<md key="com.zsir-cut.occurrence-id" value="occ_11"\/>/,
+    );
+    expect((await exporter.readBack(xml, timeline)).some((row) => row.clip_id === "clp_still")).toBe(true);
+    await expect(exporter.readBack(xml.replace('value="occ_11"', 'value=""'), timeline)).rejects.toThrow(
+      "Missing occurrence ID metadata",
+    );
+  });
+  it("uses video for a static frame on the primary storyline", async () => {
+    const { project, timeline } = await generate("fixtures/projects/std-25.zcut.json", profiles[0]);
+    const primary = timeline.tracks.find((track) => track.id === "trk_v1");
+    if (!primary || primary.kind !== "video") throw new Error("Missing primary track");
+    const first = primary.clips[0];
+    if (!first) throw new Error("Missing primary clip");
+    first.media_id = "med_STILL";
+    first.source_start = { numerator: 0n, denominator: 1n };
+    const paths = new Map(project.media.map((media) => [media.id, resolve("fixtures/projects", media.path)]));
+    const xml = (await exporter.generate(project, timeline, profiles[0], paths)).data;
+    expect(xml).toMatch(/<spine>\s*<clip offset="3600s"[^>]*>\s*<video ref="r12"/);
+    expect(await exporter.validate(xml)).toBe(true);
+    expect(await exporter.readBack(xml, timeline)).toEqual(cuttingList(project, timeline, profiles[0]));
+  });
   it("writes J cut, connected lane, hold, dissolve, captions, and encoded media URL", async () => {
     const { xml } = await generate("fixtures/projects/std-25.zcut.json", profiles[0]);
     expect(xml).toMatch(
