@@ -21,7 +21,7 @@
 
 ```text
 Timeline.1
-├─ global_start_time   时间线起始时码，换成帧数
+├─ global_start_time   时间线起始时码，换成帧数（丢帧见 2.2）
 ├─ metadata.zsir       工程 ID、修订、导出 ID
 └─ tracks: Stack.1
    └─ children: 先视频轨（第一条在最下），再音频轨
@@ -34,28 +34,54 @@ Timeline.1
 | zsir-cut | OTIO |
 |---|---|
 | 片段 | `Clip.2`，`name` 取 `label`，没有就取素材名 |
-| 源区间 | `source_range`：`start_time` 是源起始时码换成的帧数加 `source_start` 的帧数，按素材帧率；`duration` 是片段时长 |
-| 素材 | `media_references.DEFAULT_MEDIA` 是 `ExternalReference.1`，`target_url` 是百分号编码的 `file://` 地址，`available_range` 是素材全长；`active_media_reference_key` 为 `DEFAULT_MEDIA` |
+| 源区间 | `source_range`：`start_time` 是源起始时码换成的帧数加 `source_start` 的帧数，按素材帧率；`duration` 是片段时长。倒放段的 `start_time` 取这一段源区间里**最小**的源时间（也就是倒放结束处），与 Resolve 21 原生导出一致；写成起点那一侧的源时间，Resolve 会取错帧 |
+| 素材 | `media_references.DEFAULT_MEDIA` 是 `ExternalReference.1`，`target_url` 是**不编码的本地绝对路径**，不加 `file://`，空格、中文、`%` 原样保留，与 Resolve 21 原生导出一致。百分号编码的 `file://` 地址会让 Resolve 21.1 找不到全部素材。`available_range` 是素材全长；`active_media_reference_key` 为 `DEFAULT_MEDIA` |
 | 恒定变速 | `effects` 里一个 `LinearTimeWarp.1`，`time_scalar` 是速度 |
 | 定格 | `FreezeFrame.1` |
 | 倒放 | `LinearTimeWarp.1`，`time_scalar` 为负数 |
 | ID | `metadata.zsir`：`clip_id`、`occurrence_id`，拆段时加 `segment` |
-| 增益、声道选择、画面变换 | OTIO 没有字段，原值写进 `metadata.zsir`，损失报告记 `unsupported`，原因 `R_FORMAT_NO_FIELD` |
+| 画面变换 | 写 Resolve 的私有效果，见 2.5。原值同时保留在 `metadata.zsir` |
+| 增益、声道选择 | OTIO 没有字段，原值写进 `metadata.zsir`，损失报告记 `unsupported`，原因 `R_FORMAT_NO_FIELD` |
+
+**时间线起始时码**：`global_start_time.rate` 是时间线帧率。不丢帧时，`value` 是起始时码换成的帧数。丢帧时，`value` 按起始时码的**字面数字**用整数帧率（29.97 记 30）换算，例如 `01:00:00;00` 写 `108000`，不写真实帧数 `107892`。原因：Resolve 21.1 导入 OTIO 时按不丢帧解释这个数，写 107892 会得到 `00:59:56;12`（实测）；它自己导出时却写 107892，导入导出不对称。素材的 `source_range` 和 `available_range` 不受影响，仍用真实帧数（实测素材在线、取帧正确）。
 
 ### 2.3 转场与标记
 
 - 叠化写成两个片段之间的 `Transition.1`，`transition_type` 为 `SMPTE_Dissolve`。`in_offset` 是剪点之前占用的时长，`out_offset` 是剪点之后占用的时长：`center` 各占一半，`start` 全在剪点之后，`end` 全在剪点之前。
 - 时间线标记写在 `Stack.1` 的 `markers` 里，`Marker.2`：`marked_range` 是位置和时长，`name` 是文字，`metadata.zsir.kind` 是标记类型。
 
-### 2.4 待实测（Resolve 21.1）
+### 2.4 Resolve 21.1 实测（2026-10-27）
 
-| 项 | 要核实的 |
+| 项 | 结果 |
 |---|---|
-| 起始时码 | `global_start_time` 是否被识别为时间线起始时码 |
-| 混合帧率 | 25 帧素材在 29.97 时间线里是否按源帧率读取 `source_range` |
-| 倒放 | 负的 `time_scalar` 是否生效 |
-| 标记 | 栈上的标记是否导入为时间线标记 |
-| 媒体重链接 | 中文、空格、百分号路径能否直接找到素材 |
+| 起始时码 | 25 帧正确。丢帧按 2.2 写字面帧数后正确，写真实帧数会错成 00:59:56;12 |
+| 媒体重链接 | 百分号编码的 `file://` 地址全部离线；改成不编码绝对路径后全部在线 |
+| 普通片段、定格 | 帧号正确 |
+| 倒放 | 起点写成起点一侧的源时间时取错帧，已按 2.2 改为最小源时间，待复测 |
+| 画面变换 | 只写在 `metadata.zsir` 时 Resolve 不读，已按 2.5 改写，待复测 |
+| 轨道结构 | 轨道名和分层保留；分段变速拆成多段，片段数比原工程多，属预期 |
+| 混合帧率、标记、字幕 | 待复测 |
+
+### 2.5 Resolve 私有效果（画面变换）
+
+每个有 `transform` 的片段，在 `effects` 里追加 `Effect.1`，`effect_name` 为 `Resolve Effect`，参数放在 `metadata.Resolve_OTIO`，格式照 Resolve 21 原生导出：
+
+```json
+{"Effect Name": "Transform", "Name": "变换", "Enabled": true, "Display Type": 1, "Type": 2,
+ "Parameters": [{"Parameter ID": "transformationZoomX", "Parameter Value": 0.5, "Default Parameter Value": 1.0,
+                 "Variant Type": "Double", "Key Frames": {}, "minValue": 0.0, "maxValue": 100.0}, ...]}
+```
+
+| zsir-cut | Transform 参数 | 默认值 |
+|---|---|---|
+| `scale` | `transformationZoomX`、`transformationZoomY` | 1.0 |
+| `position[0]`（画面宽度的比例） | `transformationPan`，数值相同 | 0.0 |
+| `position[1]`（画面高度的比例） | `transformationTilt`，数值相同 | 0.0 |
+| `rotation_deg` | `transformationRotationAngle` | 0.0 |
+
+裁切写第二个 `Effect.1`，`Effect Name` 为 `Cropping`、`Name` 为 `裁切`、`Type` 照原生导出：`cropLeft`、`cropRight` 取 `crop.left`、`crop.right`（源画面宽度的比例），`cropTop`、`cropBottom` 取 `crop.top`、`crop.bottom`（源画面高度的比例），默认值 0.0。
+
+单位推导：Resolve 把我们的 FCPXML 导入后再导出 OTIO，Pan、Tilt、Crop 的值正好等于「像素偏移除以画面宽或高」，与本工程 `transform` 的比例单位相同。只有一个样本，待复测确认。
 
 ## 3. FCP7 XML（`premiere-25-xmeml-5`）
 
@@ -77,14 +103,15 @@ xmeml version="5"
 
 | 元素 | 取值 |
 |---|---|
+| `rate` | 序列帧率。`clipitem` 的计时一律用序列帧率，素材自身帧率只写在 `file/rate` |
 | `start`、`end` | 序列入点、出点，帧 |
-| `in`、`out` | 源入点、出点，按素材自身帧率的帧，从素材第一帧算起 |
+| `in`、`out` | 源入点、出点，按 `clipitem` 的 `rate`（即序列帧率）计的帧，从素材第一帧算起。纯音频素材同样用帧，不用采样数。源时间不在这个帧网格上时，四舍五入到最近一帧（正中间取较大），并记一条损失：`clip_cut`、`approximated`、`warning`、`R_GRID_ROUNDED` |
 | `file` | 第一次出现时写完整的 `file`：`pathurl`（`file://localhost/` 加百分号编码路径）、`rate`、`duration`、`timecode`、`media`；以后只写 `<file id="..."/>` 引用 |
 | `link` | 同一个 `occurrence_id` 的视频和音频片段互相写 `link`，保持 J/L cut 时的同步关系 |
 | `logginginfo/lognote` | `zsir-cut clip=… occ=…` |
-| 增益 | `filter` 里的 Audio Levels |
-| 画面变换 | `filter` 里的 Basic Motion（缩放、旋转、中心）和 Crop |
-| 恒定变速、倒放、定格 | `filter` 里的 Time Remap，分段时先按第 1 节拆片段 |
+| 增益 | `filter` 里的 Audio Levels（`effectid` 为 `audiolevels`，参数 `level`） |
+| 画面变换 | `filter` 里的 Basic Motion（`effectid` 为 `basic`：`scale`、`rotation`、`center`）和 Crop（`effectid` 为 `crop`：`left`、`right`、`top`、`bottom`）。参数单位待实测，先按 FCP7 惯例：`scale` 为百分比，`rotation` 为度，`center` 的 `horiz`、`vert` 以画面中心为原点、半个画面宽高为 1，`crop` 为百分比 |
+| 恒定变速、倒放、定格 | `filter` 里的 Time Remap（`effectid` 为 `timeremap`：`speed` 百分比、`reverse`、`freeze`），分段时先按第 1 节拆片段 |
 | 声道选择 | 音频片段的 `sourcetrack` 指明取哪个声道 |
 
 空白不需要 gap 元素，`start` 不连续即可。
@@ -98,6 +125,7 @@ xmeml version="5"
 
 | 项 | 要核实的 |
 |---|---|
+| `clipitem` 计时 | `rate` 取序列帧率、`in`/`out` 按序列帧计，混合帧率素材（25 帧素材放进 29.97 序列、30 帧录屏放进 25 帧序列）取帧是否正确 |
 | Audio Levels | 参数是线性倍数还是分贝 |
 | Basic Motion | 中心坐标的单位和原点 |
 | Crop | 参数是百分比还是像素 |
