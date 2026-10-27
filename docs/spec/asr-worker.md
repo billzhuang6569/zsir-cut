@@ -86,7 +86,7 @@ python -m zsir_asr eval        --manifest <评测清单> --out <报告目录>
 
 ## 6. 内核侧的 `transcribe` 动词
 
-1. 调用 worker，拿到结果。
+1. 调用 worker，拿到结果。一期一次只识别一个声道，`source_channels` 有多个时返回 `E_UNSUPPORTED`；`range` 必须能用整数毫秒表示，否则返回 `E_VALIDATION`。worker 返回的引擎版本为 null 时，写入母稿记为 `unknown`。
 2. 结果写进母稿：第 1 层追加一条 `asr` 运行和一条 `align` 运行；第 3 层更新对齐时间；第 2 层只新增或替换 `state` 为 `auto` 的字词，不动 `edited` 和 `approved` 的；第 4 层按 `subtitle-rules.md` 对受影响的范围重新断句，跳过锁定的字幕条。
 3. 整个过程是一个修订，可以撤销。
 4. worker 运行时间长，`transcribe` 按长任务返回 `accepted` 和任务 ID。
