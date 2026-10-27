@@ -14,3 +14,5 @@
 | `edit_fuzz.py` | 对 `edit` 做随机组合压力测试：每步独立校验，联动操作不得造成失步，最后逐步撤销须回到原样 | `python3 -I tools/acceptance/edit_fuzz.py <工程> [步数] [种子]` |
 | `segment.py` | 按 subtitle-rules.md 独立实现的断句与换行 | 供 `segment_diff.py` 调用 |
 | `segment_diff.py` | 随机字词流分别交给 core 的 `resegment` 和 `segment.py`，逐条比较字幕条与换行 | `python3 -I tools/acceptance/segment_diff.py [条数] [种子] [zh\|en]` |
+| `cutlist.py` | 按 handoff-profile 6.0 独立计算工程剪辑表；按 export-fcpxml 独立解析 FCPXML；逐行零帧比较 | `python3 -I tools/acceptance/cutlist.py compare <fcpxml> <工程>` |
+| `fcpxml_dtd.sh` | 用本机 FCP 应用包里的 DTD 校验 FCPXML（DTD 不进仓库；先复制到无空格路径再校验） | `sh tools/acceptance/fcpxml_dtd.sh <fcpxml>` |
