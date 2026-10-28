@@ -4,7 +4,7 @@
 
 ## 公共字段
 
-读请求只需要工程路径（命令行第二个参数）。写请求另加：
+读请求只需要工程路径（命令行第二个参数）。在编辑会话里读草稿时加 `"session_id": "ses_…"`。写请求另加：
 
 ```json
 {
@@ -44,7 +44,11 @@
 { "transcript_id": "trs_…", "with_times": true }      // read_transcript：按母稿读
 { "timeline_id": "tl_…" }                             // read_transcript：按时间线读
 { "media": true }                                     // validate：连素材一起查
+{ "timeline_id": "tl_…", "output": "/工程目录/zcut-agent/view" }  // view_timeline：剪点胶片条，加 --wait
+{ "job_id": "job_…" }                                 // job_status：查长任务
 ```
+
+在会话里自查时，以上每个读请求都加 `session_id`。
 
 ## 编辑会话
 
@@ -90,6 +94,12 @@
 ```
 
 正式导出去掉 `dry_run`，必要时加 `"accept_losses": true`，命令行加 `--wait`。
+
+```json
+// record_handoff_check：不写工程，不带公共字段，命令行也不需要工程路径
+{ "package": "/工程目录/交接/<交接包目录>", "check": "host_import", "status": "pass",
+  "by": "Bill", "host_version": "Final Cut Pro 11.1", "notes": "用户原话" }
+```
 
 ## 常见报错
 

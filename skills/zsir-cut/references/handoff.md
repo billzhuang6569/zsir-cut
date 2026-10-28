@@ -42,4 +42,4 @@
 
 ## 5. 记录实机结果
 
-剪辑师或用户在 NLE 里导入后告诉你结果时，用 `record_handoff_check` 写进交接包的 `manifest.json`：`check` 为 `host_import`，`status` 为 `pass`、`warn` 或 `fail`，`host_version` 写软件版本，`by` 写是谁看的，`items` 逐项写。没有实际导入过的不要写 `pass`，写 `not_run`。
+剪辑师或用户在 NLE 里导入后告诉你结果时，用 `record_handoff_check` 写进交接包的 `manifest.json`：`check` 为 `host_import`，`status` 为 `pass`、`warn` 或 `fail`，`host_version` 写软件版本，`by` 写是谁看的，`items` 逐项写。没有实际导入过的不要写 `pass`，写 `not_run`。用户只说了总体结论、没逐项说时，不要写 `items`，在 `notes` 里引用用户原话。这个动词不带 `base_revision`、`idempotency_key` 和 `author`，带了会被拒绝。
