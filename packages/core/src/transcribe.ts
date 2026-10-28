@@ -18,7 +18,7 @@ type WorkerResult = {
   asr: { name: string; model: string; version: string | null; weights_digest?: string | null };
   align: { name: string; model: string; version: string | null; weights_digest?: string | null };
   tokens: WorkerToken[];
-  warnings: (string | { code: string; count: number })[];
+  warnings: (string | { code: string; count: number } | { code: "W_ASR_ALIGN_DEGRADED"; ratio: number })[];
 };
 export type TranscribeRequest = {
   project: string;

@@ -58,7 +58,7 @@ def test_result_and_error_json_with_fake_engine(monkeypatch, tmp_path):
     source = tmp_path / "clip.wav"
     source.write_bytes(b"test media")
     monkeypatch.setattr(worker, "media_info", lambda _: (1, 2000))
-    monkeypatch.setattr(worker, "decode", lambda *_: object())
+    monkeypatch.setattr(worker, "decode", lambda *_: worker.np.zeros(2000 * worker.SAMPLES_PER_MS))
     monkeypatch.setattr(worker, "weight_digest", lambda _: "sha256:weights")
     monkeypatch.setenv("ZSIR_CACHE_DIR", str(tmp_path / "cache"))
     class Span:
@@ -117,7 +117,7 @@ def test_zero_width_warning_and_silence_with_fake_engine(monkeypatch, tmp_path):
     source = tmp_path / "clip.wav"
     source.write_bytes(b"fake audio")
     monkeypatch.setattr(worker, "media_info", lambda _: (1, 1000))
-    monkeypatch.setattr(worker, "decode", lambda *_: object())
+    monkeypatch.setattr(worker, "decode", lambda *_: worker.np.zeros(1000 * worker.SAMPLES_PER_MS))
     monkeypatch.setattr(worker, "weight_digest", lambda _: "sha256:fake")
     monkeypatch.setenv("ZSIR_CACHE_DIR", str(tmp_path / "cache"))
     class Fake:
@@ -128,13 +128,15 @@ def test_zero_width_warning_and_silence_with_fake_engine(monkeypatch, tmp_path):
     args = worker.parser().parse_args(["transcribe", "--input", str(source), "--channels", "0", "--language", "en", "--out", str(tmp_path / "out.json")])
     output = worker.result(args, local=Fake())
     assert output["tokens"][0]["end_ms"] == 140
-    assert output["warnings"] == [{"code": "W_ASR_ZERO_WIDTH", "count": 1}]
+    expected = [{"code": "W_ASR_ALIGN_DEGRADED", "ratio": 1}, {"code": "W_ASR_ZERO_WIDTH", "count": 1}]
+    assert output["warnings"] == expected
+    assert worker.result(args, local=Fake())["warnings"] == expected
     cache = next((tmp_path / "cache").glob("*.json"))
     old = json.loads(cache.read_text())
     old["tokens"][0]["end_ms"] = 100
     old["warnings"] = []
     cache.write_text(json.dumps(old))
-    assert worker.result(args, local=Fake())["warnings"] == [{"code": "W_ASR_ZERO_WIDTH", "count": 1}]
+    assert worker.result(args, local=Fake())["warnings"] == expected
     class Silent:
         def transcribe(self, *_):
             return " ", "en"
@@ -142,3 +144,50 @@ def test_zero_width_warning_and_silence_with_fake_engine(monkeypatch, tmp_path):
             raise AssertionError("silence must not call align")
     monkeypatch.setenv("ZSIR_CACHE_DIR", str(tmp_path / "silence-cache"))
     assert worker.result(args, local=Silent())["tokens"] == []
+
+
+@pytest.mark.parametrize(("command", "language"), [
+    ("transcribe", "zh"), ("transcribe", "en"), ("transcribe", "auto"), ("align", "zh"), ("align", "en"),
+])
+def test_zero_width_warnings_count_output_words_after_grouping(monkeypatch, tmp_path, command, language):
+    from decimal import Decimal
+    from types import SimpleNamespace
+
+    source = tmp_path / "clip.wav"
+    source.write_bytes(b"fake audio")
+    text = "你好。" * 19 + "Bill AI 我们"
+    items = []
+
+    def item(text, start_ms, end_ms):
+        return SimpleNamespace(text=text, start_time=Decimal(start_ms) / 1000, end_time=Decimal(end_ms) / 1000)
+
+    for index in range(19):
+        start = index * 40
+        items.extend([item("你", start, start + 20), item("好", start + 20, start + 20), item("。", start + 20, start + 20)])
+    items.extend([item("Bill", 760, 780), item("AI", 800, 820), item("我", 850, 850), item("们", 850, 850)])
+    assert sum(span.start_time == span.end_time for span in items) * 2 > len(items)
+
+    class Fake:
+        def transcribe(self, *_):
+            return text, "en" if language == "auto" else language
+
+        def align(self, *_):
+            return items
+
+    monkeypatch.setattr(worker, "media_info", lambda _: (1, 1000))
+    monkeypatch.setattr(worker, "decode", lambda *_: worker.np.zeros(1000 * worker.SAMPLES_PER_MS))
+    monkeypatch.setattr(worker, "weight_digest", lambda _: "sha256:fake")
+    monkeypatch.setenv("ZSIR_CACHE_DIR", str(tmp_path / "cache"))
+    argv = [command, "--input", str(source), "--channels", "0", "--language", language, "--out", str(tmp_path / "out.json")]
+    if command == "align":
+        transcript = tmp_path / "text.txt"
+        transcript.write_text(text)
+        argv.extend(["--text", str(transcript)])
+    args = worker.parser().parse_args(argv)
+    output = worker.result(args, local=Fake())
+    assert output["warnings"] == [{"code": "W_ASR_ZERO_WIDTH", "count": 1}]
+    assert [token["text"] for token in output["tokens"]] == ["你好。"] * 19 + ["Bill", "AI", "我们"]
+    assert [(token["start_ms"], token["end_ms"]) for token in output["tokens"]] == [
+        (i * 40, i * 40 + 20) for i in range(19)
+    ] + [(760, 780), (800, 820), (850, 890)]
+    assert worker.result(args, local=object())["warnings"] == output["warnings"]
