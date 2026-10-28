@@ -11,6 +11,7 @@ import {
   cuttingList,
   fingerprint,
   parseProject,
+  rational,
   runExport,
   serializeProject,
   sub,
@@ -37,6 +38,21 @@ const parameterValue = (xml: string, id: string) => {
   if (raw === undefined) throw new Error(`Missing parameter ${id}`);
   return raw;
 };
+const frame = (xml: string, tag: string) => {
+  const raw = xml.match(new RegExp(`<${tag}>(\\d+)</${tag}>`))?.[1];
+  if (raw === undefined) throw new Error(`Missing frame ${tag}`);
+  return Number(raw);
+};
+const graphKeys = (xml: string) =>
+  [...xml.matchAll(/<keyframe>([\s\S]*?)<\/keyframe>/g)].map((match) => ({
+    when: frame(match[1] ?? "", "when"),
+    value: frame(match[1] ?? "", "value"),
+  }));
+const changeParameter = (xml: string, id: string, value: string) =>
+  xml.replace(
+    new RegExp(`(<parameterid>${id}</parameterid>\\s*<name>[^<]*</name>\\s*<value>)[^<]+`),
+    (_match, prefix: string) => `${prefix}${value}`,
+  );
 
 async function generate(path: string) {
   const parsed = parseProject(await readFile(path, "utf8"));
@@ -50,6 +66,21 @@ async function generate(path: string) {
 }
 
 describe("Premiere xmeml v5", () => {
+  it("keeps a hold fixed even when the following source point jumps", async () => {
+    const { project, timeline, paths } = await generate("fixtures/regressions/xmeml-retime.zcut.json");
+    const track = timeline.tracks[0];
+    const hold = track?.kind === "video" ? track.clips.find((clip) => clip.id === "clp_hold") : undefined;
+    const last = hold?.time_map?.at(-1);
+    if (!last) throw new Error("Missing hold endpoint");
+    last.source = { numerator: 5n, denominator: 1n };
+    const xml = (await exporter.generate(project, timeline, profile, paths)).data.toString();
+    expect(graphKeys(clipitem(xml, "clp_hold"))).toEqual([
+      { when: 0, value: 249 },
+      { when: 25, value: 249 },
+    ]);
+    expect(await exporter.readBack(xml, timeline)).toEqual(cuttingList(project, timeline, profile));
+    expect(await exporter.validate(xml)).toBe(true);
+  });
   for (const name of fixtures) {
     it(`${name} round trips every cut and matches golden`, async () => {
       const path = `fixtures/projects/${name}.zcut.json`;
@@ -63,11 +94,38 @@ describe("Premiere xmeml v5", () => {
         await readFile(`fixtures/golden/xmeml/${name}.xml`, "utf8"),
       );
     });
+    it(`${name} writes retimed in/out and constant graphdict freeze frames`, async () => {
+      const { xml } = await generate(`fixtures/projects/${name}.zcut.json`);
+      const is25 = name === "std-25";
+      for (const [id, input, output] of [
+        ["clp_v6", 750, 950],
+        ["clp_v7", is25 ? 1150 : 1598, is25 ? 1250 : 1698],
+        ["clp_v8-s1", is25 ? 4790 : 5754, is25 ? 4840 : 5804],
+        ["clp_v8-s2", 0, 25],
+      ] as const) {
+        const item = clipitem(xml, id);
+        expect(frame(item, "in")).toBe(input);
+        expect(frame(item, "out")).toBe(output);
+      }
+      for (const match of xml.matchAll(/<clipitem\b[^>]*>[\s\S]*?<\/clipitem>/g)) {
+        const item = match[0];
+        expect(frame(item, "out") - frame(item, "in")).toBe(frame(item, "end") - frame(item, "start"));
+      }
+      const hold = clipitem(xml, "clp_v8-s2");
+      expect(parameterValue(hold, "variablespeed")).toBe("1");
+      expect(hold).toMatch(/<parameter>\s*<parameterid>graphdict<\/parameterid>[\s\S]*?<keyframe>/);
+      expect(graphKeys(hold)).toEqual([
+        { when: 0, value: is25 ? 2420 : 2902 },
+        { when: 25, value: is25 ? 2420 : 2902 },
+      ]);
+      expect(xml).not.toContain("<parameterid>freeze</parameterid>");
+    });
   }
   for (const path of [
     "fixtures/regressions/parent-25-on-2997.zcut.json",
     "fixtures/regressions/otio-2997-fcpxml-grid.zcut.json",
     "fixtures/regressions/xmeml-sequence-grid.zcut.json",
+    "fixtures/regressions/xmeml-retime.zcut.json",
     "examples/minimal.zcut.json",
     "examples/interview.zcut.json",
   ]) {
@@ -92,15 +150,15 @@ describe("Premiere xmeml v5", () => {
     expect(xml).toContain("<effectid>crop</effectid>");
     expect(clipitem(xml, "clp_vfr")).toMatch(/<in>0<\/in>\s*<out>100<\/out>/);
     expect(clipitem(xml, "clp_ext")).toMatch(/<in>328<\/in>\s*<out>568<\/out>/);
-    for (const [id, speed, reverse, freeze] of [
-      ["clp_v6", "200", "FALSE", "FALSE"],
-      ["clp_v7", "100", "TRUE", "FALSE"],
-      ["clp_v8-s2", "0", "FALSE", "TRUE"],
+    for (const [id, speed, reverse, variable] of [
+      ["clp_v6", "200", "FALSE", "0"],
+      ["clp_v7", "100", "TRUE", "0"],
+      ["clp_v8-s2", "0", "FALSE", "1"],
     ]) {
       const item = clipitem(xml, id);
       expect(parameterValue(item, "speed")).toBe(speed);
       expect(parameterValue(item, "reverse")).toBe(reverse);
-      expect(parameterValue(item, "freeze")).toBe(freeze);
+      expect(parameterValue(item, "variablespeed")).toBe(variable);
     }
     expect(xml).toContain("<marker id=");
     expect(xml).toContain("segment=3");
@@ -138,14 +196,174 @@ describe("Premiere xmeml v5", () => {
     const rows = await exporter.readBack(xml, timeline);
     expect(rows.find((row) => row.clip_id === "clp_ext")).toMatchObject({ source_in: 1920, source_out: 49920 });
   });
+  it("rounds the retimed coordinate and preserves reverse, slow tail, and last-frame freeze ranges", async () => {
+    const { project, timeline, xml } = await generate("fixtures/regressions/xmeml-retime.zcut.json");
+    const rows = await exporter.readBack(xml, timeline);
+    for (const [id, input, output, sourceIn, sourceOut, speed] of [
+      ["clp_fast", 1, 26, 2, 52, "2"],
+      ["clp_reverse", 25, 50, 200, 150, "-2"],
+      ["clp_slow", 450, 500, 225, 250, "1/2"],
+      ["clp_hold", 0, 25, 249, 249, "0"],
+    ] as const) {
+      const item = clipitem(xml, id);
+      expect(frame(item, "in")).toBe(input);
+      expect(frame(item, "out")).toBe(output);
+      expect(rows.find((row) => row.clip_id === id)).toMatchObject({
+        source_in: sourceIn,
+        source_out: sourceOut,
+        speed,
+      });
+    }
+    expect(rows).toEqual(cuttingList(project, timeline, profile));
+    expect(await exporter.validate(xml)).toBe(true);
+    expect(exporter.losses(project, timeline, profile).filter((item) => item.reason_code === "R_GRID_ROUNDED")).toEqual(
+      [
+        expect.objectContaining({
+          entity_id: "clp_fast",
+          feature: "clip_cut",
+          status: "approximated",
+          severity: "warning",
+        }),
+      ],
+    );
+    expect(graphKeys(clipitem(xml, "clp_hold"))).toEqual([
+      { when: 0, value: 249 },
+      { when: 25, value: 249 },
+    ]);
+  });
+  it("reads actual speed, reverse, and freeze graph values rather than the logged speed", async () => {
+    const { project, timeline, xml } = await generate("fixtures/regressions/xmeml-retime.zcut.json");
+    for (const [id, parameter, value, sourceIn, sourceOut, speed] of [
+      ["clp_fast", "speed", "100", 1, 26, "1"],
+      ["clp_reverse", "reverse", "FALSE", 50, 100, "2"],
+    ] as const) {
+      const item = clipitem(xml, id);
+      const altered = xml.replace(item, changeParameter(item, parameter, value));
+      expect(altered).not.toBe(xml);
+      const rows = await exporter.readBack(altered, timeline);
+      expect(rows.find((row) => row.clip_id === id)).toMatchObject({
+        source_in: sourceIn,
+        source_out: sourceOut,
+        speed,
+      });
+      expect(compareCuttingLists(cuttingList(project, timeline, profile), rows).zero_frame_deviation).toBe(false);
+      expect(await exporter.validate(altered)).toBe(false);
+    }
+    const hold = clipitem(xml, "clp_hold");
+    const altered = xml.replace(hold, hold.replaceAll("<value>249</value>", "<value>248</value>"));
+    const rows = await exporter.readBack(altered, timeline);
+    expect(rows.find((row) => row.clip_id === "clp_hold")).toMatchObject({ source_in: 248, source_out: 248 });
+    expect(compareCuttingLists(cuttingList(project, timeline, profile), rows).zero_frame_deviation).toBe(false);
+  });
+  it("uses the serialized rational speed when mapping source frames at a rounding boundary", async () => {
+    const { project, timeline, paths } = await generate("fixtures/regressions/xmeml-retime.zcut.json");
+    const track = timeline.tracks[0];
+    if (track?.kind !== "video" || !track.clips[0]) throw new Error("Missing retime regression clip");
+    const clip = track.clips[0];
+    clip.source_start = rational(1n, 10n);
+    clip.duration = rational(6n, 25n);
+    clip.time_map = [
+      { at: rational(0n), source: rational(1n, 10n), interp: "linear" },
+      { at: rational(6n, 25n), source: rational(3n, 10n), interp: "linear" },
+    ];
+    const xml = (await exporter.generate(project, timeline, profile, paths)).data.toString();
+    const item = clipitem(xml, clip.id);
+    expect(frame(item, "in")).toBe(3);
+    expect(frame(item, "out")).toBe(9);
+    expect(parameterValue(item, "speed")).toBe("83.333333333");
+    const rows = await exporter.readBack(xml, timeline);
+    expect(rows.find((row) => row.clip_id === clip.id)).toMatchObject({ source_in: 2, source_out: 7, speed: "5/6" });
+    expect(rows).toEqual(cuttingList(project, timeline, profile));
+    expect(await exporter.validate(xml)).toBe(true);
+    expect(exporter.losses(project, timeline, profile)).toContainEqual(
+      expect.objectContaining({ entity_id: clip.id, feature: "clip_cut", reason_code: "R_GRID_ROUNDED" }),
+    );
+  });
+  it("rejects malformed freeze graphs, invalid speed, and mapped source overflow", async () => {
+    const { xml } = await generate("fixtures/regressions/xmeml-retime.zcut.json");
+    const hold = clipitem(xml, "clp_hold");
+    for (const alteredHold of [
+      hold.replace(/<keyframe>[\s\S]*?<\/keyframe>/, ""),
+      hold.replace("<when>25</when>", "<when>24</when>"),
+      hold.replace("<value>249</value>", "<value>248</value>"),
+      hold.replaceAll("<value>249</value>", "<value>250</value>"),
+      changeParameter(hold, "variablespeed", "0"),
+    ]) {
+      expect(alteredHold).not.toBe(hold);
+      expect(await exporter.validate(xml.replace(hold, alteredHold))).toBe(false);
+    }
+    const fast = clipitem(xml, "clp_fast");
+    for (const speed of ["-200", "0", "NaN", "300"])
+      expect(await exporter.validate(xml.replace(fast, changeParameter(fast, "speed", speed)))).toBe(false);
+    const slow = clipitem(xml, "clp_slow");
+    const overflow = slow.replace("<in>450</in>", "<in>452</in>").replace("<out>500</out>", "<out>502</out>");
+    expect(await exporter.validate(xml.replace(slow, overflow))).toBe(false);
+    expect(await exporter.validate(xml.replace(fast, fast.replace("<out>26</out>", "<out>27</out>")))).toBe(false);
+  });
+  it("writes a complete self-inclusive occurrence group with actual one-based track and clip indices", async () => {
+    const { timeline, xml } = await generate("fixtures/projects/std-25.zcut.json");
+    const parts: { id: string; occurrence: string; kind: string; track: number; index: number; item: string }[] = [];
+    for (const kind of ["video", "audio"] as const) {
+      for (const [trackIndex, track] of timeline.tracks.filter((entry) => entry.kind === kind).entries()) {
+        const trackXml = xml.match(new RegExp(`<track id="${track.id}">([\\s\\S]*?)</track>`))?.[1] ?? "";
+        for (const [clipIndex, match] of [
+          ...trackXml.matchAll(/<clipitem id="([^"]+)">[\s\S]*?<\/clipitem>/g),
+        ].entries()) {
+          parts.push({
+            id: match[1] ?? "",
+            occurrence: / occ=(\S+)/.exec(match[0])?.[1] ?? "",
+            kind,
+            track: trackIndex + 1,
+            index: clipIndex + 1,
+            item: match[0],
+          });
+        }
+      }
+    }
+    expect(parts.length).toBeGreaterThan(20);
+    for (const part of parts) {
+      const links = [
+        ...part.item.matchAll(
+          /<link>\s*<linkclipref>([^<]+)<\/linkclipref>\s*<mediatype>([^<]+)<\/mediatype>\s*<trackindex>(\d+)<\/trackindex>\s*<clipindex>(\d+)<\/clipindex>\s*<\/link>/g,
+        ),
+      ].map((match) => ({ id: match[1], kind: match[2], track: Number(match[3]), index: Number(match[4]) }));
+      const group = parts
+        .filter((other) => other.occurrence === part.occurrence)
+        .map(({ id, kind, track, index }) => ({ id, kind, track, index }));
+      expect(links, part.id).toEqual(group);
+    }
+  });
+  it("rejects missing self links, duplicate links, wrong group members, and wrong indices", async () => {
+    const { xml } = await generate("fixtures/projects/std-25.zcut.json");
+    const item = clipitem(xml, "clp_v1");
+    const own = item.match(/<link>\s*<linkclipref>clp_v1<\/linkclipref>[\s\S]*?<\/link>/)?.[0];
+    if (!own) throw new Error("Missing self link");
+    for (const alteredItem of [
+      item.replace(own, ""),
+      item.replace(own, `${own}\n${own}`),
+      item.replace(own, own.replace("clp_v1", "clp_v2")),
+      item.replace(own, own.replace("<mediatype>video</mediatype>", "<mediatype>audio</mediatype>")),
+      item.replace(own, own.replace("<trackindex>1</trackindex>", "<trackindex>2</trackindex>")),
+      item.replace(own, own.replace("<clipindex>1</clipindex>", "<clipindex>2</clipindex>")),
+    ]) {
+      expect(alteredItem).not.toBe(item);
+      expect(await exporter.validate(xml.replace(item, alteredItem))).toBe(false);
+    }
+  });
   it("converts motion and crop ratios into FCP7 units and keeps audio level linear", async () => {
     const { xml } = await generate("fixtures/regressions/xmeml-sequence-grid.zcut.json");
     const motion = clipitem(xml, "clp_vfr");
     expect(parameterValue(motion, "scale")).toBe("50");
-    expect(parameterValue(motion, "rotation")).toBe("-15");
+    expect(parameterValue(motion, "rotation")).toBe("15");
     expect(motion).toMatch(
-      /<parameterid>center<\/parameterid>\s*<name>Center<\/name>\s*<value>\s*<horiz>-0.4<\/horiz>\s*<vert>0.5<\/vert>\s*<\/value>/,
+      /<parameterid>center<\/parameterid>\s*<name>Center<\/name>\s*<value>\s*<horiz>-0.2<\/horiz>\s*<vert>-0.25<\/vert>\s*<\/value>/,
     );
+    const basic = motion.match(/<effectid>basic<\/effectid>([\s\S]*?)<\/effect>/)?.[1] ?? "";
+    expect([...basic.matchAll(/<parameterid>([^<]+)<\/parameterid>/g)].map((match) => match[1])).toEqual([
+      "scale",
+      "rotation",
+      "center",
+    ]);
     for (const [side, amount] of [
       ["left", "10"],
       ["right", "20"],

@@ -90,6 +90,15 @@ const count = (time: Rational, rate: Rational) => {
 };
 const sourceRate = (media: Media) =>
   media.kind === "image" ? rational(25n) : media.kind === "audio" ? rational(48000n) : media.video!.rate;
+const retimeInput = (source: Rational, speed: Rational, media: Media, rate: Rational) => {
+  if (speed.numerator === 0n) return rational(0n);
+  const reverse = speed.numerator < 0n;
+  const limit = count(div(rational(BigInt(count(media.duration, sourceRate(media)))), sourceRate(media)), rate);
+  return div(
+    reverse ? sub(rational(BigInt(limit)), mul(source, rate)) : mul(source, rate),
+    reverse ? mul(speed, rational(-1n)) : speed,
+  );
+};
 const rateXml = (rate: Rational) =>
   n("rate", [
     t("timebase", floor(add(rate, rational(1n, 2n))).toString()),
@@ -105,6 +114,13 @@ const readRate = (item: Xml) => {
 const decimal = (value: Rational) => {
   const scaled = floor(add(mul(value, rational(1000000000n)), rational(1n, 2n)));
   return `${scaled / 1000000000n}.${String(scaled % 1000000000n).padStart(9, "0")}`.replace(/\.?0+$/, "");
+};
+const sameSpeed = (actual: Rational, expected: Rational) => {
+  const magnitude = (speed: Rational) => mul(speed, rational(speed.numerator < 0n ? -100n : 100n));
+  return (
+    compare(actual, rational(0n)) === compare(expected, rational(0n)) &&
+    decimal(magnitude(actual)) === decimal(magnitude(expected))
+  );
 };
 function loss(
   id: string,
@@ -136,7 +152,7 @@ const filter = (name: string, id: string, kind: "video" | "audio", parameters: X
   n("filter", [
     n("effect", [t("name", name), t("effectid", id), t("effecttype", "filter"), t("mediatype", kind), ...parameters]),
   ]);
-function effects(clip: Clip, kind: "video" | "audio", speed: Rational): Xml[] {
+function effects(clip: Clip, kind: "video" | "audio", speed: Rational, sourceIn: number, duration: number): Xml[] {
   const result: Xml[] = [];
   if (kind === "audio" && clip.gain_db !== undefined)
     result.push(
@@ -147,14 +163,14 @@ function effects(clip: Clip, kind: "video" | "audio", speed: Rational): Xml[] {
     result.push(
       filter("Basic Motion", "basic", "video", [
         ...(transform.scale === undefined ? [] : [parameter("scale", "Scale", transform.scale * 100)]),
-        ...(transform.rotation_deg === undefined ? [] : [parameter("rotation", "Rotation", transform.rotation_deg)]),
+        ...(transform.rotation_deg === undefined ? [] : [parameter("rotation", "Rotation", -transform.rotation_deg)]),
         ...(transform.position === undefined
           ? []
           : [
               n("parameter", [
                 t("parameterid", "center"),
                 t("name", "Center"),
-                n("value", [t("horiz", transform.position[0] * 2), t("vert", transform.position[1] * 2)]),
+                n("value", [t("horiz", transform.position[0]), t("vert", -transform.position[1])]),
               ]),
             ]),
       ]),
@@ -178,10 +194,65 @@ function effects(clip: Clip, kind: "video" | "audio", speed: Rational): Xml[] {
           decimal(mul(compare(speed, rational(0n)) < 0 ? rational(-1n) : rational(1n), mul(speed, rational(100n)))),
         ),
         parameter("reverse", "Reverse", compare(speed, rational(0n)) < 0 ? "TRUE" : "FALSE"),
-        parameter("freeze", "Freeze", compare(speed, rational(0n)) === 0 ? "TRUE" : "FALSE"),
+        parameter("variablespeed", "Variable Speed", speed.numerator === 0n ? 1 : 0),
+        ...(speed.numerator === 0n
+          ? [
+              n("parameter", [
+                t("parameterid", "graphdict"),
+                t("name", "graphdict"),
+                n("keyframe", [t("when", 0), t("value", sourceIn)]),
+                n("keyframe", [t("when", duration), t("value", sourceIn)]),
+              ]),
+            ]
+          : []),
       ]),
     );
   return result;
+}
+function sourceRange(item: Xml, file: Xml, sequenceRate: Rational) {
+  const input = number(item, "in"),
+    output = number(item, "out");
+  const limit = count(div(rational(BigInt(number(file, "duration"))), readRate(file)), sequenceRate);
+  const remaps = children(item, "filter")
+    .map((entry) => required(entry, "effect"))
+    .filter((effect) => value(effect, "effectid") === "timeremap");
+  if (remaps.length > 1) throw new Error("Duplicate Time Remap filter");
+  const remap = remaps[0];
+  if (!remap) return { start: input, end: output, speed: rational(1n), limit };
+  const parameters = new Map(children(remap, "parameter").map((entry) => [value(entry, "parameterid"), entry]));
+  if (parameters.size !== children(remap, "parameter").length || parameters.has("freeze"))
+    throw new Error("Duplicate or obsolete Time Remap parameter");
+  const variable = value(parameters.get("variablespeed") ?? n("parameter"), "value");
+  const reverse = value(parameters.get("reverse") ?? n("parameter"), "value");
+  const rawSpeed = value(parameters.get("speed") ?? n("parameter"), "value");
+  if (!rawSpeed || !/^\d+(?:\.\d+)?$/.test(rawSpeed) || !["TRUE", "FALSE"].includes(reverse ?? ""))
+    throw new Error("Invalid Time Remap parameters");
+  const [whole, fraction = ""] = rawSpeed.split(".");
+  const speed = rational(BigInt(`${whole}${fraction}`), 100n * 10n ** BigInt(fraction.length));
+  if (variable === "1") {
+    const graph = parameters.get("graphdict");
+    const keys = graph ? children(graph, "keyframe") : [];
+    if (
+      speed.numerator !== 0n ||
+      reverse !== "FALSE" ||
+      keys.length !== 2 ||
+      number(keys[0]!, "when") !== input ||
+      number(keys[1]!, "when") !== output ||
+      number(keys[0]!, "value") !== number(keys[1]!, "value")
+    )
+      throw new Error("Invalid freeze graphdict");
+    const frame = number(keys[0]!, "value");
+    return { start: frame, end: frame, speed, limit };
+  }
+  if (variable !== "0" || speed.numerator === 0n || parameters.has("graphdict"))
+    throw new Error("Invalid constant Time Remap");
+  const source = (frame: number) => {
+    const mapped = mul(rational(BigInt(frame)), speed);
+    return count(reverse === "TRUE" ? sub(rational(BigInt(limit)), mapped) : mapped, rational(1n));
+  };
+  return reverse === "TRUE"
+    ? { start: source(input), end: source(output), speed: mul(speed, rational(-1n)), limit }
+    : { start: source(input), end: source(output), speed, limit };
 }
 type Part = { clip: Clip; item: Xml; id: string; kind: "video" | "audio"; track: number; index: number };
 function fileNode(media: Media, path: string, timeline: Timeline): Xml {
@@ -248,9 +319,13 @@ export const xmemlExporter: Exporter & { validationNotes?: string } = {
         const split = points.length > 2;
         const pairs = points.slice(0, -1).map((first, segment) => [first, points[segment + 1]!, segment] as const);
         for (const [first, last, segment] of pairs) {
-          const speed = div(sub(last.source, first.source), sub(last.at, first.at));
+          const speed =
+            first.interp === "hold" ? rational(0n) : div(sub(last.source, first.source), sub(last.at, first.at));
           const sourceIn = count(first.source, timeline.edit_rate);
-          const sourceOut = count(last.source, timeline.edit_rate);
+          const start = count(add(clip.timeline_start, first.at), timeline.edit_rate);
+          const end = count(add(clip.timeline_start, last.at), timeline.edit_rate);
+          const duration = end - start;
+          const input = count(retimeInput(first.source, speed, media, timeline.edit_rate), rational(1n));
           const id = `${clip.id}${split ? `-s${segment}` : ""}`;
           const file = files.has(media.id) ? n("file", [], { id: media.id }) : fileNode(media, path, timeline);
           files.add(media.id);
@@ -259,17 +334,17 @@ export const xmemlExporter: Exporter & { validationNotes?: string } = {
             [
               t("name", clip.label ?? media.name ?? media.id),
               t("enabled", clip.enabled === false ? "FALSE" : "TRUE"),
-              t("duration", count(sub(last.at, first.at), timeline.edit_rate)),
+              t("duration", duration),
               rateXml(timeline.edit_rate),
-              t("start", count(add(clip.timeline_start, first.at), timeline.edit_rate)),
-              t("end", count(add(clip.timeline_start, last.at), timeline.edit_rate)),
-              t("in", Math.min(sourceIn, sourceOut)),
-              t("out", compare(speed, rational(0n)) === 0 ? sourceIn + 1 : Math.max(sourceIn, sourceOut)),
+              t("start", start),
+              t("end", end),
+              t("in", input),
+              t("out", input + duration),
               file,
               ...(track.kind === "audio" && clip.source_channels?.length === 1
                 ? [n("sourcetrack", [t("mediatype", "audio"), t("trackindex", clip.source_channels[0]! + 1)])]
                 : []),
-              ...effects(clip, track.kind, speed),
+              ...effects(clip, track.kind, speed, sourceIn, duration),
               n("logginginfo", [
                 t(
                   "lognote",
@@ -313,8 +388,7 @@ export const xmemlExporter: Exporter & { validationNotes?: string } = {
     }
     for (const part of parts) {
       for (const other of parts) {
-        if (other.id === part.id || other.clip.occurrence_id !== part.clip.occurrence_id || other.kind === part.kind)
-          continue;
+        if (other.clip.occurrence_id !== part.clip.occurrence_id) continue;
         part.item.children.push(
           n("link", [
             t("linkclipref", other.id),
@@ -403,11 +477,10 @@ export const xmemlExporter: Exporter & { validationNotes?: string } = {
             note,
           );
           if (!match) throw new Error("Missing xmeml stable IDs");
-          const originalIn = number(item, "in"),
-            originalOut = number(item, "out");
+          const range = sourceRange(item, sourceFile, sequenceRate);
+          const [numerator, denominator = "1"] = match[5]!.split("/");
+          const loggedSpeed = rational(BigInt(numerator!), BigInt(denominator));
           const source = (frame: number) => count(div(rational(BigInt(frame)), sequenceRate), readRate(sourceFile));
-          const speed = match[5]!;
-          const reverse = speed.startsWith("-");
           rows.push({
             track_type: kind,
             track_number: index + 1,
@@ -415,9 +488,14 @@ export const xmemlExporter: Exporter & { validationNotes?: string } = {
             media_id: match[3]!,
             timeline_in: number(item, "start"),
             timeline_out: number(item, "end"),
-            source_in: source(reverse ? originalOut : originalIn),
-            source_out: source(speed === "0" ? originalIn : reverse ? originalIn : originalOut),
-            speed: match[4] === undefined ? speed : "split",
+            source_in: source(range.start),
+            source_out: source(range.end),
+            speed:
+              match[4] !== undefined
+                ? "split"
+                : sameSpeed(range.speed, loggedSpeed)
+                  ? match[5]!
+                  : printRational(range.speed),
           });
         }
       }
@@ -512,7 +590,15 @@ export const xmemlExporter: Exporter & { validationNotes?: string } = {
       for (const clip of track.clips) {
         ext(clip, "clip", clip.timeline_start, clip.duration);
         const points = clipTimeMap(clip);
-        const sourceRounded = points.some((point) => mul(point.source, timeline.edit_rate).denominator !== 1n);
+        const media = project.media.find((entry) => entry.id === clip.media_id)!;
+        const sourceRounded =
+          points.some((point) => mul(point.source, timeline.edit_rate).denominator !== 1n) ||
+          points.slice(0, -1).some((first, index) => {
+            const last = points[index + 1]!;
+            const speed =
+              first.interp === "hold" ? rational(0n) : div(sub(last.source, first.source), sub(last.at, first.at));
+            return retimeInput(first.source, speed, media, timeline.edit_rate).denominator !== 1n;
+          });
         if (sourceRounded)
           items.push(
             loss(
@@ -522,7 +608,7 @@ export const xmemlExporter: Exporter & { validationNotes?: string } = {
               "approximated",
               "warning",
               "R_GRID_ROUNDED",
-              "源入出点已取整到序列帧网格，需在 Premiere 核对源帧",
+              "源入出点或变速后入点已取整到序列帧网格，需在 Premiere 核对源帧",
               clip.timeline_start,
               clip.duration,
             ),
@@ -610,47 +696,73 @@ export const xmemlExporter: Exporter & { validationNotes?: string } = {
       if (!value(tc, "string") || !["DF", "NDF"].includes(value(tc, "displayformat") ?? ""))
         throw new Error("Invalid timecode");
       const known = new Set<string>();
-      const limits = new Map<string, number>();
-      const ids = new Set<string>();
-      const refs: string[] = [];
+      const files = new Map<string, Xml>();
+      const parts = new Map<string, { item: Xml; kind: string; track: number; index: number; occurrence: string }>();
       for (const kind of ["video", "audio"] as const) {
         const section = required(media, kind);
         required(section, "format");
-        for (const track of children(section, "track")) {
-          for (const item of children(track, "clipitem")) {
-            if (!item.attrs.id || ids.has(item.attrs.id)) throw new Error("Duplicate clipitem ID");
-            ids.add(item.attrs.id);
+        for (const [trackIndex, track] of children(section, "track").entries()) {
+          for (const [clipIndex, item] of children(track, "clipitem").entries()) {
+            if (!item.attrs.id || parts.has(item.attrs.id)) throw new Error("Duplicate clipitem ID");
             if (compare(readRate(item), sequenceRate) !== 0) throw new Error("Clipitem rate differs from sequence");
             if (number(item, "end") <= number(item, "start") || number(item, "out") <= number(item, "in"))
               throw new Error("Invalid clip range");
+            if (number(item, "out") - number(item, "in") !== number(item, "end") - number(item, "start"))
+              throw new Error("Retime duration differs from timeline");
             const file = required(item, "file");
             if (!file.attrs.id) throw new Error("Missing file ID");
             if (file.children.length) {
               if (known.has(file.attrs.id)) throw new Error("Duplicate file definition");
               known.add(file.attrs.id);
               if (!value(file, "pathurl")?.startsWith("file://localhost/")) throw new Error("Invalid media URL");
-              limits.set(
-                file.attrs.id,
-                count(div(rational(BigInt(number(file, "duration"))), readRate(file)), sequenceRate),
-              );
+              files.set(file.attrs.id, file);
               required(file, "timecode");
               required(file, "media");
             } else if (!known.has(file.attrs.id)) throw new Error("File referenced before definition");
-            if (number(item, "out") > (limits.get(file.attrs.id) ?? -1))
+            const range = sourceRange(item, files.get(file.attrs.id)!, sequenceRate);
+            if (
+              Math.min(range.start, range.end) < 0 ||
+              Math.max(range.start, range.end) > range.limit ||
+              (range.speed.numerator === 0n && range.start === range.limit)
+            )
               throw new Error("Source range exceeds file duration");
             const note = value(required(item, "logginginfo"), "lognote") ?? "";
-            const match = /^zsir-cut clip=\S+ occ=\S+ media=\S+(?: segment=\d+)? speed=(-?\d+(?:\/\d+)?)$/.exec(note);
-            if (!match || !note.includes(`media=${file.attrs.id}`)) throw new Error("Missing stable ID");
-            if (
-              match[1] !== "1" &&
-              !children(item, "filter").some((entry) => value(required(entry, "effect"), "effectid") === "timeremap")
-            )
-              throw new Error("Missing Time Remap filter");
-            for (const link of children(item, "link")) refs.push(value(link, "linkclipref") ?? "");
+            const match = /^zsir-cut clip=\S+ occ=(\S+) media=(\S+)(?: segment=\d+)? speed=(-?\d+)(?:\/(\d+))?$/.exec(
+              note,
+            );
+            if (!match || match[2] !== file.attrs.id) throw new Error("Missing stable ID");
+            const expectedSpeed = rational(BigInt(match[3]!), BigInt(match[4] ?? "1"));
+            if (!sameSpeed(range.speed, expectedSpeed)) throw new Error("Time Remap differs from logged speed");
+            parts.set(item.attrs.id, {
+              item,
+              kind,
+              track: trackIndex + 1,
+              index: clipIndex + 1,
+              occurrence: match[1]!,
+            });
           }
         }
       }
-      if (refs.some((ref) => !ids.has(ref))) throw new Error("Broken clip link");
+      for (const part of parts.values()) {
+        const group = [...parts.values()].filter((entry) => entry.occurrence === part.occurrence);
+        const links = children(part.item, "link");
+        const refs = new Set<string>();
+        if (links.length !== group.length) throw new Error("Incomplete occurrence links");
+        for (const link of links) {
+          const ref = value(link, "linkclipref") ?? "";
+          const target = parts.get(ref);
+          if (
+            !target ||
+            refs.has(ref) ||
+            target.occurrence !== part.occurrence ||
+            value(link, "mediatype") !== target.kind ||
+            number(link, "trackindex") !== target.track ||
+            number(link, "clipindex") !== target.index
+          )
+            throw new Error("Invalid occurrence link");
+          refs.add(ref);
+        }
+      }
       await this.readBack(data, {} as Timeline);
       this.validationNotes = "xmeml v5 结构与引用自检通过；交接流程剪辑表读回零帧比对通过";
       return true;

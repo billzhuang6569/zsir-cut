@@ -176,14 +176,42 @@ export function cuttingList(project: Project, timeline: Timeline, profile: Profi
             : media.kind === "audio"
               ? rational(48000n)
               : (media.video?.rate ?? rational(48000n));
-        const source = (time: Rational) => {
-          // xmeml quantizes source cuts to sequence frames before the common native-unit comparison.
-          const exported =
-            PROFILES[profile].format === "xmeml"
-              ? div(rational(round(mul(time, timeline.edit_rate))), timeline.edit_rate)
-              : time;
-          return count(mul(exported, sourceRate));
-        };
+        let sourceIn = first.source,
+          sourceOut = last.source;
+        if (PROFILES[profile].format === "xmeml") {
+          const speed =
+            first.interp === "hold" ? rational(0n) : div(sub(last.source, first.source), sub(last.at, first.at));
+          const reverse = speed.numerator < 0n;
+          const magnitude = reverse ? mul(speed, rational(-1n)) : speed;
+          // xmeml serializes speed as a percentage with nine decimal places.
+          const exportedSpeed = rational(round(mul(magnitude, rational(100000000000n))), 100000000000n);
+          const limit = rational(
+            round(mul(div(rational(round(mul(media.duration, sourceRate))), sourceRate), timeline.edit_rate)),
+          );
+          const input =
+            speed.numerator === 0n
+              ? 0n
+              : round(
+                  div(
+                    reverse ? sub(limit, mul(first.source, timeline.edit_rate)) : mul(first.source, timeline.edit_rate),
+                    magnitude,
+                  ),
+                );
+          const duration =
+            round(mul(add(clip.timeline_start, last.at), timeline.edit_rate)) -
+            round(mul(add(clip.timeline_start, first.at), timeline.edit_rate));
+          const source = (frame: bigint) => {
+            const mapped =
+              speed.numerator === 0n
+                ? mul(first.source, timeline.edit_rate)
+                : reverse
+                  ? sub(limit, mul(rational(frame), exportedSpeed))
+                  : mul(rational(frame), exportedSpeed);
+            return div(rational(round(mapped)), timeline.edit_rate);
+          };
+          sourceIn = source(input);
+          sourceOut = source(input + duration);
+        }
         rows.push({
           track_type: track.kind,
           track_number: number,
@@ -191,13 +219,15 @@ export function cuttingList(project: Project, timeline: Timeline, profile: Profi
           media_id: clip.media_id,
           timeline_in: count(mul(add(clip.timeline_start, first.at), timeline.edit_rate)),
           timeline_out: count(mul(add(clip.timeline_start, last.at), timeline.edit_rate)),
-          source_in: source(first.source),
-          source_out: source(last.source),
+          source_in: count(mul(sourceIn, sourceRate)),
+          source_out: count(mul(sourceOut, sourceRate)),
           speed: split
             ? "split"
             : points.length > 2
               ? "map"
-              : printRational(div(sub(last.source, first.source), sub(last.at, first.at))),
+              : PROFILES[profile].format === "xmeml" && first.interp === "hold"
+                ? "0"
+                : printRational(div(sub(last.source, first.source), sub(last.at, first.at))),
         });
       }
     }
@@ -257,12 +287,27 @@ export function subtitleFiles(project: Project, timeline: Timeline) {
   const projected = projectSubtitles(project, timeline.id);
   const files: { name: string; role: "subtitle" | "subtitle_words"; language: string; data: string }[] = [];
   const tracks = timeline.tracks.filter((track) => track.kind === "subtitle");
+  const stems = new Map(
+    tracks.map((track) => {
+      const sameLanguage = tracks.filter((item) => item.language === track.language).length > 1;
+      return [track.id, `${track.language}${sameLanguage ? `_${track.name.replaceAll(/[\\/]/g, "_")}` : ""}`];
+    }),
+  );
+  const reservedNames = new Set([...stems.values()].flatMap((stem) => [`${stem}.srt`, `${stem}.words.json`]));
+  const usedNames = new Set<string>();
+  const fileName = (stem: string, extension: string, trackId: string, base: boolean) => {
+    const preferred = `${stem}${extension}`;
+    let name = preferred;
+    for (let suffix = 1; usedNames.has(name) || (reservedNames.has(name) && (!base || name !== preferred)); suffix++)
+      name = `${stem}.${trackId}${suffix > 1 ? `.${suffix}` : ""}${extension}`;
+    usedNames.add(name);
+    return name;
+  };
   for (const track of tracks) {
     const cues = projected.cues.filter((cue) => cue.track_id === track.id);
-    const sameLanguage = tracks.filter((item) => item.language === track.language).length > 1;
-    const stem = `${track.language}${sameLanguage ? `_${track.name.replaceAll(/[\\/]/g, "_")}` : ""}`;
+    const stem = stems.get(track.id)!;
     const words = [];
-    const srt = [];
+    const srt: { start: Rational; end: Rational; text: string }[] = [];
     for (const cue of cues) {
       const clips = timeline.tracks
         .flatMap((item) => (item.kind === "subtitle" ? [] : item.clips))
@@ -327,12 +372,33 @@ export function subtitleFiles(project: Project, timeline: Timeline) {
         lines: cue.lines,
         words: visible,
       });
-      srt.push(
-        `${srt.length + 1}\n${srtTime(milliseconds(q.start))} --> ${srtTime(milliseconds(q.end))}\n${cue.text}\n`,
-      );
+      srt.push({ ...q, text: cue.text });
     }
-    files.push({ name: `${stem}.srt`, role: "subtitle", language: track.language, data: `${srt.join("\n")}\n` });
-    files.push({ name: `${stem}.words.json`, role: "subtitle_words", language: track.language, data: j(words) });
+    const layers: { end: Rational; entries: string[] }[] = [{ end: zero, entries: [] }];
+    for (const cue of srt.sort((a, b) => compare(a.start, b.start) || compare(a.end, b.end))) {
+      let layer = layers.find((item) => compare(item.end, cue.start) <= 0);
+      if (!layer) {
+        layer = { end: zero, entries: [] };
+        layers.push(layer);
+      }
+      layer.entries.push(
+        `${layer.entries.length + 1}\n${srtTime(milliseconds(cue.start))} --> ${srtTime(milliseconds(cue.end))}\n${cue.text}\n`,
+      );
+      layer.end = cue.end;
+    }
+    for (const [index, layer] of layers.entries())
+      files.push({
+        name: fileName(`${stem}${index ? `.layer${index + 1}` : ""}`, ".srt", track.id, index === 0),
+        role: "subtitle",
+        language: track.language,
+        data: `${layer.entries.join("\n")}\n`,
+      });
+    files.push({
+      name: fileName(stem, ".words.json", track.id, true),
+      role: "subtitle_words",
+      language: track.language,
+      data: j(words),
+    });
   }
   return files;
 }
@@ -508,12 +574,19 @@ export async function runExport(
     files.push({ path, role, sha256: digest(data), ...(language ? { language } : {}) });
   };
   await put(`timeline/${exchange.name}`, "timeline", exchange.data);
-  for (const file of subtitleFiles(project, timeline))
-    if (!input.subtitle_languages || input.subtitle_languages.includes(file.language))
-      await put(`subtitles/${file.name}`, file.role, file.data, file.language);
+  const subtitles = subtitleFiles(project, timeline).filter(
+    (file) => !input.subtitle_languages || input.subtitle_languages.includes(file.language),
+  );
+  for (const file of subtitles) await put(`subtitles/${file.name}`, file.role, file.data, file.language);
   await put("loss-report.json", "loss_report", j(report));
   const guide =
-    "交接检查单\n1. 导入没有报错，离线素材数为零。\n2. 核对起始时码、总时长、帧率。\n3. 核对每条轨道的片段数。\n4. 抽查三个剪点的源帧号。\n5. 核对 J/L cut 的音频偏移。\n6. 核对叠化与变速。\n7. 核对字幕条数及首末条。\n8. 保存、关闭、重新打开后复查。\n";
+    "交接检查单\n1. 导入没有报错，离线素材数为零。\n2. 核对起始时码、总时长、帧率。\n3. 核对每条轨道的片段数。\n4. 抽查三个剪点的源帧号。\n5. 核对 J/L cut 的音频偏移。\n6. 核对叠化与变速。\n7. 核对字幕条数及首末条。\n8. 保存、关闭、重新打开后复查。\n" +
+    (subtitles.length
+      ? `\nSRT 字幕旁路：以下每份 SRT 单独导入一条字幕轨。layer2、layer3 等文件保存重叠字幕，每层需要再导入一条字幕轨。\n${subtitles
+          .filter((file) => file.role === "subtitle")
+          .map((file) => `- subtitles/${file.name}\n`)
+          .join("")}`
+      : "");
   await put("接手说明.txt", "readme", guide);
   const media = [];
   for (const item of project.media) {

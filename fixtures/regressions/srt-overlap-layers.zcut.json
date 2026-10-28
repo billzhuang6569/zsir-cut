@@ -1,0 +1,50 @@
+{
+  "schema": "zsir-cut/timeline",
+  "schema_version": "0.1",
+  "id": "prj_srt_layers",
+  "name": "重叠字幕分层回归",
+  "revision": {
+    "seq": 1,
+    "id": "rev_fixture_1",
+    "parent": null,
+    "created_at": "2026-10-28T00:00:00Z",
+    "author": { "kind": "system", "name": "fixture" }
+  },
+  "media": [],
+  "timelines": [
+    {
+      "id": "tl_srt",
+      "name": "字幕",
+      "edit_rate": "25",
+      "drop_frame": false,
+      "start_timecode": "00:00:00:00",
+      "audio_rate": "48000",
+      "format": { "width": 1920, "height": 1080 },
+      "tracks": [
+        { "id": "trk_audio", "kind": "audio", "name": "A1", "enabled": true, "clips": [], "transitions": [] },
+        {
+          "id": "trk_sub",
+          "kind": "subtitle",
+          "name": "中文",
+          "enabled": true,
+          "language": "zh-Hans",
+          "carrier_tracks": ["trk_audio"],
+          "default_style_id": "sty_sub",
+          "overrides": [],
+          "free_cues": [
+            { "id": "cue_e", "timeline_start": "4s", "duration": "1s", "text": "第五条" },
+            { "id": "cue_c", "timeline_start": "2s", "duration": "1s", "text": "第三条" },
+            { "id": "cue_a", "timeline_start": "0s", "duration": "3s", "text": "第一条" },
+            { "id": "cue_d", "timeline_start": "3s", "duration": "1s", "text": "第四条" },
+            { "id": "cue_b", "timeline_start": "1s", "duration": "3s", "text": "第二条" }
+          ]
+        }
+      ],
+      "markers": []
+    }
+  ],
+  "transcripts": [],
+  "subtitle_styles": [
+    { "id": "sty_sub", "name": "字幕", "version": 1, "font_family": "sans-serif", "font_size": 0.05, "color": "#FFFFFFFF" }
+  ]
+}
