@@ -1,25 +1,23 @@
 // biome-ignore-all lint/style/noNonNullAssertion: Generated XML and validated project data supply these entries.
 import { pathToFileURL } from "node:url";
-import {
+import type { Clip, CutRow, Exporter, LossItem, Media, Rational, Timeline } from "../../core/dist/index.js";
+
+const {
   add,
-  type Clip,
-  type CutRow,
   clipTimeMap,
   compare,
   div,
-  type Exporter,
   floor,
-  type LossItem,
-  type Media,
   mul,
   printRational,
   projectSubtitles,
-  type Rational,
   rational,
   sub,
-  type Timeline,
   timecodeToFrame,
-} from "../../core/dist/index.js";
+}: typeof import("../../core/dist/index.js") = await import(
+  new URL(import.meta.url.endsWith(".ts") ? "../../core/src/index.ts" : "../../core/dist/index.js", import.meta.url)
+    .href
+);
 
 type Xml = { tag: string; attrs: Record<string, string>; children: Xml[]; text?: string };
 const n = (tag: string, children: Xml[] = [], attrs: Record<string, string> = {}, text?: string): Xml => ({

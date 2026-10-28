@@ -1,9 +1,9 @@
 // biome-ignore-all lint/style/noNonNullAssertion: Indexed entries are guarded by schema or test setup.
 import { readdir, stat } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
-import { fingerprint } from "../fingerprint.js";
-import type { ValidationIssue } from "./semantics.js";
-import type { Media, Project } from "./types.js";
+import { fingerprint } from "../fingerprint.ts";
+import type { ValidationIssue } from "./semantics.ts";
+import type { Media, Project } from "./types.ts";
 
 const fullPath = (projectDir: string, path: string) => resolve(projectDir, path);
 const sameFingerprint = (a: Media["fingerprint"], b: Media["fingerprint"]) => a.algo === b.algo && a.value === b.value;

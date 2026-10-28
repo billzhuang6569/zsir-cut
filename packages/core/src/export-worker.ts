@@ -1,5 +1,5 @@
-import { dispatch } from "./dispatch.js";
-import { readJob, writeJob } from "./jobs.js";
+import { dispatch } from "./dispatch.ts";
+import { readJob, writeJob } from "./jobs.ts";
 
 const [path, modulePath] = process.argv.slice(2);
 if (!path || !modulePath) throw new Error("Missing export worker arguments");

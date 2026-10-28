@@ -1,8 +1,8 @@
 // biome-ignore-all lint/style/noNonNullAssertion: Indexed entries are guarded by project schema or local checks.
-import { add, compare, div, type Rational, rational, sub } from "../rational.js";
-import { cueText, displayRanges, transcriptRules } from "./subtitle-rules.js";
-import { clipTimeMap, mapSourceTimeToClip } from "./time-map.js";
-import type { Clip, Cue, Project, TimeMapPoint, Token, Transcript } from "./types.js";
+import { add, compare, div, type Rational, rational, sub } from "../rational.ts";
+import { cueText, displayRanges, transcriptRules } from "./subtitle-rules.ts";
+import { clipTimeMap, mapSourceTimeToClip } from "./time-map.ts";
+import type { Clip, Cue, Project, TimeMapPoint, Token, Transcript } from "./types.ts";
 
 export interface ProjectedCue {
   track_id: string;

@@ -2,12 +2,12 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
-import { EditError } from "./edit.js";
-import { diffProjectEntities, type EntityChange, type EntitySnapshot, projectEntitySnapshots } from "./entities.js";
-import { newId } from "./id.js";
-import { parseProject, serializeProject } from "./io.js";
-import { type ValidationIssue, validateProjectSemantics } from "./semantics.js";
-import type { Author, Project } from "./types.js";
+import { EditError } from "./edit.ts";
+import { diffProjectEntities, type EntityChange, type EntitySnapshot, projectEntitySnapshots } from "./entities.ts";
+import { newId } from "./id.ts";
+import { parseProject, serializeProject } from "./io.ts";
+import { type ValidationIssue, validateProjectSemantics } from "./semantics.ts";
+import type { Author, Project } from "./types.ts";
 
 export type WriteVerb = "edit" | "import_media" | "transcribe" | "undo" | "redo" | "session_approve";
 export interface WriteRequest {
@@ -658,16 +658,17 @@ export function openProject(options: OpenProjectOptions) {
 }
 
 export class HistoryError extends Error {
-  constructor(readonly code: "E_UNSUPPORTED" | "E_NOT_FOUND") {
+  readonly code: "E_UNSUPPORTED" | "E_NOT_FOUND";
+  constructor(code: HistoryError["code"]) {
     super(code);
+    this.code = code;
   }
 }
 
 class UndoConflict extends Error {
-  constructor(
-    readonly keys: string[],
-    message: string,
-  ) {
+  readonly keys: string[];
+  constructor(keys: string[], message: string) {
     super(message);
+    this.keys = keys;
   }
 }

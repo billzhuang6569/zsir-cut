@@ -1,19 +1,19 @@
-export * from "./dispatch.js";
-export * from "./export-framework.js";
-export * from "./fingerprint.js";
-export * from "./preview.js";
-export * from "./project/entities.js";
-export * from "./project/id.js";
-export * from "./project/io.js";
-export * from "./project/media.js";
-export * from "./project/probe.js";
-export * from "./project/projection.js";
-export * from "./project/semantics.js";
-export * from "./project/store.js";
-export * from "./project/subtitle-rules.js";
-export * from "./project/time-map.js";
-export * from "./project/types.js";
-export * from "./rational.js";
+export * from "./dispatch.ts";
+export * from "./export-framework.ts";
+export * from "./fingerprint.ts";
+export * from "./preview.ts";
+export * from "./project/entities.ts";
+export * from "./project/id.ts";
+export * from "./project/io.ts";
+export * from "./project/media.ts";
+export * from "./project/probe.ts";
+export * from "./project/projection.ts";
+export * from "./project/semantics.ts";
+export * from "./project/store.ts";
+export * from "./project/subtitle-rules.ts";
+export * from "./project/time-map.ts";
+export * from "./project/types.ts";
+export * from "./rational.ts";
 export {
   commandSchemaForVerb,
   validateCommand,
@@ -21,5 +21,5 @@ export {
   validateLossReport,
   validateManifest,
   validateProject,
-} from "./schema.js";
-export * from "./timecode.js";
+} from "./schema.ts";
+export * from "./timecode.ts";

@@ -1,4 +1,4 @@
-import type { Rational } from "../rational.js";
+import type { Rational } from "../rational.ts";
 
 export type Extension = Record<string, unknown>;
 

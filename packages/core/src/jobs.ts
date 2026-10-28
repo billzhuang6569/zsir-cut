@@ -2,8 +2,8 @@ import { spawn } from "node:child_process";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Envelope } from "./dispatch.js";
-import { newId } from "./project/id.js";
+import type { Envelope } from "./dispatch.ts";
+import { newId } from "./project/id.ts";
 
 export interface Job {
   job_id: string;
@@ -64,7 +64,9 @@ export async function startExportJob(
     envelope: null,
   };
   await writeJob(path, job);
-  const worker = fileURLToPath(new URL("./export-worker.js", import.meta.url).href.replace("/src/", "/dist/"));
+  const worker = fileURLToPath(
+    new URL(import.meta.url.endsWith(".ts") ? "./export-worker.ts" : "./export-worker.js", import.meta.url),
+  );
   const child = spawn(process.execPath, [worker, path, exporterModule], { stdio: "ignore", detached: true });
   child.unref();
   if (!child.pid) throw new Error("Failed to start export worker");
@@ -94,7 +96,9 @@ export async function startPreviewJob(
     envelope: null,
   };
   await writeJob(path, job);
-  const worker = fileURLToPath(new URL("./preview-worker.js", import.meta.url).href.replace("/src/", "/dist/"));
+  const worker = fileURLToPath(
+    new URL(import.meta.url.endsWith(".ts") ? "./preview-worker.ts" : "./preview-worker.js", import.meta.url),
+  );
   const child = spawn(process.execPath, [worker, path], { stdio: "ignore", detached: true });
   child.unref();
   if (!child.pid) throw new Error("Failed to start preview worker");
@@ -125,7 +129,9 @@ export async function startTranscribeJob(
     envelope: null,
   };
   await writeJob(path, job);
-  const runner = fileURLToPath(new URL("./transcribe-worker.js", import.meta.url).href.replace("/src/", "/dist/"));
+  const runner = fileURLToPath(
+    new URL(import.meta.url.endsWith(".ts") ? "./transcribe-worker.ts" : "./transcribe-worker.js", import.meta.url),
+  );
   const child = spawn(process.execPath, [runner, path, python, workerDirectory], { stdio: "ignore", detached: true });
   child.unref();
   if (!child.pid) throw new Error("Failed to start transcribe worker");

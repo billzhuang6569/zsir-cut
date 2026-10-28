@@ -1,6 +1,6 @@
 // biome-ignore-all lint/style/noNonNullAssertion: Indexed entries are guarded by command validation and local range checks.
-import { add, div, mul, parseRational, type Rational, rational, sub } from "../rational.js";
-import { EditError } from "./edit.js";
+import { add, div, mul, parseRational, type Rational, rational, sub } from "../rational.ts";
+import { EditError } from "./edit.ts";
 import {
   cueBreaks,
   type SubtitleRules,
@@ -8,7 +8,7 @@ import {
   subtitleRules,
   textWidth,
   transcriptRules,
-} from "./subtitle-rules.js";
+} from "./subtitle-rules.ts";
 import type {
   Cue,
   Project,
@@ -18,7 +18,7 @@ import type {
   Token,
   Transcript,
   TranscriptSubtitleRules,
-} from "./types.js";
+} from "./types.ts";
 
 type Op = Record<string, unknown> & { op: string };
 const fail = (code: EditError["code"], message: string): never => {

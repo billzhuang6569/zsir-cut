@@ -1,5 +1,5 @@
-import { dispatch } from "./dispatch.js";
-import { readJob, writeJob } from "./jobs.js";
+import { dispatch } from "./dispatch.ts";
+import { readJob, writeJob } from "./jobs.ts";
 
 const [path] = process.argv.slice(2);
 if (!path) throw new Error("Missing preview worker argument");

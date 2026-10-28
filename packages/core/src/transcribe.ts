@@ -3,10 +3,10 @@ import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { promisify } from "node:util";
-import { newId } from "./project/id.js";
-import { cueBreaks, segmentTokens, transcriptRules } from "./project/subtitle-rules.js";
-import type { Cue, Engine, Project, RawToken, Token, TranscriptSubtitleRules } from "./project/types.js";
-import { compare, parseRational, rational, sub } from "./rational.js";
+import { newId } from "./project/id.ts";
+import { cueBreaks, segmentTokens, transcriptRules } from "./project/subtitle-rules.ts";
+import type { Cue, Engine, Project, RawToken, Token, TranscriptSubtitleRules } from "./project/types.ts";
+import { compare, parseRational, rational, sub } from "./rational.ts";
 
 const execute = promisify(execFile);
 type WorkerToken = { text: string; start_ms: number; end_ms: number; conf: number | null };
@@ -31,12 +31,12 @@ export type TranscribeRequest = {
   rules?: Record<string, unknown>;
 };
 export class AsrError extends Error {
-  constructor(
-    public readonly code: string,
-    message: string,
-    public readonly retryable: boolean,
-  ) {
+  readonly code: string;
+  readonly retryable: boolean;
+  constructor(code: string, message: string, retryable: boolean) {
     super(message);
+    this.code = code;
+    this.retryable = retryable;
   }
 }
 const ms = (value: number) => rational(BigInt(value), 1000n);

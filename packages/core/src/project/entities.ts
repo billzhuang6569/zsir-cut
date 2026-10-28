@@ -1,5 +1,5 @@
-import { serializeProject } from "./io.js";
-import type { Project } from "./types.js";
+import { serializeProject } from "./io.ts";
+import type { Project } from "./types.ts";
 
 export interface EntitySnapshot {
   entity:

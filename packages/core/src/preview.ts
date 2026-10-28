@@ -5,10 +5,10 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { subtitleFiles } from "./export-framework.js";
-import { clipTimeMap, sourceFrameAt } from "./project/time-map.js";
-import type { Clip, Media, MediaTrack, Project, Timeline } from "./project/types.js";
-import { add, ceil, compare, div, floor, mul, printRational, type Rational, rational, sub } from "./rational.js";
+import { subtitleFiles } from "./export-framework.ts";
+import { clipTimeMap, sourceFrameAt } from "./project/time-map.ts";
+import type { Clip, Media, MediaTrack, Project, Timeline } from "./project/types.ts";
+import { add, ceil, compare, div, floor, mul, printRational, type Rational, rational, sub } from "./rational.ts";
 
 const zero = rational(0n);
 const endOf = (clip: Clip) => add(clip.timeline_start, clip.duration);

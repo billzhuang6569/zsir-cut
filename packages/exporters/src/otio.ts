@@ -4,25 +4,24 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import {
+import type { Clip, CutRow, Exporter, LossItem, Media, Rational } from "../../core/dist/index.js";
+
+const {
   add,
-  type Clip,
-  type CutRow,
   clipTimeMap,
   compare,
   div,
-  type Exporter,
   floor,
-  type LossItem,
-  type Media,
   mul,
   printRational,
   projectSubtitles,
-  type Rational,
   rational,
   sub,
   timecodeToFrame,
-} from "../../core/dist/index.js";
+}: typeof import("../../core/dist/index.js") = await import(
+  new URL(import.meta.url.endsWith(".ts") ? "../../core/src/index.ts" : "../../core/dist/index.js", import.meta.url)
+    .href
+);
 
 const count = (value: Rational) => {
   const n = floor(add(value, rational(1n, 2n)));

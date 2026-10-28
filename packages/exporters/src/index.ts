@@ -5,30 +5,36 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import {
-  add,
-  type Clip,
-  type CutRow,
-  compare,
-  div,
-  type Exporter,
-  floor,
-  type LossItem,
-  type Media,
-  type MediaTrack,
-  mul,
-  type Project,
-  parseRational,
-  printRational,
-  projectSubtitles,
-  type Rational,
-  rational,
-  sub,
-  subtitleFiles,
-  type Timeline,
+import type {
+  Clip,
+  CutRow,
+  Exporter,
+  LossItem,
+  Media,
+  MediaTrack,
+  Project,
+  Rational,
+  Timeline,
 } from "../../core/dist/index.js";
 import { otioExporter } from "./otio.ts";
 import { xmemlExporter } from "./xmeml.ts";
+
+const {
+  add,
+  compare,
+  div,
+  floor,
+  mul,
+  parseRational,
+  printRational,
+  projectSubtitles,
+  rational,
+  sub,
+  subtitleFiles,
+}: typeof import("../../core/dist/index.js") = await import(
+  new URL(import.meta.url.endsWith(".ts") ? "../../core/src/index.ts" : "../../core/dist/index.js", import.meta.url)
+    .href
+);
 
 const zero = rational(0n);
 const sec = (value: Rational) => printRational(value, true);
