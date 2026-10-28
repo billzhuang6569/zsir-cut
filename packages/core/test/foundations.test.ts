@@ -64,6 +64,56 @@ it("keeps a hold frame when its endpoint points backward", async () => {
 });
 
 describe("timecode", () => {
+  for (const [rate, fps] of [
+    ["24000/1001", 24n],
+    ["24", 24n],
+    ["25", 25n],
+    ["30000/1001", 30n],
+    ["30", 30n],
+    ["50", 50n],
+    ["60000/1001", 60n],
+    ["60", 60n],
+  ] as const) {
+    it(`${rate} round trips zero, one hour and the last frame of the day`, () => {
+      for (const [frame, tc] of [
+        [0n, "00:00:00:00"],
+        [fps * 3600n, "01:00:00:00"],
+        [fps * 86400n - 1n, `23:59:59:${fps - 1n}`],
+      ] as const) {
+        expect(frameToTimecode(frame, rate)).toBe(tc);
+        expect(timecodeToFrame(tc, rate)).toBe(frame);
+      }
+      expect(frameToTimecode(fps * 86400n, rate)).toBe("00:00:00:00");
+      expect(() => timecodeToFrame(`00:00:00:${fps}`, rate)).toThrow();
+      if (rate !== "30000/1001" && rate !== "60000/1001") expect(() => frameToTimecode(0n, rate, true)).toThrow();
+    });
+  }
+  for (const [rate, fps, dropped] of [
+    ["30000/1001", 30n, 2n],
+    ["60000/1001", 60n, 4n],
+  ] as const) {
+    it(`${rate} handles DF minute boundaries, day rollover and a nonzero start`, () => {
+      const minute = fps * 60n,
+        block = minute * 10n - dropped * 9n;
+      const day = block * 144n;
+      for (const [frame, tc] of [
+        [0n, "00:00:00;00"],
+        [minute - 1n, `00:00:59;${fps - 1n}`],
+        [minute, `00:01:00;0${dropped}`],
+        [block - 1n, `00:09:59;${fps - 1n}`],
+        [block, "00:10:00;00"],
+        [block * 6n, "01:00:00;00"],
+        [day - 1n, `23:59:59;${fps - 1n}`],
+      ] as const) {
+        expect(frameToTimecode(frame, rate, true)).toBe(tc);
+        expect(timecodeToFrame(tc, rate)).toBe(frame);
+      }
+      for (let number = 0n; number < dropped; number++)
+        expect(() => timecodeToFrame(`00:01:00;0${number}`, rate)).toThrow();
+      expect(frameToTimecode(day, rate, true)).toBe("00:00:00;00");
+      expect(frameToTimecode(minute, rate, true, "01:00:00;00")).toBe(`01:01:00;0${dropped}`);
+    });
+  }
   it("handles known drop-frame values and inverse", () => {
     for (const [frame, code] of [
       [0n, "00:00:00;00"],

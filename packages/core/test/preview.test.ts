@@ -8,8 +8,11 @@ import type { Exporter } from "../src/export-framework.js";
 import {
   cuttingList,
   dispatch,
+  div,
   fingerprint,
   parseProject,
+  parseRational,
+  printRational,
   rational,
   renderPreview,
   runExport,
@@ -35,7 +38,7 @@ afterEach(async () => {
 const run = (args: string[], input?: Buffer) => {
   const result = spawnSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-nostdin", ...args], {
     input,
-    maxBuffer: 16_000_000,
+    maxBuffer: 64_000_000,
   });
   const error: NodeJS.ErrnoException | undefined = result.error;
   if (error) throw new Error(`ffmpeg ${error.code === "ENOENT" ? "not found" : "failed to start"}: ${error.message}`);
@@ -151,7 +154,7 @@ async function setup() {
       {
         id: "tl_preview",
         name: "Timeline",
-        edit_rate: rational(4n),
+        edit_rate: rational(24n),
         drop_frame: false,
         start_timecode: "01:00:00:00",
         audio_rate: rational(48000n),
@@ -258,7 +261,7 @@ it("renders exact forward, reverse, hold frames and both sides of each cut", asy
   if (!timeline) throw new Error("Timeline missing");
   expect(
     [0n, 1n, 2n, 3n, 4n, 5n, 6n, 7n, 8n, 9n, 10n, 11n].map((frame) =>
-      Number(visibleFrame(project, timeline, frame)?.source_frame),
+      Number(visibleFrame(project, timeline, frame * 6n)?.source_frame),
     ),
   ).toEqual([0, 1, 2, 3, 7, 6, 5, 4, 8, 8, 8, 8]);
   const movie = join(directory, "preview.mov");
@@ -284,9 +287,9 @@ it("renders exact forward, reverse, hold frames and both sides of each cut", asy
   expect(container.format.tags?.comment).toContain("export_id=exp_test");
   const raw = run(["-i", movie, "-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]);
   const oneFrame = 640 * 360 * 3;
-  expect(Array.from({ length: 12 }, (_, i) => barcode(raw.subarray(i * oneFrame, (i + 1) * oneFrame), 640))).toEqual([
-    0, 1, 2, 3, 7, 6, 5, 4, 8, 8, 8, 8,
-  ]);
+  expect(
+    Array.from({ length: 12 }, (_, i) => barcode(raw.subarray(i * 6 * oneFrame, (i * 6 + 1) * oneFrame), 640)),
+  ).toEqual([0, 1, 2, 3, 7, 6, 5, 4, 8, 8, 8, 8]);
   const view = await viewTimeline(project, timeline, projectPath, join(directory, "view"));
   expect(view.cuts).toBe(2);
   for (const [index, pair] of [
@@ -304,6 +307,74 @@ it("renders exact forward, reverse, hold frames and both sides of each cut", asy
     ]);
     expect([barcode(picture, 1280), barcode(picture, 1280, 640)]).toEqual(pair);
   }
+});
+
+it.each([
+  ["24000/1001", false],
+  ["24", false],
+  ["25", false],
+  ["30000/1001", false],
+  ["30000/1001", true],
+  ["30", false],
+  ["50", false],
+  ["60000/1001", false],
+  ["60000/1001", true],
+  ["60", false],
+] as const)("renders and views %s fps (DF=%s) with exact frame selection", async (rate, drop) => {
+  const { directory, project, projectPath } = await setup();
+  const timeline = project.timelines[0];
+  if (!timeline) throw new Error("Missing timeline");
+  timeline.edit_rate = parseRational(rate);
+  timeline.drop_frame = drop;
+  timeline.start_timecode = drop ? "01:00:00;00" : "01:00:00:00";
+  const frame = div(rational(1n), timeline.edit_rate);
+  const first = { ...clip("first", 0n, 0n), duration: frame };
+  const second = { ...clip("second", 0n, 1n), timeline_start: frame, duration: frame };
+  timeline.tracks = [
+    { id: "trk_video", kind: "video", name: "V1", enabled: true, clips: [first, second], transitions: [] },
+  ];
+  await writeFile(projectPath, serializeProject(project));
+  expect(validateProjectSemantics(project).filter((issue) => issue.severity === "error")).toEqual([]);
+  const output = await dispatch(
+    "render_preview",
+    { project: projectPath, output: directory },
+    {
+      worker: true,
+      jobFile: join(directory, "job_rate", "job.json"),
+    },
+  );
+  expect(output.status, JSON.stringify(output.error)).toBe("applied");
+  const movie = (output.result as { path: string }).path;
+  const probe = spawnSync("ffprobe", [
+    "-v",
+    "error",
+    "-select_streams",
+    "v:0",
+    "-show_entries",
+    "stream=r_frame_rate,nb_frames",
+    "-of",
+    "json",
+    movie,
+  ]);
+  expect(probe.status, probe.stderr?.toString()).toBe(0);
+  const stream = JSON.parse(probe.stdout.toString()).streams[0];
+  expect(printRational(parseRational(stream.r_frame_rate.replace(/\/1$/, "")))).toBe(rate);
+  expect(stream.nb_frames).toBe("2");
+  const raw = run(["-i", movie, "-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]);
+  expect([barcode(raw, 640), barcode(raw.subarray(640 * 360 * 3), 640)]).toEqual([0, 4]);
+  const view = await dispatch(
+    "view_timeline",
+    { project: projectPath, output: directory },
+    {
+      worker: true,
+      jobFile: join(directory, "job_view_rate", "job.json"),
+    },
+  );
+  expect(view.status, JSON.stringify(view.error)).toBe("applied");
+  const result = view.result as { directory: string; cuts: number };
+  expect(result.cuts).toBe(1);
+  const strip = run(["-i", join(result.directory, "cut-0001.png"), "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]);
+  expect([barcode(strip, 1280), barcode(strip, 1280, 640)]).toEqual([0, 4]);
 });
 
 it("runs both verbs through jobs", async () => {
@@ -378,8 +449,8 @@ it("composites a transparent upper track over the selected source frame", async 
   await writeFile(projectPath, serializeProject(project));
   const movie = join(directory, "composite.mov");
   await renderPreview(project, timeline, projectPath, { output: movie, profile: "preview", exportId: "exp_alpha" });
-  const raw = run(["-i", movie, "-map", "0:v:0", "-frames:v", "2", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]);
-  const frame = raw.subarray(640 * 360 * 3);
+  const raw = run(["-i", movie, "-map", "0:v:0", "-frames:v", "7", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]);
+  const frame = raw.subarray(6 * 640 * 360 * 3);
   expect(frame[(180 * 640 + 40) * 3]).toBeGreaterThan(180);
   expect(frame[(180 * 640 + 600) * 3]).toBeGreaterThan(180);
   expect(frame[(180 * 640 + 600) * 3 + 1]).toBeLessThan(70);
@@ -409,7 +480,7 @@ it("uses exact segmented mapping and reports smooth approximation", async () => 
     },
   ];
   expect(
-    Array.from({ length: 8 }, (_, frame) => Number(visibleFrame(project, timeline, BigInt(frame))?.source_frame)),
+    Array.from({ length: 8 }, (_, frame) => Number(visibleFrame(project, timeline, BigInt(frame) * 6n)?.source_frame)),
   ).toEqual([0, 1, 2, 3, 4, 6, 8, 10]);
   expect(validateProjectSemantics(project).some((issue) => issue.code === "W_TIMEMAP_APPROX")).toBe(true);
   await writeFile(projectPath, serializeProject(project));

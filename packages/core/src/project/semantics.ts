@@ -1,5 +1,5 @@
 // biome-ignore-all lint/style/noNonNullAssertion: Indexed entries are guarded by schema or test setup.
-import { add, compare, div, mul, type Rational, rational, sub } from "../rational.ts";
+import { add, compare, div, mul, printRational, type Rational, rational, sub } from "../rational.ts";
 import type { ProjectIssue } from "./io.ts";
 import { projectSubtitles } from "./projection.ts";
 import { displayRanges, transcriptRules } from "./subtitle-rules.ts";
@@ -64,6 +64,12 @@ export function validateProjectSemantics(project: Project, parseIssues: ProjectI
 
   for (const timeline of project.timelines) {
     addId(timeline.id);
+    if (
+      !["24000/1001", "24", "25", "30000/1001", "30", "50", "60000/1001", "60"].includes(
+        printRational(timeline.edit_rate),
+      )
+    )
+      report("E_TIME_FORM", "error", "Unsupported timeline frame rate", timeline.id);
     const tracks = new Map(timeline.tracks.map((track) => [track.id, track]));
     for (const track of timeline.tracks) {
       addId(track.id);

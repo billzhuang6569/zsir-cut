@@ -7,9 +7,12 @@ import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import {
+  add,
   compareCuttingLists,
   cuttingList,
+  div,
   fingerprint,
+  floor,
   parseProject,
   rational,
   runExport,
@@ -19,7 +22,7 @@ import {
 import exporter from "../src/index.js";
 
 const profile = "premiere-25-xmeml-5";
-const fixtures = ["std-25", "std-2997-df", "std-2997-ndf"];
+const fixtures = ["std-25", "std-2997-df", "std-2997-ndf", "std-2398", "std-5994-df"];
 const mediaRoot = pathToFileURL(resolve("fixtures/.media")).href.replace("file:///", "file://localhost/");
 const previewStub: NonNullable<Parameters<typeof runExport>[6]> = async (_project, _timeline, _path, options) => {
   const data = Buffer.from("preview test placeholder");
@@ -66,6 +69,67 @@ async function generate(path: string) {
 }
 
 describe("Premiere xmeml v5", () => {
+  it.each(["fixtures/projects/std-2398.zcut.json", "fixtures/regressions/xmeml-reverse-grid.zcut.json"])(
+    "%s reports the reverse source-frame displacement using the exact file length",
+    async (path) => {
+      const { project, timeline, xml } = await generate(path);
+      const item = clipitem(xml, "clp_v7");
+      expect(parameterValue(item, "reverse")).toBe("TRUE");
+      expect(parameterValue(item, "speed")).toBe("100");
+      const file = xml.match(/<file id="med_B">[\s\S]*?<\/file>/)?.[0];
+      if (!file) throw new Error("Missing source file");
+      expect(frame(file, "duration")).toBe(2698);
+      // Native source/sequence rate ratio is 5/4; keep file length exact until the final source-frame rounding.
+      const source = (coordinate: number) =>
+        Number(floor(add(sub(rational(2698n), rational(BigInt(coordinate) * 5n, 4n)), rational(1n, 2n))));
+      expect([source(frame(item, "in")), source(frame(item, "out"))]).toEqual([1101, 1001]);
+      expect((await exporter.readBack(xml, timeline)).find((row) => row.clip_id === "clp_v7")).toMatchObject({
+        source_in: 1101,
+        source_out: 1001,
+      });
+      expect(exporter.losses(project, timeline, profile)).toContainEqual(
+        expect.objectContaining({
+          entity_id: "clp_v7",
+          feature: "clip_cut",
+          status: "approximated",
+          severity: "warning",
+          reason_code: "R_GRID_ROUNDED",
+          consequence: expect.stringContaining("源入点偏差 1 源帧、源出点偏差 1 源帧"),
+        }),
+      );
+    },
+  );
+  it.each(["reverse", "slow"])(
+    "preserves exactly representable mixed-rate %s cuts without a rounding loss",
+    async (kind) => {
+      const { project, timeline, paths } = await generate("fixtures/regressions/xmeml-reverse-grid.zcut.json");
+      const track = timeline.tracks[0];
+      if (track?.kind !== "video" || !track.clips[0]) throw new Error("Missing clip");
+      const clip = track.clips[0];
+      clip.source_start =
+        kind === "reverse" ? rational(1098n * 1001n, 30000n) : div(rational(1n, 2n), timeline.edit_rate);
+      clip.time_map = [
+        { at: rational(0n), source: clip.source_start, interp: "linear" },
+        {
+          at: clip.duration,
+          source: add(
+            clip.source_start,
+            kind === "reverse" ? rational(-100n * 1001n, 30000n) : div(clip.duration, rational(2n)),
+          ),
+          interp: "linear",
+        },
+      ];
+      const xml = (await exporter.generate(project, timeline, profile, paths)).data.toString();
+      expect(frame(clipitem(xml, clip.id), "in")).toBe(kind === "reverse" ? 1280 : 1);
+      expect((await exporter.readBack(xml, timeline)).find((row) => row.clip_id === clip.id)).toMatchObject(
+        kind === "reverse" ? { source_in: 1098, source_out: 998 } : { source_in: 1, source_out: 51 },
+      );
+      expect(
+        exporter.losses(project, timeline, profile).filter((item) => item.reason_code === "R_GRID_ROUNDED"),
+      ).toEqual([]);
+      expect(await exporter.validate(xml)).toBe(true);
+    },
+  );
   it("keeps a hold fixed even when the following source point jumps", async () => {
     const { project, timeline, paths } = await generate("fixtures/regressions/xmeml-retime.zcut.json");
     const track = timeline.tracks[0];
@@ -94,6 +158,8 @@ describe("Premiere xmeml v5", () => {
         await readFile(`fixtures/golden/xmeml/${name}.xml`, "utf8"),
       );
     });
+  }
+  for (const name of ["std-25", "std-2997-df", "std-2997-ndf"]) {
     it(`${name} writes retimed in/out and constant graphdict freeze frames`, async () => {
       const { xml } = await generate(`fixtures/projects/${name}.zcut.json`);
       const is25 = name === "std-25";
@@ -223,6 +289,7 @@ describe("Premiere xmeml v5", () => {
           feature: "clip_cut",
           status: "approximated",
           severity: "warning",
+          consequence: expect.stringContaining("源入点偏差 1 源帧、源出点偏差 1 源帧"),
         }),
       ],
     );

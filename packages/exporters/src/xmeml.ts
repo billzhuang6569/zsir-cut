@@ -6,6 +6,7 @@ const {
   add,
   clipTimeMap,
   compare,
+  cuttingList,
   div,
   floor,
   mul,
@@ -91,11 +92,8 @@ const sourceRate = (media: Media) =>
 const retimeInput = (source: Rational, speed: Rational, media: Media, rate: Rational) => {
   if (speed.numerator === 0n) return rational(0n);
   const reverse = speed.numerator < 0n;
-  const limit = count(div(rational(BigInt(count(media.duration, sourceRate(media)))), sourceRate(media)), rate);
-  return div(
-    reverse ? sub(rational(BigInt(limit)), mul(source, rate)) : mul(source, rate),
-    reverse ? mul(speed, rational(-1n)) : speed,
-  );
+  const limit = mul(div(rational(BigInt(count(media.duration, sourceRate(media)))), sourceRate(media)), rate);
+  return div(reverse ? sub(limit, mul(source, rate)) : mul(source, rate), reverse ? mul(speed, rational(-1n)) : speed);
 };
 const rateXml = (rate: Rational) =>
   n("rate", [
@@ -210,13 +208,13 @@ function effects(clip: Clip, kind: "video" | "audio", speed: Rational, sourceIn:
 function sourceRange(item: Xml, file: Xml, sequenceRate: Rational) {
   const input = number(item, "in"),
     output = number(item, "out");
-  const limit = count(div(rational(BigInt(number(file, "duration"))), readRate(file)), sequenceRate);
+  const limit = mul(div(rational(BigInt(number(file, "duration"))), readRate(file)), sequenceRate);
   const remaps = children(item, "filter")
     .map((entry) => required(entry, "effect"))
     .filter((effect) => value(effect, "effectid") === "timeremap");
   if (remaps.length > 1) throw new Error("Duplicate Time Remap filter");
   const remap = remaps[0];
-  if (!remap) return { start: input, end: output, speed: rational(1n), limit };
+  if (!remap) return { start: rational(BigInt(input)), end: rational(BigInt(output)), speed: rational(1n), limit };
   const parameters = new Map(children(remap, "parameter").map((entry) => [value(entry, "parameterid"), entry]));
   if (parameters.size !== children(remap, "parameter").length || parameters.has("freeze"))
     throw new Error("Duplicate or obsolete Time Remap parameter");
@@ -240,13 +238,13 @@ function sourceRange(item: Xml, file: Xml, sequenceRate: Rational) {
     )
       throw new Error("Invalid freeze graphdict");
     const frame = number(keys[0]!, "value");
-    return { start: frame, end: frame, speed, limit };
+    return { start: rational(BigInt(frame)), end: rational(BigInt(frame)), speed, limit };
   }
   if (variable !== "0" || speed.numerator === 0n || parameters.has("graphdict"))
     throw new Error("Invalid constant Time Remap");
   const source = (frame: number) => {
     const mapped = mul(rational(BigInt(frame)), speed);
-    return count(reverse === "TRUE" ? sub(rational(BigInt(limit)), mapped) : mapped, rational(1n));
+    return reverse === "TRUE" ? sub(limit, mapped) : mapped;
   };
   return reverse === "TRUE"
     ? { start: source(input), end: source(output), speed: mul(speed, rational(-1n)), limit }
@@ -478,7 +476,7 @@ export const xmemlExporter: Exporter & { validationNotes?: string } = {
           const range = sourceRange(item, sourceFile, sequenceRate);
           const [numerator, denominator = "1"] = match[5]!.split("/");
           const loggedSpeed = rational(BigInt(numerator!), BigInt(denominator));
-          const source = (frame: number) => count(div(rational(BigInt(frame)), sequenceRate), readRate(sourceFile));
+          const source = (frame: Rational) => count(div(frame, sequenceRate), readRate(sourceFile));
           rows.push({
             track_type: kind,
             track_number: index + 1,
@@ -508,6 +506,9 @@ export const xmemlExporter: Exporter & { validationNotes?: string } = {
   },
   losses(project, timeline) {
     const items: LossItem[] = [];
+    const cuts = new Map<string, CutRow[]>();
+    for (const row of cuttingList(project, timeline, "premiere-25-xmeml-5"))
+      cuts.set(row.clip_id, [...(cuts.get(row.clip_id) ?? []), row]);
     for (const style of project.subtitle_styles)
       items.push(
         loss(
@@ -589,13 +590,24 @@ export const xmemlExporter: Exporter & { validationNotes?: string } = {
         ext(clip, "clip", clip.timeline_start, clip.duration);
         const points = clipTimeMap(clip);
         const media = project.media.find((entry) => entry.id === clip.media_id)!;
+        const sourceUnit = media.kind === "audio" ? "源采样" : "源帧";
+        const rows = cuts.get(clip.id)!;
+        const deviations = points.slice(0, -1).map((first, index) => {
+          const last = points[index + 1]!;
+          const row = rows[index]!;
+          const start = row.source_in - count(first.source, sourceRate(media));
+          const end = row.source_out - count(first.interp === "hold" ? first.source : last.source, sourceRate(media));
+          return { start, end };
+        });
         const sourceRounded =
-          points.some((point) => mul(point.source, timeline.edit_rate).denominator !== 1n) ||
+          deviations.some(({ start, end }) => start !== 0 || end !== 0) ||
           points.slice(0, -1).some((first, index) => {
             const last = points[index + 1]!;
             const speed =
               first.interp === "hold" ? rational(0n) : div(sub(last.source, first.source), sub(last.at, first.at));
-            return retimeInput(first.source, speed, media, timeline.edit_rate).denominator !== 1n;
+            return speed.numerator === 0n
+              ? mul(first.source, timeline.edit_rate).denominator !== 1n
+              : retimeInput(first.source, speed, media, timeline.edit_rate).denominator !== 1n;
           });
         if (sourceRounded)
           items.push(
@@ -606,7 +618,7 @@ export const xmemlExporter: Exporter & { validationNotes?: string } = {
               "approximated",
               "warning",
               "R_GRID_ROUNDED",
-              "源入出点或变速后入点已取整到序列帧网格，需在 Premiere 核对源帧",
+              `源入出点或变速后入点已取整到序列帧网格；${deviations.map(({ start, end }, index) => `第 ${index + 1} 段源入点偏差 ${start} ${sourceUnit}、源出点偏差 ${end} ${sourceUnit}`).join("；")}，需在 Premiere 核对源帧`,
               clip.timeline_start,
               clip.duration,
             ),
@@ -718,10 +730,10 @@ export const xmemlExporter: Exporter & { validationNotes?: string } = {
               required(file, "media");
             } else if (!known.has(file.attrs.id)) throw new Error("File referenced before definition");
             const range = sourceRange(item, files.get(file.attrs.id)!, sequenceRate);
+            const limit = rational(BigInt(count(range.limit, rational(1n))));
             if (
-              Math.min(range.start, range.end) < 0 ||
-              Math.max(range.start, range.end) > range.limit ||
-              (range.speed.numerator === 0n && range.start === range.limit)
+              [range.start, range.end].some((point) => compare(point, rational(0n)) < 0 || compare(point, limit) > 0) ||
+              (range.speed.numerator === 0n && compare(range.start, limit) === 0)
             )
               throw new Error("Source range exceeds file duration");
             const note = value(required(item, "logginginfo"), "lognote") ?? "";

@@ -16,7 +16,7 @@ import {
 } from "../../core/src/index.js";
 import exporter from "../src/index.js";
 
-const fixtures = ["std-25", "std-2997-df", "std-2997-ndf"];
+const fixtures = ["std-25", "std-2997-df", "std-2997-ndf", "std-2398", "std-5994-df"];
 const profiles = ["fcp-11-fcpxml-1.13", "fcp-10.6-fcpxml-1.11"] as const;
 const mediaRoot = pathToFileURL(resolve("fixtures/.media")).href;
 const previewStub: NonNullable<Parameters<typeof runExport>[6]> = async (_project, _timeline, _path, options) => {
@@ -46,7 +46,12 @@ describe("FCPXML", () => {
         const { project, timeline, xml } = await generate(file, profile);
         const expected = cuttingList(project, timeline, profile);
         const actual = await exporter.readBack(xml, timeline);
-        expect(actual.map(({ timeline_in_exact: _in, timeline_out_exact: _out, ...row }) => row)).toEqual(expected);
+        const identities = (rows: typeof expected) =>
+          rows.map(
+            ({ timeline_in: _start, timeline_out: _end, timeline_in_exact: _in, timeline_out_exact: _out, ...row }) =>
+              row,
+          );
+        expect(identities(actual)).toEqual(identities(expected));
         expect(
           compareCuttingLists(expected, actual, new Set(), exporter.gridTolerances(project, timeline))
             .zero_frame_deviation,

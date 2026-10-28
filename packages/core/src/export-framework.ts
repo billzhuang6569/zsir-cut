@@ -185,9 +185,7 @@ export function cuttingList(project: Project, timeline: Timeline, profile: Profi
           const magnitude = reverse ? mul(speed, rational(-1n)) : speed;
           // xmeml serializes speed as a percentage with nine decimal places.
           const exportedSpeed = rational(round(mul(magnitude, rational(100000000000n))), 100000000000n);
-          const limit = rational(
-            round(mul(div(rational(round(mul(media.duration, sourceRate))), sourceRate), timeline.edit_rate)),
-          );
+          const limit = mul(div(rational(round(mul(media.duration, sourceRate))), sourceRate), timeline.edit_rate);
           const input =
             speed.numerator === 0n
               ? 0n
@@ -207,7 +205,7 @@ export function cuttingList(project: Project, timeline: Timeline, profile: Profi
                 : reverse
                   ? sub(limit, mul(rational(frame), exportedSpeed))
                   : mul(rational(frame), exportedSpeed);
-            return div(rational(round(mapped)), timeline.edit_rate);
+            return div(speed.numerator === 0n ? rational(round(mapped)) : mapped, timeline.edit_rate);
           };
           sourceIn = source(input);
           sourceOut = source(input + duration);

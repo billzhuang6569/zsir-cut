@@ -9,6 +9,7 @@ import { type Token, wavPcm24 } from "./audio.ts";
 import { decodeBarcode } from "./barcode.ts";
 import { bindProject, type FingerprintTable } from "./bind.ts";
 import { baseFrame, HEIGHT, isWhiteFrame, overlayText, WIDTH } from "./picture.ts";
+import { frameRateProjects, generateFrameRateProjects } from "./projects.ts";
 
 const root = resolve("fixtures/.media");
 const temp = join(root, ".tmp");
@@ -375,6 +376,7 @@ async function generateSpoken(): Promise<void> {
 }
 
 async function generate(): Promise<void> {
+  await generateFrameRateProjects();
   const labels = await renderLabels();
   try {
     for (const item of media) await encode(item, labels);
@@ -393,7 +395,7 @@ async function bind(): Promise<void> {
   const table = JSON.parse(await readFile(join(root, "fingerprints.json"), "utf8")) as FingerprintTable;
   const output = join(root, "projects");
   await mkdir(output, { recursive: true });
-  for (const name of ["std-25", "std-2997-df", "std-2997-ndf"]) {
+  for (const name of ["std-25", "std-2997-df", "std-2997-ndf", ...frameRateProjects.map((item) => item.name)]) {
     const filename = `${name}.zcut.json`;
     await writeFile(
       join(output, filename),
@@ -429,6 +431,9 @@ async function relocate(target: string | undefined): Promise<void> {
 
 async function main(): Promise<void> {
   switch (process.argv[2]) {
+    case "projects":
+      await generateFrameRateProjects();
+      break;
     case "gen":
       await generate();
       break;
@@ -449,7 +454,7 @@ async function main(): Promise<void> {
       await relocate(process.argv[3]);
       break;
     default:
-      throw new Error("Usage: node fixtures/synth/cli.ts gen|spoken|bind|check|relocate");
+      throw new Error("Usage: node fixtures/synth/cli.ts gen|projects|spoken|bind|check|relocate");
   }
 }
 

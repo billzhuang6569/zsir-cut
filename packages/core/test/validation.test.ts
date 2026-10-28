@@ -35,6 +35,23 @@ function expectOnlyError(project: Project, code: string): void {
 }
 
 describe("L1 semantic validation", () => {
+  it.each(["std-2398", "std-5994-df"])("accepts %s with zero L1 errors", async (name) => {
+    expect(
+      validateProjectSemantics(await load(`fixtures/projects/${name}.zcut.json`)).filter(
+        (issue) => issue.severity === "error",
+      ),
+    ).toEqual([]);
+  });
+  it.each(["4", "26", "120", "25000/1001"])("rejects timeline rate %s without rejecting source rates", async (rate) => {
+    const project = await load("fixtures/regressions/read-view-30.zcut.json");
+    const [n, d = "1"] = rate.split("/");
+    project.timelines[0]!.edit_rate = rational(BigInt(n!), BigInt(d));
+    project.timelines[0]!.tracks = [];
+    project.media[0]!.video!.rate = rational(120n);
+    expectOnlyError(project, "E_TIME_FORM");
+    project.timelines[0]!.edit_rate = rational(30n);
+    expect(validateProjectSemantics(project)).toEqual([]);
+  });
   it("accepts all five source projects, with only expected warnings on standard projects", async () => {
     for (const name of ["std-25", "std-2997-df", "std-2997-ndf"]) {
       const issues = validateProjectSemantics(await load(`fixtures/projects/${name}.zcut.json`));
