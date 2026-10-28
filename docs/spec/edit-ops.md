@@ -7,7 +7,7 @@
 ## 1. 通用规则
 
 1. 一个 `edit` 请求里的操作按顺序在内存里执行，后面的操作看到前面操作的结果。任何一个操作失败，整个请求失败，工程不变。
-2. 时间参数一律是序列时间，规范有理数形式。剪辑域操作产生的视频片段边界必须落在帧网格上，不在网格上的参数返回 `E_VALIDATION`，不悄悄取整。唯一的例外是 `remove_span` 的 `snap`。
+2. 时间参数一律是序列时间（`place` 的 `source_start` 是源时间），有理数秒。请求里可以写非最简分数，例如 `"50/25s"`，内核读入时约分，工程文件、`changes` 和结果里一律是规范形式。剪辑域操作产生的视频片段边界必须落在帧网格上，不在网格上的参数返回 `E_VALIDATION`，不悄悄取整。例外是 `remove_span` 的 `snap` 和 `place` 的 `tokens`。
 3. 创建实体的操作可以给出新 ID，不给就由内核生成。生成的 ID 在 `changes` 里返回。
 4. 引用不存在的 ID 返回 `E_NOT_FOUND`。
 5. 全部操作执行完后做 L1 校验，有错误就整个请求 `rejected`、`E_VALIDATION`。
@@ -21,6 +21,16 @@
 ### `place`
 
 参数：`media_id`、`source_start`、`duration`、`at`、`video_track`（可选）、`audio_track`（可选）、`mode`（`insert` 或 `overwrite`）、`source_channels`（可选）、`occurrence_id`、`video_clip_id`、`audio_clip_id`（均可选）。
+
+`source_start` 加 `duration` 可以换成 `tokens`（`transcript_id`、`from_token`、`to_token`、`pause`），按字词选段，这是 Agent 做纸面剪辑的主要方式：
+
+1. 母稿的 `media_id` 必须等于 `media_id`，否则 `E_VALIDATION`。`from_token` 不能在 `to_token` 之后。
+2. 用两个字词的对齐时间（第 3 层，没有就用第 2 层）定源区间 `[from 起点, to 终点]`。
+3. 给了 `pause` 时两端各留一点静音：前一个字词取母稿里 `from_token` 之前最近的 `text` 非空的字词，它的源终点为 `p`，没有时 `p` 为 `0s`；后一个字词同理，源起点为 `n`，没有时为素材时长。`L = from 起点 − p`，`R = n − to 终点`，都不小于 0。区间改为 `[from 起点 − min(L, pause/2), to 终点 + min(R, pause/2)]`。不给 `pause` 时贴着字边。
+4. 取整：起点按素材的帧网格向下取整（纯音频素材按时间线帧网格），时长按时间线帧网格向上取整，结果不超出素材范围。
+5. 之后与给了 `source_start`、`duration` 的情况完全相同。实际用的源区间写在 `changes` 的 `detail.source_start` 和 `detail.duration` 里。
+
+`at` 可以写 `"end"`，表示时间线现有内容的末尾，即所有视频轨和音频轨上片段出点的最大值，空时间线为 `0s`。按字词选段时配合 `mode: insert` 和 `at: "end"`，按顺序逐段追加，就能搭出纸面剪辑的结构。
 
 - 新建一个 `occurrence_id`。素材有画面且给了 `video_track`，就在该轨上建视频片段；有声音且给了 `audio_track`，就建音频片段。两者都没建成返回 `E_VALIDATION`。
 - `insert`：先在 `at` 处合拢后移 `duration`。所有视频、音频轨上横跨 `at` 的片段在 `at` 处切开，右半段拿新 ID，和 `at` 之后的内容一起后移。然后放入新片段。
