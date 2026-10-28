@@ -47,15 +47,22 @@ function sourceOrigin(media: Media, rate: Rational) {
   const tcRate = media.kind === "audio" ? rational(25n) : rate;
   return count(mul(div(rational(timecodeToFrame(media.start_timecode, printRational(tcRate))), tcRate), rate));
 }
+const resolveNumberKeys = ["Parameter Value", "Default Parameter Value", "minValue", "maxValue"];
+function decimal(value: number) {
+  // Node 24 supports rawJSON; TypeScript's ES2023 library does not declare it yet.
+  return (JSON as typeof JSON & { rawJSON(text: string): unknown }).rawJSON(
+    String(value).replace(/^(-?\d+)(e|$)/, "$1.0$2"),
+  );
+}
 function resolveEffects(transform: NonNullable<Clip["transform"]>) {
   const parameter = (id: string, value: number, defaultValue: number, min: number, max: number) => ({
     "Parameter ID": id,
-    "Parameter Value": value,
-    "Default Parameter Value": defaultValue,
+    "Parameter Value": decimal(value),
+    "Default Parameter Value": decimal(defaultValue),
     "Variant Type": "Double",
     "Key Frames": {},
-    minValue: min,
-    maxValue: max,
+    minValue: decimal(min),
+    maxValue: decimal(max),
   });
   const effect = (name: string, label: string, type: number, parameters: ReturnType<typeof parameter>[]) => ({
     OTIO_SCHEMA: "Effect.1",
@@ -117,8 +124,9 @@ type OtioTime = { OTIO_SCHEMA: string; rate: number; value: number };
 type OtioRange = { OTIO_SCHEMA: string; start_time: OtioTime; duration: OtioTime };
 type OtioChild = {
   OTIO_SCHEMA: string;
+  kind?: "Video" | "Audio";
   metadata?: { zsir?: Record<string, unknown> };
-  source_range?: OtioRange;
+  source_range?: OtioRange | null;
   effects?: { OTIO_SCHEMA: string; time_scalar?: number }[];
   children?: OtioChild[];
 };
@@ -157,7 +165,11 @@ export const otioExporter: Exporter & { validationNotes?: string } = {
           const start = count(mul(add(clip.timeline_start, first.at), timeline.edit_rate));
           const end = count(mul(add(clip.timeline_start, last.at), timeline.edit_rate));
           if (start > cursor) children.push({ OTIO_SCHEMA: "Gap.1", source_range: range(0, start - cursor, editRate) });
-          const speed = div(sub(last.source, first.source), sub(last.at, first.at));
+          const reverse = compare(last.source, first.source) < 0;
+          const speed = div(
+            reverse ? sub(first.source, last.source) : sub(last.source, first.source),
+            sub(last.at, first.at),
+          );
           const effect =
             compare(speed, rational(0n)) === 0
               ? {
@@ -178,7 +190,7 @@ export const otioExporter: Exporter & { validationNotes?: string } = {
                     enabled: true,
                     time_scalar: rateNumber(speed),
                   };
-          children.push({
+          const forward = {
             OTIO_SCHEMA: "Clip.2",
             metadata: {
               zsir: {
@@ -227,7 +239,41 @@ export const otioExporter: Exporter & { validationNotes?: string } = {
               },
             },
             active_media_reference_key: "DEFAULT_MEDIA",
-          });
+          };
+          children.push(
+            reverse
+              ? {
+                  OTIO_SCHEMA: "Stack.1",
+                  name: forward.name,
+                  metadata: forward.metadata,
+                  source_range: range(0, end - start, editRate),
+                  effects: [
+                    {
+                      OTIO_SCHEMA: "LinearTimeWarp.1",
+                      name: "",
+                      effect_name: "",
+                      metadata: {},
+                      time_scalar: decimal(-1),
+                    },
+                  ],
+                  markers: [],
+                  enabled: forward.enabled,
+                  children: [
+                    {
+                      OTIO_SCHEMA: "Track.1",
+                      name: track.kind === "video" ? "Video" : "Audio",
+                      kind: track.kind === "video" ? "Video" : "Audio",
+                      metadata: {},
+                      source_range: null,
+                      effects: [],
+                      markers: [],
+                      enabled: true,
+                      children: [forward],
+                    },
+                  ],
+                }
+              : forward,
+          );
           cursor = end;
         }
         const transition = transitions.get(clip.id);
@@ -309,7 +355,7 @@ export const otioExporter: Exporter & { validationNotes?: string } = {
     const rows: CutRow[] = [];
     const numbers = { video: 0, audio: 0 };
     for (const track of root.tracks.children) {
-      const kind = (track as OtioChild & { kind: "Video" | "Audio" }).kind === "Video" ? "video" : "audio";
+      const kind = track.kind === "Video" ? "video" : "audio";
       const number = ++numbers[kind];
       let cursor = 0;
       for (const child of track.children ?? []) {
@@ -321,10 +367,39 @@ export const otioExporter: Exporter & { validationNotes?: string } = {
           cursor += length;
           continue;
         }
-        if (child.OTIO_SCHEMA !== "Clip.2" || !child.metadata?.zsir) throw new Error("Invalid OTIO child");
+        let clip = child;
+        const reverse = child.OTIO_SCHEMA === "Stack.1";
+        if (reverse) {
+          const innerTrack = child.children?.[0];
+          const innerClip = innerTrack?.children?.[0];
+          if (
+            source.start_time.value !== 0 ||
+            Object.keys(child.metadata ?? {}).some((key) => key !== "zsir") ||
+            child.effects?.length !== 1 ||
+            child.effects[0]?.OTIO_SCHEMA !== "LinearTimeWarp.1" ||
+            child.effects[0].time_scalar !== -1 ||
+            child.children?.length !== 1 ||
+            innerTrack?.OTIO_SCHEMA !== "Track.1" ||
+            innerTrack.kind !== track.kind ||
+            innerTrack.source_range !== null ||
+            (innerTrack.effects?.length ?? 0) !== 0 ||
+            innerTrack.children?.length !== 1 ||
+            innerClip?.OTIO_SCHEMA !== "Clip.2" ||
+            innerClip.source_range?.duration.value !== source.duration.value ||
+            innerClip.source_range.duration.rate !== source.duration.rate
+          )
+            throw new Error("Invalid OTIO reverse compound");
+          clip = innerClip;
+          for (const key of ["clip_id", "occurrence_id", "media_id", "segment"])
+            if (child.metadata?.zsir?.[key] !== clip.metadata?.zsir?.[key])
+              throw new Error("Mismatched OTIO reverse compound identity");
+        }
+        if (clip.OTIO_SCHEMA !== "Clip.2" || !child.metadata?.zsir || !clip.source_range)
+          throw new Error("Invalid OTIO child");
+        const clipSource = clip.source_range;
         const zsir = child.metadata.zsir;
         const mediaRef = (
-          child as OtioChild & {
+          clip as OtioChild & {
             media_references: {
               DEFAULT_MEDIA: { target_url: string; metadata: { zsir: { source_origin: number } } };
             };
@@ -332,11 +407,16 @@ export const otioExporter: Exporter & { validationNotes?: string } = {
         ).media_references.DEFAULT_MEDIA;
         if (!isAbsolute(mediaRef.target_url)) throw new Error("OTIO media path must be a local absolute path");
         const origin = mediaRef.metadata.zsir.source_origin;
-        const speed =
-          child.effects?.find((effect) => effect.OTIO_SCHEMA === "LinearTimeWarp.1")?.time_scalar ??
-          (child.effects?.some((effect) => effect.OTIO_SCHEMA === "FreezeFrame.1") ? 0 : 1);
-        const delta = Math.round((source.duration.value * source.start_time.rate * speed) / source.duration.rate);
-        const first = source.start_time.value - origin - Math.min(0, delta);
+        const forwardSpeed =
+          clip.effects?.find((effect) => effect.OTIO_SCHEMA === "LinearTimeWarp.1")?.time_scalar ??
+          (clip.effects?.some((effect) => effect.OTIO_SCHEMA === "FreezeFrame.1") ? 0 : 1);
+        if (forwardSpeed < 0 || (reverse && forwardSpeed === 0))
+          throw new Error("OTIO reverse compound requires a forward clip");
+        const speed = reverse ? -forwardSpeed : forwardSpeed;
+        const delta = Math.round(
+          (clipSource.duration.value * clipSource.start_time.rate * speed) / clipSource.duration.rate,
+        );
+        const first = clipSource.start_time.value - origin - Math.min(0, delta);
         const last = first + delta;
         rows.push({
           track_type: kind,
@@ -470,6 +550,34 @@ export const otioExporter: Exporter & { validationNotes?: string } = {
     return items;
   },
   async validate(data) {
+    try {
+      const invalidParameters = new WeakSet<object>();
+      const parsed = JSON.parse(data.toString(), function (key, value, context?: { source?: string }) {
+        if (resolveNumberKeys.includes(key) && (typeof value !== "number" || !context?.source?.includes(".")))
+          invalidParameters.add(this);
+        return value;
+      }) as { tracks: OtioChild };
+      const check = (node: OtioChild): boolean => {
+        for (const effect of node.effects ?? []) {
+          const resolve = (
+            effect as { metadata?: { Resolve_OTIO?: { "Effect Name"?: string; Parameters?: object[] } } }
+          ).metadata?.Resolve_OTIO;
+          if (!resolve || !["Transform", "Cropping"].includes(resolve["Effect Name"] ?? "")) continue;
+          if (
+            !resolve.Parameters?.every(
+              (parameter) =>
+                !invalidParameters.has(parameter) && resolveNumberKeys.every((key) => Object.hasOwn(parameter, key)),
+            )
+          )
+            return false;
+        }
+        return (node.children ?? []).every(check);
+      };
+      if (!check(parsed.tracks)) throw new Error("Resolve effect parameters must be JSON numbers with a decimal point");
+    } catch (error) {
+      this.validationNotes = `Resolve 私有效果数值格式校验失败：${String(error)}`;
+      return false;
+    }
     const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
     let python: string | undefined;
     for (const candidate of [process.env.ZSIR_OTIO_PYTHON, join(root, "tools/python/.venv/bin/python")]) {
@@ -489,16 +597,19 @@ export const otioExporter: Exporter & { validationNotes?: string } = {
     try {
       const path = join(dir, "timeline.otio");
       await writeFile(path, data);
-      const script =
-        "import sys,json,opentimelineio as o; raw=json.load(open(sys.argv[1])); expected=[c['source_range'] for tr in raw['tracks']['children'] for c in tr['children'] if c['OTIO_SCHEMA']=='Clip.2']; clips=list(o.adapters.read_from_file(sys.argv[1]).tracks.find_clips()); assert len(clips)==len(expected); assert all(c.source_range is not None and c.source_range.start_time.value==e['start_time']['value'] and c.source_range.start_time.rate==e['start_time']['rate'] and c.source_range.duration.value==e['duration']['value'] and c.source_range.duration.rate==e['duration']['rate'] for c,e in zip(clips,expected)); print(len(clips))";
+      const script = [
+        "import sys,json,opentimelineio as o",
+        "def ranges(node):",
+        " if node['OTIO_SCHEMA']=='Clip.2': yield node['source_range']",
+        " for child in node.get('children',[]): yield from ranges(child)",
+        "raw=json.load(open(sys.argv[1])); expected=list(ranges(raw['tracks']))",
+        "clips=list(o.adapters.read_from_file(sys.argv[1]).tracks.find_clips())",
+        "assert len(clips)==len(expected)",
+        "assert all(c.source_range is not None and c.source_range.start_time.value==e['start_time']['value'] and c.source_range.start_time.rate==e['start_time']['rate'] and c.source_range.duration.value==e['duration']['value'] and c.source_range.duration.rate==e['duration']['rate'] for c,e in zip(clips,expected))",
+        "print(len(clips))",
+      ].join("\n");
       const { stdout } = await promisify(execFile)(python, ["-c", script, path]);
-      const expected = (
-        JSON.parse(data.toString()) as { tracks: { children: { children: { OTIO_SCHEMA: string }[] }[] } }
-      ).tracks.children
-        .flatMap((track) => track.children)
-        .filter((child) => child.OTIO_SCHEMA === "Clip.2").length;
-      if (Number(stdout.trim()) !== expected) throw new Error("OTIO library clip count mismatch");
-      this.validationNotes = `OpenTimelineIO 官方库加载 ${expected} 个 Clip 并读取 source_range；剪辑表读回零帧比对通过`;
+      this.validationNotes = `OpenTimelineIO 官方库加载 ${Number(stdout.trim())} 个 Clip 并读取 source_range；剪辑表读回零帧比对通过`;
       return true;
     } catch (error) {
       this.validationNotes = `OTIO 官方库加载失败：${String(error)}`;

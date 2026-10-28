@@ -499,7 +499,8 @@
             "active_media_reference_key": "DEFAULT_MEDIA"
           },
           {
-            "OTIO_SCHEMA": "Clip.2",
+            "OTIO_SCHEMA": "Stack.1",
+            "name": "倒放",
             "metadata": {
               "zsir": {
                 "clip_id": "clp_v7",
@@ -507,61 +508,100 @@
                 "media_id": "med_B"
               }
             },
-            "name": "倒放",
             "source_range": {
               "OTIO_SCHEMA": "TimeRange.1",
-              "start_time": {
-                "OTIO_SCHEMA": "RationalTime.1",
-                "rate": 25,
-                "value": 901037
-              },
               "duration": {
                 "OTIO_SCHEMA": "RationalTime.1",
                 "rate": 25,
                 "value": 100
+              },
+              "start_time": {
+                "OTIO_SCHEMA": "RationalTime.1",
+                "rate": 25,
+                "value": 0
               }
             },
             "effects": [
               {
                 "OTIO_SCHEMA": "LinearTimeWarp.1",
                 "name": "",
-                "effect_name": "LinearTimeWarp",
+                "effect_name": "",
                 "metadata": {},
-                "enabled": true,
-                "time_scalar": -1
+                "time_scalar": -1.0
               }
             ],
             "markers": [],
             "enabled": true,
-            "color": null,
-            "media_references": {
-              "DEFAULT_MEDIA": {
-                "OTIO_SCHEMA": "ExternalReference.1",
-                "metadata": {
-                  "zsir": {
-                    "media_id": "med_B",
-                    "source_origin": 900037
+            "children": [
+              {
+                "OTIO_SCHEMA": "Track.1",
+                "name": "Video",
+                "kind": "Video",
+                "metadata": {},
+                "source_range": null,
+                "effects": [],
+                "markers": [],
+                "enabled": true,
+                "children": [
+                  {
+                    "OTIO_SCHEMA": "Clip.2",
+                    "metadata": {
+                      "zsir": {
+                        "clip_id": "clp_v7",
+                        "occurrence_id": "occ_8",
+                        "media_id": "med_B"
+                      }
+                    },
+                    "name": "倒放",
+                    "source_range": {
+                      "OTIO_SCHEMA": "TimeRange.1",
+                      "start_time": {
+                        "OTIO_SCHEMA": "RationalTime.1",
+                        "rate": 25,
+                        "value": 901037
+                      },
+                      "duration": {
+                        "OTIO_SCHEMA": "RationalTime.1",
+                        "rate": 25,
+                        "value": 100
+                      }
+                    },
+                    "effects": [],
+                    "markers": [],
+                    "enabled": true,
+                    "color": null,
+                    "media_references": {
+                      "DEFAULT_MEDIA": {
+                        "OTIO_SCHEMA": "ExternalReference.1",
+                        "metadata": {
+                          "zsir": {
+                            "media_id": "med_B",
+                            "source_origin": 900037
+                          }
+                        },
+                        "name": "B_25.mov",
+                        "available_range": {
+                          "OTIO_SCHEMA": "TimeRange.1",
+                          "duration": {
+                            "OTIO_SCHEMA": "RationalTime.1",
+                            "rate": 25,
+                            "value": 2250
+                          },
+                          "start_time": {
+                            "OTIO_SCHEMA": "RationalTime.1",
+                            "rate": 25,
+                            "value": 900037
+                          }
+                        },
+                        "available_image_bounds": null,
+                        "target_url": "/__MEDIA_ROOT__/25/B_25.mov"
+                      }
+                    },
+                    "active_media_reference_key": "DEFAULT_MEDIA"
                   }
-                },
-                "name": "B_25.mov",
-                "available_range": {
-                  "OTIO_SCHEMA": "TimeRange.1",
-                  "duration": {
-                    "OTIO_SCHEMA": "RationalTime.1",
-                    "rate": 25,
-                    "value": 2250
-                  },
-                  "start_time": {
-                    "OTIO_SCHEMA": "RationalTime.1",
-                    "rate": 25,
-                    "value": 900037
-                  }
-                },
-                "available_image_bounds": null,
-                "target_url": "/__MEDIA_ROOT__/25/B_25.mov"
+                ]
               }
-            },
-            "active_media_reference_key": "DEFAULT_MEDIA"
+            ]
           },
           {
             "OTIO_SCHEMA": "Clip.2",
@@ -1036,47 +1076,47 @@
                       {
                         "Parameter ID": "transformationZoomX",
                         "Parameter Value": 0.5,
-                        "Default Parameter Value": 1,
+                        "Default Parameter Value": 1.0,
                         "Variant Type": "Double",
                         "Key Frames": {},
-                        "minValue": 0,
-                        "maxValue": 100
+                        "minValue": 0.0,
+                        "maxValue": 100.0
                       },
                       {
                         "Parameter ID": "transformationZoomY",
                         "Parameter Value": 0.5,
-                        "Default Parameter Value": 1,
+                        "Default Parameter Value": 1.0,
                         "Variant Type": "Double",
                         "Key Frames": {},
-                        "minValue": 0,
-                        "maxValue": 100
+                        "minValue": 0.0,
+                        "maxValue": 100.0
                       },
                       {
                         "Parameter ID": "transformationPan",
                         "Parameter Value": 0.2,
-                        "Default Parameter Value": 0,
+                        "Default Parameter Value": 0.0,
                         "Variant Type": "Double",
                         "Key Frames": {},
-                        "minValue": -4,
-                        "maxValue": 4
+                        "minValue": -4.0,
+                        "maxValue": 4.0
                       },
                       {
                         "Parameter ID": "transformationTilt",
                         "Parameter Value": -0.2,
-                        "Default Parameter Value": 0,
+                        "Default Parameter Value": 0.0,
                         "Variant Type": "Double",
                         "Key Frames": {},
-                        "minValue": -4,
-                        "maxValue": 4
+                        "minValue": -4.0,
+                        "maxValue": 4.0
                       },
                       {
                         "Parameter ID": "transformationRotationAngle",
-                        "Parameter Value": 5,
-                        "Default Parameter Value": 0,
+                        "Parameter Value": 5.0,
+                        "Default Parameter Value": 0.0,
                         "Variant Type": "Double",
                         "Key Frames": {},
-                        "minValue": -100000,
-                        "maxValue": 100000
+                        "minValue": -100000.0,
+                        "maxValue": 100000.0
                       }
                     ]
                   }
@@ -1097,38 +1137,38 @@
                       {
                         "Parameter ID": "cropLeft",
                         "Parameter Value": 0.1,
-                        "Default Parameter Value": 0,
+                        "Default Parameter Value": 0.0,
                         "Variant Type": "Double",
                         "Key Frames": {},
-                        "minValue": -1,
-                        "maxValue": 1
+                        "minValue": -1.0,
+                        "maxValue": 1.0
                       },
                       {
                         "Parameter ID": "cropRight",
                         "Parameter Value": 0.1,
-                        "Default Parameter Value": 0,
+                        "Default Parameter Value": 0.0,
                         "Variant Type": "Double",
                         "Key Frames": {},
-                        "minValue": -1,
-                        "maxValue": 1
+                        "minValue": -1.0,
+                        "maxValue": 1.0
                       },
                       {
                         "Parameter ID": "cropTop",
                         "Parameter Value": 0.05,
-                        "Default Parameter Value": 0,
+                        "Default Parameter Value": 0.0,
                         "Variant Type": "Double",
                         "Key Frames": {},
-                        "minValue": -1,
-                        "maxValue": 1
+                        "minValue": -1.0,
+                        "maxValue": 1.0
                       },
                       {
                         "Parameter ID": "cropBottom",
                         "Parameter Value": 0.05,
-                        "Default Parameter Value": 0,
+                        "Default Parameter Value": 0.0,
                         "Variant Type": "Double",
                         "Key Frames": {},
-                        "minValue": -1,
-                        "maxValue": 1
+                        "minValue": -1.0,
+                        "maxValue": 1.0
                       }
                     ]
                   }
