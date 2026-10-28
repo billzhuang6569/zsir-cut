@@ -31,6 +31,23 @@ afterEach(async () => {
 });
 
 describe("read views", () => {
+  it.each(["24000/1001", "24", "25", "30000/1001", "30", "50", "60000/1001", "60"])(
+    "reads all views at %s fps",
+    async (rate) => {
+      const source = JSON.parse(await readFile("fixtures/regressions/read-view-30.zcut.json", "utf8"));
+      source.timelines[0].edit_rate = rate;
+      await writeFile(path, JSON.stringify(source));
+      await result("inspect", { view: "brief" });
+      const timeline = (await result("inspect", { view: "timeline" })).result as {
+        edit_rate: string;
+        tracks: { clips: { timeline_in: { tc: string }; source_in: { tc: string } }[] }[];
+      };
+      expect(timeline.edit_rate).toBe(rate);
+      expect(timeline.tracks[0]!.clips[0]!.timeline_in.tc).toBe("01:00:00:00");
+      expect(timeline.tracks[0]!.clips[0]!.source_in.tc).toBe("10:00:04:00");
+      await result("inspect", { view: "entity", id: "clp_v1" });
+    },
+  );
   it("returns all four inspect views with exact source and sequence timecodes", async () => {
     const brief = (await result("inspect", { view: "brief" })).result as Record<string, unknown>;
     expect(brief.project).toMatchObject({ id: "prj_std_25", revision: { seq: 1, id: "rev_fixture_1" } });

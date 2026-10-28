@@ -1,8 +1,11 @@
+import { add, floor, parseRational, rational } from "./rational.ts";
+
 function nominal(rate: string, drop: boolean): bigint {
-  if (drop && rate !== "30000/1001") throw new Error("Drop-frame requires 30000/1001");
-  if (rate === "25") return 25n;
-  if (rate === "30000/1001") return 30n;
-  throw new Error(`Unsupported timecode rate: ${rate}`);
+  if (drop && rate !== "30000/1001" && rate !== "60000/1001")
+    throw new Error("Drop-frame requires 30000/1001 or 60000/1001");
+  const fps = floor(add(parseRational(rate), rational(1n, 2n)));
+  if (fps < 1n) throw new Error(`Unsupported timecode rate: ${rate}`);
+  return fps;
 }
 
 export function timecodeToFrame(value: string, rate: string): bigint {
@@ -10,21 +13,18 @@ export function timecodeToFrame(value: string, rate: string): bigint {
   if (!match) throw new Error(`Invalid timecode: ${value}`);
   const drop = match[4] === ";";
   const fps = nominal(rate, drop);
+  const dropped = drop ? fps / 15n : 0n;
   const [hours, minutes, seconds, frames] = [match[1], match[2], match[3], match[5]].map((part) => BigInt(part!));
   if (
     hours! > 23n ||
     minutes! > 59n ||
     seconds! > 59n ||
     frames! >= fps ||
-    (drop && seconds === 0n && minutes! % 10n !== 0n && frames! < 2n)
+    (drop && seconds === 0n && minutes! % 10n !== 0n && frames! < dropped)
   )
     throw new Error(`Invalid timecode: ${value}`);
   const totalMinutes = hours! * 60n + minutes!;
-  return (
-    (hours! * 3600n + minutes! * 60n + seconds!) * fps +
-    frames! -
-    (drop ? 2n * (totalMinutes - totalMinutes / 10n) : 0n)
-  );
+  return (hours! * 3600n + minutes! * 60n + seconds!) * fps + frames! - dropped * (totalMinutes - totalMinutes / 10n);
 }
 
 export function frameToTimecode(
@@ -34,15 +34,19 @@ export function frameToTimecode(
   start = drop ? "00:00:00;00" : "00:00:00:00",
 ): string {
   const fps = nominal(rate, drop);
+  const dropped = drop ? fps / 15n : 0n;
   if (frame < 0n) throw new RangeError("negative frame");
   let count = frame + timecodeToFrame(start, rate);
-  const day = drop ? 2589408n : fps * 86400n;
+  const tenMinutes = fps * 600n - dropped * 9n;
+  const day = tenMinutes * 144n;
   count %= day;
   if (drop) {
-    const tenMinutes = 17982n;
     const block = count / tenMinutes;
     const rest = count % tenMinutes;
-    count += block * 18n + (rest >= 1800n ? 2n * ((rest - 1800n) / 1798n + 1n) : 0n);
+    const firstMinute = fps * 60n;
+    count +=
+      block * dropped * 9n +
+      (rest >= firstMinute ? dropped * ((rest - firstMinute) / (firstMinute - dropped) + 1n) : 0n);
   }
   const hours = count / (fps * 3600n);
   const minutes = (count / (fps * 60n)) % 60n;

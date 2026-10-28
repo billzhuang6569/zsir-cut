@@ -15,7 +15,7 @@ import {
 } from "../../core/src/index.js";
 import exporter from "../src/index.js";
 
-const fixtures = ["std-25", "std-2997-df", "std-2997-ndf"];
+const fixtures = ["std-25", "std-2997-df", "std-2997-ndf", "std-2398", "std-5994-df"];
 const files = [
   ...fixtures.map((name) => `fixtures/projects/${name}.zcut.json`),
   "fixtures/regressions/parent-25-on-2997.zcut.json",
@@ -410,7 +410,12 @@ describe("Resolve FCPXML candidate", () => {
           .map((item) => item.entity_id)
           .sort(),
       );
-      expect(actual.map(({ timeline_in_exact: _in, timeline_out_exact: _out, ...row }) => row)).toEqual(expected);
+      const identities = (rows: typeof expected) =>
+        rows.map(
+          ({ timeline_in: _start, timeline_out: _end, timeline_in_exact: _in, timeline_out_exact: _out, ...row }) =>
+            row,
+        );
+      expect(identities(actual)).toEqual(identities(expected));
       expect(compareCuttingLists(expected, actual, new Set(), tolerances).zero_frame_deviation).toBe(true);
       expect(await exporter.validate(candidate.data)).toBe(true);
     });

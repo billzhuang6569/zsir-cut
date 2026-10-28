@@ -1,0 +1,93 @@
+{
+  "schema": "zsir-cut/timeline",
+  "schema_version": "0.1",
+  "id": "prj_xmeml_reverse_grid",
+  "name": "xmeml reverse source grid regression",
+  "revision": {
+    "seq": 1,
+    "id": "rev_fixture_1",
+    "parent": null,
+    "created_at": "2026-10-26T00:00:00Z",
+    "author": {
+      "kind": "system",
+      "name": "fixtures"
+    }
+  },
+  "media": [
+    {
+      "id": "med_B",
+      "kind": "video",
+      "name": "B_2997.mov",
+      "path": "../.media/2997/B_2997.mov",
+      "size_bytes": 0,
+      "fingerprint": {
+        "algo": "sampled-sha256-v1",
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "duration": "1350349/15000s",
+      "start_timecode": "10:00:01;12",
+      "reel": "B",
+      "video": {
+        "rate": "30000/1001",
+        "width": 960,
+        "height": 540,
+        "pixel_aspect": "1",
+        "vfr": false
+      },
+      "audio": {
+        "sample_rate": "48000",
+        "channels": 2
+      }
+    }
+  ],
+  "timelines": [
+    {
+      "id": "tl_std",
+      "name": "xmeml-reverse-grid",
+      "edit_rate": "24000/1001",
+      "drop_frame": false,
+      "start_timecode": "01:00:00:00",
+      "audio_rate": "48000",
+      "format": {
+        "width": 960,
+        "height": 540,
+        "pixel_aspect": "1"
+      },
+      "tracks": [
+        {
+          "id": "trk_v1",
+          "kind": "video",
+          "name": "V1 主机位",
+          "enabled": true,
+          "clips": [
+            {
+              "id": "clp_v7",
+              "occurrence_id": "occ_8",
+              "media_id": "med_B",
+              "timeline_start": "0s",
+              "duration": "1001/300s",
+              "source_start": "11011/300s",
+              "time_map": [
+                {
+                  "at": "0s",
+                  "source": "11011/300s",
+                  "interp": "linear"
+                },
+                {
+                  "at": "1001/300s",
+                  "source": "1001/30s",
+                  "interp": "linear"
+                }
+              ],
+              "label": "倒放"
+            }
+          ],
+          "transitions": []
+        }
+      ],
+      "markers": []
+    }
+  ],
+  "transcripts": [],
+  "subtitle_styles": []
+}
