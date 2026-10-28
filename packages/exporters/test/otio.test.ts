@@ -9,6 +9,7 @@ import {
   fingerprint,
   lossReport,
   parseProject,
+  rational,
   runExport,
   serializeProject,
 } from "../../core/src/index.js";
@@ -67,7 +68,7 @@ describe("Resolve OTIO", () => {
       tracks: { markers: unknown[]; children: { children: Record<string, unknown>[] }[] };
     };
     const children = root.tracks.children[0]?.children ?? [];
-    const clips = children.filter((child) => child.OTIO_SCHEMA === "Clip.2");
+    const clips = children.filter((child) => child.OTIO_SCHEMA === "Clip.2" || child.OTIO_SCHEMA === "Stack.1");
     const zsir = (clip: Record<string, unknown>) => (clip.metadata as { zsir: Record<string, unknown> }).zsir;
     const effects = (clip: Record<string, unknown>) => clip.effects as { OTIO_SCHEMA: string; time_scalar?: number }[];
     const segmented = clips.filter((clip) => zsir(clip).clip_id === "clp_v8");
@@ -98,12 +99,126 @@ describe("Resolve OTIO", () => {
     expect(root.global_start_time.rate).toBe(30000 / 1001);
     expect(root.global_start_time.value).toBe(108000);
   });
+  it("writes decimal Resolve parameter numbers and rejects integers in each required field", async () => {
+    const { data } = await generate("fixtures/regressions/resolve-otio-transform.zcut.json", "resolve-18.5-otio");
+    const tokens = [
+      ...data.matchAll(/"(?:Parameter Value|Default Parameter Value|minValue|maxValue)":\s*(-?[\d.e+-]+)/g),
+    ];
+    expect(tokens).toHaveLength(108);
+    expect(tokens.every((match) => match[1]?.includes("."))).toBe(true);
+    expect(await exporter.validate(data)).toBe(true);
+    for (const key of ["Parameter Value", "Default Parameter Value", "minValue", "maxValue"]) {
+      const changed = data.replace(new RegExp(`("${key}":\\s*)(-?\\d+)\\.0(?=\\s*[,}])`), "$1$2");
+      expect(changed).not.toBe(data);
+      expect(await exporter.validate(changed), key).toBe(false);
+    }
+  });
+  it("keeps exponent parameter numbers decimal without changing similarly named extension data", async () => {
+    const { project, timeline, paths } = await generate(
+      "fixtures/regressions/resolve-otio-transform.zcut.json",
+      "resolve-18.5-otio",
+    );
+    const track = timeline.tracks[0];
+    if (!track || track.kind !== "video" || !track.clips[0]) throw new Error("Missing transform clip");
+    track.clips[0].transform = { scale: 1e-7, rotation_deg: 1e21 };
+    project.ext = { "Parameter Value": 5, text: '"minValue": 0, "Parameter Value": 1', time_scalar: -1 };
+    const data = (await exporter.generate(project, timeline, "resolve-18.5-otio", paths)).data.toString();
+    expect(data).toMatch(/"Parameter Value": 1\.0e-7/);
+    expect(data).toMatch(/"Parameter Value": 1\.0e\+21/);
+    expect(JSON.parse(data).metadata.zsir.project_ext).toEqual(project.ext);
+    expect(data).toContain('"Parameter Value": 5,');
+    expect(await exporter.validate(data)).toBe(true);
+    expect(await exporter.validate(data.replace('"Parameter Value": 1.0e-7', '"Parameter Value": 1e-7'))).toBe(false);
+  });
+  it("reverses a compound's forward source range and detects a changed nested source frame", async () => {
+    const { project, timeline, data } = await generate("fixtures/projects/std-25.zcut.json", "resolve-18.5-otio");
+    const root = JSON.parse(data);
+    const compound = root.tracks.children[0].children.find(
+      (child: { OTIO_SCHEMA: string }) => child.OTIO_SCHEMA === "Stack.1",
+    );
+    expect(compound).toBeDefined();
+    expect(Object.keys(compound.metadata)).toEqual(["zsir"]);
+    expect(compound.metadata.zsir).toMatchObject({ clip_id: "clp_v7", occurrence_id: "occ_8" });
+    expect(compound.source_range).toMatchObject({
+      start_time: { value: 0, rate: 25 },
+      duration: { value: 100, rate: 25 },
+    });
+    expect(compound.effects).toMatchObject([{ OTIO_SCHEMA: "LinearTimeWarp.1", time_scalar: -1 }]);
+    expect(data).toContain('"time_scalar": -1.0');
+    expect(compound.children).toHaveLength(1);
+    const track = compound.children[0];
+    expect(track).toMatchObject({ OTIO_SCHEMA: "Track.1", kind: "Video", source_range: null });
+    expect(track.children).toHaveLength(1);
+    const clip = track.children[0];
+    expect(clip.OTIO_SCHEMA).toBe("Clip.2");
+    expect(compound.name).toBe(clip.name);
+    expect(clip.effects).toEqual([]);
+    const sourceStart =
+      clip.source_range.start_time.value - clip.media_references.DEFAULT_MEDIA.metadata.zsir.source_origin;
+    const duration = compound.source_range.duration.value;
+    expect([0, 50, 99].map((frame) => sourceStart + duration - 1 - frame)).toEqual([1099, 1049, 1000]);
+    const expected = cuttingList(project, timeline, "resolve-18.5-otio");
+    expect(await exporter.readBack(data, timeline)).toEqual(expected);
+    clip.source_range.start_time.value++;
+    expect(
+      compareCuttingLists(expected, await exporter.readBack(JSON.stringify(root), timeline)).zero_frame_deviation,
+    ).toBe(false);
+    for (const corrupt of [
+      (item: typeof compound) => item.source_range.start_time.value++,
+      (item: typeof compound) => item.children[0].children[0].source_range.duration.value++,
+      (item: typeof compound) => {
+        item.children[0].kind = "Audio";
+      },
+      (item: typeof compound) => {
+        item.metadata.Resolve_OTIO = {};
+      },
+    ]) {
+      const invalid = JSON.parse(data);
+      corrupt(
+        invalid.tracks.children[0].children.find((child: { OTIO_SCHEMA: string }) => child.OTIO_SCHEMA === "Stack.1"),
+      );
+      await expect(exporter.readBack(JSON.stringify(invalid), timeline)).rejects.toThrow("OTIO");
+    }
+  });
+  it("keeps faster reverse video and paired audio forward inside their matching compound tracks", async () => {
+    const { project, timeline, paths } = await generate("fixtures/projects/std-25.zcut.json", "resolve-18.5-otio");
+    const video = timeline.tracks.find((track) => track.id === "trk_v1");
+    const audio = timeline.tracks.find((track) => track.id === "trk_a1");
+    if (!video || video.kind !== "video" || !audio || audio.kind !== "audio") throw new Error("Missing tracks");
+    const reverse = video.clips.find((clip) => clip.id === "clp_v7");
+    if (!reverse?.time_map?.[0]) throw new Error("Missing reverse clip");
+    reverse.source_start = reverse.time_map[0].source = rational(48n);
+    audio.clips.push({ ...reverse, id: "clp_reverse_audio" });
+    const data = (await exporter.generate(project, timeline, "resolve-18.5-otio", paths)).data.toString();
+    const root = JSON.parse(data);
+    for (const index of [0, 2]) {
+      const compound = root.tracks.children[index].children.find(
+        (child: { OTIO_SCHEMA: string }) => child.OTIO_SCHEMA === "Stack.1",
+      );
+      expect(compound.children[0].kind).toBe(index === 0 ? "Video" : "Audio");
+      expect(compound.children[0].source_range).toBeNull();
+      expect(compound.effects).toMatchObject([{ OTIO_SCHEMA: "LinearTimeWarp.1", time_scalar: -1 }]);
+      expect(compound.children[0].children[0].effects).toMatchObject([
+        { OTIO_SCHEMA: "LinearTimeWarp.1", time_scalar: 2 },
+      ]);
+    }
+    expect(await exporter.readBack(data, timeline)).toEqual(cuttingList(project, timeline, "resolve-18.5-otio"));
+    expect(await exporter.validate(data)).toBe(true);
+  });
   it("writes raw local paths, nominal DF timeline origin, true media frames, reverse minima and Resolve effects", async () => {
     const path = "fixtures/regressions/resolve-otio-transform.zcut.json";
     const { project, timeline, paths, data } = await generate(path, "resolve-18.5-otio");
     const root = JSON.parse(data);
     expect(root.global_start_time).toMatchObject({ value: 108000, rate: 30000 / 1001 });
-    const clips = root.tracks.children[0].children;
+    const children = root.tracks.children[0].children;
+    expect(children.map((child: { OTIO_SCHEMA: string }) => child.OTIO_SCHEMA)).toEqual([
+      "Stack.1",
+      "Stack.1",
+      "Clip.2",
+    ]);
+    expect(children[1].metadata.zsir).toMatchObject({ clip_id: "clp_segmented", segment: 0 });
+    expect(children[2].metadata.zsir).toMatchObject({ clip_id: "clp_segmented", segment: 1 });
+    const clips = [children[0].children[0].children[0], children[1].children[0].children[0], children[2]];
     expect(
       clips.map((clip: { source_range: { start_time: { value: number } } }) => clip.source_range.start_time.value),
     ).toEqual([1078980, 1079040, 1079040]);
@@ -114,8 +229,7 @@ describe("Resolve OTIO", () => {
     expect(reference.available_range.start_time.value).toBe(1078920);
     expect(reference.available_range.duration.value).toBe(3000);
     const effects = clips[0].effects;
-    expect(effects[0]).toMatchObject({ OTIO_SCHEMA: "LinearTimeWarp.1", time_scalar: -1 });
-    expect(effects.slice(1)).toEqual([
+    expect(effects).toEqual([
       expect.objectContaining({
         OTIO_SCHEMA: "Effect.1",
         name: "",
@@ -147,11 +261,9 @@ describe("Resolve OTIO", () => {
         },
       }),
     ]);
-    const parameters = effects
-      .slice(1)
-      .flatMap(
-        (effect: { metadata: { Resolve_OTIO: { Parameters: unknown[] } } }) => effect.metadata.Resolve_OTIO.Parameters,
-      );
+    const parameters = effects.flatMap(
+      (effect: { metadata: { Resolve_OTIO: { Parameters: unknown[] } } }) => effect.metadata.Resolve_OTIO.Parameters,
+    );
     const expected = [
       ["transformationZoomX", 0.5, 1, 0, 100],
       ["transformationZoomY", 0.5, 1, 0, 100],

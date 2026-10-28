@@ -19,7 +19,16 @@ def otio_rows(path, d):
         for it in tr:
             if isinstance(it, otio.schema.Transition): continue
             dur = Q(it.source_range.duration) if it.source_range else Q(it.duration())
-            if isinstance(it, otio.schema.Clip):
+            if isinstance(it, otio.schema.Stack):  # export-otio-xmeml 2.2: reverse = compound with -1 warp around a forward clip
+                inner = [c for tr2 in it for c in tr2 if isinstance(c, otio.schema.Clip)][0]
+                z = inner.metadata.get("zsir", {}) or it.metadata.get("zsir", {}); mid = z["media_id"]
+                ref = inner.media_reference; avail0 = Q(ref.available_range.start_time) if getattr(ref, "available_range", None) else F(0)
+                lo = Q(inner.source_range.start_time) - avail0; scal = F(1)
+                for e in it.effects:
+                    if isinstance(e, otio.schema.LinearTimeWarp): scal = F(e.time_scalar).limit_denominator(1000)
+                a, b = (lo + abs(scal) * dur, lo) if scal < 0 else (lo, lo + scal * dur)
+                pieces.setdefault((kind, idx, z["clip_id"]), []).append((pos, pos + dur, a, b, mid))
+            elif isinstance(it, otio.schema.Clip):
                 z = it.metadata.get("zsir", {}); mid = z["media_id"]; m = media[mid]
                 ref = it.media_reference; avail0 = Q(ref.available_range.start_time) if getattr(ref, "available_range", None) else F(0)
                 s0 = Q(it.source_range.start_time) - avail0
