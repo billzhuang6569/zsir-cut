@@ -8,6 +8,7 @@ import platform
 import subprocess
 import sys
 import time
+import unicodedata
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -21,6 +22,7 @@ MODELS = HOME / "models"
 ASR_NAMES = {"1.7b": "Qwen3-ASR-1.7B-8bit", "0.6b": "Qwen3-ASR-0.6B-8bit"}
 ALIGN_NAME = "Qwen3-ForcedAligner-0.6B-8bit"
 PUNCT = "。！？.!?，、；：,;:"
+SAMPLES_PER_MS = 16
 
 
 class WorkerError(Exception):
@@ -77,8 +79,10 @@ def weight_digest(path):
     return "sha256:" + digest.hexdigest()
 
 
-def cache_key(input_digest, channels, start_ms, duration_ms, language, engine, asr_digest, align_digest, hotword_digest):
+def cache_key(input_digest, channels, start_ms, duration_ms, language, engine, asr_digest, align_digest, hotword_digest, text_digest=None):
     parts = [input_digest, channels, start_ms, duration_ms, language, engine, asr_digest, align_digest, __version__, hotword_digest]
+    if text_digest is not None:
+        parts.append(text_digest)
     return hashlib.sha256(json.dumps(parts, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
 
 
@@ -102,6 +106,42 @@ def decode(path, channel, start_ms, duration_ms):
     if not len(samples):
         raise WorkerError("E_ASR_INPUT", "Selected audio range is empty")
     return samples
+
+
+def chunk_ranges(audio):
+    """Return sample ranges for decoded 16 kHz mono PCM; cuts use whole ms."""
+    ranges = []
+    start = 0
+    while len(audio) - start >= 60000 * SAMPLES_PER_MS:
+        window_start = start + 40000 * SAMPLES_PER_MS
+        frames = audio[window_start:start + 60000 * SAMPLES_PER_MS].reshape(-1, 10 * SAMPLES_PER_MS).astype(np.float64)
+        # Mean square has the same minimum as RMS, without the square root.
+        energy = np.mean(frames * frames, axis=1)
+        end = window_start + int(np.argmin(energy)) * 10 * SAMPLES_PER_MS
+        ranges.append((start, end))
+        start = end
+    if start < len(audio):
+        ranges.append((start, len(audio)))
+    return ranges
+
+
+def split_text(text, counts):
+    """Use cumulative integer proportions, keeping separators on the left."""
+    parts = []
+    previous = cumulative = 0
+    total = sum(counts)
+    for count in counts[:-1]:
+        cumulative += count
+        cut = max(previous, len(text) * cumulative // total)
+        if count:
+            for boundary in range(cut, min(len(text), cut + 10) + 1):
+                if boundary and (text[boundary - 1].isspace() or unicodedata.category(text[boundary - 1]).startswith("P")):
+                    cut = boundary
+                    break
+        parts.append(text[previous:cut])
+        previous = cut
+    parts.append(text[previous:])
+    return parts
 
 
 def group_chinese(items):
@@ -133,21 +173,14 @@ def group_chinese(items):
     return grouped
 
 
-def normalize_items(items, offset_ms, language):
+def normalize_items(items, offset_ms):
     tokens = []
     for item in items:
         text = item.text.strip()
         if text:
             tokens.append({"text": text, "start_ms": offset_ms + seconds_to_ms(item.start_time), "end_ms": offset_ms + seconds_to_ms(item.end_time), "conf": None})
-    if language == "zh":
-        tokens = group_chinese(tokens)
-    tokens.sort(key=lambda item: item["start_ms"])
-    previous = offset_ms
-    for token in tokens:
-        token["start_ms"] = max(previous, token["start_ms"])
-        token["end_ms"] = max(token["start_ms"], token["end_ms"])
-        previous = token["end_ms"]
-    return tokens
+    # The aligner can emit CJK characters even for a segment detected as English.
+    return group_chinese(tokens)
 
 
 def repair_zero_width(tokens, start_ms, end_ms):
@@ -178,14 +211,37 @@ def repair_zero_width(tokens, start_ms, end_ms):
     return count
 
 
+def finalize_tokens(tokens, start_ms, end_ms):
+    tokens.sort(key=lambda item: item["start_ms"])
+    previous = start_ms
+    for token in tokens:
+        token["start_ms"] = min(end_ms, max(previous, token["start_ms"]))
+        token["end_ms"] = min(end_ms, max(token["start_ms"], token["end_ms"]))
+        previous = token["end_ms"]
+    zero_width = sum(token["start_ms"] == token["end_ms"] for token in tokens)
+    warnings = []
+    if zero_width * 20 > len(tokens):
+        warnings.append({"code": "W_ASR_ALIGN_DEGRADED", "ratio": zero_width / len(tokens)})
+    corrected = repair_zero_width(tokens, start_ms, end_ms)
+    if corrected:
+        warnings.append({"code": "W_ASR_ZERO_WIDTH", "count": corrected})
+    return warnings
+
+
 class LocalEngine:
+    def __init__(self):
+        self.models = {}
+
     def load(self, name):
+        if name in self.models:
+            return self.models[name]
         path = MODELS / name
         if not path.is_dir():
             raise WorkerError("E_ASR_MODEL_UNAVAILABLE", f"Model unavailable: {path}")
         try:
             from mlx_audio.stt import load
-            return load(path)
+            self.models[name] = load(path)
+            return self.models[name]
         except (ImportError, OSError, RuntimeError, ValueError) as exc:
             if "memory" in str(exc).lower() or "oom" in str(exc).lower():
                 raise WorkerError("E_ASR_OOM", str(exc), True) from exc
@@ -254,7 +310,9 @@ def result(args, local=None, cloud=None):
     is_transcribe = args.command == "transcribe"
     if is_transcribe and args.engine == "cloud" and (not os.getenv("ZSIR_VOLC_APP_ID") or not os.getenv("ZSIR_VOLC_ACCESS_TOKEN")):
         raise WorkerError("E_ASR_CLOUD_AUTH", "Volcengine credentials are missing")
-    asr_name = ASR_NAMES[args.model] if is_transcribe else None
+    model = getattr(args, "model", "1.7b")
+    asr_name = ASR_NAMES[model]
+    requested_engine = getattr(args, "engine", "local")
     def available_digest(name):
         try:
             return weight_digest(MODELS / name)
@@ -262,7 +320,7 @@ def result(args, local=None, cloud=None):
             if exc.code != "E_ASR_MODEL_UNAVAILABLE":
                 raise
             return None
-    asr_digest = available_digest(asr_name) if asr_name and args.engine != "cloud" else None
+    asr_digest = available_digest(asr_name) if requested_engine != "cloud" else None
     align_digest = available_digest(ALIGN_NAME)
     hotwords_path = getattr(args, "hotwords", None)
     try:
@@ -270,43 +328,59 @@ def result(args, local=None, cloud=None):
         hotword_digest = file_sha(hotwords_path) if hotwords_path else None
     except OSError as exc:
         raise WorkerError("E_ASR_INPUT", f"Cannot read hotwords: {hotwords_path}") from exc
-    input_digest = fingerprint(path)
-    key = cache_key(input_digest, [args.channels], start_ms, duration_ms, args.language, getattr(args, "engine", "local"), asr_digest, align_digest, hotword_digest)
-    cache = Path(os.getenv("ZSIR_CACHE_DIR", str(HOME / "cache" / "asr"))) / f"{key}.json"
-    if cache.exists():
-        cached = json.loads(cache.read_text())
-        corrected = repair_zero_width(cached["tokens"], start_ms, start_ms + duration_ms)
-        if corrected:
-            cached["warnings"].append({"code": "W_ASR_ZERO_WIDTH", "count": corrected})
-        return cached
-    audio = decode(path, args.channels, start_ms, duration_ms)
-    warnings = []
-    if is_transcribe:
-        (recognized, language), engine_used = choose_engine(args.engine, lambda: local.transcribe(audio, args.language, args.model, hotwords), lambda: cloud.transcribe(audio, args.language, args.model, hotwords), cloud_fallback_enabled())
-        text = recognized
-    else:
+    text = None
+    text_digest = None
+    if not is_transcribe:
         try:
             text = Path(args.text).read_text().strip()
         except OSError as exc:
             raise WorkerError("E_ASR_INPUT", f"Cannot read text: {args.text}") from exc
         if not text:
             raise WorkerError("E_ASR_INPUT", "Alignment text is empty")
-        language = args.language
-        engine_used = "local"
-    try:
-        items = local.align(audio, text, language) if text.strip() else []
-        tokens = normalize_items(items, start_ms, language)
-        alignment = {"name": "qwen3-forced-aligner", "model": ALIGN_NAME, "version": "0.5.8", "weights_digest": align_digest}
-    except WorkerError as exc:
-        if engine_used != "cloud":
-            raise
-        warnings.append("W_ASR_CLOUD_TIMING")
-        # TODO: Normalize cloud token times once the Volcengine client exists.
-        tokens = []
-        alignment = {"name": "cloud", "model": "volcengine", "version": None, "weights_digest": None}
-    corrected = repair_zero_width(tokens, start_ms, start_ms + duration_ms)
-    if corrected:
-        warnings.append({"code": "W_ASR_ZERO_WIDTH", "count": corrected})
+        text_digest = hashlib.sha256(text.encode()).hexdigest()
+    input_digest = fingerprint(path)
+    key = cache_key(input_digest, [args.channels], start_ms, duration_ms, args.language, requested_engine, asr_digest, align_digest, hotword_digest, text_digest)
+    cache = Path(os.getenv("ZSIR_CACHE_DIR", str(HOME / "cache" / "asr"))) / f"{key}.json"
+    if cache.exists():
+        cached = json.loads(cache.read_text())
+        cached["warnings"].extend(finalize_tokens(cached["tokens"], start_ms, start_ms + duration_ms))
+        return cached
+    audio = decode(path, args.channels, start_ms, duration_ms)
+    ranges = chunk_ranges(audio)
+    warnings = []
+    tokens = []
+    language = args.language
+    engine_used = "local"
+    alignment = {"name": "qwen3-forced-aligner", "model": ALIGN_NAME, "version": "0.5.8", "weights_digest": align_digest}
+    if not is_transcribe:
+        counts = [len(local.transcribe(audio[a:b], language, model, None)[0]) for a, b in ranges]
+        # shortcut: use duration weights when all counts are zero; replace when the spec defines this case.
+        parts = split_text(text, counts if sum(counts) else [b - a for a, b in ranges])
+    for index, (a, b) in enumerate(ranges):
+        chunk = audio[a:b]
+        if is_transcribe:
+            (chunk_text, chunk_language), engine_used = choose_engine(requested_engine, lambda: local.transcribe(chunk, args.language, model, hotwords), lambda: cloud.transcribe(chunk, args.language, model, hotwords), cloud_fallback_enabled())
+            if index == 0:
+                language = chunk_language
+        else:
+            chunk_text, chunk_language = parts[index], language
+        try:
+            items = local.align(chunk, chunk_text, chunk_language) if chunk_text.strip() else []
+            offset = start_ms + a // SAMPLES_PER_MS
+            chunk_tokens = normalize_items(items, offset)
+            chunk_end = start_ms + min(duration_ms, (b + SAMPLES_PER_MS - 1) // SAMPLES_PER_MS)
+            for token in chunk_tokens:
+                token["start_ms"] = min(chunk_end, max(offset, token["start_ms"]))
+                token["end_ms"] = min(chunk_end, max(token["start_ms"], token["end_ms"]))
+            tokens.extend(chunk_tokens)
+        except WorkerError:
+            if engine_used != "cloud":
+                raise
+            if "W_ASR_CLOUD_TIMING" not in warnings:
+                warnings.append("W_ASR_CLOUD_TIMING")
+            # TODO: Normalize cloud token times once the Volcengine client exists.
+            alignment = {"name": "cloud", "model": "volcengine", "version": None, "weights_digest": None}
+    warnings.extend(finalize_tokens(tokens, start_ms, start_ms + duration_ms))
     payload = {"schema": "zsir-cut/asr-result", "schema_version": "0.1", "input": {"path": str(path), "size_bytes": path.stat().st_size, "fingerprint": input_digest, "channels": [args.channels], "start_ms": start_ms, "duration_ms": duration_ms}, "language": language, "asr": {"name": "qwen3-asr" if engine_used == "local" else "volcengine", "model": asr_name if engine_used == "local" else "volcengine", "version": "0.5.8" if engine_used == "local" else None, "weights_digest": asr_digest if engine_used == "local" else None}, "align": alignment, "tokens": tokens, "runtime": {"seconds": round(time.monotonic() - started, 3), "peak_memory_mb": peak_memory_mb(), "engine_used": engine_used}, "warnings": warnings}
     cache.parent.mkdir(parents=True, exist_ok=True)
     cache.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))

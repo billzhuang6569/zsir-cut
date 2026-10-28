@@ -26,6 +26,7 @@ cd workers/asr
 
 每个目录保存模型仓库完整文件（配置、分词器和 `.safetensors` 权重）。
 识别结果缓存默认在 `~/.zsir-cut/cache/asr/`，可用 `ZSIR_CACHE_DIR` 覆盖。
+`transcribe` 和 `align` 按 40–60 秒窗口内最低能量的 10 毫秒帧分段处理，末段不足 60 秒时保留整段；对齐零宽比例超过 5% 时输出 `W_ASR_ALIGN_DEGRADED`。
 
 模型准备好后，从仓库根目录执行冒烟测试：
 

@@ -280,6 +280,23 @@ it("writes empty transcripts with runs, no tokens or cues, and W_ASR_EMPTY", asy
   });
 });
 
+it("passes the worker alignment degradation ratio through result.warnings and replay", async () => {
+  const scenarioPath = join(directory, "scenario.json");
+  const scenario = JSON.parse(await readFile(scenarioPath, "utf8"));
+  const warnings = [
+    { code: "W_ASR_ALIGN_DEGRADED", ratio: 0.06 },
+    { code: "W_ASR_ZERO_WIDTH", count: 6 },
+  ];
+  await writeFile(scenarioPath, JSON.stringify({ ...scenario, warnings }));
+  const job = await run();
+  expect(job.state, JSON.stringify(job.envelope)).toBe("succeeded");
+  expect(validateEnvelope(job.envelope).valid).toBe(true);
+  expect(job.envelope?.result).toMatchObject({ warnings });
+  const replay = await dispatch("transcribe", request());
+  expect(replay.receipt?.replayed).toBe(true);
+  expect(replay.result).toMatchObject({ warnings });
+});
+
 it("continues short token and cue IDs when transcribing again", async () => {
   await run();
   const before = await project();
