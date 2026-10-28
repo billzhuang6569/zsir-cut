@@ -14,7 +14,12 @@
 
 ## 2. 传输
 
-**CLI**：`zcut <动词> <工程路径> --input <请求.json>`，也可以从标准输入读请求。标准输出永远是一个 JSON 结果信封，人读的日志只走标准错误。退出码：
+**CLI**：`zcut <动词> <工程路径> --input <请求.json>`，也可以从标准输入读请求。标准输出永远是一个 JSON 结果信封，人读的日志只走标准错误。
+
+- 没有写工程路径时，用请求里的 `project` 字段；两处都有且不同，返回 `rejected`、`E_VALIDATION`，`message` 写明两个路径。两处都没有时同样返回 `E_VALIDATION`，`message` 写「缺少工程路径」。请求文件读不了或不是 JSON 对象时返回 `E_VALIDATION`，`message` 写明原因，不能把请求当成空对象继续校验。
+- `record_handoff_check` 不需要工程路径；`create_project` 的工程路径是要新建的文件。
+
+退出码：
 
 | 退出码 | 状态 |
 |---|---|
@@ -215,7 +220,7 @@
 3. 批准后的修订是一步撤销，撤销它就撤销整个会话。草稿相对主工程没有净改动时，批准不产生修订，返回 `no_op`，会话照常变为 `approved`。
 4. 带 `force` 的字幕域操作只在 `approval` 为 `manual` 的会话里有效，规则见第 8 节。
 
-不进会话的动词：`import_media`、`transcribe`、`render_preview`、`view_timeline`、`export`、`record_handoff_check`、`job_status` 和所有读动词。带 `session_id` 调用它们返回 `rejected`、`E_SESSION_STATE`。
+不进会话的动词：`create_project`、`import_media`、`transcribe`、`render_preview`、`view_timeline`、`export`、`record_handoff_check`、`job_status` 和所有读动词。带 `session_id` 调用它们返回 `rejected`、`E_SESSION_STATE`。
 
 ### 7.5 修订对比 `diff`
 
@@ -243,10 +248,11 @@
 | `render_preview` | 长任务 | 渲染整条时间线的代理预览，不改工程。参数：`timeline_id`（必填）、`output`（输出文件夹，必填）。一期只渲染整条时间线，不渲染转场混合和画面变换 |
 | `view_timeline` | 长任务 | 在每个剪点出胶片条 PNG 和波形，供 Agent 视觉自检。参数：`timeline_id`（必填）、`output`（输出文件夹，必填） |
 | `export` | 长任务 | 按交接 profile 生成交接包，见 `handoff-profile.md`。带 `dry_run` 时只返回损失报告；报告有 `error` 级记录时，除非带 `accept_losses: true`，否则返回 `rejected` |
+| `create_project` | 写 | 新建工程文件和一条空时间线，见 9.4 |
 | `record_handoff_check` | 写交接包 | 把 `host_import` 或 `host_render_comparison` 的检查结果写进交接包的 `manifest.json`，不改工程。参数：`package`（交接包目录）、`check`（两者之一）、`status`、`host_version`、`by`、`notes`、`items`（逐项的 `check`、`status`、`notes`）。不需要 `base_revision`，不写工程日志；同一项检查再次记录时整体覆盖，所以天然幂等 |
 | `job_status` | 读 | 查长任务进度与结果 |
 
-共 18 个。新增动词要先改本文。
+共 19 个。新增动词要先改本文。
 
 ### 9.1 给 Agent 的读视图
 
@@ -284,9 +290,10 @@
 ```
 
 - 素材没有时码（例如没有 bext 的 WAV）时，这一列写成「时:分:秒.毫秒」形式的源时间，例如 `00:00:05.440`，不写分数。
-- 按母稿输出时，时码是源时码；按时间线输出时，时码是序列时码，方括号里加上片段 ID：`[cue_zh_03 tok_015..tok_021 @clp_a1]`。
+- 按母稿输出时，时码是源时码；按时间线输出时，时码是序列时码。按时间线输出时，每当下一行来自另一个片段，先单独输出一行片段头 `@clp_a1 00:00:12:05`，即片段 ID 和它的序列入点时码；同一片段的后续行不再重复片段 ID。
 - 只输出 `text` 非空的字词。字幕条状态不是 `auto` 时，在方括号后加 `!edited` 或 `!approved`。
-- 一小时中文采访（约 9000 字、1200 条字幕）的输出约 80 KB，不超过 100 KB。中文每个字占 3 个字节，光文字就有约 27 KB，其余是每行的 ID 和时码。调研里「12 KB」的估算来自英文场景，不适用。Agent 按字词 ID 下剪辑命令，不按时间猜。
+- 一小时中文采访（约 9000 字、1200 条字幕）的输出约 110 KB，不超过 128 KB。中文每个字占 3 个字节，光文字就有约 27 KB，其余是每行的 ID 和时码；字词和字幕条用 `timeline-schema.md` 第 3 节的短 ID 才能做到。调研里「12 KB」的估算来自英文场景，不适用。Agent 按字词 ID 下剪辑命令，不按时间猜。
+- 可选参数 `with_times: true` 时，每个字词后面加上它的源时间范围，供 Agent 判断停顿：`大家[0.48-0.72]好[0.72-0.90]`，单位秒，保留两位小数，只用于阅读，不能当规范时间回传。默认不带。
 
 `result` 另含 `lines`（行数）和 `truncated`（超过 256 KB 时截断为 true）。
 
@@ -338,6 +345,32 @@
 
 `result` 包含三个数组：`relinked`（素材 ID、旧路径、新路径、其余候选）、`not_found`（素材 ID）、`skipped`（不是离线状态而跳过的素材 ID）。
 
+### 9.4 新建工程
+
+`create_project` 是唯一不需要已有工程文件的写动词。请求字段：
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `project` | 是 | 要新建的工程文件路径，以 `.zcut.json` 结尾。所在目录必须已存在；文件已存在时返回 `rejected`、`E_VALIDATION` |
+| `name` | 是 | 工程名 |
+| `timeline` | 是 | `name`（默认「主时间线」）、`edit_rate`、`drop_frame`（默认 false）、`start_timecode`（默认 `00:00:00:00`，丢帧时 `00:00:00;00`）、`width`、`height`、`audio_tracks`（音频轨数，默认 2，1 到 8） |
+| `match_media` | 否 | 一个素材文件路径。给了它时，`timeline` 里没写的 `edit_rate`、`width`、`height` 从这个素材取：帧率取 9.2 节的 `video.rate`，不在 `timeline-schema.md` 4.3 节的表里时取表里最接近的一个（差值相同取较大的）；`drop_frame` 仍默认 false。素材不是视频返回 `E_VALIDATION`。只探测，不导入 |
+| `subtitles` | 否 | `language`、`name`（默认「字幕」）。给了时同时建一个默认字幕样式和一条字幕轨，承载轨是 A1 |
+| `idempotency_key`、`author` | 是 | 同写请求。不需要 `base_revision` |
+
+`timeline` 和 `match_media` 合起来仍缺 `edit_rate`、`width` 或 `height` 时返回 `E_VALIDATION`。
+
+新工程的内容：
+
+- `id` 为新的 `prj_` ID，`media`、`transcripts` 为空。
+- 一条时间线，ID 为新的 `tl_` ID。轨道依次是 `trk_v1`（V1）、`trk_a1`（A1）、`trk_a2`（A2）……；给了 `subtitles` 时再加字幕轨 `trk_sub1`，`language` 照抄，`carrier_tracks` 为 `["trk_a1"]`，默认样式 `sty_default`。
+- `sty_default`：`name` 为「默认」，`version` 1，`font_family` 为 `PingFang SC`，`font_size` 为 `0.05`（时间线高度的比例），`color` 为 `#FFFFFF`，`outline` 为黑色 `#000000`、宽 `0.06`（字号的比例），`position` 为 `bottom`、`margin_v` 为 `0.08`。
+- 修订 `seq` 为 1，`parent` 为 null。日志写第一条，动词 `create_project`，`changes` 列出新建的工程、时间线、轨道和样式。
+
+幂等：文件已存在、它的第一条日志的幂等键和请求摘要都与本次相同时，原样返回第一次的结果信封，不报错；幂等键相同但请求不同时返回 `E_IDEMPOTENCY_MISMATCH`。
+
+`result` 含 `project_id`、`timeline_id`、`revision`（`seq` 和 `id`），给了 `subtitles` 时另含 `subtitle_track_id`。
+
 ## 10. `edit` 的操作
 
 一个 `edit` 请求带一个有序的 `ops` 数组，整体原子执行。请求可以带 `timeline_id` 指定要编辑的时间线；工程里只有一条时间线时可以省略，有多条时省略返回 `E_VALIDATION`。新建片段时产生的 `occurrence_id` 写在该片段那条 `changes` 的 `detail.occurrence_id` 里。创建实体的操作可以由调用方指定新 ID，这样同一请求里后面的操作能引用它；不指定就由内核生成，并在 `changes` 里返回。
@@ -378,7 +411,7 @@
 |---|---|---|
 | `E_CONFLICT` | `conflict` | 修订不匹配 |
 | `E_IDEMPOTENCY_MISMATCH` | `rejected` | 同一幂等键对应了不同请求 |
-| `E_VALIDATION` | `rejected` | 应用后 L1 校验有错误，`issues` 里列出 |
+| `E_VALIDATION` | `rejected` | 请求不符合 schema，或应用后 L1 校验有错误，`issues` 里列出。请求不符合 schema 时，`message` 只列与请求实际形状相关的错误：`ops` 里的每个操作按它的 `op` 值只对照该操作的 schema 报错，`op` 不认识时只报「未知操作」和可选值；动词的请求同理。不能把 `oneOf` 所有分支的失败原因全部列出 |
 | `E_NOT_FOUND` | `rejected` | 引用的 ID 不存在 |
 | `E_MIXED_DOMAIN` | `rejected` | 一个请求混用剪辑域和字幕域 |
 | `E_LOCKED` | `rejected` | 想改批准过的 token 或锁定的字幕条 |

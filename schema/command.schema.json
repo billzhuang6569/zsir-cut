@@ -100,7 +100,8 @@
         "properties": {
           "transcript_id": { "$ref": "#/$defs/id" },
           "timeline_id": { "$ref": "#/$defs/id" },
-          "range": { "$ref": "#/$defs/range" }
+          "range": { "$ref": "#/$defs/range" },
+          "with_times": { "type": "boolean" }
         },
         "oneOf": [
           { "required": ["transcript_id"], "properties": { "transcript_id": true } },
@@ -341,6 +342,40 @@
         },
         "unevaluatedProperties": false
       },
+      "create_project": {
+        "type": "object",
+        "required": ["project", "name", "timeline", "idempotency_key", "author"],
+        "properties": {
+          "project": { "type": "string", "pattern": "\\.zcut\\.json$" },
+          "name": { "type": "string", "minLength": 1 },
+          "timeline": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "edit_rate": { "enum": ["24000/1001", "24", "25", "30000/1001", "30", "50", "60000/1001", "60"] },
+              "drop_frame": { "type": "boolean" },
+              "start_timecode": { "type": "string", "pattern": "^\\d{2}:\\d{2}:\\d{2}[:;]\\d{2}$" },
+              "width": { "type": "integer", "minimum": 1 },
+              "height": { "type": "integer", "minimum": 1 },
+              "audio_tracks": { "type": "integer", "minimum": 1, "maximum": 8 }
+            },
+            "additionalProperties": false
+          },
+          "match_media": { "type": "string", "minLength": 1 },
+          "subtitles": {
+            "type": "object",
+            "required": ["language"],
+            "properties": {
+              "language": { "type": "string", "minLength": 2 },
+              "name": { "type": "string", "minLength": 1 }
+            },
+            "additionalProperties": false
+          },
+          "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "author": { "$ref": "#/$defs/author" }
+        },
+        "additionalProperties": false
+      },
       "record_handoff_check": {
         "type": "object",
         "required": ["package", "check", "status"],
@@ -414,6 +449,9 @@
         },
         "clip_id": {
           "$ref": "#/$defs/id"
+        },
+        "pause": {
+          "$ref": "#/$defs/seconds"
         }
       },
       "additionalProperties": false

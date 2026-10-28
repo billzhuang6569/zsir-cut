@@ -34,10 +34,11 @@
 
 ### `remove_span`
 
-参数：`range`（`start`、`duration`）或 `tokens`（`transcript_id`、`from_token`、`to_token`、`clip_id`）二选一；`tracks`（`all` 或轨道 ID 列表，默认 `all`）；`ripple`（默认 true）；`snap`（`out`、`in`、`nearest`，默认 `out`）。
+参数：`range`（`start`、`duration`）或 `tokens`（`transcript_id`、`from_token`、`to_token`、`clip_id`、`pause`）二选一；`tracks`（`all` 或轨道 ID 列表，默认 `all`）；`ripple`（默认 true）；`snap`（`out`、`in`、`nearest`，默认 `out`）。
 
 1. **定区间**：给 `range` 时直接使用。给 `tokens` 时，用 `timeline-schema.md` 5.2 节的投影把两个字词换算到序列时间：区间从 `from_token` 的序列起点到 `to_token` 的序列终点。这两个字词必须在 `clip_id` 指定的片段上都被投影；只出现在一个片段上时可以省略 `clip_id`，出现在多个片段上又没给，返回 `E_VALIDATION`。
-2. **取整**：区间按 `snap` 落到时间线帧网格上。`out` 起点向下、终点向上取整，保证说过的字被完整删掉；`in` 相反；`nearest` 两端各取最近的帧。
+   **停顿**：`tokens` 里给了 `pause`（规范时间字符串，例如 `"3/10s"`）时，区间不再贴着字词边缘，而是吃进两侧的静音，使剪点处只剩下不超过 `pause` 的停顿。设前一个字词为同一母稿里 `from_token` 之前最近的、`text` 非空且投影在同一片段上的字词，它的序列终点为 `p`；没有时 `p` 取片段的序列入点。设后一个字词同理在 `to_token` 之后，序列起点为 `n`；没有时取片段的序列出点。左侧静音 `L = from 起点 − p`，右侧 `R = n − to 终点`，都不小于 0。区间改为从 `p + min(L, pause/2)` 到 `n − min(R, pause/2)`。不给 `pause` 时行为不变。`pause` 为 `"0s"` 时删掉两侧全部静音。
+2. **取整**：区间按 `snap` 落到时间线帧网格上。给了 `pause` 时 `snap` 默认改为 `nearest`，因为两端都在静音里。`out` 起点向下、终点向上取整，保证说过的字被完整删掉；`in` 相反；`nearest` 两端各取最近的帧。
 3. **清空**：在 `tracks` 指定的轨道上，与区间相交的片段：完全在区间内的删除；横跨起点的修剪出点；横跨终点的修剪入点；横跨整个区间的在两端切开并删除中间，右半段拿新 ID。修剪入点时 `source_start` 相应后移；有时间映射的片段按映射切分。
 4. 区间内的标记和独立字幕条删除；横跨区间边界的缩短。挂在被删除或被修剪剪点上的转场删除。
 5. **合拢**：`ripple` 为 true 时，区间终点之后的内容整体前移区间长度。`tracks` 不是 `all` 时只合拢指定轨道，其他轨道的同步可能被破坏，L1 校验会报 `W_SYNC`。
