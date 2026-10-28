@@ -34,11 +34,11 @@ Timeline.1
 | zsir-cut | OTIO |
 |---|---|
 | 片段 | `Clip.2`，`name` 取 `label`，没有就取素材名 |
-| 源区间 | `source_range`：`start_time` 是源起始时码换成的帧数加 `source_start` 的帧数，按素材帧率；`duration` 是片段时长。倒放段的 `start_time` 取这一段源区间里**最小**的源时间（也就是倒放结束处），与 Resolve 21 原生导出一致；写成起点那一侧的源时间，Resolve 会取错帧 |
+| 源区间 | `source_range`：`start_time` 是源起始时码换成的帧数加 `source_start` 的帧数，按素材帧率；`duration` 是片段时长。倒放段见下方「倒放」 |
 | 素材 | `media_references.DEFAULT_MEDIA` 是 `ExternalReference.1`，`target_url` 是**不编码的本地绝对路径**，不加 `file://`，空格、中文、`%` 原样保留，与 Resolve 21 原生导出一致。百分号编码的 `file://` 地址会让 Resolve 21.1 找不到全部素材。`available_range` 是素材全长；`active_media_reference_key` 为 `DEFAULT_MEDIA` |
 | 恒定变速 | `effects` 里一个 `LinearTimeWarp.1`，`time_scalar` 是速度 |
 | 定格 | `FreezeFrame.1` |
-| 倒放 | `LinearTimeWarp.1`，`time_scalar` 为负数 |
+| 倒放 | 写成复合片段：一个 `Stack.1`（`name` 取片段名，`metadata` 只放 `zsir`，`source_range` 起点 0、时长为片段时长，`effects` 里一个 `time_scalar` 为 -1.0 的 `LinearTimeWarp.1`），里面一条同类 `Track.1`，放一个**正向**的 `Clip.2`，源区间从这一段最小的源时间开始。Resolve 21.1 对直接加负速度的 `Clip` 会从素材末尾倒着取帧，起点写在哪一侧都不生效；复合片段写法实测取帧与 timeline-schema 4.5 一致 |
 | ID | `metadata.zsir`：`clip_id`、`occurrence_id`，拆段时加 `segment` |
 | 画面变换 | 写 Resolve 的私有效果，见 2.5。原值同时保留在 `metadata.zsir` |
 | 增益、声道选择 | OTIO 没有字段，原值写进 `metadata.zsir`，损失报告记 `unsupported`，原因 `R_FORMAT_NO_FIELD` |
@@ -57,8 +57,9 @@ Timeline.1
 | 起始时码 | 25 帧正确。丢帧按 2.2 写字面帧数后正确，写真实帧数会错成 00:59:56;12 |
 | 媒体重链接 | 百分号编码的 `file://` 地址全部离线；改成不编码绝对路径后全部在线 |
 | 普通片段、定格 | 帧号正确 |
-| 倒放 | 起点写成起点一侧的源时间时取错帧，已按 2.2 改为最小源时间，待复测 |
-| 画面变换 | 只写在 `metadata.zsir` 时 Resolve 不读，已按 2.5 改写，待复测 |
+| 倒放 | 直接给 `Clip` 加负速度时取错帧（25 帧工程在 01:00:52:00 显示 002199），改起点也无效。改为 2.2 的复合片段后，25 帧显示 1099、1049、1000，丢帧工程 01:00:43;10 显示 1049，与 4.5 一致（2026-10-28，Claude 用 Resolve 脚本接口实测） |
+| 画面变换 | 按 2.5 写入后，Resolve 读到缩放 0.5、旋转 5°，位移和裁切按画面比例正确。数值写成整数（`1`、`5`）时整份文件导入失败，必须写成带小数点的形式 |
+| 导入失败排查 | Resolve 遇到不认的写法时只给出「OTIO 文件无法解析」，没有具体位置。已知两种触发：Resolve 私有字段里本应是小数的数值写成整数；复合片段上带 `Resolve_OTIO` 元数据 |
 | 轨道结构 | 轨道名和分层保留；分段变速拆成多段，片段数比原工程多，属预期 |
 | 混合帧率、标记、字幕 | 待复测 |
 
@@ -81,7 +82,9 @@ Timeline.1
 
 裁切写第二个 `Effect.1`，`Effect Name` 为 `Cropping`、`Name` 为 `裁切`、`Type` 照原生导出：`cropLeft`、`cropRight` 取 `crop.left`、`crop.right`（源画面宽度的比例），`cropTop`、`cropBottom` 取 `crop.top`、`crop.bottom`（源画面高度的比例），默认值 0.0。
 
-单位推导：Resolve 把我们的 FCPXML 导入后再导出 OTIO，Pan、Tilt、Crop 的值正好等于「像素偏移除以画面宽或高」，与本工程 `transform` 的比例单位相同。只有一个样本，待复测确认。
+单位：Pan、Tilt、Crop 是画面宽或高的比例，与本工程 `transform` 相同，已实测。
+
+**数值格式**：`Parameter Value`、`Default Parameter Value`、`minValue`、`maxValue` 一律写成带小数点的 JSON 数，例如 `1.0`、`5.0`、`0.0`，即使值是整数。Resolve 21.1 遇到整数会拒绝整份文件。导出自检必须检查这一点。
 
 ## 3. FCP7 XML（`premiere-25-xmeml-5`）
 
@@ -107,11 +110,11 @@ xmeml version="5"
 | `start`、`end` | 序列入点、出点，帧 |
 | `in`、`out` | 源入点、出点，按 `clipitem` 的 `rate`（即序列帧率）计的帧，从素材第一帧算起。纯音频素材同样用帧，不用采样数。源时间不在这个帧网格上时，四舍五入到最近一帧（正中间取较大），并记一条损失：`clip_cut`、`approximated`、`warning`、`R_GRID_ROUNDED` |
 | `file` | 第一次出现时写完整的 `file`：`pathurl`（`file://localhost/` 加百分号编码路径）、`rate`、`duration`、`timecode`、`media`；以后只写 `<file id="..."/>` 引用 |
-| `link` | 同一个 `occurrence_id` 的视频和音频片段互相写 `link`，保持 J/L cut 时的同步关系 |
+| `link` | 同一个 `occurrence_id` 的视频和音频片段组成一组，组里**每个** `clipitem` 都写全组的 `link`，包括指向自己的那条。每条 `link` 含 `linkclipref`、`mediatype`、`trackindex`（从 1 数）、`clipindex`（该轨里第几个 `clipitem`，从 1 数）。Premiere 25.4 实测：只在一侧写链接时，主画面与对应声音没有链接 |
 | `logginginfo/lognote` | `zsir-cut clip=… occ=…` |
 | 增益 | `filter` 里的 Audio Levels（`effectid` 为 `audiolevels`，参数 `level`） |
-| 画面变换 | `filter` 里的 Basic Motion（`effectid` 为 `basic`：`scale`、`rotation`、`center`）和 Crop（`effectid` 为 `crop`：`left`、`right`、`top`、`bottom`）。参数单位待实测，先按 FCP7 惯例：`scale` 为百分比，`rotation` 为度，`center` 的 `horiz`、`vert` 以画面中心为原点、半个画面宽高为 1，`crop` 为百分比 |
-| 恒定变速、倒放、定格 | `filter` 里的 Time Remap（`effectid` 为 `timeremap`：`speed` 百分比、`reverse`、`freeze`），分段时先按第 1 节拆片段 |
+| 画面变换 | `filter` 里的 Basic Motion（`effectid` 为 `basic`）和 Crop（`effectid` 为 `crop`）。`scale` 为百分比，只写这一个缩放参数，不写分轴缩放。`rotation` 写 `−rotation_deg`：FCP7 和 Premiere 顺时针为正，FCP 和本工程逆时针为正。`center` 的 `horiz` 写 `position[0]`、`vert` 写 `−position[1]`：画面中心为 0，整个画面宽高为 1，向下为正。`crop` 的 `left`、`right`、`top`、`bottom` 为百分比。依据：Premiere 25.4 实测，旧写法把 `center` 乘了 2、没反转纵轴，导致插入画面偏到右上方越界；`crop` 读入正确 |
+| 恒定变速、倒放、定格 | `filter` 里的 Time Remap（`effectid` 为 `timeremap`），分段时先按第 1 节拆片段。变速片段的 `in`、`out` 按**变速后**的时间计：`out − in` 等于 `end − start`。正放时 `in = 源入点 ÷ 速度`。倒放时 `reverse` 为 TRUE，FCP7 把整段素材倒过来编号，所以 `in = (素材总帧数 − 源出点) ÷ 速度`，源出点是这一段最大的源帧（不含）。定格不用 `freeze` 参数（Premiere 25.4 忽略它），改用 `variablespeed` 为 1 的 Time Remap，在 `graphdict` 参数里写两个关键帧：片段起点和终点都映射到定格的源帧。依据：Premiere 25.4 实测，旧写法导致两倍速段开头黑屏（入点超出素材）、倒放取错帧（25 帧工程 52:00 显示 001199）、定格继续前进 |
 | 声道选择 | 音频片段的 `sourcetrack` 指明取哪个声道 |
 
 空白不需要 gap 元素，`start` 不连续即可。
@@ -125,7 +128,8 @@ xmeml version="5"
 
 | 项 | 要核实的 |
 |---|---|
-| `clipitem` 计时 | `rate` 取序列帧率、`in`/`out` 按序列帧计，混合帧率素材（25 帧素材放进 29.97 序列、30 帧录屏放进 25 帧序列）取帧是否正确 |
+| `clipitem` 计时 | Premiere 25.4 实测：普通片段、J cut、叠化、起止时码、同名素材都正确；混合帧率素材在线、取帧正确 |
+| 定格的 `graphdict` 写法 | Premiere 是否按关键帧定格 |
 | Audio Levels | 参数是线性倍数还是分贝 |
 | Basic Motion | 中心坐标的单位和原点 |
 | Crop | 参数是百分比还是像素 |
