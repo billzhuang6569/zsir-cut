@@ -31,7 +31,7 @@ import {
 import type { Author, Media } from "./project/types.ts";
 import { add, compare, parseRational, rational } from "./rational.ts";
 import { inspect, readTranscript } from "./read-views.ts";
-import { validateCommand } from "./schema.ts";
+import { normalizeCommand, validateCommand } from "./schema.ts";
 import { AsrError, applyTranscription, invokeAsr, type TranscribeRequest, workerMilliseconds } from "./transcribe.ts";
 
 export const VERBS = [
@@ -258,6 +258,7 @@ function limitBrief(output: Envelope): void {
 
 export async function dispatch(verb: Verb, input: unknown, options: DispatchOptions = {}): Promise<Envelope> {
   const requestId = newId("req_");
+  input = normalizeCommand(verb, input);
   if (
     input &&
     typeof input === "object" &&

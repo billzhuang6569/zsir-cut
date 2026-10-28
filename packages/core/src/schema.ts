@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import Ajv2020Module, { type ErrorObject, type ValidateFunction } from "ajv/dist/2020.js";
 import addFormatsModule from "ajv-formats";
+import { parseRational, printRational } from "./rational.ts";
 
 const ajv = new Ajv2020Module.default({ strict: true, allErrors: true });
 addFormatsModule.default(ajv);
@@ -20,6 +21,49 @@ const envelope = ajv.getSchema("https://github.com/billzhuang6569/zsir-cut/schem
 const lossReport = ajv.getSchema("https://github.com/billzhuang6569/zsir-cut/schema/loss-report.schema.json");
 const manifest = ajv.getSchema("https://github.com/billzhuang6569/zsir-cut/schema/handoff-manifest.schema.json");
 const commandId = "https://github.com/billzhuang6569/zsir-cut/schema/command.schema.json";
+
+interface CommandNode {
+  $ref?: string;
+  properties?: Record<string, CommandNode>;
+  items?: CommandNode;
+  allOf?: CommandNode[];
+  oneOf?: CommandNode[];
+  anyOf?: CommandNode[];
+  const?: unknown;
+}
+
+export function normalizeCommand(verb: string, input: unknown): unknown {
+  const schema = ajv.getSchema(commandId)?.schema as {
+    $defs: Record<string, CommandNode> & { requests: Record<string, CommandNode> };
+  };
+  const visit = (value: unknown, node: CommandNode, key = ""): unknown => {
+    if (typeof value === "string" && (node.$ref === "#/$defs/seconds" || key === "edit_rate")) {
+      try {
+        return printRational(parseRational(value, key !== "edit_rate", false), key !== "edit_rate");
+      } catch {
+        return value; // Let request validation report malformed values.
+      }
+    }
+    if (node.$ref) return visit(value, schema.$defs[node.$ref.split("/").at(-1) ?? ""] ?? {}, key);
+    for (const branch of [...(node.allOf ?? []), ...(node.oneOf ?? []), ...(node.anyOf ?? [])]) {
+      const op = branch.properties?.op?.const;
+      if (op !== undefined && (!value || typeof value !== "object" || !("op" in value) || value.op !== op)) continue;
+      value = visit(value, branch, key);
+    }
+    if (Array.isArray(value)) return node.items ? value.map((item) => visit(item, node.items ?? {})) : value;
+    if (value && typeof value === "object" && node.properties) {
+      const properties = node.properties;
+      return Object.fromEntries(
+        Object.entries(value).map(([name, item]) => [
+          name,
+          properties[name] ? visit(item, properties[name], name) : item,
+        ]),
+      );
+    }
+    return value;
+  };
+  return visit(input, schema.$defs.requests[verb] ?? {});
+}
 
 if (!project || !envelope || !lossReport || !manifest) {
   throw new Error("Missing zsir-cut schema");

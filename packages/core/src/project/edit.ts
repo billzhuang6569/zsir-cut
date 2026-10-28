@@ -7,7 +7,7 @@ import { newId } from "./id.ts";
 import { projectSubtitles } from "./projection.ts";
 import { applySubtitleEdit } from "./subtitle-edit.ts";
 import { clipTimeMap, mapClipTimeToSource, mapSourceTimeToClip } from "./time-map.ts";
-import type { Clip, Marker, MediaTrack, Project, Timeline, TimeMapPoint, Token, Track } from "./types.ts";
+import type { Clip, Marker, Media, MediaTrack, Project, Timeline, TimeMapPoint, Token, Track } from "./types.ts";
 
 export class EditError extends Error {
   readonly code: "E_VALIDATION" | "E_NOT_FOUND" | "E_UNSUPPORTED" | "E_LOCKED" | "E_SESSION_STATE";
@@ -329,6 +329,37 @@ function snap(value: Rational, rate: Rational, mode: "floor" | "ceil" | "nearest
     mode === "floor" ? floor(frames) : mode === "ceil" ? ceil(frames) : floor(add(frames, rational(1n, 2n)));
   return div(rational(frame), rate);
 }
+function placeTokenRange(project: Project, timeline: Timeline, source: Media, op: Op): [Rational, Rational] {
+  const selection = op.tokens as { transcript_id: string; from_token: string; to_token: string; pause?: string };
+  const transcript =
+    project.transcripts.find((item) => item.id === selection.transcript_id) ??
+    fail("E_NOT_FOUND", "Transcript not found");
+  if (transcript.media_id !== source.id) fail("E_VALIDATION", "Transcript media does not match place media");
+  const firstIndex = transcript.tokens.findIndex((token) => token.id === selection.from_token);
+  const lastIndex = transcript.tokens.findIndex((token) => token.id === selection.to_token);
+  if (firstIndex < 0 || lastIndex < 0) fail("E_NOT_FOUND", "Token not found");
+  if (firstIndex > lastIndex) fail("E_VALIDATION", "Token range is reversed");
+  let start = transcript.tokens[firstIndex]!.align.start;
+  let stop = transcript.tokens[lastIndex]!.align.end;
+  if (selection.pause !== undefined) {
+    const previous = transcript.tokens.slice(0, firstIndex).findLast((token) => token.text);
+    const following = transcript.tokens.slice(lastIndex + 1).find((token) => token.text);
+    const p = previous?.align.end ?? zero;
+    const n = following?.align.start ?? source.duration;
+    const half = div(time(selection.pause), rational(2n));
+    const left = lt(start, p) ? zero : sub(start, p);
+    const right = lt(n, stop) ? zero : sub(n, stop);
+    start = sub(start, min(left, half));
+    stop = add(stop, min(right, half));
+  }
+  start = snap(start, source.video?.rate ?? timeline.edit_rate, "floor");
+  const duration = min(
+    snap(sub(stop, start), timeline.edit_rate, "ceil"),
+    snap(sub(source.duration, start), timeline.edit_rate, "floor"),
+  );
+  if (lt(start, zero) || !lt(zero, duration)) fail("E_VALIDATION", "Token source range is empty or outside media");
+  return [start, duration];
+}
 function setFields<T extends object>(entity: T, op: Op, fields: string[]): void {
   for (const field of fields)
     if (Object.hasOwn(op, field)) {
@@ -341,9 +372,15 @@ function applyOne(project: Project, timeline: Timeline, op: Op, generate: (prefi
   switch (op.op) {
     case "place": {
       const source = project.media.find((item) => item.id === op.media_id) ?? fail("E_NOT_FOUND", "Media not found");
-      const at = t("at"),
-        duration = t("duration"),
-        sourceStart = t("source_start");
+      const at =
+        op.at === "end"
+          ? mediaTracks(timeline)
+              .flatMap((item) => item.clips)
+              .reduce((latest, item) => (lt(latest, end(item)) ? end(item) : latest), zero)
+          : t("at");
+      const [sourceStart, duration] = op.tokens
+        ? placeTokenRange(project, timeline, source, op)
+        : [t("source_start"), t("duration")];
       onGrid(at, timeline);
       onGrid(duration, timeline);
       if (source.kind === "image" && !eq(sourceStart, zero)) fail("E_VALIDATION", "Image source start must be 0s");

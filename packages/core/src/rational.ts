@@ -9,11 +9,11 @@ export function rational(numerator: bigint, denominator = 1n): Rational {
   return { numerator: numerator / a, denominator: denominator / a };
 }
 
-export function parseRational(value: string, seconds = false): Rational {
+export function parseRational(value: string, seconds = false, canonical = true): Rational {
   const match = (seconds ? /^(0|[1-9]\d*)(?:\/([1-9]\d*))?s$/ : /^(0|[1-9]\d*)(?:\/([1-9]\d*))?$/).exec(value);
   if (!match) throw new Error(`Invalid rational: ${value}`);
   const result = rational(BigInt(match[1]!), BigInt(match[2] ?? "1"));
-  if (printRational(result, seconds) !== value) throw new Error(`Noncanonical rational: ${value}`);
+  if (canonical && printRational(result, seconds) !== value) throw new Error(`Noncanonical rational: ${value}`);
   return result;
 }
 
