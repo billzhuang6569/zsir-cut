@@ -255,6 +255,23 @@ it.each(["render_preview", "view_timeline"] as const)("returns E_IO when %s cann
   expect(output.error).toMatchObject({ code: "E_IO", message: expect.stringContaining("ffprobe not found") });
 });
 
+it("renders one soft subtitle across a hidden word", async () => {
+  const { directory, project: mediaProject, projectPath } = await setup();
+  const parsed = parseProject(await readFile("fixtures/regressions/hidden-tokens.zcut.json", "utf8"));
+  if (!parsed.ok) throw new Error("Invalid hidden-token regression");
+  const project = parsed.project;
+  const media = mediaProject.media[0];
+  const timeline = project.timelines[0];
+  if (!media || !timeline) throw new Error("Missing fixture media or timeline");
+  project.media = [{ ...media, id: "med_a" }];
+  const movie = join(directory, "hidden.mov");
+  await renderPreview(project, timeline, projectPath, { output: movie, profile: "preview", exportId: "exp_hidden" });
+  const subtitles = run(["-i", movie, "-map", "0:s:0", "-f", "srt", "pipe:1"]).toString();
+  expect(subtitles.match(/-->/g)).toHaveLength(1);
+  expect(subtitles).toContain("00:00:06,000 --> 00:00:07,000");
+  expect(subtitles).toContain("一起\n切这个瓜");
+});
+
 it("renders exact forward, reverse, hold frames and both sides of each cut", async () => {
   const { directory, project, projectPath } = await setup();
   const timeline = project.timelines[0];

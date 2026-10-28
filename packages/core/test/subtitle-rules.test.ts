@@ -142,4 +142,16 @@ describe("subtitle rules", () => {
     expect(manual[0]!.warnings).toEqual([]);
     expect(compare(rows[0]!.end, rows[1]!.start)).toBeLessThan(0);
   });
+
+  it("uses visible endpoints with hidden words and still extends for CPS and respects the next gap", () => {
+    const tokens = make(["", "甲乙丙丁戊己庚辛壬癸", "", "后"], [1n, 2n, 1n, 2n], [0n, 0n, 0n, 8n]);
+    const extended = ranges(tokens, [{ first: 0, last: 2 }])[0]!;
+    expect([extended.start, extended.end]).toEqual([s(1n, 10n), s(109n, 90n)]);
+    const clamped = ranges(tokens, [
+      { first: 0, last: 2 },
+      { first: 3, last: 3 },
+    ])[0]!;
+    expect([clamped.start, clamped.end]).toEqual([s(1n, 10n), s(28n, 25n)]);
+    expect(clamped.warnings).toEqual(["W_SUB_CPS"]);
+  });
 });

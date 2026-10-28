@@ -1,6 +1,6 @@
 [project]
 name = "zsir-asr"
-version = "0.2.2"
+version = "0.2.3"
 requires-python = ">=3.13,<3.14"
 dependencies = ["mlx-audio==0.5.8", "jieba==0.42.1", "numpy==2.5.4"]
 

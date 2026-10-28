@@ -31,6 +31,21 @@ afterEach(async () => {
 });
 
 describe("read views", () => {
+  it("reads one timeline row across a hidden word, including with_times", async () => {
+    await copyFile(new URL("../../../fixtures/regressions/hidden-tokens.zcut.json", import.meta.url), path);
+    for (const with_times of [false, true]) {
+      const output = (await result("read_transcript", { timeline_id: "tl_main", with_times })).result as {
+        text: string;
+        lines: number;
+      };
+      expect(output.lines).toBe(2);
+      expect(output.text.split("\n").filter((line) => line.includes("cue_hidden"))).toHaveLength(1);
+      expect(output.text).not.toContain("啊");
+      expect(output.text).toContain("[cue_hidden tok_0..tok_4] 00:00:06:00");
+      if (!with_times) expect(output.text).toContain("一起 切这个瓜");
+    }
+  });
+
   it.each(["24000/1001", "24", "25", "30000/1001", "30", "50", "60000/1001", "60"])(
     "reads all views at %s fps",
     async (rate) => {

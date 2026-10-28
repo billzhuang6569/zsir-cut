@@ -301,7 +301,7 @@ def test_chunk_failure_does_not_cache_partial_results(chunk_request, monkeypatch
 def test_worker_version_invalidates_cache(monkeypatch):
     args = ("input", [0], 0, 1000, "zh", "local", "asr", "align", None)
     new_key = worker.cache_key(*args)
-    monkeypatch.setattr(worker, "__version__", "0.2.0")
+    monkeypatch.setattr(worker, "__version__", "0.2.2")
     assert worker.cache_key(*args) != new_key
 
 
