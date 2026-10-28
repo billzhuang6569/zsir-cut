@@ -150,6 +150,34 @@ def normalize_items(items, offset_ms, language):
     return tokens
 
 
+def repair_zero_width(tokens, start_ms, end_ms):
+    for token in tokens:
+        token["start_ms"] = min(end_ms, max(start_ms, token["start_ms"]))
+        token["end_ms"] = min(end_ms, max(token["start_ms"], token["end_ms"]))
+    count = 0
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token["start_ms"] != token["end_ms"]:
+            index += 1
+            continue
+        count += 1
+        following = tokens[index + 1] if index + 1 < len(tokens) else None
+        previous = tokens[index - 1] if index else None
+        token["end_ms"] = min(following["start_ms"] if following else end_ms, token["start_ms"] + 40, end_ms)
+        if token["end_ms"] == token["start_ms"]:
+            token["start_ms"] = max(previous["end_ms"] if previous else start_ms, token["end_ms"] - 40, start_ms)
+        if token["end_ms"] == token["start_ms"]:
+            if previous:
+                previous["text"] += token["text"]
+            elif following:
+                following["text"] = token["text"] + following["text"]
+            tokens.pop(index)
+        else:
+            index += 1
+    return count
+
+
 class LocalEngine:
     def load(self, name):
         path = MODELS / name
@@ -246,7 +274,11 @@ def result(args, local=None, cloud=None):
     key = cache_key(input_digest, [args.channels], start_ms, duration_ms, args.language, getattr(args, "engine", "local"), asr_digest, align_digest, hotword_digest)
     cache = Path(os.getenv("ZSIR_CACHE_DIR", str(HOME / "cache" / "asr"))) / f"{key}.json"
     if cache.exists():
-        return json.loads(cache.read_text())
+        cached = json.loads(cache.read_text())
+        corrected = repair_zero_width(cached["tokens"], start_ms, start_ms + duration_ms)
+        if corrected:
+            cached["warnings"].append({"code": "W_ASR_ZERO_WIDTH", "count": corrected})
+        return cached
     audio = decode(path, args.channels, start_ms, duration_ms)
     warnings = []
     if is_transcribe:
@@ -262,7 +294,7 @@ def result(args, local=None, cloud=None):
         language = args.language
         engine_used = "local"
     try:
-        items = local.align(audio, text, language)
+        items = local.align(audio, text, language) if text.strip() else []
         tokens = normalize_items(items, start_ms, language)
         alignment = {"name": "qwen3-forced-aligner", "model": ALIGN_NAME, "version": "0.5.8", "weights_digest": align_digest}
     except WorkerError as exc:
@@ -272,6 +304,9 @@ def result(args, local=None, cloud=None):
         # TODO: Normalize cloud token times once the Volcengine client exists.
         tokens = []
         alignment = {"name": "cloud", "model": "volcengine", "version": None, "weights_digest": None}
+    corrected = repair_zero_width(tokens, start_ms, start_ms + duration_ms)
+    if corrected:
+        warnings.append({"code": "W_ASR_ZERO_WIDTH", "count": corrected})
     payload = {"schema": "zsir-cut/asr-result", "schema_version": "0.1", "input": {"path": str(path), "size_bytes": path.stat().st_size, "fingerprint": input_digest, "channels": [args.channels], "start_ms": start_ms, "duration_ms": duration_ms}, "language": language, "asr": {"name": "qwen3-asr" if engine_used == "local" else "volcengine", "model": asr_name if engine_used == "local" else "volcengine", "version": "0.5.8" if engine_used == "local" else None, "weights_digest": asr_digest if engine_used == "local" else None}, "align": alignment, "tokens": tokens, "runtime": {"seconds": round(time.monotonic() - started, 3), "peak_memory_mb": peak_memory_mb(), "engine_used": engine_used}, "warnings": warnings}
     cache.parent.mkdir(parents=True, exist_ok=True)
     cache.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))

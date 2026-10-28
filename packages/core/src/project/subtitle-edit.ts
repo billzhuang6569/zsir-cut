@@ -1,6 +1,7 @@
 // biome-ignore-all lint/style/noNonNullAssertion: Indexed entries are guarded by command validation and local range checks.
 import { add, div, mul, parseRational, type Rational, rational, sub } from "../rational.ts";
 import { EditError } from "./edit.ts";
+import { transcriptIds } from "./id.ts";
 import {
   cueBreaks,
   type SubtitleRules,
@@ -130,10 +131,11 @@ export function applySubtitleEdit(
       );
       const total = widths.reduce(add, rational(0n));
       let at = start;
+      const tokenId = transcriptIds(project, item, "tok_");
       const next: Token[] = pieces.map((text, index) => {
         const stop = index === pieces.length - 1 ? end : add(at, mul(sub(end, start), div(widths[index]!, total)));
         const token: Token = {
-          id: ids?.[index] ?? generate("tok_"),
+          id: ids?.[index] ?? tokenId(),
           text,
           state: "edited",
           heard: index === 0 ? old.map((entry) => entry.heard ?? entry.text).join("") : "",
@@ -213,6 +215,7 @@ export function applySubtitleEdit(
         const [a, b] = cueSpan(item, cue);
         for (let i = a; i <= b; i++) blocked.add(i);
       }
+      const cueId = transcriptIds(project, item, "cue_");
       const old = item.cues;
       const next: Cue[] = [];
       let cursor = first;
@@ -231,7 +234,7 @@ export function applySubtitleEdit(
             previous
               ? { ...previous, breaks: cueBreaks(group, rules) }
               : {
-                  id: generate("cue_"),
+                  id: cueId(),
                   first_token: firstId,
                   last_token: lastId,
                   breaks: cueBreaks(group, rules),
@@ -254,7 +257,7 @@ export function applySubtitleEdit(
         if (b > last)
           parts.push({
             ...cue,
-            id: parts.length ? generate("cue_") : cue.id,
+            id: parts.length ? cueId() : cue.id,
             first_token: item.tokens[last + 1]!.id,
             breaks: cue.breaks?.filter((id) => item.tokens.findIndex((token) => token.id === id) > last) ?? [],
           });
@@ -290,7 +293,7 @@ export function applySubtitleEdit(
       if (at < a || at >= b) fail("E_VALIDATION", "Split point is outside cue");
       const right: Cue = {
         ...structuredClone(cue),
-        id: (op.new_id as string | undefined) ?? generate("cue_"),
+        id: (op.new_id as string | undefined) ?? transcriptIds(project, item, "cue_")(),
         first_token: item.tokens[at + 1]!.id,
         state: "edited",
       };

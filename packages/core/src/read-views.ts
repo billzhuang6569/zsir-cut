@@ -6,7 +6,7 @@ import { validateProjectSemantics } from "./project/semantics.ts";
 import { openProject } from "./project/store.ts";
 import { displayRanges } from "./project/subtitle-rules.ts";
 import { clipTimeMap } from "./project/time-map.ts";
-import type { Clip, Media, Project, Timeline, Transcript } from "./project/types.ts";
+import type { Clip, Media, Project, Timeline, Token, Transcript } from "./project/types.ts";
 import {
   add,
   compare,
@@ -300,6 +300,18 @@ function transcriptSummary(item: Transcript, media?: Media) {
   };
 }
 
+const tokenSeconds = (value: Rational) => {
+  const hundredths = floor(add(mul(value, rational(100n)), rational(1n, 2n)));
+  return `${hundredths / 100n}.${(hundredths % 100n).toString().padStart(2, "0")}`;
+};
+const timedWords = (tokens: Token[]) =>
+  tokens
+    .map(
+      (token, index) =>
+        `${index && /[A-Za-z0-9]$/u.test(tokens[index - 1]!.text) && /^[A-Za-z0-9]/u.test(token.text) ? " " : ""}${token.text}[${tokenSeconds(token.align.start)}-${tokenSeconds(token.align.end)}]`,
+    )
+    .join("");
+
 export function readTranscript(project: Project, input: Input): { text: string; lines: number; truncated: boolean } {
   const range = requestedRange(input);
   const rows: string[] = [];
@@ -316,18 +328,28 @@ export function readTranscript(project: Project, input: Input): { text: string; 
       if (!tokens.length) continue;
       const ids = `${tokens[0]!.id}..${tokens.at(-1)!.id}`;
       rows.push(
-        `[${item.cue.id} ${ids}]${item.cue.state === "auto" ? "" : ` !${item.cue.state}`} ${media?.start_timecode ? sourceTime(item.start, media).tc : sourceClock(item.start)} ${joinWords(tokens.map((token) => token.text))}`,
+        `[${item.cue.id} ${ids}]${item.cue.state === "auto" ? "" : ` !${item.cue.state}`} ${media?.start_timecode ? sourceTime(item.start, media).tc : sourceClock(item.start)} ${input.with_times ? timedWords(tokens) : joinWords(tokens.map((token) => token.text))}`,
       );
     }
   } else {
     const timeline = project.timelines.find((item) => item.id === input.timeline_id);
     if (!timeline) throw new Error(`E_NOT_FOUND: ${input.timeline_id}`);
-    for (const cue of projectSubtitles(project, timeline.id).cues) {
+    const tokens = new Map(
+      project.transcripts.flatMap((item) => item.tokens.map((token) => [token.id, token] as const)),
+    );
+    let previousClip: string | null = null;
+    const clips = timeline.tracks.flatMap((track) => (track.kind === "subtitle" ? [] : track.clips));
+    for (const cue of projectSubtitles(project, timeline.id).cues.sort((a, b) => compare(a.start, b.start))) {
       if (!cue.token_ids.length || !within(cue.start, cue.end, range)) continue;
       const state = project.transcripts.flatMap((item) => item.cues).find((item) => item.id === cue.cue_id)?.state;
       const ids = `${cue.token_ids[0]}..${cue.token_ids.at(-1)}`;
+      if (cue.clip_id && previousClip !== cue.clip_id) {
+        const clip = clips.find((item) => item.id === cue.clip_id)!;
+        rows.push(`@${clip.id} ${sequenceTime(clip.timeline_start, timeline).tc}`);
+        previousClip = cue.clip_id;
+      }
       rows.push(
-        `[${cue.cue_id} ${ids} @${cue.clip_ids.join("+")}]${state === "auto" || !state ? "" : ` !${state}`} ${sequenceTime(cue.start, timeline).tc} ${cue.text.replaceAll("\n", " ")}`,
+        `[${cue.cue_id} ${ids}]${state === "auto" || !state ? "" : ` !${state}`} ${sequenceTime(cue.start, timeline).tc} ${input.with_times ? timedWords(cue.token_ids.map((id) => tokens.get(id)!).filter((token) => token.text)) : cue.text.replaceAll("\n", " ")}`,
       );
     }
   }

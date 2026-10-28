@@ -1,0 +1,199 @@
+{
+  "schema": "zsir-cut/timeline",
+  "schema_version": "0.1",
+  "id": "prj_minimal",
+  "name": "最小示例",
+  "revision": {
+    "seq": 1,
+    "id": "rev_example_1",
+    "parent": null,
+    "created_at": "2026-10-26T12:00:00Z",
+    "author": {
+      "kind": "human",
+      "name": "example"
+    }
+  },
+  "media": [
+    {
+      "id": "med_a",
+      "kind": "video",
+      "name": "A001.mov",
+      "path": "media/A001.mov",
+      "size_bytes": 104857600,
+      "fingerprint": {
+        "algo": "sampled-sha256-v1",
+        "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "duration": "10s",
+      "start_timecode": "10:00:00:00",
+      "reel": "A001",
+      "video": {
+        "rate": "25",
+        "width": 1920,
+        "height": 1080,
+        "pixel_aspect": "1",
+        "vfr": false
+      },
+      "audio": {
+        "sample_rate": "48000",
+        "channels": 2
+      }
+    }
+  ],
+  "timelines": [
+    {
+      "id": "tl_main",
+      "name": "主时间线",
+      "edit_rate": "25",
+      "drop_frame": false,
+      "start_timecode": "00:00:00:00",
+      "audio_rate": "48000",
+      "format": {
+        "width": 1920,
+        "height": 1080,
+        "pixel_aspect": "1"
+      },
+      "tracks": [
+        {
+          "id": "trk_v1",
+          "kind": "video",
+          "name": "V1",
+          "enabled": true,
+          "clips": [
+            {
+              "id": "clp_v1",
+              "occurrence_id": "occ_1",
+              "media_id": "med_a",
+              "timeline_start": "5s",
+              "duration": "10s",
+              "source_start": "0s"
+            }
+          ],
+          "transitions": []
+        },
+        {
+          "id": "trk_a1",
+          "kind": "audio",
+          "name": "A1",
+          "enabled": true,
+          "clips": [
+            {
+              "id": "clp_a1",
+              "occurrence_id": "occ_1",
+              "media_id": "med_a",
+              "timeline_start": "5s",
+              "duration": "10s",
+              "source_start": "0s",
+              "source_channels": [
+                0,
+                1
+              ]
+            }
+          ],
+          "transitions": []
+        },
+        {
+          "id": "trk_sub",
+          "kind": "subtitle",
+          "name": "中文",
+          "enabled": true,
+          "language": "zh-Hans",
+          "carrier_tracks": [
+            "trk_a1"
+          ],
+          "default_style_id": "sty_default",
+          "overrides": [],
+          "free_cues": []
+        }
+      ],
+      "markers": []
+    }
+  ],
+  "transcripts": [
+    {
+      "id": "trs_pause",
+      "media_id": "med_a",
+      "language": "zh-Hans",
+      "source_channels": [
+        0
+      ],
+      "tokens": [
+        {
+          "id": "tok_pause_0",
+          "text": "前",
+          "state": "auto",
+          "align": {
+            "start": "1s",
+            "end": "2s",
+            "run": "run_pause"
+          }
+        },
+        {
+          "id": "tok_pause_1",
+          "text": "",
+          "state": "auto",
+          "align": {
+            "start": "3s",
+            "end": "7/2s",
+            "run": "run_pause"
+          }
+        },
+        {
+          "id": "tok_pause_2",
+          "text": "删",
+          "state": "auto",
+          "align": {
+            "start": "4s",
+            "end": "5s",
+            "run": "run_pause"
+          }
+        },
+        {
+          "id": "tok_pause_3",
+          "text": "后",
+          "state": "auto",
+          "align": {
+            "start": "8s",
+            "end": "9s",
+            "run": "run_pause"
+          }
+        }
+      ],
+      "cues": [
+        {
+          "id": "cue_pause_0",
+          "first_token": "tok_pause_0",
+          "last_token": "tok_pause_3",
+          "state": "auto"
+        }
+      ],
+      "raw_runs": [
+        {
+          "id": "run_pause",
+          "kind": "align",
+          "engine": {
+            "name": "fixture",
+            "model": "fixture",
+            "version": "1"
+          },
+          "created_at": "2026-10-26T12:00:00Z",
+          "range": {
+            "start": "0s",
+            "duration": "10s"
+          },
+          "tokens": []
+        }
+      ]
+    }
+  ],
+  "subtitle_styles": [
+    {
+      "id": "sty_default",
+      "name": "默认",
+      "version": 1,
+      "font_family": "Arial",
+      "font_size": 0.05,
+      "color": "#FFFFFF"
+    }
+  ]
+}

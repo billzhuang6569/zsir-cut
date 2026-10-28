@@ -1,0 +1,174 @@
+[
+  {
+    "name": "extend end",
+    "start_ms": 1000,
+    "duration_ms": 1000,
+    "tokens": [
+      {
+        "text": "a",
+        "start_ms": 1100,
+        "end_ms": 1100,
+        "conf": null
+      },
+      {
+        "text": "b",
+        "start_ms": 1120,
+        "end_ms": 1200,
+        "conf": null
+      }
+    ],
+    "expected": [
+      {
+        "text": "a",
+        "start_ms": 1100,
+        "end_ms": 1120,
+        "conf": null
+      },
+      {
+        "text": "b",
+        "start_ms": 1120,
+        "end_ms": 1200,
+        "conf": null
+      }
+    ],
+    "count": 1
+  },
+  {
+    "name": "move start at input end",
+    "start_ms": 1000,
+    "duration_ms": 1000,
+    "tokens": [
+      {
+        "text": "a",
+        "start_ms": 2000,
+        "end_ms": 2000,
+        "conf": null
+      }
+    ],
+    "expected": [
+      {
+        "text": "a",
+        "start_ms": 1960,
+        "end_ms": 2000,
+        "conf": null
+      }
+    ],
+    "count": 1
+  },
+  {
+    "name": "merge previous",
+    "start_ms": 0,
+    "duration_ms": 1000,
+    "tokens": [
+      {
+        "text": "a",
+        "start_ms": 0,
+        "end_ms": 100,
+        "conf": null
+      },
+      {
+        "text": "b",
+        "start_ms": 100,
+        "end_ms": 100,
+        "conf": null
+      },
+      {
+        "text": "c",
+        "start_ms": 100,
+        "end_ms": 200,
+        "conf": null
+      }
+    ],
+    "expected": [
+      {
+        "text": "ab",
+        "start_ms": 0,
+        "end_ms": 100,
+        "conf": null
+      },
+      {
+        "text": "c",
+        "start_ms": 100,
+        "end_ms": 200,
+        "conf": null
+      }
+    ],
+    "count": 1
+  },
+  {
+    "name": "merge following",
+    "start_ms": 0,
+    "duration_ms": 1000,
+    "tokens": [
+      {
+        "text": "a",
+        "start_ms": 0,
+        "end_ms": 0,
+        "conf": null
+      },
+      {
+        "text": "b",
+        "start_ms": 0,
+        "end_ms": 100,
+        "conf": null
+      }
+    ],
+    "expected": [
+      {
+        "text": "ab",
+        "start_ms": 0,
+        "end_ms": 100,
+        "conf": null
+      }
+    ],
+    "count": 1
+  },
+  {
+    "name": "empty",
+    "start_ms": 0,
+    "duration_ms": 1000,
+    "tokens": [],
+    "expected": [],
+    "count": 0
+  },
+  {
+    "name": "consecutive",
+    "start_ms": 0,
+    "duration_ms": 1000,
+    "tokens": [
+      {
+        "text": "a",
+        "start_ms": 100,
+        "end_ms": 100,
+        "conf": null
+      },
+      {
+        "text": "b",
+        "start_ms": 100,
+        "end_ms": 100,
+        "conf": null
+      },
+      {
+        "text": "c",
+        "start_ms": 100,
+        "end_ms": 100,
+        "conf": null
+      }
+    ],
+    "expected": [
+      {
+        "text": "ab",
+        "start_ms": 60,
+        "end_ms": 100,
+        "conf": null
+      },
+      {
+        "text": "c",
+        "start_ms": 100,
+        "end_ms": 140,
+        "conf": null
+      }
+    ],
+    "count": 3
+  }
+]

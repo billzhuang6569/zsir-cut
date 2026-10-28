@@ -86,6 +86,10 @@ def test_result_and_error_json_with_fake_engine(monkeypatch, tmp_path):
 
 
 def test_probe_has_no_secret(monkeypatch):
+    from types import SimpleNamespace
+    fake_mlx = SimpleNamespace(metal=SimpleNamespace(is_available=lambda: False))
+    monkeypatch.setitem(sys.modules, "mlx", SimpleNamespace(core=fake_mlx))
+    monkeypatch.setitem(sys.modules, "mlx.core", fake_mlx)
     monkeypatch.setenv("ZSIR_VOLC_APP_ID", "private-app")
     monkeypatch.setenv("ZSIR_VOLC_ACCESS_TOKEN", "private-token")
     assert "private-token" not in json.dumps(worker.probe())
@@ -96,3 +100,45 @@ def test_missing_input_writes_input_error(tmp_path):
     status = worker.main(["transcribe", "--input", str(tmp_path / "missing.wav"), "--channels", "0", "--language", "zh", "--out", str(destination)])
     assert status == 1
     assert json.loads(destination.read_text())["code"] == "E_ASR_INPUT"
+
+
+@pytest.mark.parametrize("case", json.loads((Path(__file__).resolve().parents[3] / "fixtures/regressions/asr-zero-width.json").read_text()), ids=lambda case: case["name"])
+def test_zero_width_regression(case):
+    from copy import deepcopy
+    tokens = deepcopy(case["tokens"])
+    count = worker.repair_zero_width(tokens, case["start_ms"], case["start_ms"] + case["duration_ms"])
+    assert tokens == case["expected"]
+    assert count == case["count"]
+
+
+def test_zero_width_warning_and_silence_with_fake_engine(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from decimal import Decimal
+    source = tmp_path / "clip.wav"
+    source.write_bytes(b"fake audio")
+    monkeypatch.setattr(worker, "media_info", lambda _: (1, 1000))
+    monkeypatch.setattr(worker, "decode", lambda *_: object())
+    monkeypatch.setattr(worker, "weight_digest", lambda _: "sha256:fake")
+    monkeypatch.setenv("ZSIR_CACHE_DIR", str(tmp_path / "cache"))
+    class Fake:
+        def transcribe(self, *_):
+            return "hello", "en"
+        def align(self, *_):
+            return [SimpleNamespace(text="hello", start_time=Decimal("0.1"), end_time=Decimal("0.1"))]
+    args = worker.parser().parse_args(["transcribe", "--input", str(source), "--channels", "0", "--language", "en", "--out", str(tmp_path / "out.json")])
+    output = worker.result(args, local=Fake())
+    assert output["tokens"][0]["end_ms"] == 140
+    assert output["warnings"] == [{"code": "W_ASR_ZERO_WIDTH", "count": 1}]
+    cache = next((tmp_path / "cache").glob("*.json"))
+    old = json.loads(cache.read_text())
+    old["tokens"][0]["end_ms"] = 100
+    old["warnings"] = []
+    cache.write_text(json.dumps(old))
+    assert worker.result(args, local=Fake())["warnings"] == [{"code": "W_ASR_ZERO_WIDTH", "count": 1}]
+    class Silent:
+        def transcribe(self, *_):
+            return " ", "en"
+        def align(self, *_):
+            raise AssertionError("silence must not call align")
+    monkeypatch.setenv("ZSIR_CACHE_DIR", str(tmp_path / "silence-cache"))
+    assert worker.result(args, local=Silent())["tokens"] == []

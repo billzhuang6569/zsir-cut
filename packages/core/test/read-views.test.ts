@@ -182,7 +182,8 @@ describe("read views", () => {
     const projected = (await result("read_transcript", { timeline_id: "tl_std" })).result as { text: string };
     const lines = projected.text.split("\n").filter((line) => line.includes("cue_zh_03"));
     expect(lines).toHaveLength(1);
-    expect(lines[0]).toMatch(/@clp_a1\+clp_[^\]]+/u);
+    expect(projected.text).toMatch(/^@clp_a1 /mu);
+    expect(lines[0]).not.toContain("@clp");
     expect(lines[0]).not.toContain("先把");
     const ranged = (
       await result("read_transcript", { transcript_id: "trs_A_zh", range: { start: "15s", duration: "4s" } })
@@ -210,7 +211,7 @@ describe("read views", () => {
     const large = await project();
     const transcript = large.transcripts[0]!;
     transcript.tokens = Array.from({ length: 9000 }, (_, index) => ({
-      id: `tok_${index.toString().padStart(4, "0")}`,
+      id: `tok_abcdef_${index.toString(36)}`,
       text: "一",
       state: "auto" as const,
       align: {
@@ -223,18 +224,36 @@ describe("read views", () => {
       const first = index < 600 ? index * 8 : 4800 + (index - 600) * 7;
       const last = first + (index < 600 ? 7 : 6);
       return {
-        id: `cue_${index.toString().padStart(4, "0")}`,
+        id: `cue_abcdef_${index.toString(36)}`,
         first_token: transcript.tokens[first]!.id,
         last_token: transcript.tokens[last]!.id,
         state: "auto" as const,
       };
     });
-    const packed = readTranscript(large, { transcript_id: transcript.id });
+    large.media.find((media) => media.id === transcript.media_id)!.duration = rational(3600n);
+    const timeline = large.timelines[0]!;
+    timeline.tracks = timeline.tracks.filter(
+      (track) => track.id === "trk_a1" || (track.kind === "subtitle" && track.language === transcript.language),
+    );
+    const audio = timeline.tracks.find((track) => track.id === "trk_a1")!;
+    if (audio.kind === "subtitle") throw new Error("Missing audio");
+    audio.clips = [
+      {
+        id: "clp_hour",
+        media_id: transcript.media_id,
+        occurrence_id: "occ_hour",
+        timeline_start: rational(0n),
+        source_start: rational(0n),
+        duration: rational(3600n),
+      },
+    ];
+    transcript.ext = { zsir: { id_tag: "abcdef" } };
+    const packed = readTranscript(large, { timeline_id: timeline.id });
     const bytes = Buffer.byteLength(packed.text, "utf8");
-    expect(packed.lines).toBe(1200);
+    expect(packed.lines).toBe(1201);
     expect(packed.truncated).toBe(false);
     expect(bytes).toBeGreaterThan(20 * 1024);
-    expect(bytes).toBeLessThan(256 * 1024);
+    expect(bytes).toBeLessThanOrEqual(128 * 1024);
     for (const token of transcript.tokens) token.text = "长".repeat(25);
     const capped = readTranscript(large, { transcript_id: transcript.id });
     expect(capped.truncated).toBe(true);
