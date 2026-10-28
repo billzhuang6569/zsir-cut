@@ -13,6 +13,7 @@ import {
 import { fingerprint } from "./fingerprint.ts";
 import { jobPath, readJob, startExportJob, startPreviewJob, startTranscribeJob } from "./jobs.ts";
 import { renderPreview, timelineFrames, viewTimeline } from "./preview.ts";
+import { buildProject, type CreateProjectRequest } from "./project/create.ts";
 import { applyEdit, SUBTITLE_OPS } from "./project/edit.ts";
 import { diffProjectEntities } from "./project/entities.ts";
 import { newId } from "./project/id.ts";
@@ -35,6 +36,7 @@ import { normalizeCommand, validateCommand } from "./schema.ts";
 import { AsrError, applyTranscription, invokeAsr, type TranscribeRequest, workerMilliseconds } from "./transcribe.ts";
 
 export const VERBS = [
+  "create_project",
   "inspect",
   "read_transcript",
   "validate",
@@ -88,7 +90,7 @@ function basic(verb: Verb, requestId: string): Envelope {
   };
 }
 
-function errorEnvelope(
+export function errorEnvelope(
   verb: Verb,
   requestId: string,
   status: "rejected" | "failed" | "conflict",
@@ -273,7 +275,12 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
       requestId,
       "rejected",
       "E_VALIDATION",
-      check.errors.map((item) => `${item.instancePath || "/"}: ${item.message}`).join("; ") || "Invalid request",
+      check.errors
+        .map(
+          (item) =>
+            `${item.instancePath || "/"}: ${item.message}${item.params.additionalProperty ? ` (${item.params.additionalProperty})` : ""}${item.params.unevaluatedProperty ? ` (${item.params.unevaluatedProperty})` : ""}`,
+        )
+        .join("; ") || "Invalid request",
     );
   const request = input as Request;
   if (
@@ -291,10 +298,25 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
     verb !== "export" &&
     verb !== "record_handoff_check" &&
     verb !== "job_status" &&
+    verb !== "create_project" &&
     !verb.startsWith("session_")
   )
     return errorEnvelope(verb, requestId, "rejected", "E_UNSUPPORTED", `Verb ${verb} is not implemented`);
   try {
+    if (verb === "create_project") {
+      const create = request as unknown as CreateProjectRequest;
+      return await openProject({ projectPath: create.project }).createProject(
+        {
+          verb,
+          request_id: requestId,
+          base_revision: "",
+          idempotency_key: create.idempotency_key,
+          author: create.author,
+          ops: [create],
+        },
+        () => buildProject(create, options.probe ?? ffprobe),
+      );
+    }
     if (verb === "record_handoff_check") {
       const value = {
         status: request.status,

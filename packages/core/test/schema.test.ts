@@ -259,3 +259,123 @@ describe("envelope", () => {
     expect(validateEnvelope(envelope).valid).toBe(false);
   });
 });
+
+describe("request error diagnostics", () => {
+  const base = {
+    project: "test.zcut.json",
+    base_revision: "rev_test",
+    idempotency_key: "test",
+    author: { kind: "agent", name: "test" },
+  };
+  const place = {
+    op: "place",
+    media_id: "med_test",
+    source_start: "0s",
+    duration: "1s",
+    at: "0s",
+    mode: "insert",
+    video_track: "trk_v1",
+  };
+
+  it("reports only the selected operation, including misspelled parameter names", async () => {
+    const { dispatch } = await import("../src/index.ts");
+    const output = await dispatch("edit", {
+      ...base,
+      ops: [
+        { ...place, duration: "bad" },
+        { ...place, duraton: "1s" },
+      ],
+    });
+    const message = output.error?.message ?? "";
+    expect(output.error?.code).toBe("E_VALIDATION");
+    expect(Buffer.byteLength(message)).toBeLessThanOrEqual(1024);
+    expect(message).toContain("/ops/0/duration");
+    expect(message).toContain("duraton");
+    expect(message).not.toContain("clip_ids");
+    expect(message).not.toContain("transcript_id");
+    expect(message).not.toContain("oneOf");
+  });
+
+  it("reports only unknown operation and its available values", async () => {
+    const { dispatch } = await import("../src/index.ts");
+    const output = await dispatch("edit", { ...base, ops: [{ op: "plaec", nonsense: true }] });
+    expect(output.error?.message).toMatch(/^\/ops\/0\/op: 未知操作；可选值：place, remove,/);
+    expect(output.error?.message).not.toContain("required");
+    expect(output.error?.message).not.toContain("additional");
+  });
+
+  it("keeps common-field errors and selects each operation independently", async () => {
+    const { validateCommand } = await import("../src/schema.ts");
+    const output = validateCommand("edit", {
+      ...base,
+      author: {},
+      ops: [
+        { ...place, duration: false },
+        { op: "split", clip_id: "clp_test", at: false },
+        { op: "remove", clip_ids: ["clp_test"] },
+      ],
+    });
+    expect(output.valid).toBe(false);
+    expect(output.errors.map((error) => error.instancePath)).toEqual([
+      "/author",
+      "/author",
+      "/ops/0/duration",
+      "/ops/1/at",
+    ]);
+    expect(validateCommand("edit", { ...base, ops: [place] })).toEqual({ valid: true, errors: [] });
+    expect(validateCommand("edit", { ...base, ops: [null] }).errors).toHaveLength(1);
+  });
+
+  it("preserves tokens, end placement and unreduced request times during branch diagnostics", async () => {
+    const { validateCommand } = await import("../src/schema.ts");
+    const { source_start: _sourceStart, duration: _duration, ...tokenPlace } = place;
+    const ops = [
+      { ...place, source_start: "0/25s", duration: "50/25s", at: "end" },
+      {
+        ...tokenPlace,
+        at: "end",
+        tokens: { transcript_id: "trs_test", from_token: "tok_first", to_token: "tok_last", pause: "50/25s" },
+      },
+    ];
+    const before = JSON.stringify(ops);
+    expect(validateCommand("edit", { ...base, ops })).toEqual({ valid: true, errors: [] });
+    const invalid = validateCommand("edit", {
+      ...base,
+      ops: [...ops, { op: "split", clip_id: "clp_test", at: false }],
+    });
+    expect(invalid.valid).toBe(false);
+    expect(invalid.errors.map((error) => error.instancePath)).toEqual(["/ops/2/at"]);
+    expect(JSON.stringify(ops)).toBe(before);
+  });
+
+  it("keeps nested token validation and mutually exclusive place ranges", async () => {
+    const { dispatch } = await import("../src/index.ts");
+    const { validateCommand } = await import("../src/schema.ts");
+    const { source_start: _sourceStart, duration: _duration, ...tokenPlace } = place;
+    const tokens = { transcript_id: "trs_test", from_token: "tok_first", to_token: "tok_last" };
+    const output = await dispatch("edit", {
+      ...base,
+      ops: [{ ...tokenPlace, at: "end", tokens: { ...tokens, pause: "bad" } }],
+    });
+    const message = output.error?.message ?? "";
+    expect(output.error?.code).toBe("E_VALIDATION");
+    expect(message).toContain("/ops/0/tokens/pause");
+    expect(message).not.toContain("clip_ids");
+    expect(Buffer.byteLength(message)).toBeLessThanOrEqual(1024);
+    for (const op of [tokenPlace, { ...place, tokens }, { ...tokenPlace, tokens: { ...tokens, extra: true } }])
+      expect(validateCommand("edit", { ...base, ops: [op] }).valid).toBe(false);
+  });
+
+  it("reports only the chosen verb request and lists known verbs for an unknown verb", async () => {
+    const { dispatch } = await import("../src/index.ts");
+    const output = await dispatch("create_project", { ...base, timeline: {} });
+    expect(output.error?.message).toContain("'name'");
+    expect(output.error?.message).not.toContain("ops");
+    const { validateCommand } = await import("../src/schema.ts");
+    const unknown = validateCommand("creat_project", {});
+    expect(unknown.valid).toBe(false);
+    expect(unknown.errors).toHaveLength(1);
+    expect(unknown.errors[0]?.message).toContain("未知动词；可选值：");
+    expect(unknown.errors[0]?.message).toContain("create_project");
+  });
+});
