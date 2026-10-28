@@ -13,7 +13,7 @@
 
 ## 演练发现的问题
 
-2026-10-28 Claude 按 Agent 的用法从零走了一遍：新建工程、导入、识别、放上时间线、建字幕轨、按字词删句、导出 FCPXML。全流程能跑通，但有八个问题会挡住真实项目：
+2026-10-28 Claude 按 Agent 的用法从零走了一遍：新建工程、导入、识别、放上时间线、建字幕轨、按字词删句、导出 FCPXML。全流程能跑通，但有八个问题会挡住真实项目（P9 是之后用真实采访发现的）：
 
 | 编号 | 问题 | 规格改动 |
 |---|---|---|
@@ -25,6 +25,7 @@
 | P6 | 母稿语言写 `zh`、字幕轨写 `zh-Hans` 时，投影静默为空，没有任何提示 | `timeline-schema.md` 第 8 节 `W_SUB_NO_TRANSCRIPT` |
 | P7 | `read_transcript` 每行约 213 字节，其中文字只有 32 字节，其余是长 ID。一小时采访约 255 KB，会被截断 | `timeline-schema.md` 第 3 节短 ID；`command-protocol.md` 9.1 节片段头 |
 | P8 | 按字词删句时区间贴着字边，两侧停顿都留下，剪点处停顿翻倍；Agent 也看不到字词时间，没法自己算 | `edit-ops.md` `remove_span` 的 `pause`；`read_transcript` 的 `with_times` |
+| P9 | 19 分钟的真实采访整段对齐，3124 个字词里 3117 个零宽，逐字时间基本失效（识别文字是对的） | `asr-worker.md` 2.1 节长音频分段 |
 
 规格改动在同一个 PR 里，`schema/` 同步更新。
 
@@ -36,6 +37,7 @@
 | 2.2 | `create_project` 动词（CLI 和 MCP）；CLI 工程路径规则；`E_VALIDATION` 报错只列相关分支 | 规格 PR | 用 `match_media` 对 30 帧素材建工程后，导入、放置、导出 FCPXML 全部成功；写错一个 `place` 参数，报错不超过 1 KB 且指出那个参数 |
 | 2.3 | 字幕链路：worker 零宽修正和空结果；短 ID；`read_transcript` 片段头和 `with_times`；`W_SUB_NO_TRANSCRIPT`；`remove_span` 的 `pause`；`workers/asr/README.md` 写清环境搭建 | 规格 PR | 一小时规模的合成母稿 `read_transcript` 不超过 128 KB；`pause` 的区间与手算一致；零宽字词的回归用例 |
 
+| 2.7 | 识别 worker 长音频分段（`asr-worker.md` 2.1 节）和 `W_ASR_ALIGN_DEGRADED` | 2.3 | 合成一条 5 分钟的朗读素材（台词朗读拼接 3 次以上），零宽比例低于 1%，各段拼接处字词不重复、不丢失；切点选择有单元测试；Claude 用真实 19 分钟采访复测 |
 | 2.6 | `place` 按字词选段（`tokens`）和 `at: "end"`；请求里的非最简分数自动约分 | 2.3 | 用合成朗读素材按三段字词逆序追加，序列上三段首尾相接、源区间与手算一致；`"50/25s"` 被接受并写成 `2s` |
 
 2.1 到 2.3 改的文件基本不重叠，可以并行，各用一个 worktree；后合并的负责变基。2.6 改的是编辑操作，等 2.3 合并后再做。
