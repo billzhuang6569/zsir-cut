@@ -113,7 +113,14 @@ const describeChange = (change: EntityChange, entityOps: Record<string, string>,
     | "updated"
     | "removed",
   ...(change.entity === "clip" && change.before === null && typeof change.after?.occurrence_id === "string"
-    ? { detail: { occurrence_id: change.after.occurrence_id } }
+    ? {
+        detail: {
+          occurrence_id: change.after.occurrence_id,
+          ...(entityOps[change.key] === "place"
+            ? { source_start: change.after.source_start, duration: change.after.duration }
+            : {}),
+        },
+      }
     : {}),
 });
 

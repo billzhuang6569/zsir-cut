@@ -114,6 +114,34 @@ describe("CLI and MCP", () => {
         {
           verb: "edit",
           input: {
+            ...base,
+            idempotency_key: "place-tokens-parity",
+            dry_run: true,
+            ops: [
+              {
+                op: "place",
+                media_id: "med_A",
+                at: "end",
+                mode: "insert",
+                video_track: "trk_v1",
+                audio_track: "trk_a1",
+                tokens: { transcript_id: "trs_A_zh", from_token: "tok_010", to_token: "tok_017", pause: "20/50s" },
+              },
+              {
+                op: "place",
+                media_id: "med_A",
+                at: "end",
+                mode: "insert",
+                video_track: "trk_v1",
+                source_start: "0/25s",
+                duration: "50/25s",
+              },
+            ],
+          },
+        },
+        {
+          verb: "edit",
+          input: {
             base_revision: "rev_fixture_1",
             idempotency_key: "edit-preview",
             author,
@@ -129,6 +157,10 @@ describe("CLI and MCP", () => {
         const cliResult = invokeCli(verb, input);
         const mcpResult = await client.callTool({ name: `zcut_${verb}`, arguments: request });
         const envelope = mcpResult.structuredContent as Record<string, unknown>;
+        if ("idempotency_key" in input && input.idempotency_key === "place-tokens-parity") {
+          expect(cliResult.envelope.status).toBe("dry_run");
+          expect(cliResult.envelope.changes).toHaveLength(3);
+        }
         expect(validateEnvelope(cliResult.envelope).valid).toBe(true);
         expect(validateEnvelope(envelope).valid).toBe(true);
         expect(JSON.stringify(withoutRequestId(cliResult.envelope))).toBe(JSON.stringify(withoutRequestId(envelope)));

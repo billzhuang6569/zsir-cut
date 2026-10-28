@@ -1,0 +1,344 @@
+{
+  "schema": "zsir-cut/timeline",
+  "schema_version": "0.1",
+  "id": "prj_place_tokens",
+  "name": "Place three aligned sentences",
+  "revision": {
+    "seq": 1,
+    "id": "rev_fixture_1",
+    "parent": null,
+    "created_at": "2026-10-26T00:00:00Z",
+    "author": {
+      "kind": "system",
+      "name": "fixtures"
+    }
+  },
+  "media": [
+    {
+      "id": "med_A",
+      "kind": "video",
+      "name": "A_25.mov",
+      "path": "../.media/25/A_25.mov",
+      "size_bytes": 0,
+      "fingerprint": {
+        "algo": "sampled-sha256-v1",
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "duration": "120s",
+      "start_timecode": "10:00:00:00",
+      "reel": "A",
+      "video": {
+        "rate": "25",
+        "width": 960,
+        "height": 540,
+        "pixel_aspect": "1",
+        "vfr": false
+      },
+      "audio": {
+        "sample_rate": "48000",
+        "channels": 2
+      }
+    }
+  ],
+  "timelines": [
+    {
+      "id": "tl_std",
+      "name": "std-25",
+      "edit_rate": "25",
+      "drop_frame": false,
+      "start_timecode": "01:00:00:00",
+      "audio_rate": "48000",
+      "format": {
+        "width": 960,
+        "height": 540,
+        "pixel_aspect": "1"
+      },
+      "tracks": [
+        {
+          "id": "trk_v1",
+          "kind": "video",
+          "name": "V1 主机位",
+          "enabled": true,
+          "clips": [],
+          "transitions": []
+        },
+        {
+          "id": "trk_a1",
+          "kind": "audio",
+          "name": "A1 主机位收音",
+          "enabled": true,
+          "clips": [],
+          "transitions": []
+        }
+      ],
+      "markers": []
+    }
+  ],
+  "transcripts": [
+    {
+      "id": "trs_A_zh",
+      "media_id": "med_A",
+      "source_channels": [
+        0
+      ],
+      "language": "zh-Hans",
+      "raw_runs": [
+        {
+          "id": "run_truth_align",
+          "kind": "align",
+          "engine": {
+            "name": "fixture-script",
+            "model": "fixtures/synth/script.json",
+            "version": "0.1"
+          },
+          "created_at": "2026-10-26T00:00:00Z",
+          "range": {
+            "start": "0s",
+            "duration": "120s"
+          },
+          "tokens": []
+        }
+      ],
+      "tokens": [
+        {
+          "id": "tok_000",
+          "text": "大家",
+          "state": "approved",
+          "align": {
+            "start": "1/2s",
+            "end": "47/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_001",
+          "text": "好",
+          "state": "approved",
+          "align": {
+            "start": "47/50s",
+            "end": "29/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_002",
+          "text": "我",
+          "state": "approved",
+          "align": {
+            "start": "29/25s",
+            "end": "69/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_003",
+          "text": "是",
+          "state": "approved",
+          "align": {
+            "start": "69/50s",
+            "end": "8/5s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_004",
+          "text": "庄Sir",
+          "state": "approved",
+          "align": {
+            "start": "8/5s",
+            "end": "209/100s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_005",
+          "text": "今天",
+          "state": "auto",
+          "align": {
+            "start": "11/2s",
+            "end": "297/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_006",
+          "text": "聊聊",
+          "state": "auto",
+          "align": {
+            "start": "297/50s",
+            "end": "319/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_007",
+          "text": "zsir-cut",
+          "state": "auto",
+          "align": {
+            "start": "319/50s",
+            "end": "67/10s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_008",
+          "text": "这个",
+          "state": "auto",
+          "align": {
+            "start": "67/10s",
+            "end": "357/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_009",
+          "text": "项目",
+          "state": "auto",
+          "align": {
+            "start": "357/50s",
+            "end": "379/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_010",
+          "text": "它",
+          "state": "auto",
+          "align": {
+            "start": "21/2s",
+            "end": "268/25s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_011",
+          "text": "是",
+          "state": "auto",
+          "align": {
+            "start": "268/25s",
+            "end": "547/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_012",
+          "text": "剪辑师",
+          "state": "auto",
+          "align": {
+            "start": "547/50s",
+            "end": "58/5s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_013",
+          "text": "和",
+          "state": "auto",
+          "align": {
+            "start": "58/5s",
+            "end": "591/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_014",
+          "text": "Agent",
+          "state": "auto",
+          "align": {
+            "start": "591/50s",
+            "end": "607/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_015",
+          "text": "共用",
+          "state": "auto",
+          "align": {
+            "start": "607/50s",
+            "end": "629/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_016",
+          "text": "的",
+          "state": "auto",
+          "align": {
+            "start": "629/50s",
+            "end": "64/5s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_017",
+          "text": "时间线",
+          "state": "auto",
+          "align": {
+            "start": "64/5s",
+            "end": "673/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        },
+        {
+          "id": "tok_018",
+          "text": "Agent",
+          "state": "auto",
+          "align": {
+            "start": "31/2s",
+            "end": "791/50s",
+            "conf": 1,
+            "run": "run_truth_align"
+          }
+        }
+      ],
+      "cues": [
+        {
+          "id": "cue_zh_00",
+          "first_token": "tok_000",
+          "last_token": "tok_004",
+          "state": "approved"
+        },
+        {
+          "id": "cue_zh_01",
+          "first_token": "tok_005",
+          "last_token": "tok_009",
+          "timing": {
+            "start": "11/2s",
+            "end": "197/25s",
+            "locked": true
+          },
+          "state": "edited"
+        },
+        {
+          "id": "cue_zh_02",
+          "first_token": "tok_010",
+          "last_token": "tok_017",
+          "breaks": [
+            "tok_013"
+          ],
+          "state": "auto"
+        }
+      ]
+    }
+  ],
+  "subtitle_styles": []
+}

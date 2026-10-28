@@ -819,7 +819,7 @@ describe("remove_span and frame-grid details", () => {
       { op: "trim", clip_id: "clp_v1", edge: "out", to: "199/50s" },
       { op: "split", clip_id: "clp_v1", at: "1/50s" },
       { op: "move", clip_ids: ["clp_v9"], to: "3001/50s" },
-      { op: "split", clip_id: "clp_v1", at: "2/2s" },
+      { op: "split", clip_id: "clp_v1", at: "2/100s" },
     ]) {
       const output = await edit([op]);
       expect(output.status).toBe("rejected");
@@ -915,5 +915,238 @@ describe("ripple out trim", () => {
       rational(BigInt(to.slice(0, -1))),
     );
     await validateAndUndo(before);
+  });
+});
+
+describe("place tokens and request times", () => {
+  beforeEach(async () => {
+    await copyFile(new URL("../../../fixtures/regressions/place-tokens.zcut.json", import.meta.url), path);
+  });
+  const place = (tokens: Record<string, unknown>, extra = {}) => ({
+    op: "place",
+    media_id: "med_A",
+    tokens: { transcript_id: "trs_A_zh", ...tokens },
+    at: "end",
+    mode: "insert",
+    video_track: "trk_v1",
+    audio_track: "trk_a1",
+    ...extra,
+  });
+  const save = async (project: Project) => writeFile(path, serializeProject(project));
+
+  it("appends sentence 3, 1, 2 with hand-calculated silence and rounding, identically in dry run", async () => {
+    // pause/2 = 1/5s. Sentence 3: [10.5-.2, 13.46+.2] = [10.3,13.66].
+    // floor(10.3*25)/25 = 257/25; ceil((13.66-10.28)*25)/25 = 17/5.
+    // Sentence 1: [.5-.2,2.09+.2] = [.3,2.29]; floor start = 7/25;
+    // ceil((2.29-.28)*25)/25 = 51/25. No predecessor: p = 0.
+    // Sentence 2: [5.5-.2,7.58+.2] = [5.3,7.78]; floor start = 132/25;
+    // ceil((7.78-5.28)*25)/25 = 63/25. Sequence starts: 0, 17/5, 136/25.
+    const input = request([
+      place({ from_token: "tok_010", to_token: "tok_017", pause: "2/5s" }),
+      place({ from_token: "tok_000", to_token: "tok_004", pause: "2/5s" }),
+      place({ from_token: "tok_005", to_token: "tok_009", pause: "2/5s" }),
+    ]);
+    const bytes = await readFile(path, "utf8");
+    const preview = await dispatch("edit", { ...input, dry_run: true });
+    expect(preview.status, JSON.stringify(preview)).toBe("dry_run");
+    expect(await readFile(path, "utf8")).toBe(bytes);
+    await expect(stat(join(directory, ".zcut"))).rejects.toMatchObject({ code: "ENOENT" });
+    const output = await dispatch("edit", input);
+    expect(output.status, JSON.stringify(output)).toBe("applied");
+    expect(output.changes).toEqual(preview.changes);
+    const after = await read();
+    for (const trackId of ["trk_v1", "trk_a1"]) {
+      const placed = clips(after, trackId);
+      expect(
+        placed.map((clip) =>
+          [clip.source_start, clip.duration, clip.timeline_start].map((t) => printRational(t, true)),
+        ),
+      ).toEqual([
+        ["257/25s", "17/5s", "0s"],
+        ["7/25s", "51/25s", "17/5s"],
+        ["132/25s", "63/25s", "136/25s"],
+      ]);
+      for (const clip of placed)
+        expect(output.changes.find((change) => change.id === clip.id)?.detail).toEqual({
+          occurrence_id: clip.occurrence_id,
+          source_start: printRational(clip.source_start, true),
+          duration: printRational(clip.duration, true),
+        });
+      expect(add(placed[0]!.timeline_start, placed[0]!.duration)).toEqual(placed[1]!.timeline_start);
+      expect(add(placed[1]!.timeline_start, placed[1]!.duration)).toEqual(placed[2]!.timeline_start);
+    }
+    const original = parseProject(bytes);
+    if (!original.ok) throw new Error("Invalid fixture");
+    await validateAndUndo(original.project);
+  });
+
+  it("uses media boundaries without neighboring visible words, and skips hidden tokens", async () => {
+    const p = await read();
+    const transcript = p.transcripts[0]!;
+    transcript.tokens[1]!.text = "";
+    transcript.tokens[18]!.text = "";
+    await save(p);
+    const output = await dispatch(
+      "edit",
+      request([
+        place({ from_token: "tok_000", to_token: "tok_000", pause: "20s" }),
+        place({ from_token: "tok_010", to_token: "tok_017", pause: "240s" }),
+      ]),
+    );
+    expect(output.status, JSON.stringify(output)).toBe("applied");
+    // Hidden tok_001 is skipped: next start = tok_002.start = 29/25;
+    // p=0, so [0,29/25] is already on-grid. Last visible word has n=120.
+    expect(clips(await read(), "trk_v1").map((c) => [c.source_start, c.duration])).toEqual([
+      [rational(0n), rational(29n, 25n)],
+      [rational(189n, 25n), rational(2811n, 25n)],
+    ]);
+  });
+
+  it.each([undefined, "0s"])("keeps word edges before rounding with pause %s", async (pause) => {
+    const output = await dispatch(
+      "edit",
+      request([place({ from_token: "tok_000", to_token: "tok_004", ...(pause ? { pause } : {}) })]),
+    );
+    expect(output.status, JSON.stringify(output)).toBe("applied");
+    // floor(.5*25)=12 frames; ceil((2.09-.48)*25)=41 frames.
+    expect(clips(await read(), "trk_v1")[0]).toMatchObject({
+      source_start: rational(12n, 25n),
+      duration: rational(41n, 25n),
+    });
+  });
+
+  it("uses the source video grid for start and timeline grid for duration", async () => {
+    const p = await read();
+    p.media[0]!.video!.rate = rational(30n);
+    await save(p);
+    const output = await dispatch(
+      "edit",
+      request([place({ from_token: "tok_000", to_token: "tok_004", pause: "2/5s" })]),
+    );
+    expect(output.status, JSON.stringify(output)).toBe("applied");
+    // floor(.3*30)/30=.3; ceil((2.29-.3)*25)/25=2.
+    expect(clips(await read(), "trk_v1")[0]).toMatchObject({ source_start: rational(3n, 10n), duration: rational(2n) });
+  });
+
+  it("uses the timeline grid for pure audio and caps duration inside a non-grid media end", async () => {
+    const p = await read();
+    const source = p.media[0]!;
+    source.kind = "audio";
+    delete source.video;
+    source.duration = rational(4181n, 2000n); // 2.0905s, tail is between timeline frames.
+    const transcript = p.transcripts[0]!;
+    transcript.tokens = transcript.tokens.slice(0, 5);
+    transcript.cues = transcript.cues.slice(0, 1);
+    await save(p);
+    const output = await dispatch(
+      "edit",
+      request([place({ from_token: "tok_000", to_token: "tok_004", pause: "2/5s" }, { video_track: undefined })]),
+    );
+    expect(output.status, JSON.stringify(output)).toBe("applied");
+    // start=.28; ceil((2.0905-.28)*25)=46, but only floor(1.8105*25)=45 frames fit.
+    expect(clips(await read(), "trk_a1")[0]).toMatchObject({
+      source_start: rational(7n, 25n),
+      duration: rational(9n, 5n),
+    });
+  });
+
+  it("finds end across all media tracks, including disabled tracks, ignoring markers", async () => {
+    const p = await read();
+    p.timelines[0]!.tracks.push({
+      id: "trk_later",
+      kind: "audio",
+      name: "Later",
+      enabled: false,
+      transitions: [],
+      clips: [
+        {
+          id: "clp_later",
+          occurrence_id: "occ_later",
+          media_id: "med_A",
+          source_start: rational(0n),
+          timeline_start: rational(10n),
+          duration: rational(2n),
+          enabled: false,
+        },
+      ],
+    });
+    p.timelines[0]!.markers.push({
+      id: "mrk_later",
+      at: rational(100n),
+      duration: rational(1n),
+      kind: "note",
+      text: "Ignore",
+    });
+    await save(p);
+    const output = await dispatch("edit", request([place({ from_token: "tok_000", to_token: "tok_004" })]));
+    expect(output.status, JSON.stringify(output)).toBe("applied");
+    expect(clips(await read(), "trk_v1")[0]?.timeline_start).toEqual(rational(12n));
+  });
+
+  it.each([
+    ["E_VALIDATION", { from_token: "tok_010", to_token: "tok_000" }, {}],
+    ["E_VALIDATION", { from_token: "tok_000", to_token: "tok_004" }, { media_id: "med_other" }],
+    ["E_NOT_FOUND", { from_token: "tok_missing", to_token: "tok_004" }, {}],
+    ["E_NOT_FOUND", { transcript_id: "trs_missing", from_token: "tok_000", to_token: "tok_004" }, {}],
+  ])("rejects %s atomically for %j", async (code, tokens, extra) => {
+    const p = await read();
+    p.media.push({ ...p.media[0]!, id: "med_other" });
+    await save(p);
+    const bytes = await readFile(path, "utf8");
+    const input = request([place({ from_token: "tok_000", to_token: "tok_004" }), place(tokens, extra)]);
+    for (const dry_run of [true, false]) {
+      const output = await dispatch("edit", { ...input, dry_run });
+      expect(output).toMatchObject({ status: "rejected", error: { code } });
+      expect(await readFile(path, "utf8")).toBe(bytes);
+    }
+  });
+
+  it("reduces nested request times, preserves text, and replays an equivalent canonical request", async () => {
+    const input = request([
+      {
+        op: "place",
+        media_id: "med_A",
+        source_start: "0/25s",
+        duration: "50/25s",
+        at: "0/25s",
+        mode: "insert",
+        video_track: "trk_v1",
+        video_clip_id: "clp_reduced",
+      },
+      {
+        op: "set_clip",
+        clip_id: "clp_reduced",
+        label: "50/25s",
+        time_map: [
+          { at: "0/25s", source: "0/25s", interp: "linear" },
+          { at: "50/25s", source: "50/25s", interp: "linear" },
+        ],
+      },
+      { op: "add_marker", at: "50/25s", duration: "0/25s", kind: "note", text: "50/25s" },
+    ]);
+    const preview = await dispatch("edit", { ...input, dry_run: true });
+    const output = await dispatch("edit", input);
+    expect(output.status, JSON.stringify(output)).toBe("applied");
+    expect(preview.changes).toEqual(output.changes);
+    expect(clips(await read(), "trk_v1")[0]).toMatchObject({ duration: rational(2n), label: "50/25s" });
+    const raw = JSON.parse(await readFile(path, "utf8"));
+    expect(raw.timelines[0].tracks[0].clips[0].time_map[1]).toMatchObject({ at: "2s", source: "2s" });
+    expect(raw.timelines[0].markers[0]).toMatchObject({ at: "2s", duration: "0s", text: "50/25s" });
+    const replay = await dispatch("edit", {
+      ...input,
+      ops: [{ ...input.ops[0], source_start: "0s", duration: "2s", at: "0s" }, ...input.ops.slice(1)],
+    });
+    expect(replay.receipt?.replayed).toBe(true);
+  });
+
+  it("still reports E_TIME_FORM in project files", async () => {
+    const raw = JSON.parse(await readFile(path, "utf8"));
+    raw.media[0].duration = "50/25s";
+    await writeFile(path, JSON.stringify(raw));
+    const output = await dispatch("validate", { project: path });
+    expect(output.verification.passed).toBe(false);
+    expect(output.verification.issues).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "E_TIME_FORM" })]),
+    );
   });
 });

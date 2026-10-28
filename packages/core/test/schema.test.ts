@@ -1,12 +1,48 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { validateEnvelope, validateLossReport, validateManifest, validateProject } from "../src/schema.js";
+import {
+  normalizeCommand,
+  validateCommand,
+  validateEnvelope,
+  validateLossReport,
+  validateManifest,
+  validateProject,
+} from "../src/schema.js";
 
 const root = new URL("../../../", import.meta.url);
 const read = (path: string) => JSON.parse(readFileSync(new URL(path, root), "utf8"));
 const interview = read("examples/interview.zcut.json");
 const lossReport = read("examples/handoff/loss-report.json");
 const manifest = read("examples/handoff/manifest.json");
+
+describe("request rational normalization", () => {
+  it("reduces frame rates before enum validation without changing other strings", () => {
+    const input = {
+      project: "50/25s.zcut.json",
+      name: "50/25s",
+      timeline: { name: "50/25s", edit_rate: "60000/2002" },
+      idempotency_key: "rate",
+      author: { kind: "agent", name: "50/25s" },
+    };
+    const normalized = normalizeCommand("create_project", input);
+    expect(normalized).toEqual({ ...input, timeline: { ...input.timeline, edit_rate: "30000/1001" } });
+    expect(input.timeline.edit_rate).toBe("60000/2002");
+    expect(validateCommand("create_project", normalized).valid).toBe(true);
+  });
+
+  it("normalizes read ranges and transcription rules while leaving malformed times invalid", () => {
+    expect(normalizeCommand("read_transcript", { range: { start: "0/25s", duration: "50/25s" } })).toEqual({
+      range: { start: "0s", duration: "2s" },
+    });
+    expect(normalizeCommand("transcribe", { rules: { min_duration: "50/25s", soft_pause: "20/50s" } })).toEqual({
+      rules: { min_duration: "2s", soft_pause: "2/5s" },
+    });
+    for (const duration of ["1/0s", "-1s", "1.5s", "01s"])
+      expect(normalizeCommand("inspect", { range: { start: "0s", duration } })).toEqual({
+        range: { start: "0s", duration },
+      });
+  });
+});
 
 describe("schema examples", () => {
   for (const directory of ["examples", "fixtures/projects"]) {
