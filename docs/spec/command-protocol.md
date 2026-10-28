@@ -370,7 +370,9 @@
 
 幂等：文件已存在、它的第一条日志的幂等键和请求摘要都与本次相同时，原样返回第一次的结果信封，不报错；幂等键相同但请求不同时返回 `E_IDEMPOTENCY_MISMATCH`。
 
-`result` 含 `project_id`、`timeline_id`、`revision`（`seq` 和 `id`），给了 `subtitles` 时另含 `subtitle_track_id`。
+`result` 含 `project_id`、`timeline_id`、`revision`（`seq` 和 `id`），给了 `subtitles` 时另含 `subtitle_track_id`。`receipt.before` 为 null，`receipt.after` 为第一个修订的 ID。
+
+新建这一步不能撤销：对第一个修订 `undo` 返回 `rejected`、`E_UNSUPPORTED`。不想要这个工程，直接删掉文件和旁边的 `.zcut/` 目录。
 
 ## 10. `edit` 的操作
 
