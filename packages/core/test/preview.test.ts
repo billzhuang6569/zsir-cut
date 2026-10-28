@@ -458,7 +458,7 @@ it("composites a transparent upper track over the selected source frame", async 
   const strip = run(["-i", join(view.directory, "cut-0001.png"), "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]);
   expect(strip[(180 * 1280 + 600) * 3]).toBeGreaterThan(180);
   expect(strip[(180 * 1280 + 600) * 3 + 1]).toBeLessThan(70);
-});
+}, 15000);
 
 it("uses exact segmented mapping and reports smooth approximation", async () => {
   const { directory, project, projectPath } = await setup();

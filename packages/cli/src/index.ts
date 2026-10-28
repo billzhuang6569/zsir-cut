@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import type { Verb } from "../../core/dist/index.js";
 
-const { dispatch, VERBS }: typeof import("../../core/dist/index.js") = await import(
+const { dispatch, errorEnvelope, newId, VERBS }: typeof import("../../core/dist/index.js") = await import(
   new URL(import.meta.url.endsWith(".ts") ? "../../core/src/index.ts" : "../../core/dist/index.js", import.meta.url)
     .href
 );
@@ -31,16 +31,21 @@ async function main(): Promise<void> {
     });
     inputPath = parsed.values.input;
     positionals = parsed.positionals;
-  } catch {
+  } catch (error) {
     const verb = process.argv[2] as Verb;
     if (!VERBS.includes(verb)) throw new Error("Unknown verb");
-    const envelope = await dispatch(verb, {});
+    const envelope = errorEnvelope(verb, newId("req_"), "rejected", "E_VALIDATION", String(error));
     process.stdout.write(`${JSON.stringify(envelope)}\n`);
     process.exitCode = codes[envelope.status];
     return;
   }
-  const [verb, project] = positionals;
+  const [verb, positionalProject] = positionals;
   if (!VERBS.includes(verb as Verb)) throw new Error("Unknown verb");
+  const reject = (message: string) => {
+    const envelope = errorEnvelope(verb as Verb, newId("req_"), "rejected", "E_VALIDATION", message);
+    process.stdout.write(`${JSON.stringify(envelope)}\n`);
+    process.exitCode = codes[envelope.status];
+  };
   let request: unknown;
   try {
     const text = inputPath
@@ -55,17 +60,31 @@ async function main(): Promise<void> {
           process.stdin.on("error", reject);
         });
     request = JSON.parse(text);
-  } catch {
-    request = undefined;
+  } catch (error) {
+    reject(`无法读取请求${inputPath ? ` ${inputPath}` : ""}：${String(error)}`);
+    return;
   }
-  const input = request && typeof request === "object" && !Array.isArray(request) ? request : {};
+  if (!request || typeof request !== "object" || Array.isArray(request)) {
+    reject("请求必须是 JSON 对象");
+    return;
+  }
+  const input = request as Record<string, unknown>;
+  if (positionals.length > 2) {
+    reject("工程路径只能指定一次");
+    return;
+  }
+  if (positionalProject && input.project !== undefined && positionalProject !== input.project) {
+    reject(`工程路径不一致：${positionalProject}；请求 project：${String(input.project)}`);
+    return;
+  }
+  const project = positionalProject ?? input.project;
+  if (verb !== "record_handoff_check" && (project === undefined || project === "")) {
+    reject("缺少工程路径");
+    return;
+  }
   let envelope = await dispatch(
     verb as Verb,
-    verb === "record_handoff_check" && positionals.length === 1
-      ? input
-      : positionals.length === 2
-        ? { ...input, project }
-        : {},
+    verb === "record_handoff_check" && positionals.length === 1 ? input : { ...input, project },
     process.env.ZSIR_CUT_EXPORTER_MODULE ? { exporterModule: process.env.ZSIR_CUT_EXPORTER_MODULE } : {},
   );
   if (process.argv.includes("--wait") && envelope.status === "accepted" && project) {

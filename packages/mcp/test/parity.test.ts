@@ -89,7 +89,7 @@ describe("CLI and MCP", () => {
     }
   });
 
-  it("registers all 18 protocol verbs and returns equivalent envelopes", async () => {
+  it("registers all 19 protocol verbs and returns equivalent envelopes", async () => {
     const server = createServer();
     const client = new Client({ name: "test", version: "1" });
     const [left, right] = InMemoryTransport.createLinkedPair();
@@ -171,6 +171,94 @@ describe("CLI and MCP", () => {
     }
   }, 30000);
 
+  it.each(["CLI", "MCP"])(
+    "shares create_project results, replay and mismatch after creation via %s",
+    async (creator) => {
+      await rm(project);
+      const server = createServer();
+      const client = new Client({ name: "test", version: "1" });
+      const [left, right] = InMemoryTransport.createLinkedPair();
+      await Promise.all([server.connect(left), client.connect(right)]);
+      try {
+        const input = {
+          project,
+          name: "新工程",
+          timeline: { edit_rate: "25", width: 640, height: 360 },
+          subtitles: { language: "zh-Hans" },
+          idempotency_key: "create-parity",
+          author,
+        };
+        const first =
+          creator === "CLI"
+            ? JSON.parse(
+                spawnSync(process.execPath, [cli, "create_project"], {
+                  input: JSON.stringify(input),
+                  encoding: "utf8",
+                }).stdout,
+              )
+            : (await client.callTool({ name: "zcut_create_project", arguments: input })).structuredContent;
+        expect(first.status).toBe("applied");
+        expect(first.receipt.before).toBeNull();
+        expect(validateEnvelope(first)).toEqual({ valid: true, errors: [] });
+        for (const request of [input, { ...input, name: "mismatch" }, { ...input, idempotency_key: "other" }]) {
+          const cliResult = invokeCli("create_project", request);
+          const mcpResult = (await client.callTool({ name: "zcut_create_project", arguments: request }))
+            .structuredContent as Record<string, unknown>;
+          expect(JSON.stringify(withoutRequestId(cliResult.envelope))).toBe(
+            JSON.stringify(withoutRequestId(mcpResult)),
+          );
+          expect(validateEnvelope(cliResult.envelope)).toEqual({ valid: true, errors: [] });
+          expect(validateEnvelope(mcpResult)).toEqual({ valid: true, errors: [] });
+          expect(cliResult.code).toBe(request === input ? 0 : 2);
+        }
+      } finally {
+        await client.close();
+        await server.close();
+      }
+    },
+  );
+
+  it.each(["src", "dist"])(
+    "resolves CLI project paths and explains malformed input through %s",
+    async (runtime) => {
+      const entry = join(root, "packages/cli", runtime, `index.${runtime === "src" ? "ts" : "js"}`);
+      const run = (args: string[], input: string) => {
+        const result = spawnSync(process.execPath, [entry, ...args], { input, encoding: "utf8" });
+        return { code: result.status, stderr: result.stderr, envelope: JSON.parse(result.stdout) };
+      };
+      for (const args of [["validate"], ["validate", project]]) {
+        const output = run(args, JSON.stringify({ project }));
+        expect(output.code).toBe(0);
+        expect(output.envelope.status).toBe("no_op");
+      }
+      const mismatch = run(["validate", project], JSON.stringify({ project: "other.zcut.json" }));
+      expect(mismatch.code).toBe(2);
+      expect(mismatch.envelope.error).toMatchObject({
+        code: "E_VALIDATION",
+        message: expect.stringContaining(project),
+      });
+      expect(mismatch.envelope.error.message).toContain("other.zcut.json");
+      expect(run(["validate"], "{}").envelope.error.message).toBe("缺少工程路径");
+      for (const input of ["not JSON", "null", "[]", "7", "", '"string"']) {
+        const output = run(["validate", project], input);
+        expect(output.code).toBe(2);
+        expect(output.stderr).toBe("");
+        expect(output.envelope.error.code).toBe("E_VALIDATION");
+        expect(output.envelope.error.message).toMatch(/请求|JSON/);
+        expect(output.envelope.error.message).not.toContain("required property");
+      }
+      const unreadable = run(["validate", "--input", join(directory, "missing.json")], "");
+      expect(unreadable.code).toBe(2);
+      expect(unreadable.envelope.error.message).toContain("ENOENT");
+      const requestFile = join(directory, "request.json");
+      await writeFile(requestFile, JSON.stringify({ project }));
+      expect(run(["validate", "--input", requestFile], "").code).toBe(0);
+      await writeFile(requestFile, "[]");
+      expect(run(["validate", "--input", requestFile], "").envelope.error.message).toBe("请求必须是 JSON 对象");
+    },
+    15000,
+  );
+
   it("maps all CLI exit statuses", async () => {
     expect(invokeCli("validate", {}).code).toBe(0);
     const requestFile = join(directory, "request.json");
@@ -210,7 +298,7 @@ describe("CLI and MCP", () => {
     });
     expect(malformed.status).toBe(2);
     expect(validateEnvelope(JSON.parse(malformed.stdout)).valid).toBe(true);
-  });
+  }, 15000);
 
   it("matches export dry run and job status across CLI and MCP", async () => {
     const server = createServer({ exporterModule: fake });

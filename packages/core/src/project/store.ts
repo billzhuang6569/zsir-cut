@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
+import { link, lstat, mkdir, open, readFile, realpath, rename, rm } from "node:fs/promises";
 import { hostname } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { EditError } from "./edit.ts";
 import { diffProjectEntities, type EntityChange, type EntitySnapshot, projectEntitySnapshots } from "./entities.ts";
 import { newId } from "./id.ts";
@@ -9,7 +9,7 @@ import { parseProject, serializeProject } from "./io.ts";
 import { type ValidationIssue, validateProjectSemantics } from "./semantics.ts";
 import type { Author, Project } from "./types.ts";
 
-export type WriteVerb = "edit" | "import_media" | "transcribe" | "undo" | "redo" | "session_approve";
+export type WriteVerb = "create_project" | "edit" | "import_media" | "transcribe" | "undo" | "redo" | "session_approve";
 export interface WriteRequest {
   base_revision: string;
   idempotency_key: string;
@@ -47,7 +47,7 @@ export interface WriteEnvelope {
   status: EnvelopeStatus;
   verb: WriteVerb;
   request_id: string;
-  receipt: { before: string; after: string | null; idempotency_key: string; replayed: boolean } | null;
+  receipt: { before: string | null; after: string | null; idempotency_key: string; replayed: boolean } | null;
   changes: {
     op: string;
     entity: string;
@@ -243,6 +243,61 @@ function restoreEntities(project: Project, changes: EntityChange[], side: "befor
   return parsed.project;
 }
 
+async function acquireLock(directory: string, requestId: string, lockWaitMs: number, at: () => string): Promise<void> {
+  await mkdir(directory, { recursive: true });
+  const deadline = Date.now() + lockWaitMs;
+  for (;;) {
+    try {
+      const handle = await open(join(directory, "lock"), "wx");
+      try {
+        await handle.writeFile(
+          JSON.stringify({
+            pid: process.pid,
+            hostname: hostname(),
+            acquired_at: at(),
+            request_id: requestId,
+          }),
+        );
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      try {
+        const owner = JSON.parse(await readFile(join(directory, "lock"), "utf8")) as {
+          pid?: number;
+          hostname?: string;
+        };
+        if (owner.hostname === hostname() && Number.isInteger(owner.pid) && owner.pid && owner.pid > 0) {
+          let stale = false;
+          try {
+            process.kill(owner.pid, 0);
+          } catch (check) {
+            stale = (check as NodeJS.ErrnoException).code === "ESRCH";
+          }
+          if (stale) {
+            await rm(join(directory, "lock"), { force: true });
+            await appendSynced(join(directory, "lock-events.jsonl"), {
+              at: at(),
+              event: "stale_lock",
+              owner,
+              taker: { pid: process.pid, hostname: hostname(), request_id: requestId },
+            });
+            continue;
+          }
+        }
+      } catch (check) {
+        if ((check as NodeJS.ErrnoException).code !== "ENOENT" && !(check instanceof SyntaxError)) throw check;
+      }
+      if (Date.now() >= deadline)
+        throw Object.assign(new Error("Project lock is busy"), { code: "E_IO", reason: "busy" });
+      await pause(Math.min(100, Math.max(1, deadline - Date.now())));
+    }
+  }
+}
+
 export function openProject(options: OpenProjectOptions) {
   const clock = options.clock ?? (() => new Date());
   const idGenerator = options.idGenerator ?? (() => newId("rev_"));
@@ -256,13 +311,16 @@ export function openProject(options: OpenProjectOptions) {
     target?: string,
     entityOps: Record<string, string> = {},
     result: Record<string, unknown> | null = null,
+    create?: () => Promise<Project>,
   ): Promise<WriteEnvelope> {
     const envelope = (status: EnvelopeStatus, before: string, after: string | null = null): WriteEnvelope => ({
       ok: status === "applied" || status === "dry_run" || status === "no_op",
       status,
       verb: request.verb,
       request_id: request.request_id,
-      receipt: { before, after, idempotency_key: request.idempotency_key, replayed: false },
+      receipt: before
+        ? { before: create ? null : before, after, idempotency_key: request.idempotency_key, replayed: false }
+        : null,
       changes: [],
       verification: { level: "none", passed: false, issues: [] },
       result: null,
@@ -284,69 +342,48 @@ export function openProject(options: OpenProjectOptions) {
     let lockPath = "";
     let locked = false;
     let committedRevision: string | null = null;
+    let creationLock = "";
     try {
-      const initial = parseProject(await readFile(projectPath, "utf8"));
-      if (!initial.ok) throw new Error("Project file is invalid");
-      const directory = join(dirname(projectPath), ".zcut", initial.project.id);
-      await mkdir(directory, { recursive: true });
-      lockPath = join(directory, "lock");
-      const deadline = Date.now() + lockWaitMs;
-      for (;;) {
-        try {
-          const handle = await open(lockPath, "wx");
-          try {
-            await handle.writeFile(
-              JSON.stringify({
-                pid: process.pid,
-                hostname: hostname(),
-                acquired_at: clock().toISOString(),
-                request_id: request.request_id,
-              }),
-            );
-            await handle.sync();
-          } finally {
-            await handle.close();
-          }
-          locked = true;
-          break;
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-          try {
-            const owner = JSON.parse(await readFile(lockPath, "utf8")) as { pid?: number; hostname?: string };
-            if (owner.hostname === hostname() && Number.isInteger(owner.pid) && owner.pid && owner.pid > 0) {
-              let stale = false;
-              try {
-                process.kill(owner.pid, 0);
-              } catch (check) {
-                stale = (check as NodeJS.ErrnoException).code === "ESRCH";
-              }
-              if (stale) {
-                await rm(lockPath, { force: true });
-                await appendSynced(join(directory, "lock-events.jsonl"), {
-                  at: clock().toISOString(),
-                  event: "stale_lock",
-                  owner,
-                  taker: { pid: process.pid, hostname: hostname(), request_id: request.request_id },
-                });
-                continue;
-              }
-            }
-          } catch (check) {
-            if ((check as NodeJS.ErrnoException).code !== "ENOENT" && !(check instanceof SyntaxError)) throw check;
-          }
-          if (Date.now() >= deadline)
-            return fail("failed", before, "E_IO", "Project lock is busy", { reason: "busy" }, true);
-          await pause(Math.min(100, Math.max(1, deadline - Date.now())));
-        }
+      if (create) {
+        const parent = await realpath(dirname(projectPath));
+        const pathKey = createHash("sha256").update(basename(projectPath)).digest("hex");
+        const gate = join(parent, ".zcut", `create_${pathKey}`);
+        await acquireLock(gate, request.request_id, lockWaitMs, () => clock().toISOString());
+        creationLock = join(gate, "lock");
       }
-      const parsed = parseProject(await readFile(projectPath, "utf8"));
+      let initialProject: Project | undefined;
+      let exists = true;
+      try {
+        const info = await lstat(projectPath);
+        if (create && !info.isFile()) return fail("rejected", "", "E_VALIDATION", "工程路径已存在");
+      } catch (error) {
+        if (!create || (error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        exists = false;
+      }
+      if (create && !exists) initialProject = await create();
+      else {
+        const initial = parseProject(await readFile(projectPath, "utf8"));
+        if (!initial.ok) {
+          if (create) return fail("rejected", "", "E_VALIDATION", "工程文件已存在");
+          throw new Error("Project file is invalid");
+        }
+        initialProject = initial.project;
+      }
+      const directory = join(dirname(projectPath), ".zcut", initialProject.id);
+      lockPath = join(directory, "lock");
+      await acquireLock(directory, request.request_id, lockWaitMs, () => clock().toISOString());
+      locked = true;
+      const parsed =
+        create && !exists
+          ? { ok: true as const, project: initialProject }
+          : parseProject(await readFile(projectPath, "utf8"));
       if (!parsed.ok) throw new Error("Project file is invalid");
       const current = parsed.project;
       before = current.revision.id;
       const journalPath = join(directory, "journal.jsonl");
       const idempotencyPath = join(directory, "idempotency.jsonl");
       const journal = await readLines<JournalEntry>(journalPath);
-      if (current.revision.seq > (journal.at(-1)?.seq ?? 1)) {
+      if (!create && current.revision.seq > (journal.at(-1)?.seq ?? 1)) {
         const recovered: JournalEntry = {
           kind: "recovered",
           revision: before,
@@ -359,6 +396,12 @@ export function openProject(options: OpenProjectOptions) {
       }
       const records = await readLines<IdempotencyEntry>(idempotencyPath);
       const hash = requestHash(request);
+      if (
+        create &&
+        exists &&
+        (journal[0]?.verb !== "create_project" || journal[0]?.idempotency_key !== request.idempotency_key)
+      )
+        return fail("rejected", "", "E_VALIDATION", "工程文件已存在");
       const prior = records.findLast((record) => record.idempotency_key === request.idempotency_key);
       if (prior) {
         if (prior.request_hash !== hash)
@@ -368,7 +411,8 @@ export function openProject(options: OpenProjectOptions) {
           receipt: prior.envelope.receipt ? { ...prior.envelope.receipt, replayed: true } : null,
         };
       }
-      if (request.base_revision !== before) {
+      if (create && exists) return fail("rejected", "", "E_VALIDATION", "工程文件已存在，缺少新建工程的幂等回执");
+      if (!create && request.base_revision !== before) {
         const newer = journal.filter(
           (entry) => entry.seq > (journal.find((entry) => entry.revision === request.base_revision)?.seq ?? -1),
         );
@@ -412,7 +456,18 @@ export function openProject(options: OpenProjectOptions) {
         output.verification = { level: "L1", passed: false, issues };
         return output;
       }
-      const changes = diffProjectEntities(current, check.project);
+      const changes: EntityChange[] = create
+        ? [...projectEntitySnapshots(check.project)].map(([key, snapshot]) => ({
+            key,
+            entity: snapshot.entity,
+            before: null,
+            after: snapshot.value,
+            before_parent: null,
+            after_parent: snapshot.parent,
+            before_index: null,
+            after_index: snapshot.index,
+          }))
+        : diffProjectEntities(current, check.project);
       if (changes.length === 0) {
         const output = envelope("no_op", before);
         output.result = result;
@@ -425,20 +480,31 @@ export function openProject(options: OpenProjectOptions) {
         });
         return output;
       }
-      candidate.revision = {
-        seq: current.revision.seq + 1,
-        id: idGenerator(),
-        parent: before,
-        created_at: clock().toISOString(),
-        author: request.author,
-      };
+      candidate.revision = create
+        ? { ...candidate.revision, created_at: clock().toISOString() }
+        : {
+            seq: current.revision.seq + 1,
+            id: idGenerator(),
+            parent: before,
+            created_at: clock().toISOString(),
+            author: request.author,
+          };
       const bytes = serializeProject(candidate);
+      if (create) {
+        const timeline = candidate.timelines[0];
+        result = {
+          project_id: candidate.id,
+          timeline_id: timeline?.id,
+          revision: { seq: 1, id: candidate.revision.id },
+          ...(timeline?.tracks.some((track) => track.kind === "subtitle") ? { subtitle_track_id: "trk_sub1" } : {}),
+        };
+      }
       const output = envelope("applied", before, candidate.revision.id);
       output.result = result;
       output.verification = { level: "L1", passed: true, issues };
       output.changes = changes.map((change) => describeChange(change, entityOps, request.verb));
       options.fault?.("before_step_7");
-      const temp = join(dirname(projectPath), `.${initial.project.id}.${randomUUID()}.tmp`);
+      const temp = join(dirname(projectPath), `.${current.id}.${randomUUID()}.tmp`);
       try {
         const handle = await open(temp, "wx");
         try {
@@ -447,7 +513,8 @@ export function openProject(options: OpenProjectOptions) {
         } finally {
           await handle.close();
         }
-        await rename(temp, projectPath);
+        if (create) await link(temp, projectPath);
+        else await rename(temp, projectPath);
         committedRevision = candidate.revision.id;
         const dirHandle = await open(dirname(projectPath), "r");
         try {
@@ -462,7 +529,7 @@ export function openProject(options: OpenProjectOptions) {
       const entry: JournalEntry = {
         kind,
         revision: candidate.revision.id,
-        parent: before,
+        parent: create ? null : before,
         seq: candidate.revision.seq,
         at: candidate.revision.created_at,
         author: request.author,
@@ -477,7 +544,10 @@ export function openProject(options: OpenProjectOptions) {
       await appendSynced(journalPath, entry);
       const now = clock().getTime();
       const retained = records.filter(
-        (record, index) => index >= records.length - 999 || now - Date.parse(record.at) <= 7 * 24 * 60 * 60 * 1000,
+        (record, index) =>
+          record.envelope.verb === "create_project" ||
+          index >= records.length - 999 ||
+          now - Date.parse(record.at) <= 7 * 24 * 60 * 60 * 1000,
       );
       const record = {
         idempotency_key: request.idempotency_key,
@@ -514,16 +584,20 @@ export function openProject(options: OpenProjectOptions) {
         output.error = { code: "E_IO", message: String(error), retryable: false };
         return output;
       }
+      if (error instanceof EditError) return fail("rejected", "", error.code, error.message);
+      if (create && (error as NodeJS.ErrnoException).code === "EEXIST")
+        return fail("rejected", "", "E_VALIDATION", "工程文件已存在");
       return fail(
         "failed",
         before,
         (error as NodeJS.ErrnoException).code ? "E_IO" : "E_INTERNAL",
         String(error),
-        undefined,
+        (error as { reason?: string }).reason === "busy" ? { reason: "busy" } : undefined,
         true,
       );
     } finally {
       if (locked) await rm(lockPath, { force: true });
+      if (creationLock) await rm(creationLock, { force: true });
     }
   }
 
@@ -551,6 +625,7 @@ export function openProject(options: OpenProjectOptions) {
         (direction === "undo" ? undone.has(targetEntry.revision) : !undone.has(targetEntry.revision))
       )
         throw new UndoConflict(target ? [target] : [], "No undoable target revision");
+      if (targetEntry.verb === "create_project") throw new EditError("E_UNSUPPORTED", "Cannot undo project creation");
       const current = projectEntitySnapshots(project);
       const side = direction === "undo" ? "after" : "before";
       const conflicts = targetEntry.changes
@@ -568,6 +643,8 @@ export function openProject(options: OpenProjectOptions) {
   }
 
   return {
+    createProject: (request: WriteRequest, create: () => Promise<Project>) =>
+      write(request, () => {}, "write", undefined, {}, null, create),
     commitWrite: (
       request: WriteRequest,
       mutator: (project: Project) => void,

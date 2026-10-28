@@ -75,7 +75,66 @@ export const validateLossReport = (value: unknown) => validate(lossReport, value
 export const validateManifest = (value: unknown) => validate(manifest, value);
 export function validateCommand(verb: string, value: unknown): { valid: boolean; errors: ErrorObject[] } {
   const validator = ajv.getSchema(`${commandId}#/$defs/requests/${verb}`);
-  return validator ? validate(validator, value) : { valid: false, errors: [] };
+  if (!validator)
+    return {
+      valid: false,
+      errors: [
+        {
+          keyword: "verb",
+          instancePath: "",
+          schemaPath: "",
+          params: {},
+          message: `未知动词；可选值：${Object.keys(requests()).join(", ")}`,
+        },
+      ],
+    };
+  const result = validate(validator, value);
+  if (
+    result.valid ||
+    verb !== "edit" ||
+    !value ||
+    typeof value !== "object" ||
+    !("ops" in value) ||
+    !Array.isArray(value.ops)
+  )
+    return result;
+  const errors = result.errors.filter(
+    (error) =>
+      !/^\/ops\/\d+(?:\/|$)/.test(error.instancePath) &&
+      !(error.keyword === "unevaluatedProperties" && error.params.unevaluatedProperty === "ops"),
+  );
+  const schema = ajv.getSchema(commandId)?.schema as {
+    $defs: { edit_op: { oneOf: { properties: { op: { const: string } } }[] } };
+  };
+  const branches = schema.$defs.edit_op.oneOf;
+  for (const [index, op] of value.ops.entries()) {
+    const name = op && typeof op === "object" && "op" in op ? op.op : undefined;
+    const branch = branches.findIndex((item) => item.properties.op.const === name);
+    if (branch < 0) {
+      errors.push({
+        keyword: "op",
+        instancePath: `/ops/${index}/op`,
+        schemaPath: "",
+        params: {},
+        message: `未知操作；可选值：${branches.map((item) => item.properties.op.const).join(", ")}`,
+      });
+      continue;
+    }
+    const selected = ajv.getSchema(`${commandId}#/$defs/edit_op/oneOf/${branch}`);
+    if (!selected) throw new Error("Missing edit operation schema");
+    errors.push(
+      ...validate(selected, op).errors.map((error) => ({
+        ...error,
+        instancePath: `/ops/${index}${error.instancePath}`,
+      })),
+    );
+  }
+  return { valid: false, errors };
+}
+
+function requests(): Record<string, Record<string, unknown>> {
+  return (ajv.getSchema(commandId)?.schema as { $defs: { requests: Record<string, Record<string, unknown>> } }).$defs
+    .requests;
 }
 
 export function commandSchemaForVerb(verb: string): Record<string, unknown> {
