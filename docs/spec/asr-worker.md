@@ -61,7 +61,9 @@ python -m zsir_asr eval        --manifest <评测清单> --out <报告目录>
 ```
 
 - 时间是相对于媒体文件开头的源时间，整数毫秒。内核把它换算成规格里的有理数时间，写进母稿第 1 层 `raw_runs` 和第 3 层 `align`。
-- `tokens` 按 `start_ms` 递增，不重叠，不含空文本。
+- `tokens` 按 `start_ms` 递增，不重叠，不含空文本，每个字词 `end_ms` 大于 `start_ms`。
+- 对齐器给出零宽字词（`end_ms` 等于 `start_ms`）时，worker 输出前修正：终点延到 `min(下一个字词的起点, 起点 + 40, 输入终点)`；仍是零宽，就把起点提前到 `max(上一个字词的终点, 终点 − 40, 输入起点)`；还是零宽，就把它的文本并到前一个字词（没有前一个就并到后一个）并删掉它。每修正一个记一次，`warnings` 里加一条 `{"code": "W_ASR_ZERO_WIDTH", "count": 修正个数}`。
+- 静音或几乎没有人声的素材，`tokens` 可以为空数组，这不是错误。
 - 引擎不提供置信度时 `conf` 为 null，例如 MLX 的强制对齐器。内核写入母稿时省略 `conf`，schema 允许。
 - 同一份输入、同一组模型和参数，输出的 `tokens` 必须相同。
 
@@ -87,9 +89,10 @@ python -m zsir_asr eval        --manifest <评测清单> --out <报告目录>
 ## 6. 内核侧的 `transcribe` 动词
 
 1. 调用 worker，拿到结果。一期一次只识别一个声道，`source_channels` 有多个时返回 `E_UNSUPPORTED`；`range` 必须能用整数毫秒表示，否则返回 `E_VALIDATION`。worker 返回的引擎版本为 null 时，写入母稿记为 `unknown`。
-2. 结果写进母稿：第 1 层追加一条 `asr` 运行和一条 `align` 运行；第 3 层更新对齐时间；第 2 层只新增或替换 `state` 为 `auto` 的字词，不动 `edited` 和 `approved` 的；第 4 层按 `subtitle-rules.md` 对受影响的范围重新断句，跳过锁定的字幕条。
-3. 整个过程是一个修订，可以撤销。
-4. worker 运行时间长，`transcribe` 按长任务返回 `accepted` 和任务 ID。
+2. worker 的字词不满足第 4 节的约束时，报 `E_ASR_INTERNAL` 并在 `message` 里写出第一个出问题的字词序号和原因。`tokens` 为空时照常写入：母稿有运行记录、没有字词和字幕条，`result.warnings` 加 `W_ASR_EMPTY`。
+3. 结果写进母稿：第 1 层追加一条 `asr` 运行和一条 `align` 运行；第 3 层更新对齐时间；第 2 层只新增或替换 `state` 为 `auto` 的字词，不动 `edited` 和 `approved` 的；第 4 层按 `subtitle-rules.md` 对受影响的范围重新断句，跳过锁定的字幕条。
+4. 整个过程是一个修订，可以撤销。
+5. worker 运行时间长，`transcribe` 按长任务返回 `accepted` 和任务 ID。
 
 ## 7. 测试
 
