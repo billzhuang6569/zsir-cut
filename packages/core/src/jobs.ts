@@ -4,6 +4,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Envelope } from "./dispatch.ts";
 import { newId } from "./project/id.ts";
+import { serializeProject } from "./project/io.ts";
+import type { Project } from "./project/types.ts";
 
 export interface Job {
   job_id: string;
@@ -27,12 +29,15 @@ export async function writeJob(path: string, job: Job) {
   await rename(temporary, path);
 }
 export async function readJob(path: string): Promise<Job> {
-  const job = JSON.parse(await readFile(path, "utf8")) as Job;
+  let job = JSON.parse(await readFile(path, "utf8")) as Job;
   if ((job.state === "running" || job.state === "queued") && job.pid) {
     try {
       process.kill(job.pid, 0);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ESRCH") {
+        // The worker may have committed its final envelope after our first read, then exited.
+        job = JSON.parse(await readFile(path, "utf8")) as Job;
+        if (job.state === "succeeded" || job.state === "failed") return job;
         job.state = "failed";
         job.progress = 1;
         job.message = "子进程意外退出";
@@ -77,12 +82,12 @@ export async function startExportJob(
 
 export async function startPreviewJob(
   verb: "render_preview" | "view_timeline",
-  project: string,
-  projectId: string,
+  projectPath: string,
+  project: Project,
   request: Record<string, unknown>,
 ) {
   const jobId = newId("job_");
-  const path = jobPath(project, projectId, jobId);
+  const path = jobPath(projectPath, project.id, jobId);
   const now = new Date().toISOString();
   const job: Job = {
     job_id: jobId,
@@ -96,6 +101,8 @@ export async function startPreviewJob(
     envelope: null,
   };
   await writeJob(path, job);
+  // Render the revision accepted by this job even if the draft advances while queued.
+  await writeFile(join(dirname(path), "project.zcut.json"), serializeProject(project));
   const worker = fileURLToPath(
     new URL(import.meta.url.endsWith(".ts") ? "./preview-worker.ts" : "./preview-worker.js", import.meta.url),
   );

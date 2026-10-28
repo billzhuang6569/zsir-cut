@@ -155,7 +155,8 @@ def test_zero_width_warnings_count_output_words_after_grouping(monkeypatch, tmp_
 
     source = tmp_path / "clip.wav"
     source.write_bytes(b"fake audio")
-    text = "你好。" * 19 + "Bill AI 我们"
+    phrases = ["你好。" if i % 2 else "您好。" for i in range(19)]
+    text = "".join(phrases) + "Bill AI 我们"
     items = []
 
     def item(text, start_ms, end_ms):
@@ -163,7 +164,7 @@ def test_zero_width_warnings_count_output_words_after_grouping(monkeypatch, tmp_
 
     for index in range(19):
         start = index * 40
-        items.extend([item("你", start, start + 20), item("好", start + 20, start + 20), item("。", start + 20, start + 20)])
+        items.extend([item(phrases[index][0], start, start + 20), item("好", start + 20, start + 20), item("。", start + 20, start + 20)])
     items.extend([item("Bill", 760, 780), item("AI", 800, 820), item("我", 850, 850), item("们", 850, 850)])
     assert sum(span.start_time == span.end_time for span in items) * 2 > len(items)
 
@@ -186,7 +187,7 @@ def test_zero_width_warnings_count_output_words_after_grouping(monkeypatch, tmp_
     args = worker.parser().parse_args(argv)
     output = worker.result(args, local=Fake())
     assert output["warnings"] == [{"code": "W_ASR_ZERO_WIDTH", "count": 1}]
-    assert [token["text"] for token in output["tokens"]] == ["你好。"] * 19 + ["Bill", "AI", "我们"]
+    assert [token["text"] for token in output["tokens"]] == phrases + ["Bill", "AI", "我们"]
     assert [(token["start_ms"], token["end_ms"]) for token in output["tokens"]] == [
         (i * 40, i * 40 + 20) for i in range(19)
     ] + [(760, 780), (800, 820), (850, 890)]

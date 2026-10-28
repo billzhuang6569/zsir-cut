@@ -1,3 +1,4 @@
+import { dirname, join } from "node:path";
 import { dispatch } from "./dispatch.ts";
 import { readJob, writeJob } from "./jobs.ts";
 
@@ -14,7 +15,11 @@ job.message = "渲染中";
 job.updated_at = new Date().toISOString();
 await writeJob(path, job);
 try {
-  const output = await dispatch(job.verb, job.request, { worker: true, jobFile: path });
+  const output = await dispatch(job.verb, job.request, {
+    worker: true,
+    jobFile: path,
+    previewProjectPath: join(dirname(path), "project.zcut.json"),
+  });
   job.state = output.ok ? "succeeded" : "failed";
   job.envelope = output;
   job.message = output.ok ? "完成" : (output.error?.message ?? "渲染失败");

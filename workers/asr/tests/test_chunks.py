@@ -1,5 +1,7 @@
+import json
 import sys
 from decimal import Decimal
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -13,6 +15,65 @@ def pcm(duration_ms, gaps=()):
     for start, end in gaps:
         audio[start * worker.SAMPLES_PER_MS:end * worker.SAMPLES_PER_MS] = 0
     return audio
+
+
+@pytest.mark.parametrize("case", json.loads((Path(__file__).resolve().parents[3] / "fixtures/regressions/asr-repetition.json").read_text()))
+def test_repetition_is_removed_before_zero_width_statistics(chunk_request, monkeypatch, case):
+    args, _ = chunk_request
+    args.duration = "1"
+    monkeypatch.setattr(worker, "decode", lambda *_: pcm(1000))
+    count = case["count"]
+    items = [SimpleNamespace(text="正常", start_time="0.05", end_time="0.1")]
+    for index in range(count):
+        start = Decimal("0.2") + Decimal(index) / 100
+        items.append(SimpleNamespace(text=case["word"], start_time=start,
+            end_time=start if case["zero_width"] else start + Decimal("0.005")))
+    items.append(SimpleNamespace(text="继续", start_time="0.8", end_time="0.9"))
+
+    class Fake:
+        def transcribe(self, *_):
+            return "正常" + case["word"] * count + "继续", "zh"
+
+        def align(self, *_):
+            return items
+
+    output = worker.result(args, local=Fake())
+    expected = ["正常", "继续"] if count > 8 else ["正常"] + [case["word"]] * count + ["继续"]
+    assert [token["text"] for token in output["tokens"]] == expected
+    assert output["tokens"][0] == {"text": "正常", "start_ms": 7300, "end_ms": 7350, "conf": None}
+    assert output["tokens"][-1] == {"text": "继续", "start_ms": 8050, "end_ms": 8150, "conf": None}
+    assert output["warnings"] == ([{
+        "code": "W_ASR_REPETITION", "start_ms": 7450,
+        "end_ms": 7250 + worker.seconds_to_ms(items[-2].end_time), "count": count,
+    }] if count > 8 else [])
+    assert worker.result(args, local=object())["warnings"] == output["warnings"]
+
+
+def test_repetition_is_scoped_to_each_chunk(chunk_request):
+    args, _ = chunk_request
+
+    class Fake:
+        def transcribe(self, *_):
+            return "same " * 8, "en"
+
+        def align(self, *_):
+            return [SimpleNamespace(text="same", start_time=Decimal(i) / 10,
+                end_time=Decimal(i) / 10 + Decimal("0.05")) for i in range(8)]
+
+    output = worker.result(args, local=Fake())
+    assert [t["text"] for t in output["tokens"]] == ["same"] * 24
+    assert output["warnings"] == []
+
+
+def test_multiple_repetition_runs_and_empty_result():
+    tokens = [{"text": word, "start_ms": i, "end_ms": i + 1}
+        for i, word in enumerate(["哎"] * 20 + ["hello"] * 9)]
+    assert worker.remove_repetitions(tokens) == [
+        {"code": "W_ASR_REPETITION", "start_ms": 0, "end_ms": 20, "count": 20},
+        {"code": "W_ASR_REPETITION", "start_ms": 20, "end_ms": 29, "count": 9},
+    ]
+    assert tokens == []
+    assert worker.finalize_tokens(tokens, 0, 29) == []
 
 
 def test_chunk_cuts_use_lowest_energy_and_earliest_frame():

@@ -394,6 +394,113 @@ it("runs both verbs through jobs", async () => {
   }
 });
 
+it("checks draft media from the main directory and renders review's exact revision", async () => {
+  const { directory, project, projectPath } = await setup();
+  for (const track of project.timelines[0]?.tracks ?? []) {
+    if (track.kind === "subtitle") track.free_cues = [];
+    else track.clips = [];
+  }
+  await writeFile(projectPath, serializeProject(project));
+  const mainBytes = await readFile(projectPath, "utf8");
+  const author = { kind: "agent", name: "session test" };
+  const begun = await dispatch("session_begin", {
+    project: projectPath,
+    base_revision: "rev_preview",
+    idempotency_key: "begin",
+    author,
+    approval: "manual",
+    intent: "Check placements",
+  });
+  const session_id = begun.result?.session_id as string;
+  expect(session_id).toMatch(/^ses_/);
+  const input = { project: projectPath, session_id };
+  const placed = await dispatch("edit", {
+    ...input,
+    base_revision: "rev_preview",
+    idempotency_key: "place",
+    author,
+    ops: ["0s", "1s"].map((source_start) => ({
+      op: "place",
+      media_id: "med_barcode",
+      at: "end",
+      mode: "insert",
+      source_start,
+      duration: "1s",
+      video_track: "trk_video",
+      audio_track: "trk_audio",
+    })),
+  });
+  expect(placed.status, JSON.stringify(placed)).toBe("drafted");
+  const validated = await dispatch("validate", { ...input, media: true });
+  expect(validated.verification).toMatchObject({ level: "L2", passed: true });
+  expect(validated.verification.issues.filter((issue) => issue.severity === "error")).toEqual([]);
+  const wait = async (job_id: string) => {
+    for (let i = 0; i < 200; i++) {
+      const status = await dispatch("job_status", { project: projectPath, job_id });
+      const job = status.result as { state: string; envelope: { result: Record<string, unknown> } };
+      if (job.state === "failed") throw new Error(JSON.stringify(job));
+      if (job.state === "succeeded") return job.envelope.result;
+      await new Promise((done) => setTimeout(done, 50));
+    }
+    throw new Error("Preview job timed out");
+  };
+  const strip = await dispatch("view_timeline", input);
+  expect(strip.status).toBe("accepted");
+  const view = await wait(strip.result?.job_id as string);
+  expect(view.cuts).toBe(1);
+  expect((await stat(join(view.directory as string, "cut-0001.png"))).size).toBeGreaterThan(0);
+  const preview = await dispatch("render_preview", input);
+  expect(preview.status).toBe("accepted");
+  expect((await stat((await wait(preview.result?.job_id as string)).path as string)).size).toBeGreaterThan(0);
+  const reviewInput = { ...input, base_revision: placed.receipt?.after, idempotency_key: "review", author };
+  const review = await dispatch("session_review", reviewInput);
+  expect(review.ok, JSON.stringify(review)).toBe(true);
+  const job_id = review.result?.preview_job as string;
+  expect(job_id).toMatch(/^job_/);
+  expect((await dispatch("session_review", reviewInput)).result?.preview_job).toBe(job_id);
+  const changed = await dispatch("edit", {
+    ...input,
+    base_revision: placed.receipt?.after,
+    idempotency_key: "continue",
+    author,
+    ops: [
+      {
+        op: "place",
+        media_id: "med_barcode",
+        at: "end",
+        mode: "insert",
+        source_start: "2s",
+        duration: "1s",
+        video_track: "trk_video",
+        audio_track: "trk_audio",
+      },
+    ],
+  });
+  expect(changed.status).toBe("drafted");
+  const rendered = await wait(job_id);
+  const movie = rendered.path as string;
+  expect(movie).toContain(join("sessions", session_id, "preview"));
+  expect((await stat(movie)).size).toBeGreaterThan(0);
+  const probe = spawnSync("ffprobe", [
+    "-v",
+    "error",
+    "-select_streams",
+    "v:0",
+    "-show_entries",
+    "stream=nb_frames",
+    "-of",
+    "json",
+    movie,
+  ]);
+  expect(probe.status, probe.stderr?.toString()).toBe(0);
+  expect(JSON.parse(probe.stdout.toString()).streams[0].nb_frames).toBe("48");
+  expect(await readFile(projectPath, "utf8")).toBe(mainBytes);
+  const snapshot = JSON.parse(
+    await readFile(join(directory, ".zcut", project.id, "jobs", job_id, "project.zcut.json"), "utf8"),
+  );
+  expect(snapshot.revision.id).toBe(placed.receipt?.after);
+}, 30000);
+
 it("composites a transparent upper track over the selected source frame", async () => {
   const { directory, project, projectPath } = await setup();
   const pixels = Buffer.alloc(4 * 64 * 32 * 4);

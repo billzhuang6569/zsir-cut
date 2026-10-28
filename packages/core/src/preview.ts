@@ -291,7 +291,9 @@ export async function renderPreview(
     const sounds = await soundFiles(project, timeline, projectPath, directory);
     const subtitles = subtitleFiles(project, timeline).filter(
       (file) =>
-        file.role === "subtitle" && (!options.subtitleLanguages || options.subtitleLanguages.includes(file.language)),
+        file.role === "subtitle" &&
+        file.data.trim() !== "" &&
+        (!options.subtitleLanguages || options.subtitleLanguages.includes(file.language)),
     );
     const subtitlePaths: string[] = [];
     for (const file of subtitles) {

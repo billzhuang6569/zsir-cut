@@ -3,6 +3,7 @@ import { mkdir, open, readdir, readFile, rename, rm, writeFile } from "node:fs/p
 import { hostname } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { Envelope, Verb } from "../dispatch.ts";
+import { startPreviewJob } from "../jobs.ts";
 import { applyEdit, SUBTITLE_OPS } from "./edit.ts";
 import { diffProjectEntities, type EntityChange } from "./entities.ts";
 import { newId } from "./id.ts";
@@ -340,7 +341,11 @@ async function runExistingSession(
       ...classify(diffProjectEntities(base, current)),
       ops: entries.filter((entry) => entry.kind === "write").flatMap((entry) => entry.ops ?? []),
       verification: result.verification,
-      preview_job: null,
+      preview_job: await startPreviewJob("render_preview", projectPath, current, {
+        project: projectPath,
+        session_id: sessionId,
+        output: join(directory, "preview"),
+      }),
     };
     session.state = "in_review";
     session.updated_at = new Date().toISOString();

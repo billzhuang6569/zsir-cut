@@ -41,6 +41,69 @@ afterEach(async () => {
 });
 
 describe("CLI and MCP", () => {
+  it("shares session draft reads and missing-session errors", async () => {
+    const server = createServer();
+    const client = new Client({ name: "session-test", version: "1" });
+    const [left, right] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(left), client.connect(right)]);
+    try {
+      const begun = invokeCli("session_begin", {
+        base_revision: "rev_fixture_1",
+        idempotency_key: "session",
+        author,
+        approval: "manual",
+        intent: "Read draft",
+      }).envelope;
+      const session_id = (begun.result as { session_id: string }).session_id;
+      const edit = invokeCli("edit", {
+        session_id,
+        base_revision: "rev_fixture_1",
+        idempotency_key: "place-session",
+        author,
+        ops: [
+          {
+            op: "place",
+            media_id: "med_A",
+            at: "end",
+            mode: "insert",
+            video_track: "trk_v1",
+            audio_track: "trk_a1",
+            source_start: "0s",
+            duration: "1s",
+          },
+        ],
+      });
+      expect(edit.envelope.status).toBe("drafted");
+      const cases = [
+        ["inspect", { view: "brief" }],
+        ["inspect", { view: "timeline" }],
+        ["inspect", { view: "history" }],
+        ["read_transcript", { transcript_id: "trs_A_zh" }],
+        ["read_transcript", { timeline_id: "tl_std" }],
+        ["validate", {}],
+        ["diff", { from: "rev_fixture_1" }],
+        ["render_preview", { timeline_id: "tl_missing" }],
+        ["view_timeline", { timeline_id: "tl_missing" }],
+      ] as const;
+      for (const selectedSession of [session_id, "ses_missing"]) {
+        for (const [verb, fields] of cases) {
+          const input = { ...fields, session_id: selectedSession };
+          const cliResult = invokeCli(verb, input);
+          const envelope = (await client.callTool({ name: `zcut_${verb}`, arguments: { project, ...input } }))
+            .structuredContent as Record<string, unknown>;
+          expect(validateEnvelope(envelope).valid).toBe(true);
+          expect(withoutRequestId(cliResult.envelope)).toEqual(withoutRequestId(envelope));
+          if (selectedSession === "ses_missing" || verb === "render_preview" || verb === "view_timeline")
+            expect(envelope.error).toMatchObject({ code: "E_NOT_FOUND" });
+          else expect(envelope.ok).toBe(true);
+        }
+      }
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  }, 30000);
+
   it.each([
     ["src", "missing"],
     ["src", "stale"],
