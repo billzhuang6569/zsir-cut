@@ -76,6 +76,7 @@ export function projectSubtitles(
   project: Project,
   timelineId: string,
   sourceRange?: CueSourceRange,
+  mergeJumpCuts = true,
 ): {
   cues: ProjectedCue[];
   unprojected: UnprojectedToken[];
@@ -238,6 +239,7 @@ export function projectSubtitles(
       });
     }
   }
+  if (!mergeJumpCuts) return { cues, unprojected };
   const byId = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
   cues.sort(
     (a, b) =>

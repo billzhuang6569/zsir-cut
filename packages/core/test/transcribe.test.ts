@@ -86,7 +86,7 @@ const input = fs.readFileSync(arg('--input'));
 const output = scenario.error ? {schema:'zsir-cut/asr-error',schema_version:'0.1',code:scenario.error,message:'model unavailable',retryable:false} : {
   schema:'zsir-cut/asr-result',schema_version:'0.1',
   input:{path:arg('--input'),size_bytes:input.length,fingerprint:crypto.createHash('sha256').update(input).digest('hex'),channels:[Number(arg('--channels'))],start_ms:Number(arg('--start') ?? 0) * 1000,duration_ms:Number(arg('--duration') ?? 60) * 1000},
-  language:'zh',asr:{name:'fake-asr',model:'test',version:'1',weights_digest:'sha256:test'},align:{name:'fake-align',model:'test',version:'1',weights_digest:'sha256:test'},tokens:scenario.tokens,runtime:{seconds:0,peak_memory_mb:0,engine_used:'local'},warnings:[]
+  language:'zh',asr:{name:'fake-asr',model:'test',version:'1',weights_digest:'sha256:test'},align:{name:'fake-align',model:'test',version:'1',weights_digest:'sha256:test'},tokens:scenario.tokens,runtime:{seconds:0,peak_memory_mb:0,engine_used:'local'},warnings:scenario.warnings ?? []
 };
 fs.writeFileSync(arg('--out'), JSON.stringify(output));
 process.exit(scenario.error ? 1 : 0);
@@ -240,4 +240,57 @@ it("passes an exact millisecond range and the default auto engine to the worker"
 it("rejects transcribe inside an editing session", async () => {
   const result = await dispatch("transcribe", { ...request(), session_id: "ses_test" });
   expect(result.error?.code).toBe("E_SESSION_STATE");
+});
+
+it("rejects the first invalid worker token with its index and reason, then accepts repaired regression tokens", async () => {
+  const fixture = JSON.parse(
+    await readFile(new URL("../../../fixtures/regressions/asr-zero-width.zcut.json", import.meta.url), "utf8"),
+  );
+  const original = JSON.parse(await readFile(path, "utf8"));
+  fixture.media = original.media;
+  await writeFile(path, JSON.stringify(fixture));
+  const cases = JSON.parse(
+    await readFile(new URL("../../../fixtures/regressions/asr-zero-width.json", import.meta.url), "utf8"),
+  );
+  const scenario = { tokens: cases[2].tokens };
+  await writeFile(join(directory, "scenario.json"), JSON.stringify(scenario));
+  const failed = await run();
+  expect(failed.state).toBe("failed");
+  expect(failed.envelope?.error?.message).toMatch(/index 1:.*greater than start_ms/u);
+  expect((await project()).transcripts).toHaveLength(0);
+  await writeFile(
+    join(directory, "scenario.json"),
+    JSON.stringify({ tokens: cases[2].expected, warnings: [{ code: "W_ASR_ZERO_WIDTH", count: 1 }] }),
+  );
+  const repaired = await run("rev_example_1", "repaired");
+  expect(repaired.state, JSON.stringify(repaired.envelope)).toBe("succeeded");
+  expect(repaired.envelope?.result).toMatchObject({ warnings: [{ code: "W_ASR_ZERO_WIDTH", count: 1 }] });
+  expect((await project()).transcripts[0]!.tokens.map((token) => token.text)).toEqual(["ab", "c"]);
+});
+
+it("writes empty transcripts with runs, no tokens or cues, and W_ASR_EMPTY", async () => {
+  await writeFile(join(directory, "scenario.json"), JSON.stringify({ tokens: [] }));
+  const job = await run();
+  expect(job.state, JSON.stringify(job.envelope)).toBe("succeeded");
+  expect(job.envelope?.result).toMatchObject({ warnings: ["W_ASR_EMPTY"] });
+  expect((await project()).transcripts[0]).toMatchObject({
+    tokens: [],
+    cues: [],
+    raw_runs: [{ kind: "asr" }, { kind: "align" }],
+  });
+});
+
+it("continues short token and cue IDs when transcribing again", async () => {
+  await run();
+  const before = await project();
+  const first = before.transcripts[0]!;
+  const tag = (first.ext?.zsir as { id_tag: string }).id_tag;
+  expect(tag).toBe(first.id.replaceAll("-", "").slice(-6));
+  expect(first.tokens.map((token) => token.id)).toEqual([0, 1, 2, 3].map((i) => `tok_${tag}_${i}`));
+  expect(first.cues.map((cue) => cue.id)).toEqual([0, 1, 2].map((i) => `cue_${tag}_${i}`));
+  await run(before.revision.id, "again");
+  const next = (await project()).transcripts[0]!;
+  expect(next.tokens[0]!.id).toBe(`tok_${tag}_4`);
+  expect(next.cues[0]!.id).toBe(`cue_${tag}_3`);
+  expect(next.ext).toEqual(first.ext);
 });

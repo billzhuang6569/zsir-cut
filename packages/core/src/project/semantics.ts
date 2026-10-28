@@ -257,6 +257,22 @@ export function validateProjectSemantics(project: Project, parseIssues: ProjectI
   for (const timeline of project.timelines)
     for (const track of timeline.tracks) {
       if (track.kind !== "subtitle") continue;
+      for (const carrier of timeline.tracks) {
+        if (carrier.kind !== "audio" || !carrier.enabled || !track.carrier_tracks.includes(carrier.id)) continue;
+        for (const clip of carrier.clips) {
+          if (clip.enabled === false) continue;
+          const transcripts = project.transcripts.filter((item) => item.media_id === clip.media_id);
+          if (transcripts.length && !transcripts.some((item) => item.language === track.language))
+            report(
+              "W_SUB_NO_TRANSCRIPT",
+              "warning",
+              "Carrier media has no transcript matching subtitle language",
+              track.id,
+              clip.id,
+              clip.media_id,
+            );
+        }
+      }
       for (const override of track.overrides) {
         if (!occurrences.has(override.occurrence_id))
           report("E_REF", "error", "Override references missing occurrence", track.id, override.occurrence_id);

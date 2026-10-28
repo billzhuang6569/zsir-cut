@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { promisify } from "node:util";
-import { newId } from "./project/id.ts";
+import { newId, transcriptIds } from "./project/id.ts";
 import { cueBreaks, segmentTokens, transcriptRules } from "./project/subtitle-rules.ts";
 import type { Cue, Engine, Project, RawToken, Token, TranscriptSubtitleRules } from "./project/types.ts";
 import { compare, parseRational, rational, sub } from "./rational.ts";
@@ -18,7 +18,7 @@ type WorkerResult = {
   asr: { name: string; model: string; version: string | null; weights_digest?: string | null };
   align: { name: string; model: string; version: string | null; weights_digest?: string | null };
   tokens: WorkerToken[];
-  warnings: string[];
+  warnings: (string | { code: string; count: number })[];
 };
 export type TranscribeRequest = {
   project: string;
@@ -144,8 +144,6 @@ export async function invokeAsr(
     throw new AsrError("E_ASR_INTERNAL", "ASR result does not match media or request", false);
   if (request.language && request.language !== "auto" && !request.language.startsWith(output.language))
     throw new AsrError("E_ASR_INTERNAL", "ASR language differs from request", false);
-  if (output.tokens.length === 0 && output.warnings.includes("W_ASR_CLOUD_TIMING"))
-    throw new AsrError("E_ASR_INTERNAL", "Cloud timing was not returned", false);
   if (
     request.range &&
     (compare(ms(output.input.start_ms), parseRational(request.range.start, true)) !== 0 ||
@@ -153,23 +151,26 @@ export async function invokeAsr(
   )
     throw new AsrError("E_ASR_INTERNAL", "ASR result range differs from request", false);
   let end = -1;
-  for (const token of output.tokens) {
-    if (
-      !token ||
-      typeof token.text !== "string" ||
-      !token.text ||
-      !Number.isSafeInteger(token.start_ms) ||
-      !Number.isSafeInteger(token.end_ms) ||
-      token.start_ms < 0 ||
-      token.start_ms < end ||
-      token.end_ms <= token.start_ms ||
-      token.start_ms < output.input.start_ms ||
-      token.end_ms > output.input.start_ms + output.input.duration_ms ||
-      (token.conf !== null && (typeof token.conf !== "number" || token.conf < 0 || token.conf > 1))
-    )
-      throw new AsrError("E_ASR_INTERNAL", "Invalid ASR tokens", false);
+  for (const [index, token] of output.tokens.entries()) {
+    const reason =
+      !token || typeof token.text !== "string" || !token.text
+        ? "text must be nonempty"
+        : !Number.isSafeInteger(token.start_ms) || !Number.isSafeInteger(token.end_ms)
+          ? "times must be safe integer milliseconds"
+          : token.end_ms <= token.start_ms
+            ? "end_ms must be greater than start_ms (zero or negative width)"
+            : token.start_ms < output.input.start_ms || token.end_ms > output.input.start_ms + output.input.duration_ms
+              ? "time is outside input range"
+              : token.start_ms < end
+                ? "start_ms overlaps the previous token or is out of order"
+                : token.conf !== null &&
+                    (typeof token.conf !== "number" || !Number.isFinite(token.conf) || token.conf < 0 || token.conf > 1)
+                  ? "conf must be null or a number in [0, 1]"
+                  : undefined;
+    if (reason) throw new AsrError("E_ASR_INTERNAL", `Invalid ASR token at index ${index}: ${reason}`, false);
     end = token.end_ms;
   }
+  if (!output.tokens.length && !output.warnings.includes("W_ASR_EMPTY")) output.warnings.push("W_ASR_EMPTY");
   for (const value of [output.asr, output.align])
     if (
       !value ||
@@ -222,6 +223,8 @@ export function applyTranscription(project: Project, request: TranscribeRequest,
     { id: asrId, kind: "asr", engine: engine(result.asr), created_at, range, tokens: raw },
     { id: alignId, kind: "align", engine: engine(result.align), created_at, range, tokens: raw },
   );
+  const tokenId = transcriptIds(project, transcript, "tok_");
+  const cueId = transcriptIds(project, transcript, "cue_");
   const oldTokens = transcript.tokens;
   const indexes = new Map(oldTokens.map((token, index) => [token.id, index]));
   const protectedCues = transcript.cues.filter(
@@ -243,7 +246,7 @@ export function applyTranscription(project: Project, request: TranscribeRequest,
   const additions: Token[] = raw
     .filter((token) => !retained.some((old) => overlap(token.start, token.end, old.align.start, old.align.end)))
     .map((token) => ({
-      id: newId("tok_"),
+      id: tokenId(),
       text: token.text,
       state: "auto",
       align: {
@@ -288,7 +291,7 @@ export function applyTranscription(project: Project, request: TranscribeRequest,
   const flush = () => {
     for (const segment of segmentTokens(group, rules))
       cues.push({
-        id: newId("cue_"),
+        id: cueId(),
         first_token: segment[0]!.id,
         last_token: segment.at(-1)!.id,
         breaks: cueBreaks(segment, rules),

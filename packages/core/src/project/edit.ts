@@ -253,7 +253,13 @@ function clearSpan(
     shift(timeline, stop, sub(start, stop), selected.size === mediaTracks(timeline).length ? undefined : selected);
 }
 function tokenRange(project: Project, timeline: Timeline, op: Op): [Rational, Rational] {
-  const selection = op.tokens as { transcript_id: string; from_token: string; to_token: string; clip_id?: string };
+  const selection = op.tokens as {
+    transcript_id: string;
+    from_token: string;
+    to_token: string;
+    clip_id?: string;
+    pause?: string;
+  };
   const transcript =
     project.transcripts.find((item) => item.id === selection.transcript_id) ??
     fail("E_NOT_FOUND", "Transcript not found");
@@ -263,7 +269,7 @@ function tokenRange(project: Project, timeline: Timeline, op: Op): [Rational, Ra
   )
     fail("E_NOT_FOUND", "Token not found");
   if (selection.clip_id) clip(timeline, selection.clip_id);
-  const cues = projectSubtitles(project, timeline.id).cues;
+  const cues = projectSubtitles(project, timeline.id, undefined, false).cues;
   const starts = new Set(cues.filter((cue) => cue.token_ids.includes(selection.from_token)).map((cue) => cue.clip_id));
   const ends = new Set(cues.filter((cue) => cue.token_ids.includes(selection.to_token)).map((cue) => cue.clip_id));
   const candidates = [...starts].filter(
@@ -298,7 +304,24 @@ function tokenRange(project: Project, timeline: Timeline, op: Op): [Rational, Ra
     if (!position) return fail("E_VALIDATION", "Token endpoint cannot be projected");
     return add(target.timeline_start, position);
   };
-  return [projectEndpoint(first, "start"), projectEndpoint(last, "end")];
+  const firstIndex = transcript.tokens.indexOf(first);
+  const lastIndex = transcript.tokens.indexOf(last);
+  if (firstIndex > lastIndex) fail("E_VALIDATION", "Token range is reversed");
+  let start = projectEndpoint(first, "start");
+  let stop = projectEndpoint(last, "end");
+  if (selection.pause !== undefined) {
+    const shown = new Set(cues.filter((cue) => cue.clip_id === target.id).flatMap((cue) => cue.token_ids));
+    const previous = transcript.tokens.slice(0, firstIndex).findLast((token) => token.text && shown.has(token.id));
+    const following = transcript.tokens.slice(lastIndex + 1).find((token) => token.text && shown.has(token.id));
+    const p = previous ? projectEndpoint(previous, "end") : target.timeline_start;
+    const n = following ? projectEndpoint(following, "start") : end(target);
+    const half = div(time(selection.pause), rational(2n));
+    const left = lt(start, p) ? zero : sub(start, p);
+    const right = lt(n, stop) ? zero : sub(n, stop);
+    start = add(p, min(left, half));
+    stop = sub(n, min(right, half));
+  }
+  return [start, stop];
 }
 function snap(value: Rational, rate: Rational, mode: "floor" | "ceil" | "nearest"): Rational {
   const frames = mul(value, rate);
@@ -386,7 +409,11 @@ function applyOne(project: Project, timeline: Timeline, op: Op, generate: (prefi
         start = time(range.start);
         stop = add(start, time(range.duration));
       } else [start, stop] = tokenRange(project, timeline, op);
-      const mode = (op.snap ?? "out") as "out" | "in" | "nearest";
+      const mode = (op.snap ??
+        ((op.tokens as { pause?: string } | undefined)?.pause !== undefined ? "nearest" : "out")) as
+        | "out"
+        | "in"
+        | "nearest";
       start = snap(start, timeline.edit_rate, mode === "out" ? "floor" : mode === "in" ? "ceil" : "nearest");
       stop = snap(stop, timeline.edit_rate, mode === "out" ? "ceil" : mode === "in" ? "floor" : "nearest");
       if (!lt(start, stop)) fail("E_VALIDATION", "Remove span is empty");
