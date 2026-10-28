@@ -1,7 +1,12 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
-import { dispatch, VERBS, type Verb } from "../../core/dist/index.js";
+import type { Verb } from "../../core/dist/index.js";
+
+const { dispatch, VERBS }: typeof import("../../core/dist/index.js") = await import(
+  new URL(import.meta.url.endsWith(".ts") ? "../../core/src/index.ts" : "../../core/dist/index.js", import.meta.url)
+    .href
+);
 
 const codes: Record<string, number> = {
   applied: 0,

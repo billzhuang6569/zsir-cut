@@ -1,12 +1,12 @@
 // biome-ignore-all lint/style/noNonNullAssertion: Token and time-map indexes are checked before use.
 import { readdir, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { projectSubtitles } from "./project/projection.js";
-import { validateProjectSemantics } from "./project/semantics.js";
-import { openProject } from "./project/store.js";
-import { displayRanges } from "./project/subtitle-rules.js";
-import { clipTimeMap } from "./project/time-map.js";
-import type { Clip, Media, Project, Timeline, Transcript } from "./project/types.js";
+import { projectSubtitles } from "./project/projection.ts";
+import { validateProjectSemantics } from "./project/semantics.ts";
+import { openProject } from "./project/store.ts";
+import { displayRanges } from "./project/subtitle-rules.ts";
+import { clipTimeMap } from "./project/time-map.ts";
+import type { Clip, Media, Project, Timeline, Transcript } from "./project/types.ts";
 import {
   add,
   compare,
@@ -18,8 +18,8 @@ import {
   type Rational,
   rational,
   sub,
-} from "./rational.js";
-import { frameToTimecode } from "./timecode.js";
+} from "./rational.ts";
+import { frameToTimecode } from "./timecode.ts";
 
 type Input = Record<string, unknown>;
 type Range = { start: Rational; duration: Rational };

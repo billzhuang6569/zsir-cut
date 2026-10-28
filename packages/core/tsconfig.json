@@ -5,6 +5,7 @@
     "declaration": true,
     "rootDir": "src",
     "outDir": "dist",
+    "rewriteRelativeImportExtensions": true,
     "types": ["node"]
   },
   "include": ["src/**/*.ts"]

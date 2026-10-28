@@ -9,30 +9,30 @@ import {
   type ProfileId,
   recordHandoffCheck,
   runExport,
-} from "./export-framework.js";
-import { fingerprint } from "./fingerprint.js";
-import { jobPath, readJob, startExportJob, startPreviewJob, startTranscribeJob } from "./jobs.js";
-import { renderPreview, timelineFrames, viewTimeline } from "./preview.js";
-import { applyEdit, SUBTITLE_OPS } from "./project/edit.js";
-import { diffProjectEntities } from "./project/entities.js";
-import { newId } from "./project/id.js";
-import { parseProject } from "./project/io.js";
-import { relinkMedia, validateProjectMedia } from "./project/media.js";
-import { ffprobe, mediaFromProbe, type Probe } from "./project/probe.js";
-import { type ValidationIssue, validateProjectSemantics } from "./project/semantics.js";
-import { runSession } from "./project/session.js";
+} from "./export-framework.ts";
+import { fingerprint } from "./fingerprint.ts";
+import { jobPath, readJob, startExportJob, startPreviewJob, startTranscribeJob } from "./jobs.ts";
+import { renderPreview, timelineFrames, viewTimeline } from "./preview.ts";
+import { applyEdit, SUBTITLE_OPS } from "./project/edit.ts";
+import { diffProjectEntities } from "./project/entities.ts";
+import { newId } from "./project/id.ts";
+import { parseProject } from "./project/io.ts";
+import { relinkMedia, validateProjectMedia } from "./project/media.ts";
+import { ffprobe, mediaFromProbe, type Probe } from "./project/probe.ts";
+import { type ValidationIssue, validateProjectSemantics } from "./project/semantics.ts";
+import { runSession } from "./project/session.ts";
 import {
   findIdempotentWrite,
   HistoryError,
   openProject,
   type WriteEnvelope,
   type WriteRequest,
-} from "./project/store.js";
-import type { Author, Media } from "./project/types.js";
-import { add, compare, parseRational, rational } from "./rational.js";
-import { inspect, readTranscript } from "./read-views.js";
-import { validateCommand } from "./schema.js";
-import { AsrError, applyTranscription, invokeAsr, type TranscribeRequest, workerMilliseconds } from "./transcribe.js";
+} from "./project/store.ts";
+import type { Author, Media } from "./project/types.ts";
+import { add, compare, parseRational, rational } from "./rational.ts";
+import { inspect, readTranscript } from "./read-views.ts";
+import { validateCommand } from "./schema.ts";
+import { AsrError, applyTranscription, invokeAsr, type TranscribeRequest, workerMilliseconds } from "./transcribe.ts";
 
 export const VERBS = [
   "inspect",
@@ -494,13 +494,18 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
       if (!exporter && exporterModule) {
         let loaded: Record<string, Exporter>;
         try {
-          loaded = await import(isAbsolute(exporterModule) ? pathToFileURL(exporterModule).href : exporterModule);
+          // Resolve explicit relative paths before TypeScript can rewrite their extensions.
+          const moduleUrl =
+            exporterModule.startsWith("./") || exporterModule.startsWith("../")
+              ? new URL(exporterModule, import.meta.url).href
+              : exporterModule;
+          loaded = await import(isAbsolute(moduleUrl) ? pathToFileURL(moduleUrl).href : moduleUrl);
         } catch (error) {
           if (exporterModule === distModule && (error as NodeJS.ErrnoException).code === "ERR_MODULE_NOT_FOUND")
             throw new Error(`导出器编译产物缺失，请先在项目根目录运行 pnpm typecheck 构建后重试：${String(error)}`);
           throw error;
         }
-        // Source dispatch passes its selected module to the compiled job worker.
+        // Pass the selected exporter module to the job worker.
         exporter =
           exporterModule === sourceModule || exporterModule === distModule
             ? loaded[`${PROFILES[profile].format}Exporter`]

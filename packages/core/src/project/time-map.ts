@@ -1,6 +1,6 @@
 // biome-ignore-all lint/style/noNonNullAssertion: Time-map points are validated by project semantics.
-import { add, ceil, compare, div, floor, mul, type Rational, rational, sub } from "../rational.js";
-import type { Clip, TimeMapPoint } from "./types.js";
+import { add, ceil, compare, div, floor, mul, type Rational, rational, sub } from "../rational.ts";
+import type { Clip, TimeMapPoint } from "./types.ts";
 
 const zero = rational(0n);
 

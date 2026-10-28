@@ -1,9 +1,9 @@
 // biome-ignore-all lint/style/noNonNullAssertion: ffprobe fields are checked before use.
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import { div, floor, mul, rational } from "../rational.js";
-import { frameToTimecode } from "../timecode.js";
-import type { Media } from "./types.js";
+import { div, floor, mul, rational } from "../rational.ts";
+import { frameToTimecode } from "../timecode.ts";
+import type { Media } from "./types.ts";
 
 interface PacketTime {
   pts: bigint;

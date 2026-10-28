@@ -1,15 +1,24 @@
 import { spawnSync } from "node:child_process";
-import { copyFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, cp, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { openProject, parseProject, VERBS, validateCommand, validateEnvelope } from "../../core/dist/index.js";
+import {
+  commandSchemaForVerb,
+  openProject,
+  parseProject,
+  VERBS,
+  validateCommand,
+  validateEnvelope,
+} from "../../core/src/index.ts";
 import { createServer } from "../src/index.js";
 
-const cli = fileURLToPath(new URL("../../cli/dist/index.js", import.meta.url));
+const root = fileURLToPath(new URL("../../../", import.meta.url));
+const cli = fileURLToPath(new URL("../../cli/src/index.ts", import.meta.url));
 const fixture = new URL("../../../fixtures/projects/std-25.zcut.json", import.meta.url);
 const fake = fileURLToPath(new URL("../../exporters/test/fake-exporter.mjs", import.meta.url));
 const author = { kind: "agent" as const, name: "test" };
@@ -23,7 +32,7 @@ const invokeCli = (verb: string, input: Record<string, unknown>) => {
 const withoutRequestId = (value: Record<string, unknown>) => ({ ...value, request_id: "req_ignored" });
 
 beforeEach(async () => {
-  directory = await mkdtemp(join(tmpdir(), "zcut-parity-"));
+  directory = await realpath(await mkdtemp(join(tmpdir(), "zcut-parity-")));
   project = join(directory, "std-25.zcut.json");
   await copyFile(fixture, project);
 });
@@ -32,6 +41,54 @@ afterEach(async () => {
 });
 
 describe("CLI and MCP", () => {
+  it.each([
+    ["src", "missing"],
+    ["src", "stale"],
+    ["dist", "missing"],
+    ["dist", "stale"],
+  ] as const)("runs the %s MCP entry when the other core runtime is %s", async (runtime, state) => {
+    await copyFile(join(root, "package.json"), join(directory, "package.json"));
+    await cp(join(root, "schema"), join(directory, "schema"), { recursive: true });
+    await symlink(join(root, "node_modules"), join(directory, "node_modules"), "junction");
+    for (const name of ["core", "mcp"]) {
+      for (const mode of ["src", "dist"]) {
+        const path = join("packages", name, mode);
+        await cp(join(root, path), join(directory, path), { recursive: true });
+      }
+      await symlink(
+        join(root, "packages", name, "node_modules"),
+        join(directory, "packages", name, "node_modules"),
+        "junction",
+      );
+    }
+    const excluded = runtime === "src" ? "dist" : "src";
+    const extension = runtime === "src" ? "ts" : "js";
+    if (state === "missing") {
+      await rm(join(directory, "packages/core", excluded), { recursive: true });
+    } else {
+      const filename = runtime === "src" ? "index.js" : "index.ts";
+      await writeFile(join(directory, "packages/core", excluded, filename), 'throw new Error("WRONG CORE RUNTIME");');
+    }
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [join(directory, "packages/mcp", runtime, `index.${extension}`)],
+      cwd: directory,
+    });
+    const client = new Client({ name: "source-runtime-test", version: "1" });
+    try {
+      await client.connect(transport);
+      const listed = await client.listTools();
+      expect(listed.tools).toEqual(
+        VERBS.map((verb) => ({ name: `zcut_${verb}`, inputSchema: commandSchemaForVerb(verb) })),
+      );
+      const result = await client.callTool({ name: "zcut_validate", arguments: { project } });
+      expect(validateEnvelope(result.structuredContent).valid).toBe(true);
+      expect(result.structuredContent).toMatchObject({ ok: true, status: "no_op" });
+    } finally {
+      await client.close();
+    }
+  });
+
   it("registers all 18 protocol verbs and returns equivalent envelopes", async () => {
     const server = createServer();
     const client = new Client({ name: "test", version: "1" });

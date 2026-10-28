@@ -1,6 +1,6 @@
 // biome-ignore-all lint/style/noNonNullAssertion: Indexed entries are guarded by the token range checks.
-import { add, compare, div, mul, type Rational, rational, sub } from "../rational.js";
-import type { Cue, Token, Transcript } from "./types.js";
+import { add, compare, div, mul, type Rational, rational, sub } from "../rational.ts";
+import type { Cue, Token, Transcript } from "./types.ts";
 
 export interface SubtitleRules {
   name: "zh-talk" | "en-talk";

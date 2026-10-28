@@ -1,10 +1,10 @@
 // biome-ignore-all lint/style/noNonNullAssertion: Indexed entries are guarded by schema or test setup.
-import { add, compare, div, mul, type Rational, rational, sub } from "../rational.js";
-import type { ProjectIssue } from "./io.js";
-import { projectSubtitles } from "./projection.js";
-import { displayRanges, transcriptRules } from "./subtitle-rules.js";
-import { mapClipTimeToSource } from "./time-map.js";
-import type { Clip, Project } from "./types.js";
+import { add, compare, div, mul, type Rational, rational, sub } from "../rational.ts";
+import type { ProjectIssue } from "./io.ts";
+import { projectSubtitles } from "./projection.ts";
+import { displayRanges, transcriptRules } from "./subtitle-rules.ts";
+import { mapClipTimeToSource } from "./time-map.ts";
+import type { Clip, Project } from "./types.ts";
 
 export interface ValidationIssue {
   code: string;

@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import type { ErrorObject } from "ajv";
-import { compare, printRational, type Rational, rational } from "../rational.js";
-import { validateProject } from "../schema.js";
-import type { Project } from "./types.js";
+import { compare, printRational, type Rational, rational } from "../rational.ts";
+import { validateProject } from "../schema.ts";
+import type { Project } from "./types.ts";
 
 interface SchemaNode {
   $ref?: string;

@@ -5,12 +5,12 @@ import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promi
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { fingerprint } from "./fingerprint.js";
-import type { renderPreview } from "./preview.js";
-import { projectSubtitles } from "./project/projection.js";
-import { validateProjectSemantics } from "./project/semantics.js";
-import { clipTimeMap, mapSourceTimeToClip } from "./project/time-map.js";
-import type { Project, Timeline } from "./project/types.js";
+import { fingerprint } from "./fingerprint.ts";
+import type { renderPreview } from "./preview.ts";
+import { projectSubtitles } from "./project/projection.ts";
+import { validateProjectSemantics } from "./project/semantics.ts";
+import { clipTimeMap, mapSourceTimeToClip } from "./project/time-map.ts";
+import type { Project, Timeline } from "./project/types.ts";
 import {
   add,
   compare,
@@ -22,8 +22,8 @@ import {
   type Rational,
   rational,
   sub,
-} from "./rational.js";
-import { validateLossReport, validateManifest } from "./schema.js";
+} from "./rational.ts";
+import { validateLossReport, validateManifest } from "./schema.ts";
 
 export const PROFILES = {
   "fcp-11-fcpxml-1.13": { host: "final_cut_pro", min_host_version: "11", format: "fcpxml", format_version: "1.13" },
@@ -612,7 +612,7 @@ export async function runExport(
     const previewName = `${safeName(project.name)}_r${project.revision.seq}_${profile}_${exportId}.mov`;
     const previewPath = `preview/${previewName}`;
     await mkdir(join(root, "preview"));
-    const renderer = previewRenderer ?? (await import("./preview.js")).renderPreview;
+    const renderer = previewRenderer ?? (await import("./preview.ts")).renderPreview;
     const preview = await renderer(project, timeline, input.project, {
       output: join(root, previewPath),
       profile,

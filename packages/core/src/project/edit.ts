@@ -1,20 +1,19 @@
 // biome-ignore-all lint/style/noNonNullAssertion: Indexed entries are guarded by schema or local checks.
 
 import { createHash } from "node:crypto";
-import { add, ceil, compare, div, floor, mul, parseRational, type Rational, rational, sub } from "../rational.js";
-import { diffProjectEntities } from "./entities.js";
-import { newId } from "./id.js";
-import { projectSubtitles } from "./projection.js";
-import { applySubtitleEdit } from "./subtitle-edit.js";
-import { clipTimeMap, mapClipTimeToSource, mapSourceTimeToClip } from "./time-map.js";
-import type { Clip, Marker, MediaTrack, Project, Timeline, TimeMapPoint, Token, Track } from "./types.js";
+import { add, ceil, compare, div, floor, mul, parseRational, type Rational, rational, sub } from "../rational.ts";
+import { diffProjectEntities } from "./entities.ts";
+import { newId } from "./id.ts";
+import { projectSubtitles } from "./projection.ts";
+import { applySubtitleEdit } from "./subtitle-edit.ts";
+import { clipTimeMap, mapClipTimeToSource, mapSourceTimeToClip } from "./time-map.ts";
+import type { Clip, Marker, MediaTrack, Project, Timeline, TimeMapPoint, Token, Track } from "./types.ts";
 
 export class EditError extends Error {
-  constructor(
-    readonly code: "E_VALIDATION" | "E_NOT_FOUND" | "E_UNSUPPORTED" | "E_LOCKED" | "E_SESSION_STATE",
-    message: string,
-  ) {
+  readonly code: "E_VALIDATION" | "E_NOT_FOUND" | "E_UNSUPPORTED" | "E_LOCKED" | "E_SESSION_STATE";
+  constructor(code: EditError["code"], message: string) {
     super(message);
+    this.code = code;
   }
 }
 

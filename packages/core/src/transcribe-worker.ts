@@ -1,5 +1,5 @@
-import { dispatch } from "./dispatch.js";
-import { readJob, writeJob } from "./jobs.js";
+import { dispatch } from "./dispatch.ts";
+import { readJob, writeJob } from "./jobs.ts";
 
 const [path, python, workerDirectory] = process.argv.slice(2);
 if (!path || !python || !workerDirectory) throw new Error("Missing transcribe worker arguments");
