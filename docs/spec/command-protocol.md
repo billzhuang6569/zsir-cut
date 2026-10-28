@@ -18,6 +18,7 @@
 
 - 没有写工程路径时，用请求里的 `project` 字段；两处都有且不同，返回 `rejected`、`E_VALIDATION`，`message` 写明两个路径。两处都没有时同样返回 `E_VALIDATION`，`message` 写「缺少工程路径」。请求文件读不了或不是 JSON 对象时返回 `E_VALIDATION`，`message` 写明原因，不能把请求当成空对象继续校验。
 - `record_handoff_check` 不需要工程路径；`create_project` 的工程路径是要新建的文件。
+- 请求里的时间和帧率可以写非最简分数，内核读入时约分，见 `edit-ops.md` 第 1 节第 2 条。结果信封里一律是规范形式。
 
 退出码：
 
@@ -379,7 +380,7 @@
 
 | 操作 | 主要参数 | 说明 |
 |---|---|---|
-| `place` | `media_id`、`source_start`、`duration`、`at`、`video_track`、`audio_track`、`mode` | 把一段素材放上时间线，新建一个 `occurrence_id` 和对应的视音频片段。`mode` 取 `insert` 或 `overwrite` |
+| `place` | `media_id`、`source_start` 和 `duration` 或 `tokens`、`at`、`video_track`、`audio_track`、`mode` | 把一段素材放上时间线，新建一个 `occurrence_id` 和对应的视音频片段。`mode` 取 `insert` 或 `overwrite`。`tokens` 按字词选段，`at` 可写 `"end"` |
 | `remove` | `clip_ids`、`linked` | 删片段，留下空隙，不合拢；要合拢用 `remove_span` |
 | `remove_span` | `range` 或 `tokens`、`tracks`、`ripple`、`snap` | 删一段序列区间。可以用 token 范围指定，内核按投影换算成序列时间。`tracks` 默认全部轨道，保持同步。`snap` 取 `out`、`in`、`nearest`，默认 `out`，保证说过的字被完整删掉 |
 | `trim` | `clip_id`、`edge`、`to`、`ripple`、`linked` | 改入点或出点。`linked` 为 true 时同一次使用的视音频一起改；J/L cut 就是只改其中一个 |

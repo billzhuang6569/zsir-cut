@@ -487,14 +487,27 @@
           "required": [
             "op",
             "media_id",
-            "source_start",
-            "duration",
             "at",
             "mode"
+          ],
+          "oneOf": [
+            { "required": ["source_start", "duration"], "properties": { "source_start": true, "duration": true } },
+            { "required": ["tokens"], "properties": { "tokens": true } }
           ],
           "properties": {
             "op": {
               "const": "place"
+            },
+            "tokens": {
+              "type": "object",
+              "required": ["transcript_id", "from_token", "to_token"],
+              "properties": {
+                "transcript_id": { "$ref": "#/$defs/id" },
+                "from_token": { "$ref": "#/$defs/id" },
+                "to_token": { "$ref": "#/$defs/id" },
+                "pause": { "$ref": "#/$defs/seconds" }
+              },
+              "additionalProperties": false
             },
             "media_id": {
               "$ref": "#/$defs/id"
@@ -506,7 +519,7 @@
               "$ref": "#/$defs/seconds"
             },
             "at": {
-              "$ref": "#/$defs/seconds"
+              "anyOf": [{ "$ref": "#/$defs/seconds" }, { "const": "end" }]
             },
             "mode": {
               "enum": [

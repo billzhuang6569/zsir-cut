@@ -36,7 +36,11 @@
 | 2.2 | `create_project` 动词（CLI 和 MCP）；CLI 工程路径规则；`E_VALIDATION` 报错只列相关分支 | 规格 PR | 用 `match_media` 对 30 帧素材建工程后，导入、放置、导出 FCPXML 全部成功；写错一个 `place` 参数，报错不超过 1 KB 且指出那个参数 |
 | 2.3 | 字幕链路：worker 零宽修正和空结果；短 ID；`read_transcript` 片段头和 `with_times`；`W_SUB_NO_TRANSCRIPT`；`remove_span` 的 `pause`；`workers/asr/README.md` 写清环境搭建 | 规格 PR | 一小时规模的合成母稿 `read_transcript` 不超过 128 KB；`pause` 的区间与手算一致；零宽字词的回归用例 |
 
-三个任务改的文件基本不重叠，可以并行，各用一个 worktree；后合并的负责变基。
+| 2.6 | `place` 按字词选段（`tokens`）和 `at: "end"`；请求里的非最简分数自动约分 | 2.3 | 用合成朗读素材按三段字词逆序追加，序列上三段首尾相接、源区间与手算一致；`"50/25s"` 被接受并写成 `2s` |
+
+2.1 到 2.3 改的文件基本不重叠，可以并行，各用一个 worktree；后合并的负责变基。2.6 改的是编辑操作，等 2.3 合并后再做。
+
+2.6 来自写 Skill 时的推演：采访剪三分钟，常要挑几段话重新排顺序，只靠删除做不到；而要 Agent 自己从字词时间算出最简分数的源区间，容易出错。
 
 ## Skill（Claude）
 
