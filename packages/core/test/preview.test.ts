@@ -266,10 +266,12 @@ it("renders one soft subtitle across a hidden word", async () => {
   project.media = [{ ...media, id: "med_a" }];
   const movie = join(directory, "hidden.mov");
   await renderPreview(project, timeline, projectPath, { output: movie, profile: "preview", exportId: "exp_hidden" });
-  const subtitles = run(["-i", movie, "-map", "0:s:0", "-f", "srt", "pipe:1"]).toString();
+  const subtitles = run(["-i", movie, "-map", "0:s:0", "-f", "srt", "pipe:1"]).toString().replace(/\r\n?/g, "\n");
   expect(subtitles.match(/-->/g)).toHaveLength(1);
   expect(subtitles).toContain("00:00:06,000 --> 00:00:07,000");
-  expect(subtitles).toContain("一起\n切这个瓜");
+  // FFmpeg versions differ in how mov_text line breaks are read back.
+  const lines = subtitles.split("\n").filter((line) => line.trim() !== "");
+  expect(lines.slice(2)).toEqual(["一起", "切这个瓜"]);
 });
 
 it("renders exact forward, reverse, hold frames and both sides of each cut", async () => {
