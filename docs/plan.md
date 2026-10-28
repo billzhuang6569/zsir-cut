@@ -71,7 +71,7 @@
 
 ## 第 2 步：Skill 首发，真项目跑通（一到两周）
 
-详细拆分见 [docs/tasks/step-2.md](tasks/step-2.md)。第 1 步已于 2026-10-28 完成，收尾情况也记在那里。
+详细拆分见 [docs/tasks/step-2.md](tasks/step-2.md)。第 1 步已于 2026-10-28 完成，第 2 步已于 2026-10-29 完成，收尾情况和遗留问题都记在那里。
 
 写 SKILL.md：一个路由 skill，加粗剪、字幕、交接复核三个子 skill。用一个真实采访项目走完「素材、转写、Agent 粗剪、字幕校对、导出 FCP 接手版」，Resolve 和 Premiere 各导一份做对照。
 
