@@ -144,7 +144,7 @@ def split_text(text, counts):
     return parts
 
 
-def group_chinese(items):
+def group_chinese(items, tokenizer=jieba):
     """Join aligned Chinese characters using jieba, retaining Latin words."""
     grouped = []
     index = 0
@@ -160,7 +160,7 @@ def group_chinese(items):
             end = index
             while end < len(items) and len(items[end]["text"]) == 1 and "\u4e00" <= items[end]["text"] <= "\u9fff":
                 end += 1
-            words = list(jieba.cut("".join(part["text"] for part in items[index:end]), HMM=False))
+            words = list(tokenizer.cut("".join(part["text"] for part in items[index:end]), HMM=False))
             cursor = index
             for word in words:
                 spans = items[cursor:cursor + len(word)]
@@ -361,6 +361,14 @@ def result(args, local=None, cloud=None):
         cached = json.loads(cache.read_text())
         cached["warnings"].extend(finalize_tokens(cached["tokens"], start_ms, start_ms + duration_ms))
         return cached
+    tokenizer = jieba
+    if hotwords:
+        # Each request owns its hotword dictionary; jieba's global dictionary stays unchanged.
+        tokenizer = jieba.Tokenizer()
+        for word in hotwords:
+            word = word.strip()
+            if word and all("\u4e00" <= char <= "\u9fff" for char in word):
+                tokenizer.add_word(word)
     audio = decode(path, args.channels, start_ms, duration_ms)
     ranges = chunk_ranges(audio)
     warnings = []
@@ -390,7 +398,7 @@ def result(args, local=None, cloud=None):
                 token["end_ms"] = min(chunk_end, max(token["start_ms"], token["end_ms"]))
             warnings.extend(remove_repetitions(chunk_tokens))
             # Check characters before jieba grouping and words after it, including auto-detected English.
-            chunk_tokens = group_chinese(chunk_tokens)
+            chunk_tokens = group_chinese(chunk_tokens, tokenizer)
             warnings.extend(remove_repetitions(chunk_tokens))
             tokens.extend(chunk_tokens)
         except WorkerError:

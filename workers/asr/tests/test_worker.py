@@ -34,6 +34,42 @@ def test_jieba_group_and_punctuation():
     ]
 
 
+def test_hotwords_group_aligned_characters_without_polluting_global_dictionary(monkeypatch, tmp_path):
+    from decimal import Decimal
+    from types import SimpleNamespace
+
+    text = "飞书豆包工作"
+    items = [{"text": char, "start_ms": index * 80, "end_ms": (index + 1) * 80, "conf": None} for index, char in enumerate(text)]
+    baseline = worker.group_chinese(items)
+    assert [token["text"] for token in baseline] == ["飞", "书", "豆包", "工作"]
+    source = tmp_path / "clip.wav"
+    source.write_bytes(b"fake audio")
+    hotwords = tmp_path / "hotwords.txt"
+    hotwords.write_text(" 飞书 \n豆包工作\n\nAgent\n")
+    monkeypatch.setattr(worker, "media_info", lambda _: (1, 1000))
+    monkeypatch.setattr(worker, "decode", lambda *_: worker.np.zeros(1000 * worker.SAMPLES_PER_MS))
+    monkeypatch.setattr(worker, "weight_digest", lambda _: "sha256:fake")
+    monkeypatch.setenv("ZSIR_CACHE_DIR", str(tmp_path / "cache"))
+
+    class Fake:
+        def transcribe(self, audio, language, model, words):
+            return text, "zh"
+
+        def align(self, *_):
+            return [SimpleNamespace(text=item["text"], start_time=Decimal(item["start_ms"]) / 1000, end_time=Decimal(item["end_ms"]) / 1000) for item in items]
+
+    argv = ["transcribe", "--input", str(source), "--channels", "0", "--language", "zh", "--out", str(tmp_path / "out.json")]
+    args = worker.parser().parse_args(argv + ["--hotwords", str(hotwords)])
+    output = worker.result(args, local=Fake())
+    assert output["tokens"] == [
+        {"text": "飞书", "start_ms": 0, "end_ms": 160, "conf": None},
+        {"text": "豆包工作", "start_ms": 160, "end_ms": 480, "conf": None},
+    ]
+    assert worker.result(args, local=object())["tokens"] == output["tokens"]
+    assert worker.group_chinese(items) == baseline
+    assert worker.result(worker.parser().parse_args(argv), local=Fake())["tokens"] == baseline
+
+
 def test_engine_selection_only_falls_back_for_opted_in_model_errors():
     def missing():
         raise worker.WorkerError("E_ASR_MODEL_UNAVAILABLE", "missing")

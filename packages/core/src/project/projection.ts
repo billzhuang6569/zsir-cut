@@ -57,6 +57,17 @@ function selectForwardSegment(source: Rational, start: Rational, end: Rational, 
     }, undefined);
 }
 
+function visibleBreaks(tokens: Token[], breaks: Set<string>): string[] {
+  const result = new Set<string>();
+  let previous: string | undefined;
+  for (const token of tokens) {
+    if (token.text !== "") previous = token.id;
+    if (breaks.has(token.id) && previous) result.add(previous);
+  }
+  if (previous) result.delete(previous);
+  return [...result];
+}
+
 function display(tokens: Token[], breaks: Set<string>): string[] {
   const lines: string[] = [];
   let line = "";
@@ -133,8 +144,12 @@ export function projectSubtitles(
             let piece = 0;
             const flush = () => {
               if (!group.length) return;
-              const first = group[0]!;
-              const last = group.at(-1)!;
+              const included = group.map((item) => item.token);
+              const visible = group.filter((item) => item.token.text !== "");
+              group = [];
+              if (!visible.length) return;
+              const first = visible[0]!;
+              const last = visible.at(-1)!;
               const startSource =
                 first.token.id === shownTokens[0]?.id ? (cue.timing?.start ?? replacement?.start) : undefined;
               const endSource =
@@ -152,11 +167,12 @@ export function projectSubtitles(
                   : add(clip.timeline_start, mapSourceTimeToClip(endSource, last.part.first, last.part.last)!),
               );
               if (compare(start, end) < 0 && !override?.hidden) {
-                const included = group.map((item) => item.token);
+                const rules = transcriptRules(transcript);
+                const breaks = new Set(cue.breaks);
                 const lines =
                   override?.text !== undefined
                     ? override.text.split("\n")
-                    : cueText(included, transcriptRules(transcript), cue.breaks);
+                    : cueText(included, rules, visibleBreaks(included, breaks));
                 const projected: ProjectedCue = {
                   track_id: track.id,
                   cue_id: cue.id,
@@ -169,12 +185,12 @@ export function projectSubtitles(
                   text: lines.join("\n"),
                   lines,
                   style_id: override?.style_id ?? cue.style_id ?? track.default_style_id,
-                  token_ids: included.map((item) => item.id),
+                  token_ids: visible.map((item) => item.token.id),
                 };
                 cues.push(projected);
                 mergeInfo.set(projected, {
                   tokens: included,
-                  breaks: new Set(cue.breaks),
+                  breaks,
                   settings: JSON.stringify([
                     override?.hidden ?? null,
                     override?.text ?? null,
@@ -184,12 +200,10 @@ export function projectSubtitles(
                 });
                 piece++;
               }
-              group = [];
             };
             for (const token of tokens) {
               const { start, end } = token.align;
               if (
-                !token.text ||
                 compare(start, end) >= 0 ||
                 compare(overlap(start, end, sourceStart, sourceEnd), div(sub(end, start), half)) < 0
               ) {
@@ -267,9 +281,13 @@ export function projectSubtitles(
       priorInfo.tokens.push(...info.tokens);
       if (priorInfo.text === undefined) {
         const transcript = project.transcripts.find((item) => item.cues.some((entry) => entry.id === cue.cue_id));
+        const breaks = visibleBreaks(priorInfo.tokens, priorInfo.breaks);
         previous.lines = transcript
-          ? cueText(priorInfo.tokens, transcriptRules(transcript), [...priorInfo.breaks])
-          : display(priorInfo.tokens, priorInfo.breaks);
+          ? cueText(priorInfo.tokens, transcriptRules(transcript), breaks)
+          : display(
+              priorInfo.tokens.filter((token) => token.text !== ""),
+              new Set(breaks),
+            );
         previous.text = previous.lines.join("\n");
       }
       continue;

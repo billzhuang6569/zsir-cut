@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   type Clip,
   compare,
+  displayRanges,
   mapClipTimeToSource,
   mapSourceTimeToClip,
   type Project,
@@ -15,9 +16,9 @@ import {
 } from "../src/index.js";
 
 const seconds = (numerator: bigint, denominator = 1n) => rational(numerator, denominator);
-function fixture(name: string): Project {
+function fixture(name: string, directory = "projects"): Project {
   const result = parseProject(
-    readFileSync(new URL(`../../../fixtures/projects/${name}.zcut.json`, import.meta.url), "utf8"),
+    readFileSync(new URL(`../../../fixtures/${directory}/${name}.zcut.json`, import.meta.url), "utf8"),
   );
   if (!result.ok) throw new Error(JSON.stringify(result.errors));
   return result.project;
@@ -63,6 +64,87 @@ describe("time map", () => {
 });
 
 describe("subtitle projection", () => {
+  it.each([
+    { name: "middle", hidden: [1], start: "6s", end: "7s", lines: ["一起", "切这个瓜"] },
+    { name: "first", hidden: [0], start: "31/5s", end: "36/5s", lines: ["啊", "切这个瓜"] },
+    { name: "last", hidden: [4], start: "6s", end: "7s", lines: ["一起啊", "切这个"] },
+    { name: "all", hidden: [0, 1, 2, 3, 4], start: null, end: null, lines: [] },
+  ])("keeps $name hidden tokens in the group and applies display timing", ({ hidden, start, end, lines }) => {
+    const project = fixture("hidden-tokens", "regressions");
+    const transcript = project.transcripts[0]!;
+    for (const [index, token] of transcript.tokens.entries()) token.text = hidden.includes(index) ? "" : token.heard!;
+    expect(validateProjectSemantics(project).filter((issue) => issue.severity === "error")).toEqual([]);
+    const result = projectSubtitles(project, "tl_main");
+    expect(result.unprojected).toEqual([]);
+    expect(result.cues.map(compact)).toMatchObject(start ? [{ start, end, text: lines.join("\n"), lines }] : []);
+    expect(result.cues).toHaveLength(start ? 1 : 0);
+    expect(result.cues[0]?.token_ids).toEqual(
+      start ? transcript.tokens.filter((token) => token.text).map((token) => token.id) : undefined,
+    );
+  });
+
+  it.each([
+    { breaks: ["tok_1"], lines: ["一起", "切这个瓜"] },
+    { breaks: ["tok_3"], lines: ["一起切这个", "瓜"] },
+    { breaks: ["tok_0", "tok_1", "tok_3"], lines: ["一起", "切这个", "瓜"] },
+    { breaks: ["tok_4"], lines: ["一起切这个瓜"] },
+    { breaks: ["tok_outside"], lines: ["一起切这个瓜"] },
+  ])("filters stored breaks $breaks without recomputing them", ({ breaks, lines }) => {
+    const project = fixture("hidden-tokens", "regressions");
+    project.transcripts[0]!.cues[0]!.breaks = breaks;
+    expect(projectSubtitles(project, "tl_main").cues[0]?.lines).toEqual(lines);
+  });
+
+  it("drops a leading hidden break and a trailing hidden break moved to the last visible word", () => {
+    const project = fixture("hidden-tokens", "regressions");
+    const transcript = project.transcripts[0]!;
+    transcript.tokens[0]!.text = "";
+    transcript.tokens[4]!.text = "";
+    transcript.cues[0]!.breaks = ["tok_1", "tok_4"];
+    expect(projectSubtitles(project, "tl_main").cues[0]?.lines).toEqual(["切这个"]);
+  });
+
+  it("filters original breaks again after merging jump cuts", () => {
+    const project = fixture("hidden-tokens", "regressions");
+    const transcript = project.transcripts[0]!;
+    transcript.tokens[1]!.align.end = seconds(31n, 25n);
+    transcript.tokens[2]!.align.start = seconds(31n, 25n);
+    const track = project.timelines[0]!.tracks.find((track) => track.kind === "audio")!;
+    if (track.kind !== "audio") throw new Error("Missing audio track");
+    const clip = track.clips[0]!;
+    track.clips = [
+      { ...clip, source_start: seconds(1n), duration: seconds(1n, 5n) },
+      {
+        ...clip,
+        id: "clp_jump",
+        occurrence_id: "occ_jump",
+        source_start: seconds(6n, 5n),
+        timeline_start: seconds(26n, 5n),
+        duration: seconds(4n, 5n),
+      },
+    ];
+    transcript.cues[0]!.breaks = ["tok_0", "tok_1", "tok_3"];
+    expect(projectSubtitles(project, "tl_main", undefined, false).cues.map((cue) => cue.lines)).toEqual([
+      ["一起"],
+      ["切这个", "瓜"],
+    ]);
+    const cues = projectSubtitles(project, "tl_main").cues;
+    expect(cues).toHaveLength(1);
+    expect(cues[0]!.clip_ids).toEqual(["clp_a1", "clp_jump"]);
+    expect(cues[0]!.lines).toEqual(["一起", "切这个", "瓜"]);
+  });
+
+  it("extends a cue with a hidden first word and preserves explicit timing", () => {
+    const project = fixture("hidden-tokens", "regressions");
+    const transcript = project.transcripts[0]!;
+    transcript.tokens[0]!.text = "";
+    const range = displayRanges(transcript)[0]!;
+    expect([range.start, range.end]).toEqual([seconds(7n, 5n), seconds(12n, 5n)]);
+    expect(projectSubtitles(project, "tl_main").cues.map(compact)).toMatchObject([{ start: "32/5s", end: "37/5s" }]);
+    transcript.cues[0]!.timing = { start: seconds(4n, 5n), end: seconds(11n, 5n) };
+    expect(projectSubtitles(project, "tl_main").cues.map(compact)).toMatchObject([{ start: "29/5s", end: "36/5s" }]);
+  });
+
   it("keeps freeze-separated cue_zh_19 as two visible cues", () => {
     const cues = projectSubtitles(fixture("std-25"), "tl_std").cues.filter((cue) => cue.cue_id === "cue_zh_19");
     expect(cues).toHaveLength(2);
