@@ -1,0 +1,7 @@
+[
+  { "word": "哎", "count": 20, "zero_width": true },
+  { "word": "哈", "count": 20, "zero_width": true },
+  { "word": "我们", "count": 20, "zero_width": true },
+  { "word": "哎", "count": 8, "zero_width": false },
+  { "word": "word", "count": 9, "zero_width": false }
+]

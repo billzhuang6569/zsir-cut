@@ -103,7 +103,12 @@ async function sessions(projectPath: string, project: Project): Promise<Record<s
   return active;
 }
 
-export async function inspect(project: Project, projectPath: string, input: Input): Promise<Record<string, unknown>> {
+export async function inspect(
+  project: Project,
+  projectPath: string,
+  input: Input,
+  mainProjectPath = projectPath,
+): Promise<Record<string, unknown>> {
   if (input.view === "entity") {
     const raw = JSON.parse(await readFile(projectPath, "utf8")) as Project;
     const found = entity(raw, input.id as string);
@@ -248,7 +253,7 @@ export async function inspect(project: Project, projectPath: string, input: Inpu
     transcripts,
     transcripts_truncated: false,
     recent_revisions: recent,
-    sessions: await sessions(projectPath, project),
+    sessions: await sessions(mainProjectPath, project),
     sessions_truncated: false,
     issues: counts,
   };

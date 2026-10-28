@@ -72,6 +72,7 @@ export interface DispatchOptions {
   asrPython?: string;
   asrWorkerDirectory?: string;
   jobFile?: string;
+  previewProjectPath?: string;
 }
 
 type Request = Record<string, unknown>;
@@ -265,7 +266,20 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
     input &&
     typeof input === "object" &&
     "session_id" in input &&
-    !["edit", "undo", "redo", "session_review", "session_approve", "session_reject"].includes(verb)
+    ![
+      "edit",
+      "undo",
+      "redo",
+      "session_review",
+      "session_approve",
+      "session_reject",
+      "inspect",
+      "read_transcript",
+      "validate",
+      "diff",
+      "render_preview",
+      "view_timeline",
+    ].includes(verb)
   )
     return errorEnvelope(verb, requestId, "rejected", "E_SESSION_STATE", "Verb cannot enter a session");
   const check = validateCommand(verb, input);
@@ -345,8 +359,35 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
       )) as unknown as Record<string, unknown>;
       return output;
     }
+    let projectPath = request.project as string;
+    const mediaProjectPath = projectPath;
+    if (
+      request.session_id !== undefined &&
+      ["inspect", "read_transcript", "validate", "diff", "render_preview", "view_timeline"].includes(verb)
+    ) {
+      const main = parseProject(await readFile(projectPath, "utf8"));
+      if (!main.ok) return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Project file is invalid");
+      const directory = join(
+        dirname(resolve(projectPath)),
+        ".zcut",
+        main.project.id,
+        "sessions",
+        request.session_id as string,
+      );
+      try {
+        await readFile(join(directory, "session.json"), "utf8");
+        projectPath = join(directory, "draft.zcut.json");
+        await stat(projectPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT")
+          return errorEnvelope(verb, requestId, "rejected", "E_NOT_FOUND", "Session not found");
+        throw error;
+      }
+    }
     if (verb === "render_preview" || verb === "view_timeline") {
-      const extra = Object.keys(request).filter((key) => !["project", "author", "timeline_id", "output"].includes(key));
+      const extra = Object.keys(request).filter(
+        (key) => !["project", "author", "session_id", "timeline_id", "output"].includes(key),
+      );
       if (extra.length)
         return errorEnvelope(
           verb,
@@ -360,8 +401,7 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
         (request.output !== undefined && (typeof request.output !== "string" || !request.output))
       )
         return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Invalid timeline_id or output");
-      const projectPath = request.project as string;
-      const parsed = parseProject(await readFile(projectPath, "utf8"));
+      const parsed = parseProject(await readFile(options.previewProjectPath ?? projectPath, "utf8"));
       if (!parsed.ok) return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Project file is invalid");
       const project = parsed.project;
       const timeline = project.timelines.find((item) => item.id === (request.timeline_id ?? project.timelines[0]?.id));
@@ -372,7 +412,7 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
       if (issues.some((issue) => issue.severity === "error"))
         return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Project has validation errors");
       if (!options.worker) {
-        const jobId = await startPreviewJob(verb, projectPath, project.id, request);
+        const jobId = await startPreviewJob(verb, mediaProjectPath, project, request);
         const output = basic(verb, requestId);
         output.status = "accepted";
         output.result = { job_id: jobId };
@@ -384,12 +424,12 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
       const safeName = (name: string) => name.replaceAll(/[\\/:*?"<>|]/g, "_");
       const result =
         verb === "render_preview"
-          ? await renderPreview(project, timeline, projectPath, {
+          ? await renderPreview(project, timeline, mediaProjectPath, {
               output: join(directory, `${safeName(project.name)}_r${project.revision.seq}_preview_${jobId}.mov`),
               profile: "preview",
               exportId: jobId,
             })
-          : await viewTimeline(project, timeline, projectPath, join(directory, `view_${jobId}`));
+          : await viewTimeline(project, timeline, mediaProjectPath, join(directory, `view_${jobId}`));
       const output = basic(verb, requestId);
       output.status = "applied";
       output.result = result;
@@ -621,9 +661,9 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
     }
     if (verb === "import_media") return await importMedia(request, requestId, options.probe ?? ffprobe);
     if (verb === "diff") {
-      const store = openProject({ projectPath: request.project as string });
+      const store = openProject({ projectPath });
       try {
-        const current = parseProject(await readFile(request.project as string, "utf8"));
+        const current = parseProject(await readFile(projectPath, "utf8"));
         if (!current.ok) return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Project file is invalid");
         const from = await store.snapshotAt(request.from as string);
         const to = await store.snapshotAt((request.to as string | undefined) ?? current.project.revision.id);
@@ -635,14 +675,14 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
         throw error;
       }
     }
-    const parsed = parseProject(await readFile(request.project as string, "utf8"));
+    const parsed = parseProject(await readFile(projectPath, "utf8"));
     if (!parsed.ok) return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Project file is invalid");
     if (verb === "inspect" || verb === "read_transcript") {
       try {
         const output = basic(verb, requestId);
         output.result =
           verb === "inspect"
-            ? await inspect(parsed.project, request.project as string, request)
+            ? await inspect(parsed.project, projectPath, request, mediaProjectPath)
             : readTranscript(parsed.project, request);
         if (verb === "inspect" && request.view === "brief") limitBrief(output);
         return output;
@@ -654,7 +694,7 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
     }
     const issues = validateProjectSemantics(parsed.project, parsed.issues);
     if (request.media === true)
-      issues.push(...(await validateProjectMedia(parsed.project, dirname(resolve(request.project as string)))));
+      issues.push(...(await validateProjectMedia(parsed.project, dirname(resolve(mediaProjectPath)))));
     const output = basic(verb, requestId);
     output.verification = {
       level: request.media === true ? "L2" : "L1",

@@ -1,15 +1,17 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { writeFileSync } from "node:fs";
 import { copyFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   compareCuttingLists,
   cuttingList,
   defaultProfile,
   dispatch,
+  errorEnvelope,
   PROFILES,
   parseProject,
   printRational,
@@ -21,6 +23,7 @@ import {
   validateLossReport,
   validateManifest,
 } from "../src/index.js";
+import { type Job, readJob, writeJob } from "../src/jobs.ts";
 
 const fixture = new URL("../../../fixtures/projects/std-25.zcut.json", import.meta.url);
 const fake = fileURLToPath(new URL("../../exporters/test/fake-exporter.mjs", import.meta.url));
@@ -62,6 +65,7 @@ beforeEach(async () => {
   await copyFile(fixture, projectPath);
 });
 afterEach(async () => {
+  vi.restoreAllMocks();
   await rm(directory, { recursive: true, force: true });
 });
 
@@ -426,6 +430,43 @@ it("includes the mismatched clip and values in a failed export job", async () =>
   expect(job.envelope?.error?.message).toBe(job.message);
 });
 
+it.each(["succeeded", "failed"] as const)(
+  "preserves a %s job when the worker exits between reading status and checking its PID",
+  async (state) => {
+    const path = join(directory, "job.json");
+    const envelope =
+      state === "failed"
+        ? errorEnvelope("export", "req_worker", "failed", "E_IO", "Export failed")
+        : {
+            ...(await dispatch("export", request({ dry_run: true }), { exporterModule: fake })),
+            status: "applied" as const,
+            result: { package: directory },
+          };
+    const running: Job = {
+      job_id: "job_race",
+      verb: "export",
+      request: request(),
+      state: "running",
+      progress: 0.1,
+      message: "导出中",
+      created_at: "2026-10-28T00:00:00Z",
+      updated_at: "2026-10-28T00:00:00Z",
+      envelope: null,
+      pid: 12345,
+    };
+    const finished: Job = { ...running, state, progress: 1, message: "worker finished", envelope };
+    await writeJob(path, running);
+    vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+      expect([pid, signal]).toEqual([running.pid, 0]);
+      // The worker commits its envelope and exits after the poller read the old running status.
+      writeFileSync(path, JSON.stringify(finished));
+      throw Object.assign(new Error("No such process"), { code: "ESRCH" });
+    });
+    expect(await readJob(path)).toEqual(finished);
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual(finished);
+  },
+);
+
 it("CLI --wait prints the final envelope", () => {
   const cli = fileURLToPath(new URL("../../cli/dist/index.js", import.meta.url));
   const run = spawnSync(process.execPath, [cli, "export", projectPath, "--wait"], {
@@ -434,6 +475,6 @@ it("CLI --wait prints the final envelope", () => {
     env: { ...process.env, ZSIR_CUT_EXPORTER_MODULE: fake },
     timeout: 10000,
   });
-  expect(run.status).toBe(0);
+  expect(run.status, JSON.stringify({ error: run.error?.message, stderr: run.stderr, stdout: run.stdout })).toBe(0);
   expect(JSON.parse(run.stdout).status).toBe("applied");
 });

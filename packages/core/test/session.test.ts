@@ -1,7 +1,7 @@
 import { copyFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   diffProjectEntities,
   dispatch,
@@ -10,6 +10,11 @@ import {
   validateCommand,
   validateEnvelope,
 } from "../src/index.js";
+
+vi.mock("../src/jobs.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/jobs.ts")>()),
+  startPreviewJob: vi.fn(async () => "job_review"),
+}));
 
 const fixture = new URL("../../../fixtures/projects/std-25.zcut.json", import.meta.url);
 const author = { kind: "agent", name: "test" };
@@ -61,6 +66,69 @@ afterEach(async () => {
 });
 
 describe("sessions and diff", () => {
+  it("reads the draft's placements, entities, history and diff without changing main", async () => {
+    const bytes = await readFile(project, "utf8");
+    const session_id = await begin();
+    const placed = await send("edit", {
+      session_id,
+      ops: [
+        {
+          op: "place",
+          media_id: "med_A",
+          at: "end",
+          mode: "insert",
+          video_track: "trk_v1",
+          audio_track: "trk_a1",
+          tokens: { transcript_id: "trs_A_zh", from_token: "tok_010", to_token: "tok_017", pause: "2/5s" },
+        },
+      ],
+    });
+    expect(placed.status).toBe("drafted");
+    const clipId = placed.changes.find((change) => change.entity === "clip")?.id;
+    expect(clipId).toBeDefined();
+    const read = (verb: Parameters<typeof dispatch>[0], input: Record<string, unknown>) =>
+      dispatch(verb, { project, session_id, ...input });
+    const entity = await read("inspect", { view: "entity", id: clipId });
+    expect(entity.result).toMatchObject({ entity: { id: clipId, media_id: "med_A" } });
+    const timeline = await read("inspect", { view: "timeline" });
+    expect(JSON.stringify(timeline.result)).toContain(clipId);
+    const history = await read("inspect", { view: "history" });
+    expect(history.result?.entries).toEqual([expect.objectContaining({ revision: placed.receipt?.after })]);
+    const brief = await read("inspect", { view: "brief" });
+    expect(brief.result?.project).toMatchObject({ revision: { id: placed.receipt?.after } });
+    expect(brief.result?.sessions).toEqual([expect.objectContaining({ id: session_id })]);
+    const transcript = await read("read_transcript", { timeline_id: "tl_std" });
+    expect(transcript.ok).toBe(true);
+    expect(transcript.result?.text).toContain(`@${clipId} `);
+    const source = await read("read_transcript", { transcript_id: "trs_A_zh" });
+    expect(source.ok).toBe(true);
+    const diff = await read("diff", { from: "rev_fixture_1" });
+    expect(diff.result).toMatchObject({
+      to: placed.receipt?.after,
+      changes: expect.arrayContaining([expect.objectContaining({ key: clipId, before: null })]),
+    });
+    expect((await read("validate", {})).verification.passed).toBe(true);
+    await send("session_reject", { session_id });
+    expect((await read("inspect", { view: "entity", id: clipId })).ok).toBe(true);
+    expect(await readFile(project, "utf8")).toBe(bytes);
+    expect((await dispatch("inspect", { project, view: "entity", id: clipId })).error?.code).toBe("E_NOT_FOUND");
+  });
+
+  it.each(["inspect", "read_transcript", "validate", "diff", "render_preview", "view_timeline"] as const)(
+    "returns E_NOT_FOUND for %s in a missing session",
+    async (verb) => {
+      const result = await dispatch(verb, {
+        project,
+        session_id: "ses_missing",
+        ...(verb === "inspect" ? { view: "brief" } : {}),
+        ...(verb === "read_transcript" ? { timeline_id: "tl_std" } : {}),
+        ...(verb === "diff" ? { from: "rev_fixture_1" } : {}),
+      });
+      expect(result).toMatchObject({ status: "rejected", error: { code: "E_NOT_FOUND" } });
+      expect(validateEnvelope(result).valid).toBe(true);
+    },
+  );
+
   it("retries begin and approve without creating duplicate sessions or revisions", async () => {
     const input = {
       project,
@@ -129,7 +197,7 @@ describe("sessions and diff", () => {
     );
     expect(review.result?.subtitle_changes).toEqual([]);
     expect(review.result?.ops).toEqual([label("clp_v1", "draft label"), token]);
-    expect(review.result?.preview_job).toBeNull();
+    expect(review.result?.preview_job).toMatch(/^job_/);
     expect(review.verification.level).toBe("L1");
     expect(noRevision(await load())).toBe(noRevision(before));
     const approved = await send("session_approve", { session_id });
@@ -210,15 +278,12 @@ describe("sessions and diff", () => {
     expect((await send("session_review", { session_id: auto }, edited.receipt?.after ?? "")).error?.code).toBe(
       "E_SESSION_STATE",
     );
-    expect((await send("diff", { from: "rev_fixture_1", session_id: manual })).error?.code).toBe("E_SESSION_STATE");
-    expect((await send("validate", { session_id: manual })).error?.code).toBe("E_SESSION_STATE");
+    expect((await send("diff", { from: (await load()).revision.id, session_id: manual })).ok).toBe(true);
+    expect((await send("validate", { session_id: manual })).ok).toBe(true);
     for (const verb of [
-      "inspect",
-      "read_transcript",
+      "create_project",
       "import_media",
       "transcribe",
-      "render_preview",
-      "view_timeline",
       "export",
       "record_handoff_check",
       "job_status",

@@ -179,8 +179,7 @@ def normalize_items(items, offset_ms):
         text = item.text.strip()
         if text:
             tokens.append({"text": text, "start_ms": offset_ms + seconds_to_ms(item.start_time), "end_ms": offset_ms + seconds_to_ms(item.end_time), "conf": None})
-    # The aligner can emit CJK characters even for a segment detected as English.
-    return group_chinese(tokens)
+    return tokens
 
 
 def repair_zero_width(tokens, start_ms, end_ms):
@@ -225,6 +224,23 @@ def finalize_tokens(tokens, start_ms, end_ms):
     corrected = repair_zero_width(tokens, start_ms, end_ms)
     if corrected:
         warnings.append({"code": "W_ASR_ZERO_WIDTH", "count": corrected})
+    return warnings
+
+
+def remove_repetitions(tokens):
+    kept = []
+    warnings = []
+    index = 0
+    while index < len(tokens):
+        end = index + 1
+        while end < len(tokens) and tokens[end]["text"] == tokens[index]["text"]:
+            end += 1
+        if end - index > 8:
+            warnings.append({"code": "W_ASR_REPETITION", "start_ms": min(t["start_ms"] for t in tokens[index:end]), "end_ms": max(t["end_ms"] for t in tokens[index:end]), "count": end - index})
+        else:
+            kept.extend(tokens[index:end])
+        index = end
+    tokens[:] = kept
     return warnings
 
 
@@ -372,6 +388,10 @@ def result(args, local=None, cloud=None):
             for token in chunk_tokens:
                 token["start_ms"] = min(chunk_end, max(offset, token["start_ms"]))
                 token["end_ms"] = min(chunk_end, max(token["start_ms"], token["end_ms"]))
+            warnings.extend(remove_repetitions(chunk_tokens))
+            # Check characters before jieba grouping and words after it, including auto-detected English.
+            chunk_tokens = group_chinese(chunk_tokens)
+            warnings.extend(remove_repetitions(chunk_tokens))
             tokens.extend(chunk_tokens)
         except WorkerError:
             if engine_used != "cloud":
