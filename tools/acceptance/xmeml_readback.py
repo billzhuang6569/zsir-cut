@@ -24,7 +24,7 @@ def xmeml_rows(path, d):
             for ci in tr.findall("clipitem"):
                 cr = rate_of(ci); assert cr == R, f"clipitem {ci.get('id')} rate {cr} != sequence {R}"
                 st, en = int(ci.findtext("start")), int(ci.findtext("end")); i, o = int(ci.findtext("in")), int(ci.findtext("out"))
-                speed, rev, freeze = F(1), False, False
+                speed, rev, var, hold = F(1), False, False, None
                 for flt in ci.findall("filter"):
                     eff = flt.find("effect")
                     if eff is None or eff.findtext("effectid") != "timeremap": continue
@@ -32,10 +32,20 @@ def xmeml_rows(path, d):
                         pid, val = p.findtext("parameterid"), p.findtext("value")
                         if pid == "speed": speed = F(val) / 100
                         elif pid == "reverse": rev = val == "TRUE"
-                        elif pid == "freeze": freeze = val == "TRUE"
-                s_in, s_out = F(i), F(o)
-                if freeze: s_out = s_in
-                if rev: s_in, s_out = s_out, s_in
+                        elif pid == "variablespeed": var = val == "1"
+                        elif pid == "graphdict":
+                            vals = [F(k.findtext("value")) for k in p.findall("keyframe")]
+                            if vals and all(v == vals[0] for v in vals): hold = vals[0]
+                dur = F(en - st)
+                # export-otio-xmeml 3.2: retimed in/out are in the retimed timescale; reverse numbers the media backwards
+                if var and hold is not None:
+                    s_in = s_out = hold
+                elif rev:
+                    fl = ci.find("file"); fl = files.get(fl.get("id"), fl)
+                    media_len = F(int(fl.findtext("duration"))) / rate_of(fl) * R
+                    s_in = media_len - F(i) * speed; s_out = s_in - dur * speed
+                else:
+                    s_in = F(i) * speed; s_out = s_in + dur * speed
                 cid = re.sub(r"-s\d+$", "", ci.get("id")); mid = ci.find("file").get("id")
                 pieces.setdefault((kind, idx, cid), []).append((st, en, s_in, s_out, mid))
     rows = []

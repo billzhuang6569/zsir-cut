@@ -15,6 +15,7 @@ import {
   printRational,
   quantizeCue,
   rational,
+  runExport,
   subtitleFiles,
   validateCommand,
   validateLossReport,
@@ -170,6 +171,115 @@ it("quantizes subtitle in and out on 25 and 30000/1001 frame grids and clips the
     "00:00:00,000 --> 00:00:00,033",
   );
 });
+
+it("greedily layers overlapping SRT cues, reuses touching boundaries, and keeps one unchanged words file", async () => {
+  const parsed = parseProject(await readFile("fixtures/regressions/srt-overlap-layers.zcut.json", "utf8"));
+  if (!parsed.ok || !parsed.project.timelines[0]) throw new Error("SRT fixture invalid");
+  const files = subtitleFiles(parsed.project, parsed.project.timelines[0]);
+  expect(files.map((file) => file.name)).toEqual([
+    "zh-Hans.srt",
+    "zh-Hans.layer2.srt",
+    "zh-Hans.layer3.srt",
+    "zh-Hans.words.json",
+  ]);
+  expect(files.filter((file) => file.role === "subtitle").map((file) => file.data)).toEqual([
+    "1\n00:00:00,000 --> 00:00:03,000\n第一条\n\n2\n00:00:03,000 --> 00:00:04,000\n第四条\n\n3\n00:00:04,000 --> 00:00:05,000\n第五条\n\n",
+    "1\n00:00:01,000 --> 00:00:04,000\n第二条\n\n",
+    "1\n00:00:02,000 --> 00:00:03,000\n第三条\n\n",
+  ]);
+  const words = files.find((file) => file.role === "subtitle_words");
+  expect(words && JSON.parse(words.data)).toEqual(
+    [
+      ["a", 0, 3, "第一条"],
+      ["b", 1, 4, "第二条"],
+      ["c", 2, 3, "第三条"],
+      ["d", 3, 4, "第四条"],
+      ["e", 4, 5, "第五条"],
+    ].map(([id, start, end, text]) => ({
+      cue_id: `cue_${id}`,
+      track_id: "trk_sub",
+      clip_ids: [],
+      start: `${start}s`,
+      end: `${end}s`,
+      start_ms: Number(start) * 1000,
+      end_ms: Number(end) * 1000,
+      text,
+      lines: [text],
+      words: [],
+    })),
+  );
+});
+
+it("keeps SRT layer names distinct from other tracks and reserves their original base filenames", async () => {
+  const parsed = parseProject(await readFile("fixtures/regressions/srt-overlap-layers.zcut.json", "utf8"));
+  if (!parsed.ok || !parsed.project.timelines[0]) throw new Error("SRT fixture invalid");
+  const p = parsed.project;
+  const timeline = parsed.project.timelines[0];
+  const track = timeline.tracks.find((item) => item.kind === "subtitle");
+  if (!track || track.kind !== "subtitle") throw new Error("Subtitle track missing");
+  const originalWords = subtitleFiles(p, timeline).find((file) => file.role === "subtitle_words")?.data;
+  track.name = "A";
+  const other = {
+    ...track,
+    id: "trk_named_layer",
+    name: "A.layer2",
+    free_cues: [{ id: "cue_other", timeline_start: rational(0n), duration: rational(1n), text: "另一条轨" }],
+  };
+  timeline.tracks.push(other);
+  const files = subtitleFiles(p, timeline);
+  expect(files.map((file) => file.name)).toEqual([
+    "zh-Hans_A.srt",
+    "zh-Hans_A.layer2.trk_sub.srt",
+    "zh-Hans_A.layer3.srt",
+    "zh-Hans_A.words.json",
+    "zh-Hans_A.layer2.srt",
+    "zh-Hans_A.layer2.words.json",
+  ]);
+  expect(files.find((file) => file.name === "zh-Hans_A.layer2.trk_sub.srt")?.data).toContain("第二条");
+  expect(files.find((file) => file.name === "zh-Hans_A.layer2.srt")?.data).toContain("另一条轨");
+  expect(files.find((file) => file.name === "zh-Hans_A.words.json")?.data).toBe(originalWords);
+  expect(subtitleFiles(p, timeline)).toEqual(files);
+
+  timeline.tracks.push(
+    { ...other, id: "trk_reserved_suffix", name: "A.layer2.trk_sub", free_cues: [] },
+    { ...other, id: "trk_same_name", name: "A", free_cues: [] },
+  );
+  const names = subtitleFiles(p, timeline).map((file) => file.name);
+  expect(new Set(names).size).toBe(names.length);
+  expect(names).toContain("zh-Hans_A.layer2.trk_sub.2.srt");
+  expect(names).toContain("zh-Hans_A.layer2.trk_sub.srt");
+  expect(names).toContain("zh-Hans_A.trk_same_name.srt");
+  expect(names).toContain("zh-Hans_A.trk_same_name.words.json");
+});
+
+it.each(Object.keys(PROFILES) as (keyof typeof PROFILES)[])(
+  "shares SRT layers and filtered handoff instructions for %s",
+  async (profile) => {
+    const p = await project();
+    const result = await runExport(
+      p,
+      { project: projectPath, output: directory, accept_losses: true, subtitle_languages: ["zh-Hans"] },
+      (await import(fake)).default,
+      "exp_srt_layers",
+      "2026-10-28T00:00:00Z",
+      profile,
+    );
+    if (!result.package || !result.manifest) throw new Error("Export package missing");
+    expect(result.manifest.files.filter((file) => file.role === "subtitle").map((file) => file.path)).toEqual([
+      "subtitles/zh-Hans.srt",
+      "subtitles/zh-Hans.layer2.srt",
+    ]);
+    const first = await readFile(join(result.package, "subtitles/zh-Hans.srt"), "utf8");
+    const second = await readFile(join(result.package, "subtitles/zh-Hans.layer2.srt"), "utf8");
+    expect(first).toContain("00:00:00,000 --> 00:00:02,360\n剪辑师和\nAgent共用的时间线");
+    expect(first).not.toContain("zsir-cut 标准测试工程");
+    expect(second).toBe("1\n00:00:00,000 --> 00:00:03,000\nzsir-cut 标准测试工程\n\n");
+    const guide = await readFile(join(result.package, "接手说明.txt"), "utf8");
+    expect(guide).toContain("每层需要再导入一条字幕轨");
+    expect(guide).toContain("subtitles/zh-Hans.layer2.srt");
+    expect(guide).not.toContain("subtitles/en.srt");
+  },
+);
 
 it("runs export through a job, writes a schema-valid package, and records a handoff check", async () => {
   expect(validateCommand("export", request()).valid).toBe(true);
