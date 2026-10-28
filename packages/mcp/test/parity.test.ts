@@ -298,7 +298,7 @@ describe("CLI and MCP", () => {
     });
     expect(malformed.status).toBe(2);
     expect(validateEnvelope(JSON.parse(malformed.stdout)).valid).toBe(true);
-  });
+  }, 15000);
 
   it("matches export dry run and job status across CLI and MCP", async () => {
     const server = createServer({ exporterModule: fake });

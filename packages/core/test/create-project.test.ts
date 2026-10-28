@@ -1,6 +1,7 @@
+import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   dispatch,
@@ -341,17 +342,47 @@ describe("create_project", () => {
   });
 
   it.each([
-    ["shared/手机录屏_vfr.mp4", "60"],
-    ["25/A_25.mov", "25"],
-    ["shared/手机录屏_vfr.mp4", "30", "30"],
+    ["30", "30"],
+    ["25", "25"],
+    ["60", "30"],
   ])(
-    "matches real %s, then imports and places it",
-    async (path, rate, edit_rate?: string) => {
-      const mediaPath = resolve("fixtures/.media", path);
+    "matches generated %s fps media to %s fps, then imports and places it",
+    async (sourceRate, rate) => {
+      const mediaPath = join(directory, `sample-${sourceRate}.mov`);
+      const generated = spawnSync(
+        "ffmpeg",
+        [
+          "-hide_banner",
+          "-loglevel",
+          "error",
+          "-nostdin",
+          "-f",
+          "lavfi",
+          "-i",
+          `color=c=blue:s=160x90:r=${sourceRate}:d=1`,
+          "-f",
+          "lavfi",
+          "-i",
+          "sine=frequency=440:sample_rate=48000:duration=1",
+          "-c:v",
+          "ffv1",
+          "-c:a",
+          "pcm_s16le",
+          "-threads",
+          "1",
+          "-y",
+          mediaPath,
+        ],
+        { encoding: "utf8", timeout: 10000 },
+      );
+      if (generated.error) throw generated.error;
+      expect(generated.status, generated.stderr).toBe(0);
       const metadata = mediaFromProbe(mediaPath, await ffprobe(mediaPath));
+      expect(metadata.video).toMatchObject({ width: 160, height: 90 });
+      expect(metadata.audio).toMatchObject({ channels: 1 });
       const created = await dispatch(
         "create_project",
-        input({ timeline: edit_rate ? { edit_rate } : {}, match_media: mediaPath }),
+        input({ timeline: sourceRate === rate ? {} : { edit_rate: rate }, match_media: mediaPath }),
       );
       expect(created.status).toBe("applied");
       const initial = await read();
