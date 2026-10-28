@@ -38,6 +38,9 @@
         },
         "author": {
           "$ref": "#/$defs/author"
+        },
+        "session_id": {
+          "$ref": "#/$defs/session_id"
         }
       }
     },
