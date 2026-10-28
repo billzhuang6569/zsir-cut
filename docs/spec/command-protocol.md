@@ -212,7 +212,7 @@
 - `timeline_changes` 和 `subtitle_changes`：从会话基础到草稿当前状态的实体级差异，分开列出。剪辑域包括媒体、时间线、轨道、片段、转场、标记；字幕域包括母稿、识别运行、字词、字幕条、覆盖值、独立字幕条、样式，以及字幕轨。
 - `ops`：草稿日志里全部写入的操作原文，按顺序。
 - `verification`：对草稿做 L1 校验的结果。
-- `preview_job`：预览渲染的任务 ID。`render_preview` 实现之前为 null。
+- `preview_job`：对草稿当前修订自动启动的 `render_preview` 任务 ID，输出到 `.zcut/<project_id>/sessions/<session_id>/preview/`。审阅的人可以直接看这段预览。
 
 ### 7.4 批准与合并
 
@@ -221,7 +221,11 @@
 3. 批准后的修订是一步撤销，撤销它就撤销整个会话。草稿相对主工程没有净改动时，批准不产生修订，返回 `no_op`，会话照常变为 `approved`。
 4. 带 `force` 的字幕域操作只在 `approval` 为 `manual` 的会话里有效，规则见第 8 节。
 
-不进会话的动词：`create_project`、`import_media`、`transcribe`、`render_preview`、`view_timeline`、`export`、`record_handoff_check`、`job_status` 和所有读动词。带 `session_id` 调用它们返回 `rejected`、`E_SESSION_STATE`。
+不进会话的写动词：`create_project`、`import_media`、`transcribe`、`export`、`record_handoff_check`。带 `session_id` 调用它们返回 `rejected`、`E_SESSION_STATE`。
+
+读动词（`inspect`、`read_transcript`、`validate`、`diff`）和 `render_preview`、`view_timeline` 可以带 `session_id`：这时读的、渲染的是该会话的草稿，而不是主工程。Agent 在会话里剪完后，要能自己读剪辑表、出胶片条和预览来自查。`job_status` 不受影响。
+
+草稿里素材的相对路径一律按**主工程文件所在目录**解析，不按草稿文件所在目录。草稿存放在 `.zcut/` 深处，按草稿位置解析会找不到素材（2026-10-28 真实项目实测）。
 
 ### 7.5 修订对比 `diff`
 

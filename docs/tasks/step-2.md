@@ -38,6 +38,7 @@
 | 2.3 | 字幕链路：worker 零宽修正和空结果；短 ID；`read_transcript` 片段头和 `with_times`；`W_SUB_NO_TRANSCRIPT`；`remove_span` 的 `pause`；`workers/asr/README.md` 写清环境搭建 | 规格 PR | 一小时规模的合成母稿 `read_transcript` 不超过 128 KB；`pause` 的区间与手算一致；零宽字词的回归用例 |
 
 | 2.7 | 识别 worker 长音频分段（`asr-worker.md` 2.1 节）和 `W_ASR_ALIGN_DEGRADED` | 2.3 | 合成一条 5 分钟的朗读素材（台词朗读拼接 3 次以上），零宽比例低于 1%，各段拼接处字词不重复、不丢失；切点选择有单元测试；Claude 用真实 19 分钟采访复测 |
+| 2.8 | 会话内的读、预览和胶片条（`session_id`）；草稿素材路径按主工程目录解析；`session_review` 自动出预览；识别复读检查 `W_ASR_REPETITION` | 2.2–2.7 | 物美采访工程开会话后，`view_timeline` 带 `session_id` 直接成功；`session_review` 给出可播放的预览；全片识别不再出现几千个「哎」，`W_ASR_ALIGN_DEGRADED` 不再误报 |
 | 2.6 | `place` 按字词选段（`tokens`）和 `at: "end"`；请求里的非最简分数自动约分 | 2.3 | 用合成朗读素材按三段字词逆序追加，序列上三段首尾相接、源区间与手算一致；`"50/25s"` 被接受并写成 `2s` |
 
 2.1 到 2.3 改的文件基本不重叠，可以并行，各用一个 worktree；后合并的负责变基。2.6 改的是编辑操作，等 2.3 合并后再做。
