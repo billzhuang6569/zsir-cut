@@ -46,6 +46,7 @@
 | 3.9 | 章节面板：大纲视图，点击跳转，复制 Markdown | 3.1、3.6 |
 | 3.10 | 字幕面板：识别设置、字幕列表（搜索、查找替换、逐条编辑）、样式 | 3.3、3.6 |
 | 3.11 | 导出面板：节点图、三家去处和直接导出 | 3.4、3.5 |
+| 3.14 | 字幕渲染器与字幕叠层导出（`handoff-profile.md` 第 9 节）：独立的排版模块（只依赖 Canvas 2D 接口）；工程格式 0.3（`subtitle_overlays`、样式新字段、迁移）；`add_overlay` / `update_overlay` / `remove_overlay`；`export` 的 `subtitle-overlay`（PNG 序列加 ffmpeg 编码 ProRes 4444、原子替换、`last_export`）；本任务允许新增依赖 `@napi-rs/canvas`，Claude 联网安装 | 3.12 |
 | 3.13 | 历史面板：按 `history` 视图列出步骤，批次折叠成组；点一步预览（`at_revision`）；「回到这一步」调用 `restore`；批次进行中显示「AI 正在做第 x / n 步」 | 3.6、3.12 |
 
 ### 3.5 详细说明
