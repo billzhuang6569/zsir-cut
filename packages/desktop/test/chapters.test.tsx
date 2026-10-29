@@ -248,7 +248,9 @@ it.each([true, false])(
       (n) => n.textContent === "让 AI 重新分章",
     );
     expect(generate?.disabled).toBe(!available);
+    expect(generate?.classList.contains("zc-btn-primary")).toBe(true);
     if (!available) {
+      expect(generate?.title).toContain("暂无可用的 Agent");
       expect(call.mock.calls.some(([verb]) => verb === "chat_send")).toBe(false);
       return;
     }

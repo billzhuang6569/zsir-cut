@@ -109,29 +109,33 @@ export function useChapterPanel({
       </section>
       <section>
         <h3>生成</h3>
-        <button
-          type="button"
-          className="zc-btn zc-chapter-action"
-          disabled={!project || !canGenerate}
-          onClick={generate}
-        >
-          <Icon name="spark" />让 AI 重新分章
-        </button>
-        <button
-          type="button"
-          className="zc-btn zc-chapter-action"
-          disabled={!markers.length}
-          onClick={() => {
-            setError("");
-            void Promise.resolve()
-              .then(() => navigator.clipboard.writeText(chapterMarkdown(project?.markers ?? [], settings.levels)))
-              .then(() => setCopied(true))
-              .catch(() => setError("复制失败，请检查剪贴板权限后重试"));
-          }}
-        >
-          <Icon name={copied ? "check" : "md"} />
-          {copied ? "已复制" : "复制 Markdown"}
-        </button>
+        <div className="zc-chapter-actions">
+          <button
+            type="button"
+            className="zc-btn zc-btn-primary"
+            disabled={!project || !canGenerate}
+            title={!project ? "请先打开工程" : !canGenerate ? "暂无可用的 Agent，或 Agent 正在生成中" : undefined}
+            onClick={generate}
+          >
+            <Icon name="spark" />让 AI 重新分章
+          </button>
+          <button
+            type="button"
+            className="zc-btn zc-btn-secondary"
+            disabled={!markers.length}
+            title={!markers.length ? "暂无可复制的章节" : undefined}
+            onClick={() => {
+              setError("");
+              void Promise.resolve()
+                .then(() => navigator.clipboard.writeText(chapterMarkdown(project?.markers ?? [], settings.levels)))
+                .then(() => setCopied(true))
+                .catch(() => setError("复制失败，请检查剪贴板权限后重试"));
+            }}
+          >
+            <Icon name={copied ? "check" : "md"} />
+            {copied ? "已复制" : "复制 Markdown"}
+          </button>
+        </div>
       </section>
     </div>
   );

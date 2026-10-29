@@ -59,17 +59,14 @@
   padding: var(--space-2);
   font: inherit;
 }
-.zc-chapter-action {
-  width: 100%;
+.zc-chapter-actions {
   display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  background: transparent;
-  color: var(--text-2);
-  cursor: pointer;
+  gap: var(--space-3);
 }
-.zc-chapter-action:disabled {
+.zc-chapter-actions .zc-btn:disabled {
+  background: transparent;
   color: var(--text-off);
+  border-color: var(--line);
   cursor: not-allowed;
 }
 .zc-chapter-stats,
