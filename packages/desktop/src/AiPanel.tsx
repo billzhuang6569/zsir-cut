@@ -170,7 +170,7 @@ export function useAiPanel({
           : "text" in value
             ? value.text
             : (decision.options.find((item) => item.id === value.option_id)?.label ?? "");
-      answers.current.push(`关于『${decision.question}』：${label}`);
+      answers.current.push(`- ${decision.question} → ${label}`);
       await refresh();
       if (pending.length === 1) {
         const text = answers.current.join("\n");
@@ -212,6 +212,7 @@ export function useAiPanel({
       result?: unknown;
       live: boolean;
       failed: boolean;
+      failureCount?: number;
       attempts?: unknown[];
     }[];
   }[] = [];
@@ -256,11 +257,14 @@ export function useAiPanel({
     for (let i = 0; i < message.tools.length; i++) {
       const tool = message.tools[i];
       const next = message.tools[i + 1];
-      if (tool?.failed && next?.failed && toolVerb(tool.name) === toolVerb(next.name)) {
+      if (tool && next && toolVerb(tool.name) === toolVerb(next.name)) {
         tool.attempts = [
           ...(tool.attempts ?? [{ tool: tool.name, arguments: tool.input, result: tool.result }]),
           { tool: next.name, arguments: next.input, result: next.result },
         ];
+        tool.failureCount = (tool.failureCount ?? Number(tool.failed)) + Number(next.failed);
+        tool.failed = tool.failureCount > 0;
+        tool.live ||= next.live;
         message.tools.splice(i + 1, 1);
         i--;
       }
@@ -350,6 +354,7 @@ export function useAiPanel({
                         live={tool.live}
                         name={tool.name}
                         failed={tool.failed}
+                        failureCount={tool.failureCount ?? Number(tool.failed)}
                         count={tool.attempts?.length ?? 1}
                         detail={tool.attempts ?? { tool: tool.name, arguments: tool.input, result: tool.result }}
                       />

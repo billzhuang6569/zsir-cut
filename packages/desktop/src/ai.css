@@ -319,6 +319,7 @@
 }
 
 .zc-ai-chat {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: var(--space-6);
@@ -339,6 +340,7 @@
   padding: var(--space-2);
 }
 .zc-chat-messages {
+  min-width: 0;
   overflow: auto;
   display: flex;
   flex-direction: column;
@@ -346,6 +348,7 @@
   overflow-wrap: anywhere;
 }
 .zc-chat-user {
+  white-space: pre-wrap;
   margin-left: var(--space-8);
   padding: var(--space-5) var(--space-6);
   border-radius: var(--radius-xl);
@@ -374,6 +377,30 @@
 .zc-markdown p {
   white-space: pre-wrap;
   margin-block: var(--space-3);
+}
+.zc-chat-assistant,
+.zc-markdown {
+  min-width: 0;
+}
+.zc-markdown-table {
+  max-width: 100%;
+  overflow-x: auto;
+  margin-block: var(--space-3);
+}
+.zc-markdown-table table {
+  border-collapse: collapse;
+  width: 100%;
+}
+.zc-markdown-table th,
+.zc-markdown-table td {
+  border: 1px solid var(--line);
+  padding: var(--space-3) var(--space-4);
+  text-align: left;
+  min-width: 8ch;
+}
+.zc-markdown-table th {
+  background: var(--raised);
+  color: var(--text);
 }
 .zc-markdown pre,
 .zc-step-detail {

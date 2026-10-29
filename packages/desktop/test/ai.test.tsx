@@ -106,14 +106,38 @@ describe("AI panel", () => {
         expect(container.querySelectorAll(".zc-q")).toHaveLength(1);
         expect(container.querySelector(".zc-q-question")?.textContent).toBe(`问题 ${index + 1}`);
         expect(container.querySelector(".zc-ring")?.getAttribute("aria-label")).toBe(`${index} / 3 已定`);
-        await act(() => button(container, `回答 ${index + 1}`).click());
-        await act(async () => button(container, index === 2 ? "发给 AI" : "下一件").click());
+        if (index === 2) {
+          await act(async () => button(container, "跳过").click());
+        } else {
+          if (index === 1) {
+            const input = container.querySelector<HTMLInputElement>('input[aria-label="其他想法"]');
+            if (!input) throw new Error("Missing other input");
+            await act(() => input.focus());
+            await change(input, "保留 **原文** | <回答>");
+          } else await act(() => button(container, `回答 ${index + 1}`).click());
+          await act(async () => button(container, "下一件").click());
+        }
       }
       expect(call.mock.calls.filter(([verb]) => verb === "session_answer")).toHaveLength(3);
       expect(call).toHaveBeenCalledWith("chat_send", {
         agent: "claude",
-        text: "关于『问题 1』：回答 1\n关于『问题 2』：回答 2\n关于『问题 3』：回答 3",
+        text: "- 问题 1 → 回答 1\n- 问题 2 → 保留 **原文** | <回答>\n- 问题 3 → 跳过",
       });
+      const sent = call.mock.calls.find(([verb]) => verb === "chat_send")?.[1].text as string;
+      await act(async () =>
+        root.render(
+          <Harness call={call} path={project} notices={[{ chat: "chat_test", event: { type: "user", text: sent } }]} />,
+        ),
+      );
+      expect(container.querySelector(".zc-chat-user p")?.textContent).toBe(sent);
+      const style = document.createElement("style");
+      style.textContent = await readFile("packages/desktop/src/ai.css", "utf8");
+      document.head.append(style);
+      try {
+        expect(getComputedStyle(container.querySelector(".zc-chat-user") as HTMLElement).whiteSpace).toBe("pre-wrap");
+      } finally {
+        style.remove();
+      }
       expect(core("inspect", { project, view: "session", session_id: begun.session_id }).pending_count).toBe(0);
       const stored = JSON.parse(await readFile(project, "utf8"));
       expect(stored.revision.id).toBe(raw.revision.id);
@@ -318,7 +342,7 @@ it("separates tool-delimited text and merges consecutive failed attempts with fu
     ]);
     expect(container.querySelectorAll(".zc-step")).toHaveLength(2);
     expect(container.querySelectorAll(".zc-step.is-failed")).toHaveLength(1);
-    expect(container.querySelector(".zc-step.is-failed")?.textContent).toContain("开始会话 ×3（失败）");
+    expect(container.querySelector(".zc-step.is-failed")?.textContent).toContain("开始会话 ×3（失败 3 次）");
     await act(() => button(container, "×3").click());
     const detail = JSON.parse(container.querySelector(".zc-step-detail")?.textContent ?? "null");
     expect(detail).toHaveLength(3);
@@ -329,6 +353,104 @@ it("separates tool-delimited text and merges consecutive failed attempts with fu
     ]);
     expect(JSON.stringify(detail)).toContain("E_VALIDATION");
     expect(JSON.stringify(detail)).toContain("mcp__zsir-cut__zcut_session_begin");
+  } finally {
+    await act(() => root.unmount());
+  }
+});
+
+it("renders streamed GFM tables with inline formatting, escaped pipes and safe HTML", async () => {
+  const { Markdown } = await import("../src/ai-components.js");
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  const header = "| 名称 | 结果 |";
+  try {
+    await act(() => root.render(<Markdown text={header} />));
+    expect(container.querySelector("table")).toBeNull();
+    expect(container.querySelector("p")?.textContent).toBe(header);
+    await act(() =>
+      root.render(
+        <Markdown
+          text={`${header}\n| :--- | ---: |\n| **重点** | \`代码\` |\n| A\\|B | <img src=x onerror=alert(1)> |\n\n后文`}
+        />,
+      ),
+    );
+    expect([...container.querySelectorAll("th")].map((node) => node.textContent)).toEqual(["名称", "结果"]);
+    expect(container.querySelectorAll("tbody tr")).toHaveLength(2);
+    expect(container.querySelector("td strong")?.textContent).toBe("重点");
+    expect(container.querySelector("td code")?.textContent).toBe("代码");
+    expect(container.querySelectorAll("td")[2]?.textContent).toBe("A|B");
+    expect(container.querySelector("img")).toBeNull();
+    expect([...container.querySelectorAll("p")].at(-1)?.textContent).toBe("后文");
+    const style = document.createElement("style");
+    style.textContent = await readFile("packages/desktop/src/ai.css", "utf8");
+    document.head.append(style);
+    document.body.append(container);
+    try {
+      expect(getComputedStyle(container.querySelector(".zc-markdown-table") as HTMLElement).overflowX).toBe("auto");
+      expect(getComputedStyle(container.querySelector(".zc-markdown-table") as HTMLElement).maxWidth).toBe("100%");
+    } finally {
+      style.remove();
+    }
+    await act(() => root.render(<Markdown text={"名称 | 结果\n--- | :---:\n短行\n名称 | 结果\n不是分隔行 | ---"} />));
+    expect(container.querySelectorAll("table")).toHaveLength(1);
+    expect(container.querySelector("tbody tr")).toBeNull();
+    expect(container.textContent).toContain("不是分隔行 | ---");
+    await act(() => root.render(<Markdown text={"```\n| A | B |\n| --- | --- |\n```"} />));
+    expect(container.querySelector("table")).toBeNull();
+  } finally {
+    await act(() => root.unmount());
+    container.remove();
+  }
+});
+
+it("groups consecutive successful and mixed tool calls while preserving order and live state", async () => {
+  const call = vi.fn(async (verb: string) =>
+    verb === "chat_agents" ? [{ agent: "claude", available: true, version: "测试" }] : { sessions: [], batches: [] },
+  );
+  const events: AiNotice["event"][] = [];
+  for (let i = 0; i < 5; i++)
+    events.push(
+      { type: "tool_start", id: `ok${i}`, name: i % 2 ? "mcp__zsir-cut__zcut_inspect" : "zcut_inspect", input: { i } },
+      { type: "tool_end", id: `ok${i}`, input: { ok: true, i } },
+    );
+  events.push({ type: "text", text: "间隔" });
+  for (let i = 0; i < 4; i++) {
+    events.push({ type: "tool_start", id: `mixed${i}`, name: "zcut_inspect", input: { i } });
+    if (i < 3) events.push({ type: "tool_end", id: `mixed${i}`, input: { ok: i === 0, i } });
+  }
+  events.push({ type: "tool_start", id: "other", name: "zcut_validate", input: {} });
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  const render = () =>
+    root.render(
+      <Harness call={call} path="/project.zcut.json" notices={events.map((event) => ({ chat: "chat_test", event }))} />,
+    );
+  try {
+    await act(async () => render());
+    expect(container.querySelectorAll(".zc-step")).toHaveLength(3);
+    expect(container.querySelectorAll(".zc-step")[0]?.textContent).toContain("查看工程 ×5");
+    expect(container.querySelectorAll(".zc-step")[0]?.querySelector(".zc-icon")).not.toBeNull();
+    expect(container.querySelector(".zc-step.is-failed.is-live")?.textContent).toContain("查看工程 ×4（失败 2 次）");
+    await act(() => button(container, "×5").click());
+    const success = JSON.parse(container.querySelector(".zc-step-detail")?.textContent ?? "null");
+    expect(success.map((item: { arguments: unknown; result: unknown }) => [item.arguments, item.result])).toEqual(
+      Array.from({ length: 5 }, (_, i) => [{ i }, { ok: true, i }]),
+    );
+    expect(success.map((item: { tool: string }) => item.tool)).toEqual(
+      Array.from({ length: 5 }, (_, i) => (i % 2 ? "mcp__zsir-cut__zcut_inspect" : "zcut_inspect")),
+    );
+    await act(() => button(container, "×4").click());
+    const mixed = JSON.parse(container.querySelectorAll(".zc-step-detail")[1]?.textContent ?? "null");
+    expect(mixed.map((item: { arguments: unknown }) => item.arguments)).toEqual([
+      { i: 0 },
+      { i: 1 },
+      { i: 2 },
+      { i: 3 },
+    ]);
+    events.push({ type: "tool_end", id: "mixed3", input: { ok: true, i: 3 } });
+    await act(async () => render());
+    expect(container.querySelector(".zc-step.is-failed.is-live")).toBeNull();
+    expect(container.querySelector(".zc-step.is-failed")?.textContent).toContain("失败 2 次");
   } finally {
     await act(() => root.unmount());
   }

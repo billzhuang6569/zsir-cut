@@ -197,12 +197,14 @@ export function StepRow({
   live,
   name,
   failed,
+  failureCount = Number(failed),
   count = 1,
   detail,
 }: {
   live: boolean;
   name: string;
   failed: boolean;
+  failureCount?: number;
   count?: number;
   detail: unknown;
 }) {
@@ -220,7 +222,7 @@ export function StepRow({
         <span className="zc-grow">
           {label}
           {count > 1 && ` ×${count}`}
-          {failed && "（失败）"}
+          {failed && `（失败 ${failureCount} 次）`}
         </span>
         <Icon name="chevron" size={12} />
       </button>
@@ -245,11 +247,31 @@ function inline(text: string): ReactNode[] {
     );
 }
 // Only the requested Markdown subset; React escapes all agent-provided HTML.
+function tableCells(line: string): string[] {
+  const cells: string[] = [];
+  let cell = "";
+  const source = line.trim();
+  for (let i = 0; i < source.length; i++) {
+    const char = source[i] ?? "";
+    if (char === "\\" && (source[i + 1] === "|" || source[i + 1] === "\\")) {
+      cell += source[++i];
+    } else if (char === "|") {
+      cells.push(cell);
+      cell = "";
+    } else cell += char;
+  }
+  cells.push(cell);
+  if (source.startsWith("|")) cells.shift();
+  if (source.endsWith("|") && cell === "") cells.pop();
+  return cells.map((cell) => cell.trim());
+}
 export function Markdown({ text }: { text: string }) {
   const blocks: ReactNode[] = [];
   const lines = text.split("\n");
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? "";
+    const headers = tableCells(line);
+    const separator = tableCells(lines[i + 1] ?? "");
     if (line.startsWith("```")) {
       const code: string[] = [];
       while (++i < lines.length && !(lines[i] ?? "").startsWith("```")) code.push(lines[i] ?? "");
@@ -257,6 +279,43 @@ export function Markdown({ text }: { text: string }) {
         <pre key={i}>
           <code>{code.join("\n")}</code>
         </pre>,
+      );
+    } else if (
+      line.includes("|") &&
+      headers.length > 0 &&
+      separator.length === headers.length &&
+      separator.every((cell) => /^:?-+:?$/.test(cell))
+    ) {
+      const rows: ReactNode[] = [];
+      i++;
+      while (
+        i + 1 < lines.length &&
+        (lines[i + 1] ?? "").includes("|") &&
+        !(lines[i + 1] ?? "").trimStart().startsWith("```")
+      ) {
+        const cells = tableCells(lines[++i] ?? "");
+        rows.push(
+          <tr key={i}>
+            {headers.map((_, column) => (
+              <td key={`${column}-${headers[column]}`}>{inline(cells[column] ?? "")}</td>
+            ))}
+          </tr>,
+        );
+      }
+      blocks.push(
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard users must be able to scroll wide tables.
+        <section className="zc-markdown-table" key={i} aria-label="表格" tabIndex={0}>
+          <table>
+            <thead>
+              <tr>
+                {headers.map((header, column) => (
+                  <th key={`${column}-${headers[column]}`}>{inline(header)}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>{rows}</tbody>
+          </table>
+        </section>,
       );
     } else if (/^#{1,6} /.test(line)) blocks.push(<h3 key={i}>{inline(line.replace(/^#+ /, ""))}</h3>);
     else if (/^(?:[-*] |\d+\. )/.test(line)) {
