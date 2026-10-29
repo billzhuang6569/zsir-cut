@@ -751,6 +751,9 @@ export function applyEdit(
 }
 
 export const SUBTITLE_OPS = new Set([
+  "add_overlay",
+  "update_overlay",
+  "remove_overlay",
   "edit_text",
   "replace_text",
   "set_recognition",

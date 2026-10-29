@@ -642,14 +642,24 @@
       },
       "export": {
         "type": "object",
-        "allOf": [{ "$ref": "#/$defs/write" }],
+        "allOf": [
+          { "$ref": "#/$defs/write" },
+          {
+            "if": { "required": ["profile"], "properties": { "profile": { "const": "subtitle-overlay" } } },
+            "then": { "required": ["overlay_id"], "properties": { "overlay_id": true } }
+          }
+        ],
         "properties": {
           "timeline_id": { "type": "string", "pattern": "^tl_[A-Za-z0-9_-]{1,64}$" },
-          "profile": { "enum": ["fcp-11-fcpxml-1.13", "fcp-10.6-fcpxml-1.11", "resolve-18.5-otio", "resolve-21-fcpxml-1.11", "premiere-25-xmeml-5", "direct-srt", "direct-audio-wav"] },
+          "profile": { "enum": ["fcp-11-fcpxml-1.13", "fcp-10.6-fcpxml-1.11", "resolve-18.5-otio", "resolve-21-fcpxml-1.11", "premiere-25-xmeml-5", "direct-srt", "direct-audio-wav", "subtitle-overlay"] },
           "output": { "type": "string", "minLength": 1 },
           "accept_losses": { "type": "boolean" },
           "overlay": { "type": "boolean" },
-          "subtitle_languages": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
+          "subtitle_languages": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+          "overlay_id": {
+            "type": "string",
+            "pattern": "^ovl_[A-Za-z0-9_-]{1,64}$"
+          }
         },
         "unevaluatedProperties": false
       },
@@ -2054,6 +2064,10 @@
                 "padding": {
                   "type": "number",
                   "minimum": 0
+                },
+                "radius": {
+                  "type": "number",
+                  "minimum": 0
                 }
               },
               "additionalProperties": false
@@ -2075,6 +2089,14 @@
                 "margin_v": {
                   "type": "number",
                   "minimum": 0
+                },
+                "offset_x": {
+                  "type": "number"
+                },
+                "max_width": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 1
                 }
               },
               "additionalProperties": false
@@ -2082,10 +2104,14 @@
             "max_lines": {
               "type": "integer",
               "minimum": 1,
-              "maximum": 2
+              "maximum": 3
             },
             "force": {
               "type": "boolean"
+            },
+            "line_spacing": {
+              "type": "number",
+              "exclusiveMinimum": 0
             }
           },
           "additionalProperties": false
@@ -2171,6 +2197,10 @@
                     "padding": {
                       "type": "number",
                       "minimum": 0
+                    },
+                    "radius": {
+                      "type": "number",
+                      "minimum": 0
                     }
                   },
                   "additionalProperties": false
@@ -2199,6 +2229,14 @@
                     "margin_v": {
                       "type": "number",
                       "minimum": 0
+                    },
+                    "offset_x": {
+                      "type": "number"
+                    },
+                    "max_width": {
+                      "type": "number",
+                      "exclusiveMinimum": 0,
+                      "maximum": 1
                     }
                   },
                   "additionalProperties": false
@@ -2213,7 +2251,7 @@
                 {
                   "type": "integer",
                   "minimum": 1,
-                  "maximum": 2
+                  "maximum": 3
                 },
                 {
                   "type": "null"
@@ -2222,6 +2260,17 @@
             },
             "force": {
               "type": "boolean"
+            },
+            "line_spacing": {
+              "oneOf": [
+                {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "additionalProperties": false
@@ -2360,6 +2409,94 @@
               }
             }
           ]
+        },
+        {
+          "type": "object",
+          "required": [
+            "op",
+            "name",
+            "timeline_id",
+            "subtitle_track_id",
+            "output_path"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "timeline_id": {
+              "$ref": "#/$defs/id"
+            },
+            "subtitle_track_id": {
+              "$ref": "#/$defs/id"
+            },
+            "output_path": {
+              "type": "string",
+              "pattern": "\\.mov$"
+            },
+            "tail": {
+              "$ref": "#/$defs/seconds"
+            },
+            "op": {
+              "const": "add_overlay"
+            },
+            "id": {
+              "type": "string",
+              "pattern": "^ovl_[A-Za-z0-9_-]{1,64}$"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "op",
+            "overlay_id"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "timeline_id": {
+              "$ref": "#/$defs/id"
+            },
+            "subtitle_track_id": {
+              "$ref": "#/$defs/id"
+            },
+            "output_path": {
+              "type": "string",
+              "pattern": "\\.mov$"
+            },
+            "tail": {
+              "$ref": "#/$defs/seconds"
+            },
+            "op": {
+              "const": "update_overlay"
+            },
+            "overlay_id": {
+              "type": "string",
+              "pattern": "^ovl_[A-Za-z0-9_-]{1,64}$"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "op",
+            "overlay_id"
+          ],
+          "properties": {
+            "op": {
+              "const": "remove_overlay"
+            },
+            "overlay_id": {
+              "type": "string",
+              "pattern": "^ovl_[A-Za-z0-9_-]{1,64}$"
+            }
+          },
+          "additionalProperties": false
         }
       ]
     },

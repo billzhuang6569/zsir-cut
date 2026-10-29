@@ -1,6 +1,6 @@
 {
   "schema": "zsir-cut/timeline",
-  "schema_version": "0.2",
+  "schema_version": "0.3",
   "id": "prj_rate_30",
   "name": "30 fps read-view regression",
   "revision": {

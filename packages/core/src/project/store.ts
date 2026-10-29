@@ -11,6 +11,7 @@ import { type ValidationIssue, validateProjectSemantics } from "./semantics.ts";
 import type { Author, Project } from "./types.ts";
 
 export type WriteVerb =
+  | "export"
   | "create_project"
   | "edit"
   | "import_media"

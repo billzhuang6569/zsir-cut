@@ -667,3 +667,50 @@ it("shares queued admission, batch status, undo, restore and historical reads be
     await server.close();
   }
 }, 30000);
+
+it("shares overlay edit settings and export dry-run envelopes between CLI and MCP", async () => {
+  const server = createServer();
+  const client = new Client({ name: "overlay-test", version: "1" });
+  const [left, right] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(left), client.connect(right)]);
+  try {
+    const added = invokeCli("edit", {
+      base_revision: "rev_fixture_1",
+      idempotency_key: "overlay-add",
+      author,
+      label: "Add overlay",
+      ops: [
+        {
+          op: "add_overlay",
+          id: "ovl_parity",
+          name: "中文",
+          timeline_id: "tl_std",
+          subtitle_track_id: "trk_sub_zh",
+          output_path: join(directory, "sub.mov"),
+        },
+      ],
+    }).envelope;
+    expect(added.status, JSON.stringify(added)).toBe("applied");
+    const parsed = parseProject(await readFile(project, "utf8"));
+    if (!parsed.ok) throw new Error("Bad project");
+    for (const overlay_id of ["ovl_parity", "ovl_missing"]) {
+      const input = {
+        base_revision: parsed.project.revision.id,
+        idempotency_key: `overlay-${overlay_id}`,
+        author,
+        profile: "subtitle-overlay",
+        overlay_id,
+        dry_run: true,
+      };
+      const cliResult = invokeCli("export", input).envelope;
+      const mcpResult = (await client.callTool({ name: "zcut_export", arguments: { project, ...input } }))
+        .structuredContent as Record<string, unknown>;
+      expect(validateEnvelope(mcpResult).valid).toBe(true);
+      expect(withoutRequestId(cliResult)).toEqual(withoutRequestId(mcpResult));
+      expect(cliResult.status).toBe(overlay_id === "ovl_parity" ? "dry_run" : "rejected");
+    }
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});

@@ -16,7 +16,7 @@ describe("project IO", () => {
   it("migrates every 0.1 example by changing only the version bytes", () => {
     for (const name of readdirSync(new URL("examples", root)).filter((entry) => entry.endsWith(".zcut.json"))) {
       const current = read(`examples/${name}`);
-      const legacy = current.replace('"schema_version": "0.2"', '"schema_version": "0.1"');
+      const legacy = current.replace('"schema_version": "0.3"', '"schema_version": "0.1"');
       expect(serializeProject(parsed(legacy).project)).toBe(current);
     }
   });
@@ -126,7 +126,7 @@ describe("project IO", () => {
   });
 
   it("prompts an upgrade for an unrecognized project version", () => {
-    for (const version of ["0.3", "1.0"]) {
+    for (const version of ["0.4", "1.0"]) {
       const source = JSON.parse(standard);
       source.schema_version = version;
       const result = parseProject(JSON.stringify(source));

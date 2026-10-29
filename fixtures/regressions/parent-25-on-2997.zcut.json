@@ -1,6 +1,6 @@
 {
   "schema": "zsir-cut/timeline",
-  "schema_version": "0.2",
+  "schema_version": "0.3",
   "id": "prj_grid_rounding",
   "name": "25 fps parent on 29.97 timeline",
   "revision": {
