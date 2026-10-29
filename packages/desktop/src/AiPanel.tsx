@@ -219,7 +219,8 @@ export function useAiPanel({
       author: { kind: "human", name: "剪辑师" },
       ...extra,
     });
-  const session = ai.sessions.find((item) => item.session_id === sessionId) ?? ai.sessions.at(-1);
+  const decisionSessions = ai.sessions.filter((item) => item.state !== "in_review" || item.pending_count > 0);
+  const session = decisionSessions.find((item) => item.session_id === sessionId) ?? decisionSessions.at(-1);
   const decisions = [...(session?.decisions ?? [])].sort((a, b) => a.seq - b.seq);
   const pending = decisions.filter((item) => item.state === "pending");
   const decision = pending[0];
@@ -577,9 +578,9 @@ export function useAiPanel({
           AI 正在做第 {Math.min(runningBatch.count, runningBatch.applied.length + 1)} / {runningBatch.count} 步
         </output>
       )}
-      {ai.sessions.length > 1 && (
+      {decisionSessions.length > 1 && (
         <div className="zc-tabs zc-session-tabs" role="tablist" aria-label="编辑会话">
-          {ai.sessions.map((item) => {
+          {decisionSessions.map((item) => {
             const title = item.label?.trim() || item.intent?.trim() || "编辑会话";
             return (
               <button

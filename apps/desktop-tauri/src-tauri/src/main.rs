@@ -20,6 +20,8 @@ impl Drop for Host {
 
 fn main() {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::Builder::new().build())
         .setup(|app| {
             let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
             let project = std::env::var_os("ZCUT_PROJECT")

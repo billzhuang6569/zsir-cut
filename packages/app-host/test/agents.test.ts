@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { mkdtemp, readFile, realpath, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -85,7 +86,18 @@ if (${JSON.stringify(mode)} === 'stop') setInterval(()=>{},1000);
     url: "http://127.0.0.1:12345/mcp",
     token: "test-token",
     commands: { claude: script, codex: script },
-    emit: (_chat, event) => events.push(event),
+    emit: (chat, event) => {
+      if (event.type === "end")
+        expect(
+          JSON.parse(
+            readFileSync(join(directory, ".zcut", "prj_test", "chats", `${chat}.jsonl`), "utf8")
+              .trim()
+              .split("\n")
+              .at(-1) ?? "null",
+          ),
+        ).toEqual(event);
+      events.push(event);
+    },
   });
   managers.push(manager);
   return { directory, manager, events, capture };

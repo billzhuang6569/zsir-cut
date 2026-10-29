@@ -131,7 +131,8 @@ export class Agents {
           .catch(() => {
             this.options.emit(id, { type: "error", text: "对话记录保存失败，请检查磁盘空间和目录权限" });
           });
-        this.options.emit(id, event);
+        if (event.type === "end") this.writes = this.writes.then(() => this.options.emit(id, event));
+        else this.options.emit(id, event);
       };
       const args =
         agent === "claude"

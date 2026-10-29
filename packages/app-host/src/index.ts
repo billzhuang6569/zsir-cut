@@ -56,6 +56,11 @@ const uiStateSchema = z.strictObject({
   playing: z.boolean(),
   range: z.strictObject({ start: time, duration }).nullable(),
   loop: z.boolean(),
+  mediaBrowser: z
+    .strictObject({ scope: z.string(), search: z.string(), size: z.number().int().min(110).max(280) })
+    .optional(),
+  preview: z.enum(["media", "timeline"]).optional(),
+  media: z.strictObject({ id, at: time, in: time.nullable(), out: time.nullable() }).optional(),
 });
 
 function uiEnvelope(verb: UiVerb, code?: string, message = "", retryable = false): UiEnvelope {
@@ -325,7 +330,31 @@ export async function startHost(
               envelope: {
                 ok: true,
                 result: {
-                  media: project.media.map((item) => ({ id: item.id, name: item.name, kind: item.kind })),
+                  media: project.media.map((item) => ({
+                    uses: new Set(
+                      timeline?.tracks.flatMap((track) =>
+                        track.kind === "subtitle"
+                          ? []
+                          : track.clips.filter((clip) => clip.media_id === item.id).map((clip) => clip.occurrence_id),
+                      ) ?? [],
+                    ).size,
+                    id: item.id,
+                    name: item.path.split("/").at(-1),
+                    kind: item.kind,
+                    path: resolve(dirname(options.project ?? "."), item.path),
+                    duration: printRational(item.duration, true),
+                    start_timecode: item.start_timecode,
+                    reel: item.reel,
+                    video: item.video
+                      ? {
+                          ...item.video,
+                          rate: printRational(item.video.rate),
+                          pixel_aspect: item.video.pixel_aspect ? printRational(item.video.pixel_aspect) : undefined,
+                        }
+                      : undefined,
+                    audio: item.audio,
+                    organize: item.organize,
+                  })),
                   cues,
                   styles: project.subtitle_styles,
                 },

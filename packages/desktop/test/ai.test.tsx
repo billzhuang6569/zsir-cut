@@ -524,7 +524,23 @@ it("switches named session tabs, shows option notes and hides empty draft counts
   const call = vi.fn(async (verb: string) => {
     if (verb === "chat_agents") return [{ agent: "claude", available: true }];
     if (verb === "chat_list") return [];
-    return { sessions: multiple ? sessions : sessions.slice(0, 1), batches: [] };
+    return {
+      sessions: multiple
+        ? [
+            ...sessions,
+            {
+              ...sessions[0],
+              session_id: "ses_done",
+              label: "已完成审阅",
+              pending_count: 0,
+              decisions: [],
+              revision_count: 0,
+              changes: [],
+            },
+          ]
+        : sessions.slice(0, 1),
+      batches: [],
+    };
   });
   const container = document.createElement("div");
   const root = createRoot(container);
