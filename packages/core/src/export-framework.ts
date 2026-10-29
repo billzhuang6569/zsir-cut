@@ -283,7 +283,13 @@ const srtTime = (ms: number) =>
   `${String(Math.floor(ms / 3600000)).padStart(2, "0")}:${String(Math.floor(ms / 60000) % 60).padStart(2, "0")}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")},${String(ms % 1000).padStart(3, "0")}`;
 export function subtitleFiles(project: Project, timeline: Timeline) {
   const projected = projectSubtitles(project, timeline.id);
-  const files: { name: string; role: "subtitle" | "subtitle_words"; language: string; data: string }[] = [];
+  const files: {
+    name: string;
+    role: "subtitle" | "subtitle_words";
+    track_id: string;
+    language: string;
+    data: string;
+  }[] = [];
   const tracks = timeline.tracks.filter((track) => track.kind === "subtitle");
   const stems = new Map(
     tracks.map((track) => {
@@ -388,12 +394,14 @@ export function subtitleFiles(project: Project, timeline: Timeline) {
       files.push({
         name: fileName(`${stem}${index ? `.layer${index + 1}` : ""}`, ".srt", track.id, index === 0),
         role: "subtitle",
+        track_id: track.id,
         language: track.language,
         data: `${layer.entries.join("\n")}\n`,
       });
     files.push({
       name: fileName(stem, ".words.json", track.id, true),
       role: "subtitle_words",
+      track_id: track.id,
       language: track.language,
       data: j(words),
     });

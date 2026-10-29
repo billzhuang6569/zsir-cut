@@ -338,7 +338,7 @@
         "allOf": [{ "$ref": "#/$defs/write" }],
         "properties": {
           "timeline_id": { "type": "string", "pattern": "^tl_[A-Za-z0-9_-]{1,64}$" },
-          "profile": { "enum": ["fcp-11-fcpxml-1.13", "fcp-10.6-fcpxml-1.11", "resolve-18.5-otio", "resolve-21-fcpxml-1.11", "premiere-25-xmeml-5"] },
+          "profile": { "enum": ["fcp-11-fcpxml-1.13", "fcp-10.6-fcpxml-1.11", "resolve-18.5-otio", "resolve-21-fcpxml-1.11", "premiere-25-xmeml-5", "direct-srt", "direct-audio-wav"] },
           "output": { "type": "string", "minLength": 1 },
           "accept_losses": { "type": "boolean" },
           "overlay": { "type": "boolean" },
