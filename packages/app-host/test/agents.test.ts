@@ -24,8 +24,10 @@ const args=process.argv.slice(2);
 if(args.includes('--version')) { console.log('${agent} test-version'); process.exit(0); }
 const config=args[args.indexOf('--mcp-config')+1];
 writeFileSync(${JSON.stringify(capture)},JSON.stringify({args,cwd:process.cwd(),config:${agent === "claude" ? "config,mode:statSync(config).mode&0o777,body:JSON.parse(readFileSync(config,'utf8'))" : "null"}}));
+let input='';process.stdin.on('data',chunk=>input+=chunk);
 process.stdin.resume();
 process.stdin.on('end',()=> {
+const captured=JSON.parse(readFileSync(${JSON.stringify(capture)},'utf8'));captured.input=input;writeFileSync(${JSON.stringify(capture)},JSON.stringify(captured));
 const events=${JSON.stringify(
       agent === "claude"
         ? [
@@ -113,6 +115,7 @@ describe("local agent conversations with fake executables", () => {
       });
       expect(await reopened.list()).toEqual([{ id: chat.id, agent, title: "做粗剪" }]);
       const details = JSON.parse(await readFile(capture, "utf8"));
+      expect(details.input).toContain("请使用用户使用的语言回答；未明确语言时默认中文");
       expect(details.cwd).toBe(await realpath(directory));
       if (agent === "claude") {
         expect(details.mode).toBe(0o600);
@@ -187,5 +190,23 @@ it("ignores malformed and unfamiliar records and normalizes error events", () =>
       ),
     );
     expect(events).toContainEqual({ type: "error", text: "version incompatible" });
+  }
+});
+
+it("preserves explicit failed tool results from both agents", () => {
+  for (const agent of ["claude", "codex"] as const) {
+    const events: ChatEvent[] = [];
+    const parse = agentParser(agent, (event) => events.push(event));
+    parse(
+      JSON.stringify(
+        agent === "claude"
+          ? {
+              type: "user",
+              message: { content: [{ type: "tool_result", tool_use_id: "failed", is_error: true, content: "失败" }] },
+            }
+          : { type: "item.completed", item: { type: "mcp_tool_call", id: "failed", error: { message: "失败" } } },
+      ),
+    );
+    expect(events).toContainEqual(expect.objectContaining({ type: "tool_end", id: "failed", failed: true }));
   }
 });

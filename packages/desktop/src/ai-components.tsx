@@ -161,18 +161,67 @@ export function DecisionCard({
     </section>
   );
 }
-export function StepRow({ live, children, detail }: { live: boolean; children: ReactNode; detail: unknown }) {
+const TOOL_ACTIONS: Record<string, [string, string]> = {
+  create_project: ["新建工程", "plus"],
+  inspect: ["查看工程", "search"],
+  read_transcript: ["读取字幕", "subtitle"],
+  validate: ["检查工程", "check"],
+  diff: ["比较改动", "replace"],
+  import_media: ["导入素材", "clip"],
+  edit: ["修改", "blade"],
+  undo: ["撤销", "undo"],
+  redo: ["重做", "redo"],
+  restore: ["恢复步骤", "undo"],
+  batch_status: ["查看批次", "list"],
+  transcribe: ["识别字幕", "subtitle"],
+  session_begin: ["开始会话", "new-chat"],
+  session_review: ["提交审阅", "send"],
+  session_approve: ["批准草稿", "check"],
+  session_reject: ["拒绝草稿", "close"],
+  session_ask: ["提问", "ask"],
+  session_answer: ["回答决定", "ask"],
+  render_preview: ["生成预览", "play"],
+  view_timeline: ["查看时间线", "clip"],
+  export: ["导出", "export"],
+  record_handoff_check: ["记录交接检查", "check"],
+  job_status: ["查看任务", "list"],
+  ui_state: ["查看界面", "grid"],
+  ui_show_panel: ["打开面板", "grid"],
+  ui_seek: ["跳转位置", "marker"],
+  ui_select: ["选中对象", "select"],
+  ui_play: ["播放", "play"],
+  ui_pause: ["暂停", "stop"],
+};
+export const toolVerb = (name: string) => name.replace(/^mcp__.+?__/, "").replace(/^zcut_/, "");
+export function StepRow({
+  live,
+  name,
+  failed,
+  count = 1,
+  detail,
+}: {
+  live: boolean;
+  name: string;
+  failed: boolean;
+  count?: number;
+  detail: unknown;
+}) {
+  const [label, icon] = TOOL_ACTIONS[toolVerb(name)] ?? ["工具调用", "spark"];
   const [expanded, setExpanded] = useState(false);
   return (
     <div>
       <button
         type="button"
-        className={`zc-step${live ? " is-live" : ""}`}
+        className={`zc-step${live ? " is-live" : ""}${failed ? " is-failed" : ""}`}
         aria-expanded={expanded}
         onClick={() => setExpanded(!expanded)}
       >
-        <span className="zc-step-dot" aria-hidden="true" />
-        <span className="zc-grow">{children}</span>
+        <Icon name={failed ? "close" : icon} />
+        <span className="zc-grow">
+          {label}
+          {count > 1 && ` ×${count}`}
+          {failed && "（失败）"}
+        </span>
         <Icon name="chevron" size={12} />
       </button>
       {expanded && (

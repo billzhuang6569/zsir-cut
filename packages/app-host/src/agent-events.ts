@@ -5,6 +5,7 @@ export interface ChatEvent {
   id?: string;
   name?: string;
   input?: unknown;
+  failed?: boolean;
 }
 const record = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" ? (value as Record<string, unknown>) : {};
@@ -69,7 +70,7 @@ export function agentParser(agent: AgentKind, emit: (event: ChatEvent) => void) 
         for (const value of record(e.message).content as unknown[]) {
           const block = record(value);
           if (block.type === "tool_result" && typeof block.tool_use_id === "string")
-            emit({ type: "tool_end", id: block.tool_use_id, input: block.content });
+            emit({ type: "tool_end", id: block.tool_use_id, input: block.content, failed: block.is_error === true });
         }
       } else if (e.type === "result") {
         if (e.is_error)
@@ -90,7 +91,13 @@ export function agentParser(agent: AgentKind, emit: (event: ChatEvent) => void) 
           texts.set(key, item.text);
         } else if (item.type === "mcp_tool_call" && typeof item.id === "string") {
           startTool({ id: item.id, name: item.tool, input: item.arguments });
-          if (e.type === "item.completed") emit({ type: "tool_end", id: item.id, input: item.result ?? item.error });
+          if (e.type === "item.completed")
+            emit({
+              type: "tool_end",
+              id: item.id,
+              input: item.result ?? item.error,
+              failed: !!item.error || item.status === "failed",
+            });
         } else emit({ type: "log", text: `Ignored Codex item: ${String(item.type)}` });
       } else if (e.type === "turn.completed") emit({ type: "end" });
       else if (e.type === "error" || e.type === "turn.failed")

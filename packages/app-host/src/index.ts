@@ -22,6 +22,7 @@ import { PANELS, UI_VERBS, type UiEnvelope, type UiVerb } from "./ui.js";
 const {
   dispatch,
   commandSchemaForVerb,
+  flattenMcpSchema,
   newId,
   VERBS,
   parseProject,
@@ -79,10 +80,13 @@ export function createMcpServer(
   const mcp = new Server({ name: "zsir-cut-desktop", version: "0.0.0" }, { capabilities: { tools: {} } });
   mcp.setRequestHandler(ListToolsRequestSchema, () => ({
     tools: [
-      ...VERBS.map((verb) => ({ name: `zcut_${verb}`, inputSchema: commandSchemaForVerb(verb) as { type: "object" } })),
+      ...VERBS.map((verb) => ({
+        name: `zcut_${verb}`,
+        inputSchema: flattenMcpSchema(commandSchemaForVerb(verb)) as { type: "object" },
+      })),
       ...UI_VERBS.map((verb) => ({
         name: `zcut_${verb}`,
-        inputSchema: { ...z.toJSONSchema(uiSchemas[verb]), type: "object" as const },
+        inputSchema: { ...flattenMcpSchema(z.toJSONSchema(uiSchemas[verb])), type: "object" as const },
       })),
     ],
   }));

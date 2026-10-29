@@ -191,7 +191,7 @@ describe("AI panel", () => {
       expect(container.querySelector(".zc-markdown pre")?.textContent).toBe("<unsafe>");
       expect(container.querySelector("unsafe")).toBeNull();
       expect(container.querySelector(".zc-step.is-live")).not.toBeNull();
-      await act(() => button(container, "zcut_inspect").click());
+      await act(() => button(container, "查看工程").click());
       expect(container.querySelector(".zc-step-detail")?.textContent).toContain("brief");
       await act(async () => button(container, "停止").click());
       expect(call).toHaveBeenCalledWith("chat_stop", {});
@@ -270,6 +270,65 @@ it("shows only installation guidance when no local Agent is available", async ()
       "https://code.claude.com/docs/en/setup",
     );
     expect(container.querySelector(".zc-ai-chat textarea")).toBeNull();
+  } finally {
+    await act(() => root.unmount());
+  }
+});
+
+it("separates tool-delimited text and merges consecutive failed attempts with full diagnostics", async () => {
+  const call = vi.fn(async (verb: string) =>
+    verb === "chat_agents" ? [{ agent: "claude", available: true, version: "测试" }] : { sessions: [], batches: [] },
+  );
+  const events: AiNotice["event"][] = [{ type: "text", text: "第一段" }];
+  for (let i = 0; i < 3; i++)
+    events.push(
+      { type: "tool_start", id: String(i), name: "mcp__zsir-cut__zcut_session_begin", input: { attempt: i } },
+      {
+        type: "tool_end",
+        id: String(i),
+        input: [{ type: "text", text: JSON.stringify({ ok: false, error: { code: "E_VALIDATION" } }) }],
+      },
+    );
+  events.push(
+    { type: "text", text: "第二" },
+    { type: "text", text: "段" },
+    {
+      type: "tool_start",
+      id: "success",
+      name: "zcut_session_begin",
+      input: { author: { kind: "agent", name: "Claude" } },
+    },
+    { type: "tool_end", id: "success", input: { ok: true } },
+  );
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(
+        <Harness
+          call={call}
+          path="/project.zcut.json"
+          notices={events.map((event) => ({ chat: "chat_test", event }))}
+        />,
+      ),
+    );
+    expect([...container.querySelectorAll(".zc-markdown")].map((node) => node.textContent)).toEqual([
+      "第一段",
+      "第二段",
+    ]);
+    expect(container.querySelectorAll(".zc-step")).toHaveLength(2);
+    expect(container.querySelectorAll(".zc-step.is-failed")).toHaveLength(1);
+    expect(container.querySelector(".zc-step.is-failed")?.textContent).toContain("开始会话 ×3（失败）");
+    await act(() => button(container, "×3").click());
+    const detail = JSON.parse(container.querySelector(".zc-step-detail")?.textContent ?? "null");
+    expect(detail).toHaveLength(3);
+    expect(detail.map((item: { arguments: unknown }) => item.arguments)).toEqual([
+      { attempt: 0 },
+      { attempt: 1 },
+      { attempt: 2 },
+    ]);
+    expect(JSON.stringify(detail)).toContain("E_VALIDATION");
+    expect(JSON.stringify(detail)).toContain("mcp__zsir-cut__zcut_session_begin");
   } finally {
     await act(() => root.unmount());
   }

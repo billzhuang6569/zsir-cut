@@ -1,9 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentKind, ChatEvent } from "../../app-host/src/agent-events.js";
-import { Button, type Decision, DecisionCard, Markdown, StepRow } from "./ai-components.js";
+import { Button, type Decision, DecisionCard, Markdown, StepRow, toolVerb } from "./ai-components.js";
 import { IconButton } from "./components.js";
 import type { ProjectView } from "./connection.js";
 import "./ai.css";
+
+function toolResultFailed(value: unknown): boolean {
+  if (typeof value === "string") {
+    try {
+      return toolResultFailed(JSON.parse(value));
+    } catch {
+      return false;
+    }
+  }
+  if (Array.isArray(value)) return value.some(toolResultFailed);
+  if (!value || typeof value !== "object") return false;
+  const result = value as Record<string, unknown>;
+  return (
+    result.ok === false ||
+    result.isError === true ||
+    result.is_error === true ||
+    result.status === "failed" ||
+    result.status === "rejected" ||
+    [result.structuredContent, result.content, result.text].some(toolResultFailed)
+  );
+}
 
 type Call = (verb: string, request: Record<string, unknown>) => Promise<unknown>;
 export interface AiNotice {
@@ -184,7 +205,15 @@ export function useAiPanel({
     id: string;
     role: "user" | "assistant";
     text: string;
-    tools: { id: string; name: string; input: unknown; live: boolean }[];
+    tools: {
+      id: string;
+      name: string;
+      input: unknown;
+      result?: unknown;
+      live: boolean;
+      failed: boolean;
+      attempts?: unknown[];
+    }[];
   }[] = [];
   for (const [index, event] of events.entries()) {
     if (event.type === "user")
@@ -192,12 +221,14 @@ export function useAiPanel({
     else if (["text", "tool_start", "tool_end", "error"].includes(event.type)) {
       if (messages.at(-1)?.role !== "assistant")
         messages.push({ id: `message-${index}`, role: "assistant", text: "", tools: [] });
+      if (event.type === "text" && messages.at(-1)?.tools.length)
+        messages.push({ id: `message-${index}`, role: "assistant", text: "", tools: [] });
       const message = messages.at(-1);
       if (!message) continue;
       if (event.type === "text") message.text += event.text ?? "";
       if (event.type === "error") message.text += `\n${event.text ?? "Agent 出错"}`;
       if (event.type === "tool_start") {
-        const existing = message.tools.find((tool) => tool.id === event.id);
+        const existing = messages.flatMap((entry) => entry.tools).find((tool) => tool.id === event.id);
         if (existing) {
           if (event.name) existing.name = event.name;
           if (event.input !== undefined) existing.input = event.input;
@@ -207,14 +238,33 @@ export function useAiPanel({
             name: event.name ?? "工具调用",
             input: event.input,
             live: true,
+            failed: false,
           });
       }
       if (event.type === "tool_end") {
-        const tool = message.tools.find((tool) => tool.id === event.id);
-        if (tool) tool.live = false;
+        const tool = messages.flatMap((entry) => entry.tools).find((tool) => tool.id === event.id);
+        if (tool) {
+          tool.live = false;
+          tool.result = event.input;
+          tool.failed = event.failed === true || toolResultFailed(event.input);
+        }
       }
     } else if (event.type === "end")
       for (const message of messages) for (const tool of message.tools) tool.live = false;
+  }
+  for (const message of messages) {
+    for (let i = 0; i < message.tools.length; i++) {
+      const tool = message.tools[i];
+      const next = message.tools[i + 1];
+      if (tool?.failed && next?.failed && toolVerb(tool.name) === toolVerb(next.name)) {
+        tool.attempts = [
+          ...(tool.attempts ?? [{ tool: tool.name, arguments: tool.input, result: tool.result }]),
+          { tool: next.name, arguments: next.input, result: next.result },
+        ];
+        message.tools.splice(i + 1, 1);
+        i--;
+      }
+    }
   }
   const available = agents.filter((item) => item.available);
   const chat = (
@@ -295,9 +345,14 @@ export function useAiPanel({
                   <>
                     <Markdown text={message.text} />
                     {message.tools.map((tool) => (
-                      <StepRow key={tool.id} live={tool.live} detail={{ tool: tool.name, arguments: tool.input }}>
-                        {tool.name}
-                      </StepRow>
+                      <StepRow
+                        key={tool.id}
+                        live={tool.live}
+                        name={tool.name}
+                        failed={tool.failed}
+                        count={tool.attempts?.length ?? 1}
+                        detail={tool.attempts ?? { tool: tool.name, arguments: tool.input, result: tool.result }}
+                      />
                     ))}
                     <IconButton
                       icon="copy"

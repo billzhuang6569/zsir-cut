@@ -9,6 +9,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   commandSchemaForVerb,
+  flattenMcpSchema,
   openProject,
   parseProject,
   VERBS,
@@ -41,6 +42,42 @@ afterEach(async () => {
 });
 
 describe("CLI and MCP", () => {
+  it("begins a session through the SDK with an object author", async () => {
+    const server = createServer();
+    const client = new Client({ name: "object-author", version: "1" });
+    const [left, right] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(left), client.connect(right)]);
+    try {
+      const tools = await client.listTools();
+      expect(tools.tools).toHaveLength(23);
+      for (const tool of tools.tools) {
+        if (tool.name !== "zcut_record_handoff_check")
+          expect(tool.inputSchema.properties?.author).toMatchObject({
+            type: "object",
+            properties: { kind: { enum: ["human", "agent", "system"] }, name: { type: "string" } },
+          });
+      }
+      expect(
+        (
+          await client.callTool({
+            name: "zcut_session_begin",
+            arguments: {
+              project,
+              author,
+              base_revision: "rev_fixture_1",
+              idempotency_key: "object-author",
+              approval: "manual",
+              intent: "测试会话",
+            },
+          })
+        ).structuredContent,
+      ).toMatchObject({ ok: true });
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
   it("shares session draft reads and missing-session errors", async () => {
     const server = createServer();
     const client = new Client({ name: "session-test", version: "1" });
@@ -198,7 +235,7 @@ describe("CLI and MCP", () => {
       await client.connect(transport);
       const listed = await client.listTools();
       expect(listed.tools).toEqual(
-        VERBS.map((verb) => ({ name: `zcut_${verb}`, inputSchema: commandSchemaForVerb(verb) })),
+        VERBS.map((verb) => ({ name: `zcut_${verb}`, inputSchema: flattenMcpSchema(commandSchemaForVerb(verb)) })),
       );
       const result = await client.callTool({ name: "zcut_validate", arguments: { project } });
       expect(validateEnvelope(result.structuredContent).valid).toBe(true);

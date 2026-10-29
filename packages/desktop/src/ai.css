@@ -393,3 +393,10 @@
 .zc-ai-chat a {
   color: var(--info);
 }
+
+.zc-step.is-failed {
+  color: var(--attention);
+}
+.zc-step.is-live > .zc-icon {
+  color: var(--attention);
+}

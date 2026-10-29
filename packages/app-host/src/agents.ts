@@ -116,7 +116,7 @@ export class Agents {
         }),
         { mode: 0o600 },
       );
-      const desktopInstructions = `桌面模式：只通过 mcp__zsir-cut__* 工具操作工程，不使用 CLI、shell 或文件写入。当前工程：${this.options.project}。写入 author.kind=agent，edit 必须带 label；使用 manual 编辑会话，交出草稿用 session_review，不能自行批准。`;
+      const desktopInstructions = `请使用用户使用的语言回答；未明确语言时默认中文。桌面模式：只通过 mcp__zsir-cut__* 工具操作工程，不使用 CLI、shell 或文件写入。当前工程：${this.options.project}。写入 author.kind=agent，edit 必须带 label；使用 manual 编辑会话，交出草稿用 session_review，不能自行批准。`;
       const instructions = `${await readFile(skill, "utf8")}\n${desktopInstructions}`;
       let ended = false;
       const emit = (event: ChatEvent) => {
