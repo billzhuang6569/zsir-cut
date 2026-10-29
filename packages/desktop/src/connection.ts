@@ -15,6 +15,8 @@ export function connectHost(
   handlers: {
     ui: (verb: UiVerb, request: Record<string, unknown>) => UiState | Promise<UiState>;
     project: (path: string, view: ProjectView) => void;
+    chat?: (notice: import("./AiPanel.js").AiNotice) => void;
+    aiChanged?: () => void;
     icon: (value: string | null) => void;
     error: (message: string, detail?: string) => void;
   },
@@ -49,6 +51,10 @@ export function connectHost(
       void refresh().catch((error: Error) =>
         handlers.error(`工程文件打不开：${error.message}`, String(error.cause ?? error.message)),
       );
+    } else if (message.type === "chat_event") {
+      handlers.chat?.(message);
+    } else if (message.type === "ai_changed") {
+      handlers.aiChanged?.();
     } else if (message.type === "project_changed") {
       void refresh().catch((error: Error) =>
         handlers.error(`工程文件打不开：${error.message}`, String(error.cause ?? error.message)),
@@ -68,11 +74,13 @@ export function connectHost(
       else
         item?.reject(
           new Error(
-            envelope.error?.code === "E_VALIDATION"
-              ? "工程文件无效"
-              : envelope.error?.code === "E_NOT_FOUND"
-                ? "找不到工程文件"
-                : "请求失败，请检查工程后重试",
+            !envelope.error?.code
+              ? (envelope.error?.message ?? "请求失败")
+              : envelope.error?.code === "E_VALIDATION"
+                ? "工程文件无效"
+                : envelope.error?.code === "E_NOT_FOUND"
+                  ? "找不到工程文件"
+                  : "请求失败，请检查工程后重试",
             { cause: `${envelope.error?.code ?? ""} ${envelope.error?.message ?? ""}`.trim() },
           ),
         );

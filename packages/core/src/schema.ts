@@ -153,3 +153,49 @@ export function commandSchemaForVerb(verb: string): Record<string, unknown> {
     $defs: Object.fromEntries(Object.entries(schema.$defs).filter(([key]) => key !== "requests")),
   };
 }
+
+// MCP clients need field types directly in properties; core validation keeps the original schema.
+export function flattenMcpSchema(schema: Record<string, unknown>): Record<string, unknown> {
+  const expand = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(expand);
+    if (!value || typeof value !== "object") return value;
+    const node = value as Record<string, unknown>;
+    const result: Record<string, unknown> = {};
+    const merge = (source: Record<string, unknown>) => {
+      const properties: Record<string, unknown> = {
+        ...(result.properties as object),
+        ...(source.properties as object),
+      };
+      for (const [key, field] of Object.entries((result.properties as object) ?? {}))
+        if (properties[key] === true) Object.assign(properties, { [key]: field });
+      const required = [
+        ...new Set([...((result.required as string[]) ?? []), ...((source.required as string[]) ?? [])]),
+      ];
+      Object.assign(result, source);
+      if (Object.keys(properties).length) result.properties = properties;
+      if (required.length) result.required = required;
+    };
+    if (typeof node.$ref === "string") {
+      if (!node.$ref.startsWith("#/")) throw new Error(`Unsupported MCP schema reference: ${node.$ref}`);
+      let target: unknown = schema;
+      for (const part of node.$ref.slice(2).split("/"))
+        target = (target as Record<string, unknown>)[part.replaceAll("~1", "/").replaceAll("~0", "~")];
+      merge(expand(target) as Record<string, unknown>);
+    }
+    for (const branch of (node.allOf as unknown[]) ?? []) merge(expand(branch) as Record<string, unknown>);
+    merge(
+      Object.fromEntries(
+        Object.entries(node)
+          .filter(([key]) => !["$defs", "$ref", "allOf", "if", "then", "else"].includes(key))
+          .map(([key, field]) => [key, expand(field)]),
+      ),
+    );
+    for (const key of ["anyOf", "oneOf"]) {
+      for (const branch of (result[key] as Record<string, unknown>[]) ?? [])
+        if (branch.properties)
+          result.properties = { ...(branch.properties as object), ...(result.properties as object) };
+    }
+    return result;
+  };
+  return expand(schema) as Record<string, unknown>;
+}

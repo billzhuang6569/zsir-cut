@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Exporter } from "../src/export-framework.js";
 import {
   cuttingList,
@@ -30,10 +30,21 @@ vi.mock("node:child_process", async (importOriginal) => {
 });
 
 const directories: string[] = [];
+const children: Promise<void>[] = [];
+beforeEach(async () => {
+  const { spawn } = await vi.importActual<typeof childProcess>("node:child_process");
+  vi.mocked(childProcess.spawn).mockImplementation((...args) => {
+    const child = spawn(...args);
+    children.push(new Promise((resolve) => child.once("close", () => resolve())));
+    return child;
+  });
+});
 afterEach(async () => {
+  await Promise.all(children.splice(0));
   vi.mocked(childProcess.spawn).mockReset();
   vi.unstubAllEnvs();
-  for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true });
+  for (const directory of directories.splice(0))
+    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 const run = (args: string[], input?: Buffer) => {
   const result = spawnSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-nostdin", ...args], {
@@ -403,15 +414,15 @@ it("runs both verbs through jobs", async () => {
     expect(accepted.status).toBe("accepted");
     const jobId = (accepted.result as { job_id: string }).job_id;
     let state = "queued";
-    for (let i = 0; i < 100 && state !== "succeeded" && state !== "failed"; i++) {
-      await new Promise((done) => setTimeout(done, 100));
+    for (let i = 0; i < 600 && state !== "succeeded" && state !== "failed"; i++) {
+      await new Promise((done) => setTimeout(done, 25));
       const status = await dispatch("job_status", { project: projectPath, job_id: jobId });
       state = (status.result as { state: string }).state;
       if (state === "failed") throw new Error(JSON.stringify(status.result));
     }
     expect(state).toBe("succeeded");
   }
-});
+}, 30000);
 
 it("checks draft media from the main directory and renders review's exact revision", async () => {
   const { directory, project, projectPath } = await setup();

@@ -5,21 +5,24 @@ import { once } from "node:events";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, promisify } from "node:util";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { WebSocket, WebSocketServer } from "ws";
 import { z } from "zod";
 import type { DispatchOptions, Envelope, Verb } from "../../core/dist/index.js";
+import { Agents } from "./agents.js";
 import { mediaChannel } from "./media.js";
 import { PANELS, UI_VERBS, type UiEnvelope, type UiVerb } from "./ui.js";
 
 const {
   dispatch,
   commandSchemaForVerb,
+  flattenMcpSchema,
   newId,
   VERBS,
   parseProject,
@@ -77,10 +80,13 @@ export function createMcpServer(
   const mcp = new Server({ name: "zsir-cut-desktop", version: "0.0.0" }, { capabilities: { tools: {} } });
   mcp.setRequestHandler(ListToolsRequestSchema, () => ({
     tools: [
-      ...VERBS.map((verb) => ({ name: `zcut_${verb}`, inputSchema: commandSchemaForVerb(verb) as { type: "object" } })),
+      ...VERBS.map((verb) => ({
+        name: `zcut_${verb}`,
+        inputSchema: flattenMcpSchema(commandSchemaForVerb(verb)) as { type: "object" },
+      })),
       ...UI_VERBS.map((verb) => ({
         name: `zcut_${verb}`,
-        inputSchema: { ...z.toJSONSchema(uiSchemas[verb]), type: "object" as const },
+        inputSchema: { ...flattenMcpSchema(z.toJSONSchema(uiSchemas[verb])), type: "object" as const },
       })),
     ],
   }));
@@ -98,6 +104,42 @@ export function createMcpServer(
     return { content: [], structuredContent: envelope };
   });
   return mcp;
+}
+
+export async function readAiState(
+  kernel: (verb: Verb, input: unknown) => Promise<Envelope>,
+  project: string,
+  batches: Iterable<string>,
+) {
+  const call = async (verb: Verb, input: Record<string, unknown>) => {
+    const envelope = await kernel(verb, { ...input, project });
+    if (!envelope.ok) throw new Error(envelope.error?.message ?? "AI state unavailable");
+    return envelope.result as Record<string, unknown>;
+  };
+  const brief = await call("inspect", { view: "brief" });
+  const sessions = await Promise.all(
+    (brief.sessions as { id: string }[]).map(async ({ id }) => {
+      const info = await call("inspect", { view: "session", session_id: id });
+      let before: string | undefined;
+      let revisionCount = 0;
+      for (;;) {
+        const history = await call("inspect", {
+          view: "history",
+          session_id: id,
+          limit: 200,
+          ...(before ? { before } : {}),
+        });
+        const entries = history.entries as { revision: string }[];
+        revisionCount += entries.length;
+        if (entries.length < 200) break;
+        before = entries.at(-1)?.revision;
+      }
+      const diff = await call("diff", { session_id: id, from: info.base_revision, to: info.draft_revision });
+      return { ...info, revision_count: revisionCount, changes: diff.changes };
+    }),
+  );
+  const batchStates = await Promise.all([...batches].map((batch_id) => call("batch_status", { batch_id })));
+  return { sessions, batches: batchStates };
 }
 
 export async function readFcpIcon(): Promise<string | null> {
@@ -138,9 +180,35 @@ export async function startHost(
     if (!parsed.ok) throw new Error("Invalid project");
     return parsed.project;
   };
+  const initialProject = options.project ? await load() : undefined;
   const serve = mediaChannel(options.project, token, load);
+  const httpServers = new Set<Server>();
   const http = createHttpServer((request, response) => {
-    void serve(request, response);
+    if (new URL(request.url ?? "/", "http://127.0.0.1").pathname !== "/mcp") {
+      void serve(request, response);
+      return;
+    }
+    const supplied = Buffer.from(request.headers.authorization ?? "");
+    const expected = Buffer.from(`Bearer ${token}`);
+    if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) {
+      response.writeHead(401).end();
+      return;
+    }
+    void (async () => {
+      const server = createMcpServer(callUi, agentKernel);
+      httpServers.add(server);
+      const transport = new StreamableHTTPServerTransport();
+      response.once("close", () => {
+        httpServers.delete(server);
+        void server.close();
+      });
+      // SDK callback declarations do not support exactOptionalPropertyTypes.
+      await server.connect(transport as import("@modelcontextprotocol/sdk/shared/transport.js").Transport);
+      await transport.handleRequest(request, response);
+    })().catch(() => {
+      if (!response.headersSent) response.writeHead(500);
+      response.end();
+    });
   });
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
   let ui: WebSocket | undefined;
@@ -152,10 +220,29 @@ export async function startHost(
       pending.delete(key);
     }
   };
+  const batches = new Set<string>();
+  let agents: Agents | undefined;
+  const notify = (type: string) => {
+    if (ui?.readyState === WebSocket.OPEN) ui.send(JSON.stringify({ type }));
+  };
   const kernel = async (verb: Verb, input: unknown) => {
     const envelope = await dispatch(verb, input, options.dispatchOptions);
-    if (envelope.receipt && ui?.readyState === WebSocket.OPEN) ui.send(JSON.stringify({ type: "project_changed" }));
+    if (envelope.receipt) notify("project_changed");
+    const request = input as { batch?: { id?: string } };
+    if (envelope.ok && request?.batch?.id) batches.add(request.batch.id);
+    if (["session_begin", "session_ask", "session_answer", "session_review", "session_approve", "edit"].includes(verb))
+      notify("ai_changed");
     return envelope;
+  };
+  const agentKernel = async (verb: Verb, input: unknown) => {
+    if (!options.project) throw new Error("No current project");
+    const request = input as Record<string, unknown>;
+    if (
+      typeof request.project !== "string" ||
+      resolve(dirname(resolve(options.project)), request.project) !== resolve(options.project)
+    )
+      throw new Error("Agent must use the current project");
+    return kernel(verb, { ...request, project: options.project });
   };
   const callUi = async (verb: UiVerb, input: unknown): Promise<UiEnvelope> => {
     if (!ui || ui.readyState !== WebSocket.OPEN) return uiEnvelope(verb, "E_APP_NOT_RUNNING", "桌面界面未连接", true);
@@ -247,6 +334,44 @@ export async function startHost(
           );
           return;
         }
+        if (typeof message.id === "string" && typeof message.verb === "string" && message.verb.startsWith("chat_")) {
+          try {
+            if (!agents) throw new Error("未打开工程");
+            const request = message.request ?? {};
+            let result: unknown;
+            if (message.verb === "chat_agents") result = await agents.detect();
+            else if (message.verb === "chat_list") result = await agents.list();
+            else if (message.verb === "chat_history") result = await agents.history(request.id);
+            else if (message.verb === "chat_send")
+              result = await agents.send(request.agent, request.text, request.chat_id);
+            else if (message.verb === "chat_stop") {
+              await agents.stop();
+              result = {};
+            } else throw new Error("Unknown chat request");
+            if (client.readyState === WebSocket.OPEN)
+              client.send(JSON.stringify({ id: message.id, envelope: { ok: true, result } }));
+          } catch (error) {
+            if (client.readyState === WebSocket.OPEN)
+              client.send(
+                JSON.stringify({ id: message.id, envelope: { ok: false, error: { message: String(error) } } }),
+              );
+          }
+          return;
+        }
+        if (typeof message.id === "string" && message.verb === "ai_state") {
+          try {
+            if (!options.project) throw new Error("未打开工程");
+            const result = await readAiState(kernel, options.project, batches);
+            if (client.readyState === WebSocket.OPEN)
+              client.send(JSON.stringify({ id: message.id, envelope: { ok: true, result } }));
+          } catch (error) {
+            if (client.readyState === WebSocket.OPEN)
+              client.send(
+                JSON.stringify({ id: message.id, envelope: { ok: false, error: { message: String(error) } } }),
+              );
+          }
+          return;
+        }
         if (typeof message.id !== "string" || !VERBS.includes(message.verb)) {
           client.close(1008, "Invalid message");
           return;
@@ -262,12 +387,26 @@ export async function startHost(
   await once(http, "listening");
   const address = http.address();
   if (!address || typeof address === "string") throw new Error("No host port");
+  if (options.project && initialProject) {
+    agents = new Agents({
+      project: resolve(options.project),
+      projectId: initialProject.id,
+      url: `http://127.0.0.1:${address.port}/mcp`,
+      token,
+      emit: (chat, event) => {
+        if (ui?.readyState === WebSocket.OPEN) ui.send(JSON.stringify({ type: "chat_event", chat, event }));
+        if (event.type === "end") notify("ai_changed");
+      },
+    });
+  }
   const mcp = createMcpServer(callUi, kernel);
   return {
     port: address.port,
     token,
     mcp,
     close: async () => {
+      await agents?.stop();
+      await Promise.all([...httpServers].map((server) => server.close()));
       disconnected();
       for (const client of sockets.clients) client.terminate();
       await new Promise<void>((resolve) => sockets.close(() => resolve()));

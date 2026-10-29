@@ -5,17 +5,18 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { DispatchOptions, Verb } from "../../core/dist/index.js";
 
-const { commandSchemaForVerb, dispatch, VERBS }: typeof import("../../core/dist/index.js") = await import(
-  new URL(import.meta.url.endsWith(".ts") ? "../../core/src/index.ts" : "../../core/dist/index.js", import.meta.url)
-    .href
-);
+const { commandSchemaForVerb, flattenMcpSchema, dispatch, VERBS }: typeof import("../../core/dist/index.js") =
+  await import(
+    new URL(import.meta.url.endsWith(".ts") ? "../../core/src/index.ts" : "../../core/dist/index.js", import.meta.url)
+      .href
+  );
 
 export function createServer(options: DispatchOptions = {}): Server {
   const server = new Server({ name: "zsir-cut", version: "0.0.0" }, { capabilities: { tools: {} } });
   server.setRequestHandler(ListToolsRequestSchema, () => ({
     tools: VERBS.map((verb) => ({
       name: `zcut_${verb}`,
-      inputSchema: commandSchemaForVerb(verb) as { type: "object" },
+      inputSchema: flattenMcpSchema(commandSchemaForVerb(verb)) as { type: "object" },
     })),
   }));
   server.setRequestHandler(CallToolRequestSchema, async (request) => {

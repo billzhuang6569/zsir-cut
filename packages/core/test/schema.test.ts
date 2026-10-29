@@ -1,6 +1,8 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  commandSchemaForVerb,
+  flattenMcpSchema,
   normalizeCommand,
   validateCommand,
   validateEnvelope,
@@ -379,4 +381,33 @@ describe("request error diagnostics", () => {
     expect(unknown.errors[0]?.message).toContain("未知动词；可选值：");
     expect(unknown.errors[0]?.message).toContain("create_project");
   });
+});
+
+it("exposes every accepted field directly in MCP schemas for all 23 verbs", async () => {
+  const { VERBS } = await import("../src/dispatch.js");
+  expect(VERBS).toHaveLength(23);
+  for (const verb of VERBS) {
+    const schema = commandSchemaForVerb(verb);
+    const fields = (node: Record<string, unknown>): string[] => [
+      ...Object.keys((node.properties as object) ?? {}),
+      ...(typeof node.$ref === "string"
+        ? fields((schema.$defs as Record<string, Record<string, unknown>>)[node.$ref.split("/").at(-1) ?? ""] ?? {})
+        : []),
+      ...["allOf", "oneOf", "anyOf"].flatMap((key) => ((node[key] as Record<string, unknown>[]) ?? []).flatMap(fields)),
+    ];
+    const flat = flattenMcpSchema(schema);
+    expect(Object.keys(flat.properties as object).sort()).toEqual([...new Set(fields(schema))].sort());
+    if (verb === "session_begin")
+      expect(flat.required).toEqual(
+        expect.arrayContaining(["project", "author", "base_revision", "idempotency_key", "approval", "intent"]),
+      );
+    expect(flat).not.toHaveProperty("allOf");
+    expect(JSON.stringify(flat)).not.toContain('"$ref"');
+    if (fields(schema).includes("author"))
+      expect((flat.properties as Record<string, unknown>).author).toMatchObject({
+        type: "object",
+        required: ["kind", "name"],
+      });
+    expect(schema).toEqual(commandSchemaForVerb(verb));
+  }
 });

@@ -1,0 +1,508 @@
+.zc-btn {
+  font: inherit;
+  height: var(--control-h);
+  padding: 0 var(--space-7);
+  border-radius: var(--radius-md);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  cursor: pointer;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+.zc-btn.zc-btn-primary {
+  background: var(--primary);
+  color: var(--on-primary);
+  font-weight: 700;
+}
+.zc-btn.zc-btn-primary:hover {
+  background: var(--text-2);
+}
+.zc-btn.zc-btn-secondary {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+.zc-btn.zc-btn-secondary:hover {
+  background: var(--raised);
+}
+.zc-btn.zc-btn-approve {
+  background: var(--approved);
+  color: var(--on-approved);
+  font-weight: 700;
+}
+.zc-btn.zc-btn-text {
+  background: transparent;
+  color: var(--text-3);
+  padding: 0 var(--space-4);
+}
+.zc-btn.zc-btn-text:hover {
+  color: var(--text);
+}
+.zc-btn:disabled {
+  background: transparent;
+  color: var(--text-off);
+  border-color: var(--line);
+  cursor: not-allowed;
+}
+
+.zc-ibtn {
+  width: var(--icon-btn);
+  height: var(--icon-btn);
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: 0;
+}
+.zc-ibtn:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+.zc-ibtn[aria-pressed="true"] {
+  background: var(--raised-2);
+  color: var(--text);
+}
+.zc-ibtn:disabled {
+  color: var(--text-off);
+  background: transparent;
+  cursor: not-allowed;
+}
+.zc-ibtn-compact {
+  width: var(--icon-btn-compact);
+  height: var(--icon-btn-compact);
+}
+.zc-ibtn-bordered {
+  border: 1px solid var(--line);
+}
+
+.zc-q {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-width: 360px;
+  box-sizing: border-box;
+  padding: var(--space-7);
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+}
+.zc-q-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-bottom: var(--space-3);
+}
+.zc-q-badge {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  background: var(--attention-soft);
+  color: var(--attention);
+}
+.zc-q-title {
+  font-weight: 500;
+}
+.zc-ring {
+  display: block;
+  flex-shrink: 0;
+}
+.zc-ring-track {
+  fill: none;
+  stroke: var(--line-strong);
+  stroke-width: 2;
+}
+.zc-ring-done {
+  fill: none;
+  stroke: var(--text-3);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+.zc-q-question {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.6;
+  color: var(--text);
+  text-wrap: balance;
+}
+.zc-q-context {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-4);
+}
+.zc-q-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: var(--space-3) calc(-1 * var(--space-4)) 0;
+}
+.zc-q-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  min-height: 36px;
+  padding: var(--space-3) var(--space-4);
+  border: none;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+.zc-q-option:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+.zc-q-option.is-on {
+  background: var(--raised);
+  color: var(--text);
+}
+.zc-q-key {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-strong);
+  background: var(--raised);
+  color: var(--text-4);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+.zc-q-option.is-on .zc-q-key {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--bg);
+}
+.zc-q-label {
+  flex-grow: 1;
+  min-width: 0;
+  line-height: 1.5;
+}
+.zc-q-rec {
+  display: inline-flex;
+  color: var(--text-4);
+}
+.zc-q-other {
+  cursor: text;
+}
+.zc-q-other-input {
+  flex-grow: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  padding: 0;
+  outline: none;
+}
+.zc-q-other-input::placeholder {
+  color: var(--text-4);
+}
+.zc-q-foot {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+.zc-q-skip {
+  height: var(--control-h);
+  padding: 0 var(--space-7);
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--raised);
+  color: var(--text-2);
+  font: inherit;
+  cursor: pointer;
+}
+.zc-q-skip:hover {
+  background: var(--raised-2);
+  color: var(--text);
+}
+.zc-q-next {
+  height: var(--control-h);
+  padding: 0 var(--space-3) 0 var(--space-7);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-5);
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--primary);
+  color: var(--on-primary);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.zc-q-next:hover {
+  background: var(--text-2);
+}
+.zc-q-next:disabled {
+  background: var(--raised-2);
+  color: var(--text-off);
+  cursor: not-allowed;
+}
+.zc-q-keys {
+  display: inline-flex;
+  gap: 2px;
+}
+.zc-q-keys kbd {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 3px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  background: rgba(17, 18, 20, 0.12);
+  color: inherit;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+}
+.zc-q-next:disabled .zc-q-keys kbd {
+  background: var(--raised);
+}
+@media (prefers-reduced-motion: reduce) {
+  .zc-q-option,
+  .zc-q-key {
+    transition: none;
+  }
+}
+
+.zc-step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  width: 100%;
+  padding: var(--space-3) 0;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+.zc-step:hover {
+  color: var(--text);
+}
+.zc-step-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--approved);
+}
+.zc-step.is-live .zc-step-dot {
+  background: var(--attention);
+  box-shadow: 0 0 0 3px var(--attention-soft);
+}
+
+.zc-ai-chat {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-height: 0;
+}
+.zc-chat-actions {
+  flex-shrink: 0;
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+}
+.zc-chat-actions select {
+  min-width: 0;
+  max-width: 220px;
+  background: var(--panel);
+  color: var(--text-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: var(--space-2);
+}
+.zc-chat-messages {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  overflow-wrap: anywhere;
+}
+.zc-chat-user {
+  white-space: pre-wrap;
+  margin-left: var(--space-8);
+  padding: var(--space-5) var(--space-6);
+  border-radius: var(--radius-xl);
+  background: var(--raised);
+}
+.zc-chat-ref {
+  color: var(--info);
+  background: var(--info-soft);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-2);
+}
+.zc-chat-input {
+  flex-shrink: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  background: var(--bg);
+}
+.zc-chat-input textarea {
+  width: 100%;
+  resize: vertical;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+}
+.zc-markdown p {
+  white-space: pre-wrap;
+  margin-block: var(--space-3);
+}
+.zc-chat-assistant,
+.zc-markdown {
+  min-width: 0;
+}
+.zc-markdown-table {
+  max-width: 100%;
+  overflow-x: auto;
+  margin-block: var(--space-3);
+}
+.zc-markdown-table table {
+  border-collapse: collapse;
+  width: 100%;
+}
+.zc-markdown-table th,
+.zc-markdown-table td {
+  border: 1px solid var(--line);
+  padding: var(--space-3) var(--space-4);
+  text-align: left;
+  min-width: 8ch;
+}
+.zc-markdown-table th {
+  background: var(--raised);
+  color: var(--text);
+}
+.zc-markdown pre,
+.zc-step-detail {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  font-family: var(--font-mono);
+}
+.zc-draft {
+  padding: var(--space-6);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+}
+.zc-ai-chat a {
+  color: var(--info);
+}
+
+.zc-step.is-failed {
+  color: var(--attention);
+}
+.zc-step.is-live > .zc-icon {
+  color: var(--attention);
+}
+
+.zc-q-note {
+  display: block;
+  color: var(--text-4);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.zc-draft-counts,
+.zc-draft-counts > span {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.zc-draft-counts {
+  gap: var(--space-6);
+  margin-block: var(--space-5);
+  color: var(--text-3);
+}
+.zc-chat-history {
+  flex-shrink: 0;
+  max-height: 30%;
+  overflow: auto;
+}
+.zc-chat-history-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-4);
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  text-align: left;
+}
+.zc-chat-history-row:hover,
+.zc-chat-history-row[aria-current="true"] {
+  background: var(--raised);
+  color: var(--text);
+}
+.zc-chat-history-row > svg,
+.zc-chat-history-row > time {
+  flex-shrink: 0;
+}
+.zc-chat-history-title,
+.zc-session-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.zc-chat-history-title {
+  flex: 1;
+}
+.zc-chat-history-row > time {
+  color: var(--text-4);
+  font-size: 12px;
+}
+.zc-session-tabs {
+  flex-wrap: wrap;
+}
+.zc-session-tabs > .zc-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: 100%;
+}
+.zc-session-count {
+  flex-shrink: 0;
+  color: var(--text-4);
+  font-size: 12px;
+}

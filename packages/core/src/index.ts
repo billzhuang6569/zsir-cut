@@ -16,6 +16,7 @@ export * from "./project/types.ts";
 export * from "./rational.ts";
 export {
   commandSchemaForVerb,
+  flattenMcpSchema,
   validateCommand,
   validateEnvelope,
   validateLossReport,
