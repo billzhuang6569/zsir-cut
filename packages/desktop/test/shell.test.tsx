@@ -8,7 +8,10 @@ import { createRoot } from "react-dom/client";
 import { describe, expect, it, vi } from "vitest";
 import type { UiState } from "../../app-host/src/ui.js";
 import { App } from "../src/App.js";
+import type { ProjectView } from "../src/connection.js";
+import { connectHost } from "../src/connection.js";
 import { applyUi, initialState } from "../src/state.js";
+import { TimelinePreview } from "../src/TimelinePreview.js";
 import { tokenCss } from "../src/tokens.js";
 
 describe("desktop shell", () => {
@@ -19,6 +22,8 @@ describe("desktop shell", () => {
     const root = createRoot(container);
     try {
       await act(() => root.render(<App />));
+      expect(container.querySelector('[id$="-tab-ai"]')?.textContent).toBe("AI");
+      expect(container.querySelector('[role="tabpanel"] h2')?.textContent).toBe("AI");
       for (const name of ["菜单栏", "功能区", "预览", "参数区", "工具栏", "时间线"]) {
         expect(container.querySelector(`[aria-label="${name}"]`)).not.toBeNull();
       }
@@ -258,5 +263,133 @@ it("opens the project through inspect and receives UI commands", async () => {
     container.remove();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  }
+});
+
+it("stacks overlapping cues in distinct rows with the earliest at the bottom", async () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const project: ProjectView = {
+    id: "timeline",
+    name: "测试",
+    revision: { id: "r1", seq: 1 },
+    edit_rate: "25",
+    start_timecode: "00:00:00:00",
+    drop_frame: false,
+    duration: { t: "10s" },
+    markers: [],
+    media: [],
+    styles: [],
+    tracks: [{ id: "sub", name: "字幕", kind: "subtitle", enabled: true, clips: [] }],
+    cues: [
+      { cue_id: "later", track_id: "sub", start: "1s", end: "4s", text: "后来的一句", style_id: "s", piece: 0 },
+      {
+        cue_id: "first",
+        track_id: "sub",
+        start: "0s",
+        end: "3s",
+        text: "先出现的标题\n第二行",
+        style_id: "s",
+        piece: 0,
+      },
+    ],
+  };
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  try {
+    await act(() =>
+      root.render(
+        <TimelinePreview
+          project={project}
+          state={{ ...initialState(), playhead: { at: "2s" } }}
+          update={() => {}}
+          config={undefined}
+          call={async () => ({})}
+          error={null}
+          dragging={{ current: false }}
+        />,
+      ),
+    );
+    const captions = [...container.querySelectorAll<HTMLElement>(".zc-caption")];
+    expect(captions.map((caption) => caption.textContent)).toEqual(["先出现的标题\n第二行", "后来的一句"]);
+    expect(captions.map((caption) => caption.style.gridRow)).toEqual(["2", "1"]);
+    const css = readFileSync(new NodeURL("../src/timeline.css", import.meta.url), "utf8");
+    expect(css).toMatch(/\.zc-caption\s*\{[^}]*grid-column: 1/s);
+    expect(css).toMatch(/\.zc-caption-stack\s*\{[^}]*display: grid/s);
+    expect(css).toMatch(/\.zc-ruler-row\s*\{[^}]*position: sticky;[^}]*top: 0/s);
+    const shell = readFileSync(new NodeURL("../src/shell.css", import.meta.url), "utf8");
+    expect(shell).toMatch(/\.zc-timeline\s*\{[^}]*min-height: 0;[^}]*overflow: auto/s);
+    expect(container.querySelector(".zc-track .zc-track-name")?.parentElement).toBe(
+      container.querySelector(".zc-track-lane")?.parentElement,
+    );
+  } finally {
+    await act(() => root.unmount());
+  }
+});
+
+it("shows Chinese open errors and preserves the kernel code in the tooltip", async () => {
+  let socket: FakeSocket | undefined;
+  class FakeSocket {
+    onopen: (() => void) | null = null;
+    onmessage: ((event: MessageEvent) => void) | null = null;
+    onclose = null;
+    constructor() {
+      socket = this;
+    }
+    send(raw: string) {
+      const request = JSON.parse(raw);
+      queueMicrotask(() =>
+        this.onmessage?.(
+          new MessageEvent("message", {
+            data: JSON.stringify({
+              id: request.id,
+              envelope: { ok: false, error: { code: "E_VALIDATION", message: "Project file is invalid" } },
+            }),
+          }),
+        ),
+      );
+    }
+    close() {}
+  }
+  vi.stubGlobal("WebSocket", FakeSocket);
+  const error = vi.fn();
+  const disconnect = connectHost(
+    { port: 1, token: "test" },
+    {
+      ui: () => initialState(),
+      project: vi.fn(),
+      icon: vi.fn(),
+      error,
+    },
+  );
+  try {
+    socket?.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ type: "bootstrap", project: "bad" }) }));
+    await vi.waitFor(() =>
+      expect(error).toHaveBeenCalledWith("工程文件打不开：工程文件无效", "E_VALIDATION Project file is invalid"),
+    );
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    try {
+      await act(() =>
+        root.render(
+          <TimelinePreview
+            project={null}
+            state={initialState()}
+            update={() => {}}
+            config={undefined}
+            call={async () => ({})}
+            error={error.mock.calls[0]?.[0]}
+            errorDetail={error.mock.calls[0]?.[1]}
+            dragging={{ current: false }}
+          />,
+        ),
+      );
+      expect(container.querySelector('[role="alert"]')?.getAttribute("title")).toContain("E_VALIDATION");
+      expect(container.querySelector('[role="alert"]')?.textContent).not.toContain("Project file is invalid");
+    } finally {
+      await act(() => root.unmount());
+    }
+  } finally {
+    disconnect();
+    vi.unstubAllGlobals();
   }
 });

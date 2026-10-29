@@ -44,8 +44,8 @@ export function useReverseAudio(
       .then((buffer) => {
         if (!controller.signal.aborted) setDecoded({ src, buffer: reverseBuffer(audio, buffer) });
       })
-      .catch((reason: Error) => {
-        if (!controller.signal.aborted) error(reason.message);
+      .catch(() => {
+        if (!controller.signal.aborted) error("倒放声音读取或解码失败");
       });
     return () => controller.abort();
   }, [src, reverse, decoded, error]);
@@ -82,7 +82,7 @@ export function useReverseAudio(
     volume.connect(audio.destination);
     active.current = { node, gain: volume, at: offset, started: audio.currentTime, rate, clip: clipId };
     node.start(0, offset);
-    void audio.resume().catch((reason: Error) => error(reason.message));
+    void audio.resume().catch(() => error("声音播放失败，请重试"));
   }, [src, clipId, seconds, speed, playing, reverse, decoded, gain, error]);
   useEffect(
     () => () => {

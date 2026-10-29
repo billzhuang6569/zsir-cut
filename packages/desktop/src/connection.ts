@@ -8,7 +8,7 @@ export interface ProjectView extends TimelineView, PreviewData {
 interface ResultEnvelope {
   ok: boolean;
   result: unknown;
-  error: { message: string } | null;
+  error: { message: string; code?: string } | null;
 }
 export function connectHost(
   config: { port: number; token: string },
@@ -16,7 +16,7 @@ export function connectHost(
     ui: (verb: UiVerb, request: Record<string, unknown>) => UiState | Promise<UiState>;
     project: (path: string, view: ProjectView) => void;
     icon: (value: string | null) => void;
-    error: (message: string) => void;
+    error: (message: string, detail?: string) => void;
   },
 ): (() => void) & { call: (verb: string, request: Record<string, unknown>) => Promise<unknown> } {
   const socket = new WebSocket(`ws://127.0.0.1:${config.port}/?token=${encodeURIComponent(config.token)}`);
@@ -46,22 +46,36 @@ export function connectHost(
     if (message.type === "bootstrap") {
       project = message.project;
       handlers.icon(message.fcpIcon);
-      void refresh().catch((error: Error) => handlers.error(error.message));
+      void refresh().catch((error: Error) =>
+        handlers.error(`工程文件打不开：${error.message}`, String(error.cause ?? error.message)),
+      );
     } else if (message.type === "project_changed") {
-      void refresh().catch((error: Error) => handlers.error(error.message));
+      void refresh().catch((error: Error) =>
+        handlers.error(`工程文件打不开：${error.message}`, String(error.cause ?? error.message)),
+      );
     } else if (message.type === "ui_request") {
       uiQueue = uiQueue
         .then(async () => {
           const result = await handlers.ui(message.verb, message.request);
           socket.send(JSON.stringify({ type: "ui_result", id: message.id, result }));
         })
-        .catch((error: Error) => handlers.error(error.message));
+        .catch(() => handlers.error("界面操作失败，请重试"));
     } else if (message.envelope) {
       const item = pending.get(message.id);
       pending.delete(message.id);
       const envelope = message.envelope as ResultEnvelope;
       if (envelope.ok) item?.resolve(envelope.result);
-      else item?.reject(new Error(envelope.error?.message ?? "宿主请求失败"));
+      else
+        item?.reject(
+          new Error(
+            envelope.error?.code === "E_VALIDATION"
+              ? "工程文件无效"
+              : envelope.error?.code === "E_NOT_FOUND"
+                ? "找不到工程文件"
+                : "请求失败，请检查工程后重试",
+            { cause: `${envelope.error?.code ?? ""} ${envelope.error?.message ?? ""}`.trim() },
+          ),
+        );
     }
   };
   socket.onerror = () => handlers.error("无法连接本机宿主进程");

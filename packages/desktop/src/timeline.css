@@ -173,13 +173,21 @@
   object-fit: contain;
 }
 .zc-caption {
+  grid-column: 1;
   font-size: calc(var(--cue-size, 0.055) * 100cqh);
+  line-height: 1.2;
+  text-align: center;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.zc-caption-stack {
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
-  text-align: center;
-  white-space: pre-line;
+  width: max-content;
   max-width: 95%;
+  display: grid;
+  justify-items: center;
 }
 .zc-approx {
   position: absolute;
@@ -236,6 +244,10 @@
   cursor: pointer;
 }
 .zc-ruler-row {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-timeline);
   display: flex;
   height: 28px;
 }
@@ -272,8 +284,9 @@
   z-index: 2;
 }
 .zc-playhead button {
-  position: absolute;
-  left: -7px;
+  position: sticky;
+  display: block;
+  transform: translateX(-50%);
   top: 0;
   border: 0;
   padding: 0;

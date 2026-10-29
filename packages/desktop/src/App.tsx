@@ -16,6 +16,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
   const projectRef = useRef(project);
   projectRef.current = project;
   const dragging = useRef(false);
+  const [errorDetail, setErrorDetail] = useState<string | undefined>();
   const [error, setError] = useState<string | null>(null);
   const update = useCallback((next: UiState) => {
     current.current = next;
@@ -39,7 +40,10 @@ export function App({ config }: { config?: { port: number; token: string } }) {
         setError(null);
       },
       icon: () => {},
-      error: setError,
+      error: (message, detail) => {
+        setError(message);
+        setErrorDetail(detail);
+      },
     });
     connection.current = host;
     return () => {
@@ -110,6 +114,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
         update={update}
         config={config}
         error={error}
+        errorDetail={errorDetail}
         dragging={dragging}
         call={(verb, request) => connection.current?.call(verb, request) ?? Promise.reject(new Error("宿主未连接"))}
       />

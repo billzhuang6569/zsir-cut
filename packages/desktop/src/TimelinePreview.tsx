@@ -115,6 +115,7 @@ export function TimelinePreview({
   config,
   call,
   error,
+  errorDetail,
   dragging,
 }: {
   project: ProjectView | null;
@@ -123,12 +124,14 @@ export function TimelinePreview({
   config: Config | undefined;
   call: (verb: string, request: Record<string, unknown>) => Promise<unknown>;
   error: string | null;
+  errorDetail?: string | undefined;
   dragging: React.MutableRefObject<boolean>;
 }) {
   const [scale, setScale] = useState(48);
   const [snap, setSnap] = useState(true);
   const [tool, setTool] = useState("select");
   const [writeError, setWriteError] = useState<string | null>(null);
+  const [writeErrorDetail, setWriteErrorDetail] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
   const [direction, setDirection] = useState(1n);
   const video = useRef<HTMLVideoElement>(null);
@@ -164,7 +167,13 @@ export function TimelinePreview({
     if (!project) return;
     const target = seekTarget(project, project.cues, state.playhead);
     if (!("at" in state.playhead)) update({ ...state, playhead: { at: target } });
-    playhead.current?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    const head = playhead.current;
+    const scroller = head?.closest(".zc-timeline");
+    if (head && scroller) {
+      const x = head.offsetLeft;
+      if (x < scroller.scrollLeft) scroller.scrollLeft = x;
+      else if (x > scroller.scrollLeft + scroller.clientWidth) scroller.scrollLeft = x - scroller.clientWidth;
+    }
   }, [project, state.playhead, update, state]);
   useEffect(() => {
     if (!state.playing || !project) return;
@@ -245,6 +254,7 @@ export function TimelinePreview({
     if (!project || busy) return;
     setBusy(true);
     setWriteError(null);
+    setWriteErrorDetail(undefined);
     try {
       await call(verb, {
         project: state.project,
@@ -255,7 +265,8 @@ export function TimelinePreview({
         ...(ops ? { timeline_id: project.id, ops } : {}),
       });
     } catch (error) {
-      setWriteError(String(error));
+      setWriteError(error instanceof Error ? error.message : "操作失败，请重试");
+      setWriteErrorDetail(error instanceof Error ? String(error.cause ?? error.message) : undefined);
     } finally {
       setBusy(false);
     }
@@ -349,7 +360,11 @@ export function TimelinePreview({
   return (
     <>
       <section aria-label="预览" className="zc-viewer">
-        {(error || writeError) && <p role="alert">{error || writeError}</p>}
+        {(error || writeError) && (
+          <p role="alert" title={error ? errorDetail : writeErrorDetail}>
+            {error || writeError}
+          </p>
+        )}
         <div className="zc-picture">
           {src && media?.kind === "image" ? (
             <img src={src} alt={media.name ?? "预览"} />
@@ -371,31 +386,51 @@ export function TimelinePreview({
               近似
             </span>
           )}
-          {captions.map((cue) => {
-            const style = project?.styles.find((item) => item.id === cue.style_id);
-            return (
-              <span
-                key={`${cue.track_id}-${cue.cue_id}-${cue.piece}`}
-                className="zc-caption"
-                style={{
-                  fontFamily: style?.font_family,
-                  ...{ "--cue-size": style?.font_size },
-                  fontWeight: style?.font_weight,
-                  color: style?.color,
-                  background: style?.box?.color,
-                  padding: style?.box?.padding,
-                  WebkitTextStroke: style?.outline ? `${style.outline.width}em ${style.outline.color}` : undefined,
-                  ...(style?.position?.anchor === "top"
-                    ? { top: `${style.position.margin_v * 100}%`, bottom: "auto" }
-                    : style?.position?.anchor === "middle"
-                      ? { top: "50%", bottom: "auto" }
-                      : { bottom: `${(style?.position?.margin_v ?? 0.08) * 100}%` }),
-                }}
-              >
-                {cue.text}
-              </span>
-            );
-          })}
+          {project?.tracks
+            .filter((track) => track.kind === "subtitle")
+            .map((track) => {
+              const active = captions
+                .filter((cue) => cue.track_id === track.id)
+                .sort((a, b) => compare(parseRational(a.start, true), parseRational(b.start, true)));
+              const position = project.styles.find((style) => style.id === active[0]?.style_id)?.position;
+              return (
+                <div
+                  key={track.id}
+                  className="zc-caption-stack"
+                  style={
+                    position?.anchor === "top"
+                      ? { top: `${position.margin_v * 100}%` }
+                      : position?.anchor === "middle"
+                        ? { top: "50%" }
+                        : { bottom: `${(position?.margin_v ?? 0.08) * 100}%` }
+                  }
+                >
+                  {active.map((cue, index) => {
+                    const style = project.styles.find((item) => item.id === cue.style_id);
+                    return (
+                      <span
+                        key={`${cue.cue_id}-${cue.piece}`}
+                        className="zc-caption"
+                        style={{
+                          gridRow: active.length - index,
+                          fontFamily: style?.font_family,
+                          ...{ "--cue-size": style?.font_size },
+                          fontWeight: style?.font_weight,
+                          color: style?.color,
+                          background: style?.box?.color,
+                          padding: style?.box?.padding,
+                          WebkitTextStroke: style?.outline
+                            ? `${style.outline.width}em ${style.outline.color}`
+                            : undefined,
+                        }}
+                      >
+                        {cue.text}
+                      </span>
+                    );
+                  })}
+                </div>
+              );
+            })}
         </div>
         <div className="zc-player">
           <IconButton
