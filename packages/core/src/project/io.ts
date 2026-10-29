@@ -151,6 +151,16 @@ export function parseProject(text: string): ParseProjectResult {
   } catch (error) {
     return { ok: false, errors: [parseError(error instanceof Error ? error.message : String(error))] };
   }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schema" in value &&
+    value.schema === "zsir-cut/timeline" &&
+    "schema_version" in value &&
+    value.schema_version === "0.1"
+  ) {
+    value.schema_version = "0.2";
+  }
   const validation = validateProject(value);
   if (!validation.valid) {
     return {

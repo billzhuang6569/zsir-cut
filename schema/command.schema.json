@@ -1003,6 +1003,13 @@
             },
             "text": {
               "type": "string"
+            },
+            "level": {
+              "type": "integer",
+              "enum": [
+                1,
+                2
+              ]
             }
           },
           "additionalProperties": false
@@ -1036,6 +1043,13 @@
             },
             "text": {
               "type": "string"
+            },
+            "level": {
+              "type": "integer",
+              "enum": [
+                1,
+                2
+              ]
             }
           },
           "additionalProperties": false,
@@ -1071,6 +1085,14 @@
               "properties": {
                 "text": true
               }
+            },
+            {
+              "required": [
+                "level"
+              ],
+              "properties": {
+                "level": true
+              }
             }
           ]
         },
@@ -1094,8 +1116,7 @@
           "type": "object",
           "required": [
             "op",
-            "kind",
-            "name"
+            "kind"
           ],
           "properties": {
             "op": {
@@ -1794,7 +1815,6 @@
           "type": "object",
           "required": [
             "op",
-            "name",
             "language",
             "carrier_tracks",
             "default_style_id"
@@ -1824,6 +1844,107 @@
             }
           },
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "track_id",
+            "name"
+          ],
+          "properties": {
+            "op": {
+              "const": "rename_track"
+            },
+            "track_id": {
+              "$ref": "#/$defs/id"
+            },
+            "name": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "media_id"
+          ],
+          "properties": {
+            "op": {
+              "const": "update_media"
+            },
+            "media_id": {
+              "$ref": "#/$defs/id"
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "folders": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "rating": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 5
+            },
+            "note": {
+              "type": "string"
+            },
+            "link": {
+              "type": "string"
+            }
+          },
+          "anyOf": [
+            {
+              "required": [
+                "tags"
+              ],
+              "properties": {
+                "tags": true
+              }
+            },
+            {
+              "required": [
+                "folders"
+              ],
+              "properties": {
+                "folders": true
+              }
+            },
+            {
+              "required": [
+                "rating"
+              ],
+              "properties": {
+                "rating": true
+              }
+            },
+            {
+              "required": [
+                "note"
+              ],
+              "properties": {
+                "note": true
+              }
+            },
+            {
+              "required": [
+                "link"
+              ],
+              "properties": {
+                "link": true
+              }
+            }
+          ]
         }
       ]
     }

@@ -7,10 +7,11 @@ import { newId } from "./id.ts";
 import { projectSubtitles } from "./projection.ts";
 import { applySubtitleEdit } from "./subtitle-edit.ts";
 import { clipTimeMap, mapClipTimeToSource, mapSourceTimeToClip } from "./time-map.ts";
+import { automaticTrackName } from "./track-name.ts";
 import type { Clip, Marker, Media, MediaTrack, Project, Timeline, TimeMapPoint, Token, Track } from "./types.ts";
 
 export class EditError extends Error {
-  readonly code: "E_VALIDATION" | "E_NOT_FOUND" | "E_UNSUPPORTED" | "E_LOCKED" | "E_SESSION_STATE";
+  readonly code: "E_MIXED_DOMAIN" | "E_VALIDATION" | "E_NOT_FOUND" | "E_UNSUPPORTED" | "E_LOCKED" | "E_SESSION_STATE";
   constructor(code: EditError["code"], message: string) {
     super(message);
     this.code = code;
@@ -623,22 +624,33 @@ function applyOne(project: Project, timeline: Timeline, op: Op, generate: (prefi
         duration: t("duration"),
         kind: op.kind as Marker["kind"],
         text: op.text as string,
+        ...(op.level !== undefined ? { level: op.level as 1 | 2 } : {}),
       });
       break;
     case "update_marker": {
       const marker =
         timeline.markers.find((item) => item.id === op.marker_id) ?? fail("E_NOT_FOUND", "Marker not found");
-      if (!["at", "duration", "kind", "text"].some((field) => Object.hasOwn(op, field)))
+      if (!["at", "duration", "kind", "text", "level"].some((field) => Object.hasOwn(op, field)))
         fail("E_VALIDATION", "No marker field supplied");
       const converted = { ...op };
       if (op.at !== undefined) converted.at = t("at");
       if (op.duration !== undefined) converted.duration = t("duration");
-      setFields(marker, converted, ["at", "duration", "kind", "text"]);
+      setFields(marker, converted, ["at", "duration", "kind", "text", "level"]);
       break;
     }
     case "remove_marker": {
       if (!timeline.markers.some((item) => item.id === op.marker_id)) fail("E_NOT_FOUND", "Marker not found");
       timeline.markers = timeline.markers.filter((item) => item.id !== op.marker_id);
+      break;
+    }
+    case "rename_track":
+      track(timeline, op.track_id).name = op.name as string;
+      break;
+    case "update_media": {
+      const media = project.media.find((item) => item.id === op.media_id) ?? fail("E_NOT_FOUND", "Media not found");
+      media.organize ??= {};
+      setFields(media.organize, op, ["tags", "folders", "rating", "note", "link"]);
+      if (media.organize.tags) media.organize.tags = [...new Set(media.organize.tags)];
       break;
     }
     case "add_track": {
@@ -647,7 +659,7 @@ function applyOne(project: Project, timeline: Timeline, op: Op, generate: (prefi
       timeline.tracks.splice(index, 0, {
         id: id(op.id, "trk_", generate),
         kind: op.kind as "video" | "audio",
-        name: op.name as string,
+        name: (op.name as string | undefined) ?? automaticTrackName(timeline.tracks, op.kind as "video" | "audio"),
         enabled: true,
         clips: [],
         transitions: [],
@@ -690,6 +702,18 @@ export function applyEdit(
     (timelineId ? project.timelines.find((item) => item.id === timelineId) : project.timelines[0]) ??
     fail("E_NOT_FOUND", `Timeline ${timelineId} does not exist`);
   const imageIds = new Set(project.media.filter((media) => media.kind === "image").map((media) => media.id));
+  const trackKinds = new Map(timeline.tracks.map((track) => [track.id, track.kind]));
+  let subtitleDomain: boolean | undefined;
+  for (const op of ops) {
+    const isSubtitle =
+      SUBTITLE_OPS.has(op.op) || (op.op === "rename_track" && trackKinds.get(op.track_id as string) === "subtitle");
+    if (subtitleDomain !== undefined && subtitleDomain !== isSubtitle)
+      fail("E_MIXED_DOMAIN", "Editing and subtitle operations cannot be mixed");
+    subtitleDomain = isSubtitle;
+    if (typeof op.id === "string" && (op.op === "add_track" || op.op === "add_subtitle_track"))
+      trackKinds.set(op.id, op.op === "add_subtitle_track" ? "subtitle" : (op.kind as "video" | "audio"));
+    if (op.op === "remove_track") trackKinds.delete(op.track_id as string);
+  }
   for (const op of ops) {
     const before = structuredClone(project);
     if (SUBTITLE_OPS.has(op.op)) applySubtitleEdit(project, timeline, op, generate, allowForce);

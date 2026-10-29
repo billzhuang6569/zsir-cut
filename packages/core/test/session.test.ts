@@ -66,6 +66,21 @@ afterEach(async () => {
 });
 
 describe("sessions and diff", () => {
+  it("uses the target track domain for renames inside a draft", async () => {
+    const bytes = await readFile(project, "utf8");
+    const subtitle = (await load()).timelines[0]?.tracks.find((track) => track.kind === "subtitle");
+    const session_id = await begin();
+    const rename = { op: "rename_track", track_id: subtitle?.id, name: "字幕 A" };
+    const mixed = await send("edit", { session_id, ops: [rename, label("clp_v1", "mixed")] });
+    expect(mixed.error?.code).toBe("E_MIXED_DOMAIN");
+    const edited = await send("edit", { session_id, ops: [rename, token] });
+    expect(edited.status).toBe("drafted");
+    expect(edited.changes).toContainEqual(
+      expect.objectContaining({ entity: "track", id: subtitle?.id, op: "rename_track" }),
+    );
+    expect(await readFile(project, "utf8")).toBe(bytes);
+  });
+
   it("reads the draft's placements, entities, history and diff without changing main", async () => {
     const bytes = await readFile(project, "utf8");
     const session_id = await begin();

@@ -183,7 +183,11 @@ export function validateProjectSemantics(project: Project, parseIssues: ProjectI
           report("E_HANDLES", "error", "Insufficient transition source handles", transition.id, from.id, to.id);
       }
     }
-    for (const marker of timeline.markers) addId(marker.id);
+    for (const marker of timeline.markers) {
+      addId(marker.id);
+      if (marker.level !== undefined && marker.kind !== "chapter")
+        report("E_VALIDATION", "error", "Only chapter markers may have a level", marker.id);
+    }
   }
 
   for (const [occurrence, clips] of occurrenceClips) {

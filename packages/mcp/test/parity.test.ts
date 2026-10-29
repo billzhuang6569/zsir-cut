@@ -212,6 +212,39 @@ describe("CLI and MCP", () => {
             ops: [{ op: "set_clip", clip_id: "clp_v9", label: "preview" }],
           },
         },
+        ...[
+          [{ op: "update_media", media_id: "med_A", tags: ["A", "A", "B"], rating: 4 }],
+          [
+            { op: "rename_track", track_id: "trk_v1", name: "视频 Z" },
+            { op: "add_track", kind: "video" },
+          ],
+          [
+            {
+              op: "add_subtitle_track",
+              id: "trk_parity",
+              language: "zh",
+              carrier_tracks: ["trk_a1"],
+              default_style_id: "sty_zh",
+            },
+            { op: "rename_track", track_id: "trk_parity", name: "字幕 Z" },
+          ],
+          [
+            {
+              op: "add_marker",
+              id: "mrk_parity",
+              at: "0s",
+              duration: "0s",
+              kind: "chapter",
+              text: "chapter",
+              level: 1,
+            },
+            { op: "update_marker", marker_id: "mrk_parity", level: 2 },
+          ],
+          [{ op: "add_marker", at: "0s", duration: "0s", kind: "note", text: "invalid", level: 1 }],
+        ].map((ops, index) => ({
+          verb: "edit",
+          input: { ...base, dry_run: true, idempotency_key: `format-02-${index}`, ops },
+        })),
         { verb: "undo", input: base },
       ] as const;
       for (const { verb, input } of cases) {

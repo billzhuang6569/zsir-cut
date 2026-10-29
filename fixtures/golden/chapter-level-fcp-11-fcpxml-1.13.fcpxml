@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE fcpxml>
+<fcpxml version="1.13">
+  <resources>
+    <format id="r1" name="FFVideoFormat1080p25" frameDuration="1/25s" width="1920" height="1080" colorSpace="1-1-1 (Rec. 709)"/>
+    <format id="r2" name="FFVideoFormat1080p25" frameDuration="1/25s" width="1920" height="1080" colorSpace="1-1-1 (Rec. 709)"/>
+    <asset id="r3" name="A001.mov" start="36000s" duration="60s" hasVideo="1" videoSources="1" format="r2" hasAudio="1" audioSources="1" audioChannels="2" audioRate="48000">
+      <media-rep kind="original-media" src="file:///__MEDIA_ROOT__/med_a.mov"/>
+      <metadata>
+        <md key="com.zsir-cut.media-id" value="med_a"/>
+      </metadata>
+    </asset>
+  </resources>
+  <library>
+    <event name="zsir-cut">
+      <project name="最小示例 · 主时间线">
+        <sequence format="r1" duration="10s" tcStart="0s" tcFormat="NDF" audioLayout="stereo" audioRate="48k">
+          <spine>
+            <asset-clip ref="r3" offset="0s" start="36004s" duration="10s" srcEnable="all" format="r2">
+              <chapter-marker start="36004s" value="一级"/>
+              <chapter-marker start="36005s" value="二级"/>
+              <chapter-marker start="36006s" value="默认"/>
+              <marker start="36007s" value="备注"/>
+              <audio-channel-source srcCh="1, 2"/>
+              <metadata>
+                <md key="com.zsir-cut.clip-id" value="clp_v1"/>
+                <md key="com.zsir-cut.occurrence-id" value="occ_1"/>
+                <md key="com.zsir-cut.audio-clip-id" value="clp_a1"/>
+              </metadata>
+            </asset-clip>
+          </spine>
+        </sequence>
+      </project>
+    </event>
+  </library>
+</fcpxml>

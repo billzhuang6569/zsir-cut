@@ -1,0 +1,53 @@
+[
+  {
+    "entity_id": "mrk_parent",
+    "entity_kind": "marker",
+    "feature": "marker_level",
+    "status": "approximated",
+    "severity": "warning",
+    "reason_code": "R_FORMAT_NO_FIELD",
+    "consequence": "目标格式的章节标记不区分层级",
+    "timeline_range": null,
+    "fallback_asset": null,
+    "recoverable_from_source_project": true
+  },
+  {
+    "entity_id": "mrk_child",
+    "entity_kind": "marker",
+    "feature": "marker_level",
+    "status": "approximated",
+    "severity": "warning",
+    "reason_code": "R_FORMAT_NO_FIELD",
+    "consequence": "目标格式的章节标记不区分层级",
+    "timeline_range": null,
+    "fallback_asset": null,
+    "recoverable_from_source_project": true
+  },
+  {
+    "entity_id": "clp_a1",
+    "entity_kind": "clip",
+    "feature": "av_sync",
+    "status": "unsupported",
+    "severity": "warning",
+    "reason_code": "R_FORMAT_NO_FIELD",
+    "consequence": "声道选择保存在 OTIO 元数据中，需在 Resolve 中重设",
+    "timeline_range": {
+      "start": "0s",
+      "duration": "10s"
+    },
+    "fallback_asset": null,
+    "recoverable_from_source_project": true
+  },
+  {
+    "entity_id": "med_a",
+    "entity_kind": "media",
+    "feature": "media",
+    "status": "unsupported",
+    "severity": "error",
+    "timeline_range": null,
+    "reason_code": "R_MEDIA_OFFLINE",
+    "consequence": "素材离线或指纹不符，请重链接后再导入",
+    "fallback_asset": null,
+    "recoverable_from_source_project": true
+  }
+]

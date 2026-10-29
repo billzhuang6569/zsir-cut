@@ -3,6 +3,7 @@ import { compare, parseRational, rational, sub } from "../rational.ts";
 import { EditError } from "./edit.ts";
 import { newId } from "./id.ts";
 import { mediaFromProbe, type Probe } from "./probe.ts";
+import { automaticTrackName } from "./track-name.ts";
 import type { Author, Project, Track } from "./types.ts";
 
 export interface CreateProjectRequest {
@@ -52,14 +53,23 @@ export async function buildProject(input: CreateProjectRequest, probe: Probe): P
   }
   if (!editRate || width === undefined || height === undefined)
     throw new EditError("E_VALIDATION", "timeline 和 match_media 缺少 edit_rate、width 或 height");
-  const tracks: Track[] = [{ id: "trk_v1", kind: "video", name: "V1", enabled: true, clips: [], transitions: [] }];
+  const tracks: Track[] = [
+    { id: "trk_v1", kind: "video", name: automaticTrackName([], "video"), enabled: true, clips: [], transitions: [] },
+  ];
   for (let index = 1; index <= (settings.audio_tracks ?? 2); index++)
-    tracks.push({ id: `trk_a${index}`, kind: "audio", name: `A${index}`, enabled: true, clips: [], transitions: [] });
+    tracks.push({
+      id: `trk_a${index}`,
+      kind: "audio",
+      name: automaticTrackName(tracks, "audio"),
+      enabled: true,
+      clips: [],
+      transitions: [],
+    });
   if (input.subtitles)
     tracks.push({
       id: "trk_sub1",
       kind: "subtitle",
-      name: input.subtitles.name ?? "字幕",
+      name: input.subtitles.name ?? automaticTrackName(tracks, "subtitle"),
       enabled: true,
       language: input.subtitles.language,
       carrier_tracks: ["trk_a1"],
@@ -69,7 +79,8 @@ export async function buildProject(input: CreateProjectRequest, probe: Probe): P
     });
   return {
     schema: "zsir-cut/timeline",
-    schema_version: "0.1",
+    schema_version: "0.2",
+    ...(input.subtitles ? { recognition: { language: input.subtitles.language } } : {}),
     id: newId("prj_"),
     name: input.name,
     revision: { seq: 1, id: newId("rev_"), parent: null, created_at: new Date().toISOString(), author: input.author },

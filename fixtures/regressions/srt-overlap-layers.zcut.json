@@ -1,6 +1,6 @@
 {
   "schema": "zsir-cut/timeline",
-  "schema_version": "0.1",
+  "schema_version": "0.2",
   "id": "prj_srt_layers",
   "name": "重叠字幕分层回归",
   "revision": {

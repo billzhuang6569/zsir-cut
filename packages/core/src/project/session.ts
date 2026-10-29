@@ -4,7 +4,7 @@ import { hostname } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { Envelope, Verb } from "../dispatch.ts";
 import { startPreviewJob } from "../jobs.ts";
-import { applyEdit, SUBTITLE_OPS } from "./edit.ts";
+import { applyEdit } from "./edit.ts";
 import { diffProjectEntities, type EntityChange } from "./entities.ts";
 import { newId } from "./id.ts";
 import { parseProject, serializeProject } from "./io.ts";
@@ -274,20 +274,6 @@ async function runExistingSession(
   if (verb === "edit" || verb === "undo" || verb === "redo") {
     if (session.state === "in_review" && verb !== "edit")
       return reject(verb, id, "E_SESSION_STATE", "Session is in review");
-    if (verb === "edit") {
-      const ops = input.ops as { op: string }[];
-      if (ops.some((op) => SUBTITLE_OPS.has(op.op)) && !ops.every((op) => SUBTITLE_OPS.has(op.op))) {
-        const result = output(verb, id);
-        result.ok = false;
-        result.status = "rejected";
-        result.error = {
-          code: "E_MIXED_DOMAIN",
-          message: "Editing and subtitle operations cannot be mixed",
-          retryable: false,
-        };
-        return result;
-      }
-    }
     const request = writeRequest(verb, id, input, verb === "edit" ? (input.ops as unknown[]) : []);
     let applied: WriteEnvelope;
     if (verb === "edit") {

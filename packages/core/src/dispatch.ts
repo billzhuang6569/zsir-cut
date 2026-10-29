@@ -14,7 +14,7 @@ import { fingerprint } from "./fingerprint.ts";
 import { jobPath, readJob, startExportJob, startPreviewJob, startTranscribeJob } from "./jobs.ts";
 import { renderPreview, timelineFrames, viewTimeline } from "./preview.ts";
 import { buildProject, type CreateProjectRequest } from "./project/create.ts";
-import { applyEdit, SUBTITLE_OPS } from "./project/edit.ts";
+import { applyEdit } from "./project/edit.ts";
 import { diffProjectEntities } from "./project/entities.ts";
 import { newId } from "./project/id.ts";
 import { parseProject } from "./project/io.ts";
@@ -632,14 +632,6 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
       return await runSession(verb, request, requestId);
     if (verb === "edit") {
       const ops = request.ops as ({ op: string } & Record<string, unknown>)[];
-      if (ops.some((op) => SUBTITLE_OPS.has(op.op)) && !ops.every((op) => SUBTITLE_OPS.has(op.op)))
-        return errorEnvelope(
-          "edit",
-          requestId,
-          "rejected",
-          "E_MIXED_DOMAIN",
-          "Editing and subtitle operations cannot be mixed",
-        );
       const store = openProject({ projectPath: request.project as string });
       const entityOps: Record<string, string> = {};
       const mutator = (project: Parameters<typeof applyEdit>[0]) =>
