@@ -26,7 +26,7 @@ zsir-cut（庄Sir剪辑助手）是剪辑师和 AI Agent 共用的时间线中�
 
 ## spec 是合同
 
-- `docs/spec/`、`docs/adr/`、`docs/plan.md`、`schema/` 下已有的文件，以及 `tools/acceptance/`（Claude 的独立验收工具），你只读不改。
+- `docs/spec/`、`docs/adr/`、`docs/plan.md`、`schema/` 下已有的文件，`design/`（从设计系统同步的变量和参考实现），以及 `tools/acceptance/`（Claude 的独立验收工具），你只读不改。
 - 实现中发现 spec 有矛盾、遗漏或做不到的地方，不要自己绕过，也不要改 spec。在 PR 描述的「spec 问题」一节写清楚，按最保守的理解实现，或者停下来只交问题说明。
 - 例外：任务说明明确让你新建的 schema 文件，例如 `schema/command.schema.json`，按对应 spec 写。
 - 错误码、校验规则编号、状态值、动词名必须与 spec 完全一致，不新增。
@@ -50,6 +50,9 @@ packages/core        时间线模型、校验、编辑、投影、修订与日�
 packages/exporters   fcpxml、otio、xmeml 导出器与损失报告
 packages/cli         zcut 命令行
 packages/mcp         MCP server，与 CLI 共用 core，不另写逻辑
+packages/app-host    桌面版宿主进程：给界面的本机通道、MCP（含界面动词），见 ADR-0016
+packages/desktop     桌面版界面：React + Vite，只显示和交互
+apps/desktop-tauri   桌面版窗口壳：Tauri 2
 workers/asr          Python：识别、对齐
 fixtures/            测试工程、生成器、golden 文件、回归用例
 schema/  docs/  examples/

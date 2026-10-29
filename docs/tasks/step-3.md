@@ -35,7 +35,7 @@
 
 | 编号 | 内容 | 依赖 |
 |---|---|---|
-| 3.5 | Tauri + TS 桌面壳：六个区域的布局和尺寸按 `design.md` 第 5 节；设计变量；打开工程；界面动词（9.6）的 MCP 入口 | 设计稿验收 |
+| 3.5 | 桌面壳、宿主进程和六个区域的空布局，详见下文 | 设计稿验收（2026-10-29 Bill 说「继续」） |
 | 3.6 | 时间线和预览：三类轨道、片段、标记、字幕条、播放头；播放、`J` `K` `L`、缩放、吸附；工具栏的选择、切割、加标记、撤销重做 | 3.5 |
 | 3.7 | AI 面板与决定：驱动本机 Claude Code / Codex 命令行，逐字渲染回复，草稿卡片；参数区的决定卡片，回答后自动发消息 | 3.2、3.5 |
 | 3.8 | 素材面板：网格和列表、`I` / `O` / `Q`、拖到时间线、`⌘ +` / `⌘ −`；参数区的素材信息 | 3.1、3.6 |
@@ -43,7 +43,31 @@
 | 3.10 | 字幕面板：识别设置、字幕列表（搜索、查找替换、逐条编辑）、样式 | 3.3、3.6 |
 | 3.11 | 导出面板：节点图、三家去处和直接导出 | 3.4、3.5 |
 
-每个桌面版任务的详细说明，等设计稿定稿后再写。验收方式：Claude 对照设计稿和 `design.md` 检查每个状态，Bill 验收界面效果；最后用一个非采访素材的项目走一遍（ADR-0013）。
+### 3.5 详细说明
+
+依据：ADR-0016、`docs/product.md` 第 3 节、设计系统 https://claude.ai/artifact/15p6YuU4UfgJEGWU6tUDtX （变量在仓库的 `design/tokens.json`，参考组件在 `design/reference/`）、设计画布 https://claude.ai/artifact/6g8fzZAHD7GhqE4EeUyF9d 。本任务允许新增依赖：react、react-dom、vite、@vitejs/plugin-react、ws、@tauri-apps/api、@tauri-apps/cli、jsdom（测试用），以及 Rust 的 tauri；PR 里逐个列出版本和许可证。
+
+1. **`packages/app-host`**（Node）
+   - 启动参数：工程文件路径（可选）、端口（默认随机）、令牌。
+   - 本机 WebSocket 通道，只监听 `127.0.0.1`，连接必须带令牌。消息：`{id, verb, request}` → 调用内核同一个 `dispatch` → `{id, envelope}`。结果信封与 CLI 完全相同。
+   - MCP（stdio）：内核的 21 个动词，加上 9.6 节的界面动词。界面动词转给已连接的界面执行；没有界面连接时返回 `failed`、`E_APP_NOT_RUNNING`、`retryable: true`。
+   - 检测本机安装的 Final Cut Pro，把它的图标转成 PNG 交给界面（读 `/Applications/Final Cut Pro.app` 的应用图标；没装返回空）。
+2. **`packages/desktop`**（React + Vite）
+   - 从 `design/tokens.json` 生成 CSS 变量（构建时生成，名字与设计系统一致，例如 `--attention`、`--space-6`、`--track-video-h`），界面里不写死颜色和尺寸。
+   - 六个区域按 `product.md` 第 3 节和设计系统的布局尺寸：菜单栏 41、功能区 315（最小 280）、预览、参数区 417（最小 320）、工具栏 35、时间线 278。功能区四个标签（AI、素材、章节、字幕）切换时，参数区跟着换成对应的空白面板。
+   - 打开工程后，菜单栏显示工程名和修订序号；时间线画出轨道名（按 `inspect` 的 `timeline` 视图）。本任务不画片段内容，留给 3.6。
+   - 实现界面动词的接收端：`ui_state`、`ui_show_panel` 真正生效；`ui_seek`、`ui_select`、`ui_play`、`ui_pause` 先记录状态并在 `ui_state` 里反映，播放等 3.6 再接。
+3. **`apps/desktop-tauri`**（Tauri 2）
+   - 开一个 1440×900 的窗口，启动宿主进程（开发时用本机 `node`），把端口和令牌传给界面。
+   - 根目录加脚本 `pnpm desktop:dev`，打开 `examples/interview.zcut.json`。
+4. **测试**（CI 只跑 TypeScript，不编译 Rust）
+   - 宿主进程：同一请求走 WebSocket 通道、走 CLI，结果信封逐字段相同（`request_id`、时间等非确定字段除外）；不带令牌连接被拒绝。
+   - MCP：工具列表含 21 个内核动词和 6 个界面动词；没有界面时 `ui_seek` 返回 `E_APP_NOT_RUNNING`；用一个假界面客户端连上后，`ui_show_panel` 再 `ui_state` 能读回来。
+   - 界面：jsdom 下渲染外壳，六个区域都在，功能区切到「字幕」后参数区换成字幕面板；CSS 变量文件包含 `tokens.json` 里每个颜色名。
+
+验收：CI 通过；Claude 在本机运行 `pnpm desktop:dev`，截图核对布局尺寸和配色，确认打开示例工程后显示工程名和轨道名。
+
+3.6 起的详细说明，在 3.5 合并后再写。验收方式：Claude 对照设计稿和 `design.md` 检查每个状态，Bill 验收界面效果；最后用一个非采访素材的项目走一遍（ADR-0013）。
 
 ## 需要 Bill 做的
 
