@@ -54,6 +54,7 @@ describe("read-only media channel", () => {
       await writeFile(join(directory, media.path), "original");
       await writeFile(join(directory, media.proxy.path), "0123456789");
       const run = vi.fn(async (args: string[]) => {
+        if (args.includes("rgb24")) return Buffer.from(Array.from({ length: 27 }, (_, i) => i));
         if (args.includes("mjpeg")) return Buffer.from("jpeg");
         const pcm = Buffer.alloc(400);
         pcm.writeInt16LE(-16384, 0);
@@ -91,9 +92,33 @@ describe("read-only media channel", () => {
         ]);
       }
       expect(run).toHaveBeenCalledTimes(2);
+      const colors = [
+        "#000102",
+        "#030405",
+        "#060708",
+        "#090a0b",
+        "#0c0d0e",
+        "#0f1011",
+        "#121314",
+        "#151617",
+        "#18191a",
+      ];
+      for (let i = 0; i < 2; i++)
+        expect(
+          JSON.parse((await request(`/palette?token=secret&media_id=${media.id}&at=1s`)).bytes.toString()),
+        ).toEqual(colors);
+      expect(run).toHaveBeenCalledTimes(3);
+      const restarted = mediaChannel(join(directory, "project.zcut.json"), "secret", async () => project, run);
+      const response = new Response();
+      await restarted(
+        { url: `/palette?token=secret&media_id=${media.id}&at=1s`, method: "GET", headers: {} } as IncomingMessage,
+        response as unknown as ServerResponse,
+      );
+      expect(JSON.parse(response.bytes.toString())).toEqual(colors);
+      expect(run).toHaveBeenCalledTimes(3);
       expect(run.mock.calls.every(([args]) => args.includes(join(directory, "proxy.mp4")))).toBe(true);
       await request(`/thumb?token=secret&media_id=${media.id}&at=2s`);
-      expect(run).toHaveBeenCalledTimes(3);
+      expect(run).toHaveBeenCalledTimes(4);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

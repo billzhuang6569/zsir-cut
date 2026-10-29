@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { copyFile, mkdtemp, rm } from "node:fs/promises";
+import { copyFile, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,6 +36,73 @@ async function mcpClient() {
 }
 
 describe("desktop host", () => {
+  it("serializes preview rationals and keeps the connection usable after a request fails", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "zcut-preview-rational-"));
+    const project = join(directory, "project.zcut.json");
+    const fixture = new URL("../../../fixtures/regressions/preview-media-rational.zcut.json", import.meta.url);
+    await copyFile(fixture, project);
+    host = await startHost({ project });
+    const socket = new WebSocket(`ws://127.0.0.1:${host.port}/?token=${host.token}`);
+    try {
+      await once(socket, "open");
+      const send = async (message: Record<string, unknown>) => {
+        const reply = once(socket, "message", { signal: AbortSignal.timeout(3000) });
+        socket.send(JSON.stringify(message));
+        const result = JSON.parse((await reply)[0].toString());
+        expect(socket.readyState).toBe(WebSocket.OPEN);
+        if (message.id) expect(result.id).toBe(message.id);
+        return result;
+      };
+      expect(await send({ type: "ui_ready" })).toMatchObject({ type: "bootstrap", project });
+      for (const view of ["brief", "timeline"])
+        expect(await send({ id: view, verb: "inspect", request: { project, view } })).toMatchObject({
+          envelope: { ok: true },
+        });
+      expect(await send({ id: "preview", type: "preview_data" })).toMatchObject({
+        envelope: {
+          ok: true,
+          result: {
+            media: [
+              {
+                duration: "60001/1000s",
+                video: { rate: "30000/1001", pixel_aspect: "4/3" },
+                audio: { sample_rate: "48000", channels: 2 },
+              },
+            ],
+          },
+        },
+      });
+      await writeFile(project, "{}");
+      expect(await send({ id: "failed-preview", type: "preview_data" })).toMatchObject({
+        envelope: { ok: false, error: { message: expect.stringContaining("Invalid project") } },
+      });
+      await copyFile(fixture, project);
+      expect(await send({ id: "unknown", verb: "unknown", request: {} })).toMatchObject({
+        envelope: { ok: false, error: { message: expect.stringContaining("Unknown request") } },
+      });
+      expect(await send({ id: "recovered", verb: "inspect", request: { project, view: "brief" } })).toMatchObject({
+        envelope: { ok: true },
+      });
+    } finally {
+      socket.terminate();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["{", "null", "[]", "{}", '{"type":"preview_data"}'])(
+    "rejects malformed protocol messages: %s",
+    async (raw) => {
+      const socket = await connect();
+      try {
+        const closed = once(socket, "close");
+        socket.send(raw);
+        expect((await closed)[0]).toBe(1008);
+      } finally {
+        socket.terminate();
+      }
+    },
+  );
+
   it("matches CLI envelopes over the authenticated loopback channel", async () => {
     const socket = await connect();
     try {

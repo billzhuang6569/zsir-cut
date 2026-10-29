@@ -85,7 +85,7 @@ export function mediaChannel(
       }
       if (
         !projectPath ||
-        !["/media", "/thumb", "/peaks"].includes(url.pathname) ||
+        !["/media", "/thumb", "/peaks", "/palette"].includes(url.pathname) ||
         [...url.searchParams.keys()].some((key) => !["token", "media_id", "at"].includes(key))
       ) {
         response.writeHead(404).end();
@@ -126,18 +126,40 @@ export function mediaChannel(
         const ns = floor(mul(time, rational(1_000_000_000n)));
         const seconds = `${ns / 1_000_000_000n}.${String(ns % 1_000_000_000n).padStart(9, "0")}`;
         const thumb = url.pathname === "/thumb";
+        const palette = url.pathname === "/palette";
         const key = createHash("sha256")
-          .update(`${fingerprint}:${thumb ? at : "peaks-100hz-v1"}`)
+          .update(`${fingerprint}:${palette ? `palette-v1:${at}` : thumb ? at : "peaks-100hz-v1"}`)
           .digest("hex");
         const file = join(
           dirname(projectPath),
           ".zcut",
           project.id,
           "cache",
-          thumb ? "thumbs" : "peaks",
+          palette ? "palettes" : thumb ? "thumbs" : "peaks",
           key + (thumb ? ".jpg" : ".json"),
         );
         const bytes = await cached(file, async () => {
+          if (palette) {
+            const rgb = await run([
+              "-ss",
+              seconds,
+              "-i",
+              source,
+              "-frames:v",
+              "1",
+              "-vf",
+              "scale=3:3:flags=area",
+              "-pix_fmt",
+              "rgb24",
+              "-f",
+              "rawvideo",
+              "pipe:1",
+            ]);
+            if (rgb.length !== 27) throw new Error("Invalid palette frame");
+            return Buffer.from(
+              JSON.stringify(Array.from({ length: 9 }, (_, i) => `#${rgb.subarray(i * 3, i * 3 + 3).toString("hex")}`)),
+            );
+          }
           if (thumb)
             return run([
               "-ss",

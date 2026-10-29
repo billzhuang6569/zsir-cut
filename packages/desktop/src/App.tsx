@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { PANELS, type Panel, type UiState } from "../../app-host/src/ui.js";
 import { type AiNotice, useAiPanel } from "./AiPanel.js";
 import { connectHost, type ProjectView } from "./connection.js";
+import { useMediaPanel } from "./MediaPanel.js";
+import { sourceProject } from "./media.js";
 import { applyUi, initialState } from "./state.js";
 import { TimelinePreview } from "./TimelinePreview.js";
 import { seekTarget } from "./timeline.js";
@@ -40,7 +42,19 @@ export function App({ config }: { config?: { port: number; token: string } }) {
         while (dragging.current && verb !== "ui_state") await new Promise((resolve) => setTimeout(resolve, 16));
         const view = projectRef.current;
         const next = applyUi(current.current, verb, request);
-        if (view && verb === "ui_seek") next.playhead = { at: seekTarget(view, view.cues, next.playhead) };
+        if (view && verb === "ui_select") {
+          const selected = view.media.find((m) => next.selected.includes(m.id));
+          if (selected) {
+            next.preview = "media";
+            next.media = { id: selected.id, at: "0s", in: null, out: null };
+            next.playing = false;
+          }
+        }
+        if (view && verb === "ui_seek") {
+          next.playhead = { at: seekTarget(view, view.cues, next.playhead) };
+          next.preview = "timeline";
+          next.playing = false;
+        }
         if (verb === "ui_play" && next.range) next.playhead = { at: next.range.start };
         update(next);
         return next;
@@ -68,6 +82,23 @@ export function App({ config }: { config?: { port: number; token: string } }) {
       connection.current = null;
     };
   }, [config, update]);
+  const media = useMediaPanel({ project, state, update, call, config });
+  const source = useMemo(
+    () => (project && media.selected && state.preview === "media" ? sourceProject(project, media.selected) : null),
+    [project, media.selected, state.preview],
+  );
+  const updateSource = useCallback(
+    (next: UiState) => {
+      const previous = current.current;
+      if (previous.media)
+        update({
+          ...previous,
+          playing: next.playing,
+          media: { ...previous.media, at: "at" in next.playhead ? next.playhead.at : "0s" },
+        });
+    },
+    [update],
+  );
   return (
     <main className="zc-shell">
       <section aria-label="菜单栏" className="zc-menubar">
@@ -103,6 +134,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
           className="zc-pad zc-function-panel"
         >
           <h2>{labels[state.panel]}</h2>
+          {state.panel === "media" && media.library}
           <div className="zc-ai-body" hidden={state.panel !== "ai"}>
             {ai.chat}
           </div>
@@ -111,6 +143,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
       <section aria-label="参数区" className="zc-parameters zc-pad" data-panel={state.panel}>
         <h2>{parameters[state.panel]}</h2>
         {state.panel === "ai" && ai.parameters}
+        {state.panel === "media" && media.parameters}
         {state.panel === "subtitles" && (
           <div className="zc-tabs" role="tablist" aria-label="字幕参数">
             {["subtitles", "style"].map((sub) => (
@@ -129,7 +162,24 @@ export function App({ config }: { config?: { port: number; token: string } }) {
         )}
         {state.panel === "subtitles" && state.sub === "style" && <h3>样式</h3>}
       </section>
+      {source && state.media && (
+        <TimelinePreview
+          viewerOnly
+          project={source}
+          state={{ ...state, playhead: { at: state.media.at }, range: null, loop: false }}
+          update={updateSource}
+          config={config}
+          error={null}
+          dragging={dragging}
+          call={call}
+        />
+      )}
       <TimelinePreview
+        hideViewer={Boolean(source)}
+        onMediaDrop={(id, at, track) => {
+          const item = project?.media.find((m) => m.id === id);
+          if (item) media.place(item, at, track);
+        }}
         project={project}
         state={state}
         update={update}

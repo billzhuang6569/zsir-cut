@@ -72,7 +72,7 @@ function Film({
     </span>
   );
 }
-function Wave({
+export function Wave({
   clip,
   width,
   config,
@@ -80,7 +80,7 @@ function Wave({
 }: {
   clip: ClipView;
   width: number;
-  scale: number;
+  scale: number | ReturnType<typeof rational>;
   config: Config | undefined;
 }) {
   const [peaks, setPeaks] = useState<number[]>([]);
@@ -100,7 +100,10 @@ function Wave({
     <svg className="zc-wave" width={width} height={48} viewBox={`0 0 ${width} 48`} aria-hidden="true">
       {Array.from({ length: Math.max(1, Math.floor(width / 3)) }, (_, i) => {
         const at = printRational(
-          add(parseRational(clip.timeline_in.t, true), div(rational(BigInt(i * 3)), rational(BigInt(scale)))),
+          add(
+            parseRational(clip.timeline_in.t, true),
+            div(rational(BigInt(i * 3)), typeof scale === "number" ? rational(BigInt(scale)) : scale),
+          ),
           true,
         );
         const index = Number(floor(mul(sourceAt(clip, at), rational(100n))));
@@ -119,7 +122,13 @@ export function TimelinePreview({
   error,
   errorDetail,
   dragging,
+  viewerOnly = false,
+  hideViewer = false,
+  onMediaDrop,
 }: {
+  viewerOnly?: boolean;
+  hideViewer?: boolean;
+  onMediaDrop?: (id: string, at: string, track: string) => void;
   project: ProjectView | null;
   state: UiState;
   update: (state: UiState) => void;
@@ -129,6 +138,7 @@ export function TimelinePreview({
   errorDetail?: string | undefined;
   dragging: React.MutableRefObject<boolean>;
 }) {
+  const [drop, setDrop] = useState<{ track: string; at: string } | null>(null);
   const [scale, setScale] = useState(48);
   const [snap, setSnap] = useState(true);
   const [tool, setTool] = useState("select");
@@ -143,9 +153,14 @@ export function TimelinePreview({
   latest.current = { state, project };
   const at = project ? seekTarget(project, project.cues, state.playhead) : "0s";
   const top = project?.tracks.find(
-    (track) => track.kind === "video" && track.enabled && track.clips.some((clip) => clip.enabled),
+    (track) =>
+      (track.kind === "video" || (viewerOnly && track.kind === "audio")) &&
+      track.enabled &&
+      track.clips.some((clip) => clip.enabled),
   );
-  const clip = top?.clips.find((item) => item.enabled && contains(item.timeline_in.t, item.timeline_out.t, at));
+  const clip = top?.clips.find(
+    (item) => item.enabled && (viewerOnly || contains(item.timeline_in.t, item.timeline_out.t, at)),
+  );
   const media = project?.media.find((item) => item.id === clip?.media_id);
   const speed = clip ? sourceSpeed(clip, at) : 0;
   const source = clip ? sourceAt(clip, at) : rational(0n);
@@ -155,7 +170,7 @@ export function TimelinePreview({
     clip?.id,
     numberOf(source),
     speed * Number(direction),
-    state.playing,
+    state.playing && !hideViewer,
     clip?.gain_db ?? 0,
     setWriteError,
   );
@@ -178,7 +193,7 @@ export function TimelinePreview({
     }
   }, [project, state.playhead, update, state]);
   useEffect(() => {
-    if (!state.playing || !project) return;
+    if (hideViewer || !state.playing || !project) return;
     let started = performance.now();
     let previous = seekTarget(project, project.cues, latest.current.state.playhead);
     let start = frameAt(previous, project.edit_rate);
@@ -222,10 +237,10 @@ export function TimelinePreview({
     };
     animation = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(animation);
-  }, [state.playing, project, direction, update]);
+  }, [state.playing, project, direction, update, hideViewer]);
   useEffect(() => {
     const element = video.current;
-    if (!element) return;
+    if (!element || hideViewer) return;
     if (!clip) {
       if (element.readyState >= 1) element.pause();
       return;
@@ -251,7 +266,7 @@ export function TimelinePreview({
     if (element.readyState >= 1) sync();
     element.addEventListener("loadedmetadata", sync);
     return () => element.removeEventListener("loadedmetadata", sync);
-  }, [clip, source, speed, state.playing, direction]);
+  }, [clip, source, speed, state.playing, direction, hideViewer]);
   const write = async (verb: string, label: string, ops?: unknown[]) => {
     if (!project || busy) return;
     setBusy(true);
@@ -309,10 +324,12 @@ export function TimelinePreview({
       const key = event.key.toLowerCase();
       if (event.metaKey && ["+", "=", "-"].includes(key)) {
         event.preventDefault();
+        if (state.panel === "media") return;
         setScale((value) => Math.max(12, Math.min(192, value + (key === "-" ? -12 : 12))));
         return;
       }
-      if (!project) return;
+      if (!project || hideViewer) return;
+      if (viewerOnly && ["a", "b", "m", "z"].includes(key)) return;
       if ([" ", "j", "k", "l", "arrowleft", "arrowright", "a", "b", "m"].includes(key)) event.preventDefault();
       if (key === "a") setTool("select");
       if (key === "b") setTool("blade");
@@ -341,7 +358,7 @@ export function TimelinePreview({
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
   });
-  const point = (x: number, element: HTMLElement) => {
+  const dropPoint = (x: number, element: HTMLElement) => {
     if (!project) return;
     let target = pointerTime(x - element.getBoundingClientRect().left, scale, project.edit_rate);
     if (snap) {
@@ -355,274 +372,356 @@ export function TimelinePreview({
       )[0];
       if (nearest && Math.abs(pixelAt(nearest, scale) - pixelAt(target, scale)) <= 8) target = nearest;
     }
-    seek(target);
+    return target;
+  };
+  const point = (x: number, element: HTMLElement) => {
+    const target = dropPoint(x, element);
+    if (target) {
+      update({ ...latest.current.state, preview: "timeline", playing: false, playhead: { at: target } });
+    }
   };
   const width = project ? Math.max(800, pixelAt(project.duration.t, scale) + 100) : 800;
   const captions = project?.cues.filter((cue) => contains(cue.start, cue.end, at)) ?? [];
   return (
     <>
-      <section aria-label="预览" className="zc-viewer">
-        {(error || writeError) && (
-          <p role="alert" title={error ? errorDetail : writeErrorDetail}>
-            {error || writeError}
-          </p>
-        )}
-        <div className="zc-picture">
-          {src && media?.kind === "image" ? (
-            <img src={src} alt={media.name ?? "预览"} />
-          ) : (
-            // biome-ignore lint/a11y/useMediaCaption: Projected, styled captions are rendered immediately below the player.
-            <video
-              ref={video}
-              src={src}
-              playsInline
-              aria-label="时间线预览"
-              onError={() => setWriteError("预览无法读取，请检查素材或代理")}
-            />
+      {!hideViewer && (
+        <section aria-label="预览" className="zc-viewer">
+          {(error || writeError) && (
+            <p role="alert" title={error ? errorDetail : writeErrorDetail}>
+              {error || writeError}
+            </p>
           )}
-          {clip?.speed === "map" && (
-            <span
-              className="zc-approx"
-              title="近似：平滑变速按线性映射；倒放与静帧逐帧定位，倒放声音按采样近似；无转场混合或画面变换"
-            >
-              近似
-            </span>
-          )}
-          {project?.tracks
-            .filter((track) => track.kind === "subtitle")
-            .map((track) => {
-              const active = captions
-                .filter((cue) => cue.track_id === track.id)
-                .sort((a, b) => compare(parseRational(a.start, true), parseRational(b.start, true)));
-              const position = project.styles.find((style) => style.id === active[0]?.style_id)?.position;
-              return (
-                <div
-                  key={track.id}
-                  className="zc-caption-stack"
-                  style={
-                    position?.anchor === "top"
-                      ? { top: `${position.margin_v * 100}%` }
-                      : position?.anchor === "middle"
-                        ? { top: "50%" }
-                        : { bottom: `${(position?.margin_v ?? 0.08) * 100}%` }
-                  }
-                >
-                  {active.map((cue, index) => {
-                    const style = project.styles.find((item) => item.id === cue.style_id);
-                    return (
-                      <span
-                        key={`${cue.cue_id}-${cue.piece}`}
-                        className="zc-caption"
-                        style={{
-                          gridRow: active.length - index,
-                          fontFamily: subtitleFontFamily(style?.font_family),
-                          ...{ "--cue-size": style?.font_size },
-                          fontWeight: style?.font_weight,
-                          color: style?.color,
-                          background: style?.box?.color,
-                          padding: style?.box?.padding,
-                          WebkitTextStroke: style?.outline
-                            ? `${style.outline.width}em ${style.outline.color}`
-                            : undefined,
-                        }}
-                      >
-                        {cue.text}
-                      </span>
-                    );
-                  })}
-                </div>
-              );
-            })}
-        </div>
-        <div className="zc-player">
-          <IconButton
-            icon={state.playing ? "stop" : "play"}
-            label={state.playing ? "暂停" : "播放"}
-            onClick={() => update({ ...state, playing: !state.playing })}
-          />
-          <output aria-label="播放时码">{project ? timecode(at, project) : "00:00:00:00"}</output>
-        </div>
-      </section>
-      <section aria-label="工具栏" className="zc-toolbar">
-        <IconButton icon="select" label="选择 A" pressed={tool === "select"} onClick={() => setTool("select")} />
-        <IconButton
-          icon="blade"
-          label="切割 B"
-          pressed={tool === "blade"}
-          disabled={!project || busy}
-          onClick={() => {
-            setTool("blade");
-            split();
-          }}
-        />
-        <IconButton icon="marker" label="加标记 M" disabled={!project || busy} onClick={marker} />
-        <IconButton icon="undo" label="撤销" disabled={!project || busy} onClick={() => void write("undo", "撤销")} />
-        <IconButton icon="redo" label="重做" disabled={!project || busy} onClick={() => void write("redo", "重做")} />
-        <IconButton icon="snap" label="吸附" pressed={snap} onClick={() => setSnap(!snap)} />
-        <span className="zc-grow" />
-        <span className="zc-count" title="片段">
-          <Icon name="clip" />
-          {project?.tracks.reduce((count, track) => count + track.clips.length, 0) ?? 0}
-        </span>
-        <span className="zc-count" title="字幕">
-          <Icon name="subtitle" />
-          {project?.cues.length ?? 0}
-        </span>
-        <IconButton icon="search" label="缩放" onClick={() => setScale(48)} />
-        <input
-          aria-label="时间线缩放"
-          type="range"
-          min={12}
-          max={192}
-          step={12}
-          value={scale}
-          onChange={(event) => setScale(Number(event.target.value))}
-        />
-      </section>
-      <section aria-label="时间线" className="zc-timeline">
-        {project && (
-          <div className="zc-timeline-content" style={{ width: `calc(var(--track-label-w) + ${width}px)` }}>
-            <div className="zc-ruler-row">
-              <span className="zc-track-name" />
-              <div
-                className="zc-ruler"
-                style={{ width }}
-                role="slider"
-                tabIndex={0}
-                aria-label="时间标尺"
-                aria-valuemin={0}
-                aria-valuemax={Number(frameAt(project.duration.t, project.edit_rate))}
-                aria-valuenow={Number(frameAt(at, project.edit_rate))}
-                onPointerDown={(event) => {
-                  dragging.current = true;
-                  event.currentTarget.setPointerCapture?.(event.pointerId);
-                  point(event.clientX, event.currentTarget);
-                }}
-                onPointerMove={(event) => {
-                  if (dragging.current) point(event.clientX, event.currentTarget);
-                }}
-                onPointerUp={() => {
-                  dragging.current = false;
-                }}
-                onLostPointerCapture={() => {
-                  dragging.current = false;
-                }}
-                onPointerCancel={() => {
-                  dragging.current = false;
-                }}
+          {viewerOnly && <h3>{project?.name}</h3>}
+          <div className="zc-picture">
+            {src && media?.kind === "image" ? (
+              <img src={src} alt={media.name ?? "预览"} />
+            ) : (
+              // biome-ignore lint/a11y/useMediaCaption: Projected, styled captions are rendered immediately below the player.
+              <video
+                ref={video}
+                src={src}
+                playsInline
+                aria-label={viewerOnly ? "素材预览" : "时间线预览"}
+                onError={() => setWriteError("预览无法读取，请检查素材或代理")}
+              />
+            )}
+            {clip?.speed === "map" && (
+              <span
+                className="zc-approx"
+                title="近似：平滑变速按线性映射；倒放与静帧逐帧定位，倒放声音按采样近似；无转场混合或画面变换"
               >
-                {Array.from({ length: Math.ceil(width / 96) }, (_, index) => (
-                  <span key={index} className="zc-tick" style={{ left: index * 96 }}>
-                    {timecode(printRational(div(rational(BigInt(index * 96)), rational(BigInt(scale))), true), project)}
-                  </span>
+                近似
+              </span>
+            )}
+            {project?.tracks
+              .filter((track) => track.kind === "subtitle")
+              .map((track) => {
+                const active = captions
+                  .filter((cue) => cue.track_id === track.id)
+                  .sort((a, b) => compare(parseRational(a.start, true), parseRational(b.start, true)));
+                const position = project.styles.find((style) => style.id === active[0]?.style_id)?.position;
+                return (
+                  <div
+                    key={track.id}
+                    className="zc-caption-stack"
+                    style={
+                      position?.anchor === "top"
+                        ? { top: `${position.margin_v * 100}%` }
+                        : position?.anchor === "middle"
+                          ? { top: "50%" }
+                          : { bottom: `${(position?.margin_v ?? 0.08) * 100}%` }
+                    }
+                  >
+                    {active.map((cue, index) => {
+                      const style = project.styles.find((item) => item.id === cue.style_id);
+                      return (
+                        <span
+                          key={`${cue.cue_id}-${cue.piece}`}
+                          className="zc-caption"
+                          style={{
+                            gridRow: active.length - index,
+                            fontFamily: subtitleFontFamily(style?.font_family),
+                            ...{ "--cue-size": style?.font_size },
+                            fontWeight: style?.font_weight,
+                            color: style?.color,
+                            background: style?.box?.color,
+                            padding: style?.box?.padding,
+                            WebkitTextStroke: style?.outline
+                              ? `${style.outline.width}em ${style.outline.color}`
+                              : undefined,
+                          }}
+                        >
+                          {cue.text}
+                        </span>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+          </div>
+          <div className="zc-player">
+            <IconButton
+              icon={state.playing ? "stop" : "play"}
+              label={state.playing ? "暂停" : "播放"}
+              onClick={() => update({ ...state, playing: !state.playing })}
+            />
+            <output aria-label="播放时码">{project ? timecode(at, project) : "00:00:00:00"}</output>
+          </div>
+          {viewerOnly && project && (
+            <div className="zc-source-scrub">
+              <input
+                type="range"
+                aria-label="素材进度"
+                min={0}
+                max={Number(frameAt(project.duration.t, project.edit_rate))}
+                value={Number(frameAt(at, project.edit_rate))}
+                onChange={(e) => seek(frameTime(BigInt(e.target.value), project.edit_rate))}
+              />
+              {state.media && (
+                <span
+                  className="zc-source-range"
+                  style={{
+                    left: `${pixelAt(state.media.in ?? "0s", 100) / pixelAt(project.duration.t, 1)}%`,
+                    width: `${(pixelAt(state.media.out ?? project.duration.t, 100) - pixelAt(state.media.in ?? "0s", 100)) / pixelAt(project.duration.t, 1)}%`,
+                  }}
+                />
+              )}
+            </div>
+          )}
+        </section>
+      )}
+      {!viewerOnly && (
+        <>
+          <section aria-label="工具栏" className="zc-toolbar">
+            <IconButton icon="select" label="选择 A" pressed={tool === "select"} onClick={() => setTool("select")} />
+            <IconButton
+              icon="blade"
+              label="切割 B"
+              pressed={tool === "blade"}
+              disabled={!project || busy}
+              onClick={() => {
+                setTool("blade");
+                split();
+              }}
+            />
+            <IconButton icon="marker" label="加标记 M" disabled={!project || busy} onClick={marker} />
+            <IconButton
+              icon="undo"
+              label="撤销"
+              disabled={!project || busy}
+              onClick={() => void write("undo", "撤销")}
+            />
+            <IconButton
+              icon="redo"
+              label="重做"
+              disabled={!project || busy}
+              onClick={() => void write("redo", "重做")}
+            />
+            <IconButton icon="snap" label="吸附" pressed={snap} onClick={() => setSnap(!snap)} />
+            <span className="zc-grow" />
+            <span className="zc-count" title="片段">
+              <Icon name="clip" />
+              {project?.tracks.reduce((count, track) => count + track.clips.length, 0) ?? 0}
+            </span>
+            <span className="zc-count" title="字幕">
+              <Icon name="subtitle" />
+              {project?.cues.length ?? 0}
+            </span>
+            <IconButton icon="search" label="缩放" onClick={() => setScale(48)} />
+            <input
+              aria-label="时间线缩放"
+              type="range"
+              min={12}
+              max={192}
+              step={12}
+              value={scale}
+              onChange={(event) => setScale(Number(event.target.value))}
+            />
+          </section>
+          <section
+            aria-label="时间线"
+            className="zc-timeline"
+            onPointerDownCapture={() => {
+              if (state.preview === "media") update({ ...state, preview: "timeline", playing: false });
+            }}
+          >
+            {project && (
+              <div className="zc-timeline-content" style={{ width: `calc(var(--track-label-w) + ${width}px)` }}>
+                <div className="zc-ruler-row">
+                  <span className="zc-track-name" />
+                  <div
+                    className="zc-ruler"
+                    style={{ width }}
+                    role="slider"
+                    tabIndex={0}
+                    aria-label="时间标尺"
+                    aria-valuemin={0}
+                    aria-valuemax={Number(frameAt(project.duration.t, project.edit_rate))}
+                    aria-valuenow={Number(frameAt(at, project.edit_rate))}
+                    onPointerDown={(event) => {
+                      dragging.current = true;
+                      event.currentTarget.setPointerCapture?.(event.pointerId);
+                      point(event.clientX, event.currentTarget);
+                    }}
+                    onPointerMove={(event) => {
+                      if (dragging.current) point(event.clientX, event.currentTarget);
+                    }}
+                    onPointerUp={() => {
+                      dragging.current = false;
+                    }}
+                    onLostPointerCapture={() => {
+                      dragging.current = false;
+                    }}
+                    onPointerCancel={() => {
+                      dragging.current = false;
+                    }}
+                  >
+                    {Array.from({ length: Math.ceil(width / 96) }, (_, index) => (
+                      <span key={index} className="zc-tick" style={{ left: index * 96 }}>
+                        {timecode(
+                          printRational(div(rational(BigInt(index * 96)), rational(BigInt(scale))), true),
+                          project,
+                        )}
+                      </span>
+                    ))}
+                    {project.markers.map((marker) => (
+                      <button
+                        type="button"
+                        key={marker.id}
+                        className="zc-marker"
+                        title={marker.text}
+                        aria-label={marker.text}
+                        style={{ left: pixelAt(marker.at.t, scale) }}
+                        onClick={() => seek(marker.at.t)}
+                      >
+                        ▼
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {project.tracks.map((track) => (
+                  <div key={track.id} className={`zc-track zc-track-${track.kind}`}>
+                    <span className="zc-track-name" title={track.name}>
+                      {track.name}
+                    </span>
+                    {/* biome-ignore lint/a11y/useSemanticElements: A timeline drop lane is not a form fieldset. */}
+                    <div
+                      role="group"
+                      aria-label={`${track.name} 放置区域`}
+                      className="zc-track-lane"
+                      style={{ width }}
+                      onDragOver={(event) => {
+                        if (track.kind === "subtitle" || !event.dataTransfer.types.includes("application/x-zcut-media"))
+                          return;
+                        event.preventDefault();
+                        event.dataTransfer.dropEffect = "copy";
+                        const at = dropPoint(event.clientX, event.currentTarget);
+                        if (at) setDrop({ track: track.id, at });
+                      }}
+                      onDragLeave={() => setDrop(null)}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        const at = dropPoint(event.clientX, event.currentTarget);
+                        const id = event.dataTransfer.getData("application/x-zcut-media");
+                        if (id && at) onMediaDrop?.(id, at, track.id);
+                        setDrop(null);
+                      }}
+                    >
+                      {drop?.track === track.id && (
+                        <span className="zc-drop-preview" style={{ left: pixelAt(drop.at, scale) }} />
+                      )}
+                      {track.clips.map((item) => {
+                        const clipWidth = Math.max(
+                          1,
+                          pixelAt(item.timeline_out.t, scale) - pixelAt(item.timeline_in.t, scale),
+                        );
+                        return (
+                          <Clip
+                            key={item.id}
+                            kind={track.kind}
+                            label={
+                              project.media.find((media) => media.id === item.media_id)?.name ??
+                              item.label ??
+                              item.media_id
+                            }
+                            selected={state.selected.includes(item.id)}
+                            dimmed={
+                              !track.enabled ||
+                              !item.enabled ||
+                              (state.selected.length > 0 && !state.selected.includes(item.id))
+                            }
+                            style={{ left: pixelAt(item.timeline_in.t, scale), width: clipWidth }}
+                            onClick={() => {
+                              update({ ...state, preview: "timeline", playing: false, selected: [item.id] });
+                              if (tool === "blade") split();
+                            }}
+                          >
+                            {track.kind === "video" ? (
+                              <Film clip={item} width={clipWidth} scale={scale} config={config} />
+                            ) : (
+                              <Wave clip={item} width={clipWidth} scale={scale} config={config} />
+                            )}
+                          </Clip>
+                        );
+                      })}
+                      {track.kind === "subtitle" &&
+                        project.cues
+                          .filter((cue) => cue.track_id === track.id)
+                          .map((cue) => (
+                            <Clip
+                              key={`${cue.cue_id}-${cue.piece}-${cue.start}`}
+                              kind="subtitle"
+                              label={cue.text.replaceAll("\n", " ")}
+                              selected={state.selected.includes(cue.cue_id)}
+                              dimmed={
+                                !track.enabled || (state.selected.length > 0 && !state.selected.includes(cue.cue_id))
+                              }
+                              style={{
+                                left: pixelAt(cue.start, scale),
+                                width: Math.max(1, pixelAt(cue.end, scale) - pixelAt(cue.start, scale)),
+                              }}
+                              onClick={() => update({ ...state, selected: [cue.cue_id] })}
+                            />
+                          ))}
+                    </div>
+                  </div>
                 ))}
-                {project.markers.map((marker) => (
+                <div
+                  ref={playhead}
+                  className="zc-playhead"
+                  style={{ left: `calc(var(--track-label-w) + ${pixelAt(at, scale)}px)` }}
+                >
                   <button
                     type="button"
-                    key={marker.id}
-                    className="zc-marker"
-                    title={marker.text}
-                    aria-label={marker.text}
-                    style={{ left: pixelAt(marker.at.t, scale) }}
-                    onClick={() => seek(marker.at.t)}
+                    aria-label="播放头"
+                    onPointerDown={(event) => {
+                      dragging.current = true;
+                      event.currentTarget.setPointerCapture?.(event.pointerId);
+                    }}
+                    onPointerMove={(event) => {
+                      const ruler = event.currentTarget
+                        .closest(".zc-timeline-content")
+                        ?.querySelector<HTMLElement>(".zc-ruler");
+                      if (dragging.current && ruler) point(event.clientX, ruler);
+                    }}
+                    onPointerUp={() => {
+                      dragging.current = false;
+                    }}
+                    onLostPointerCapture={() => {
+                      dragging.current = false;
+                    }}
+                    onPointerCancel={() => {
+                      dragging.current = false;
+                    }}
                   >
                     ▼
                   </button>
-                ))}
-              </div>
-            </div>
-            {project.tracks.map((track) => (
-              <div key={track.id} className={`zc-track zc-track-${track.kind}`}>
-                <span className="zc-track-name" title={track.name}>
-                  {track.name}
-                </span>
-                <div className="zc-track-lane" style={{ width }}>
-                  {track.clips.map((item) => {
-                    const clipWidth = Math.max(
-                      1,
-                      pixelAt(item.timeline_out.t, scale) - pixelAt(item.timeline_in.t, scale),
-                    );
-                    return (
-                      <Clip
-                        key={item.id}
-                        kind={track.kind}
-                        label={
-                          project.media.find((media) => media.id === item.media_id)?.name ?? item.label ?? item.media_id
-                        }
-                        selected={state.selected.includes(item.id)}
-                        dimmed={
-                          !track.enabled ||
-                          !item.enabled ||
-                          (state.selected.length > 0 && !state.selected.includes(item.id))
-                        }
-                        style={{ left: pixelAt(item.timeline_in.t, scale), width: clipWidth }}
-                        onClick={() => {
-                          update({ ...state, selected: [item.id] });
-                          if (tool === "blade") split();
-                        }}
-                      >
-                        {track.kind === "video" ? (
-                          <Film clip={item} width={clipWidth} scale={scale} config={config} />
-                        ) : (
-                          <Wave clip={item} width={clipWidth} scale={scale} config={config} />
-                        )}
-                      </Clip>
-                    );
-                  })}
-                  {track.kind === "subtitle" &&
-                    project.cues
-                      .filter((cue) => cue.track_id === track.id)
-                      .map((cue) => (
-                        <Clip
-                          key={`${cue.cue_id}-${cue.piece}-${cue.start}`}
-                          kind="subtitle"
-                          label={cue.text.replaceAll("\n", " ")}
-                          selected={state.selected.includes(cue.cue_id)}
-                          dimmed={!track.enabled || (state.selected.length > 0 && !state.selected.includes(cue.cue_id))}
-                          style={{
-                            left: pixelAt(cue.start, scale),
-                            width: Math.max(1, pixelAt(cue.end, scale) - pixelAt(cue.start, scale)),
-                          }}
-                          onClick={() => update({ ...state, selected: [cue.cue_id] })}
-                        />
-                      ))}
                 </div>
               </div>
-            ))}
-            <div
-              ref={playhead}
-              className="zc-playhead"
-              style={{ left: `calc(var(--track-label-w) + ${pixelAt(at, scale)}px)` }}
-            >
-              <button
-                type="button"
-                aria-label="播放头"
-                onPointerDown={(event) => {
-                  dragging.current = true;
-                  event.currentTarget.setPointerCapture?.(event.pointerId);
-                }}
-                onPointerMove={(event) => {
-                  const ruler = event.currentTarget
-                    .closest(".zc-timeline-content")
-                    ?.querySelector<HTMLElement>(".zc-ruler");
-                  if (dragging.current && ruler) point(event.clientX, ruler);
-                }}
-                onPointerUp={() => {
-                  dragging.current = false;
-                }}
-                onLostPointerCapture={() => {
-                  dragging.current = false;
-                }}
-                onPointerCancel={() => {
-                  dragging.current = false;
-                }}
-              >
-                ▼
-              </button>
-            </div>
-          </div>
-        )}
-      </section>
+            )}
+          </section>
+        </>
+      )}
     </>
   );
 }

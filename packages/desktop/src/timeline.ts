@@ -16,6 +16,7 @@ export { add, compare, div, floor, mul, parseRational, printRational, rational, 
 export const zero = rational(0n);
 export type Time = { t: string; tc?: string };
 export interface ClipView {
+  occurrence_id?: string;
   id: string;
   media_id: string;
   label: string | null;
@@ -63,8 +64,21 @@ export interface StyleView {
   box?: { color: string; padding?: number };
   position?: { anchor: string; margin_v: number };
 }
+export interface MediaView {
+  uses?: number;
+  id: string;
+  name?: string;
+  kind: string;
+  path?: string;
+  duration?: string;
+  start_timecode?: string;
+  reel?: string;
+  video?: { rate: string; width: number; height: number };
+  audio?: { sample_rate: string; channels: number };
+  organize?: { note?: string; link?: string; tags?: string[]; folders?: string[]; rating?: number };
+}
 export interface PreviewData {
-  media: { id: string; name?: string; kind: string }[];
+  media: MediaView[];
   cues: CueView[];
   styles: StyleView[];
 }

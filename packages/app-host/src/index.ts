@@ -56,6 +56,11 @@ const uiStateSchema = z.strictObject({
   playing: z.boolean(),
   range: z.strictObject({ start: time, duration }).nullable(),
   loop: z.boolean(),
+  mediaBrowser: z
+    .strictObject({ scope: z.string(), search: z.string(), size: z.number().int().min(110).max(280) })
+    .optional(),
+  preview: z.enum(["media", "timeline"]).optional(),
+  media: z.strictObject({ id, at: time, in: time.nullable(), out: time.nullable() }).optional(),
 });
 
 function uiEnvelope(verb: UiVerb, code?: string, message = "", retryable = false): UiEnvelope {
@@ -276,8 +281,18 @@ export async function startHost(
       }
     });
     client.on("message", async (raw) => {
+      const message = (() => {
+        try {
+          return JSON.parse(raw.toString());
+        } catch {
+          return null;
+        }
+      })();
+      if (!message || typeof message !== "object" || Array.isArray(message)) {
+        client.close(1008, "Invalid message");
+        return;
+      }
       try {
-        const message = JSON.parse(raw.toString());
         if (message.type === "ui_ready") {
           if (ui && ui !== client) {
             client.close(1008, "UI already connected");
@@ -325,7 +340,33 @@ export async function startHost(
               envelope: {
                 ok: true,
                 result: {
-                  media: project.media.map((item) => ({ id: item.id, name: item.name, kind: item.kind })),
+                  media: project.media.map((item) => ({
+                    uses: new Set(
+                      timeline?.tracks.flatMap((track) =>
+                        track.kind === "subtitle"
+                          ? []
+                          : track.clips.filter((clip) => clip.media_id === item.id).map((clip) => clip.occurrence_id),
+                      ) ?? [],
+                    ).size,
+                    id: item.id,
+                    name: item.path.split("/").at(-1),
+                    kind: item.kind,
+                    path: resolve(dirname(options.project ?? "."), item.path),
+                    duration: printRational(item.duration, true),
+                    start_timecode: item.start_timecode,
+                    reel: item.reel,
+                    video: item.video
+                      ? {
+                          ...item.video,
+                          rate: printRational(item.video.rate),
+                          pixel_aspect: item.video.pixel_aspect ? printRational(item.video.pixel_aspect) : undefined,
+                        }
+                      : undefined,
+                    audio: item.audio
+                      ? { ...item.audio, sample_rate: printRational(item.audio.sample_rate) }
+                      : undefined,
+                    organize: item.organize,
+                  })),
                   cues,
                   styles: project.subtitle_styles,
                 },
@@ -372,14 +413,16 @@ export async function startHost(
           }
           return;
         }
-        if (typeof message.id !== "string" || !VERBS.includes(message.verb)) {
+        if (typeof message.id !== "string" || typeof message.verb !== "string") {
           client.close(1008, "Invalid message");
           return;
         }
+        if (!VERBS.includes(message.verb)) throw new Error(`Unknown request: ${message.verb}`);
         const envelope = await kernel(message.verb as Verb, message.request);
         if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify({ id: message.id, envelope }));
-      } catch {
-        client.close(1008, "Invalid message");
+      } catch (error) {
+        if (typeof message.id === "string" && client.readyState === WebSocket.OPEN)
+          client.send(JSON.stringify({ id: message.id, envelope: { ok: false, error: { message: String(error) } } }));
       }
     });
   });
