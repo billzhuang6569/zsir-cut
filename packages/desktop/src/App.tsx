@@ -3,6 +3,7 @@ import { PANELS, type Panel, type UiState } from "../../app-host/src/ui.js";
 import { type AiNotice, useAiPanel } from "./AiPanel.js";
 import { useChapterPanel } from "./ChapterPanel.js";
 import { connectHost, type ProjectView } from "./connection.js";
+import { ExportPanel } from "./ExportPanel.js";
 import { useMediaPanel } from "./MediaPanel.js";
 import { sourceProject } from "./media.js";
 import { useSubtitlePanel } from "./SubtitlePanel.js";
@@ -29,6 +30,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
     [],
   );
   const ai = useAiPanel({ call, path: state.project, project, notices, revision: aiRevision, connectionEpoch });
+  const [fcpIcon, setFcpIcon] = useState<string | null>(null);
   const dragging = useRef(false);
   const [errorDetail, setErrorDetail] = useState<string | undefined>();
   const [error, setError] = useState<string | null>(null);
@@ -72,7 +74,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
       },
       chat: (notice) => setNotices((old) => [...old, notice]),
       aiChanged: () => setAiRevision((value) => value + 1),
-      icon: () => {},
+      icon: setFcpIcon,
       error: (message, detail) => {
         setError(message);
         setErrorDetail(detail);
@@ -122,7 +124,12 @@ export function App({ config }: { config?: { port: number; token: string } }) {
         <span>{project?.name ?? "未打开工程"}</span>
         {project && <span className="zc-muted">r{project.revision.seq}</span>}
         <span className="zc-grow" />
-        <button type="button" className="zc-btn" disabled>
+        <button
+          type="button"
+          className="zc-btn"
+          disabled={!project}
+          onClick={() => update(applyUi(current.current, "ui_show_panel", { panel: "export" }))}
+        >
           导出
         </button>
       </section>
@@ -192,6 +199,9 @@ export function App({ config }: { config?: { port: number; token: string } }) {
         dragging={dragging}
         call={(verb, request) => connection.current?.call(verb, request) ?? Promise.reject(new Error("宿主未连接"))}
       />
+      {project && (
+        <ExportPanel project={project} state={state} update={update} call={call} config={config} fcpIcon={fcpIcon} />
+      )}
     </main>
   );
 }

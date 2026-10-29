@@ -16,6 +16,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import { z } from "zod";
 import type { DispatchOptions, Envelope, Verb } from "../../core/dist/index.js";
 import { Agents } from "./agents.js";
+import { exportPreferences } from "./export-preferences.js";
 import { mediaChannel } from "./media.js";
 import { PANELS, UI_VERBS, type UiEnvelope, type UiVerb } from "./ui.js";
 
@@ -40,7 +41,7 @@ const duration = time.refine((value) => !/^0(?:\/\d+)?s$/.test(value), "Duration
 const id = z.string().min(1).max(200);
 const uiSchemas = {
   ui_state: z.strictObject({}),
-  ui_show_panel: z.strictObject({ panel: z.enum(PANELS), sub: z.string().optional() }),
+  ui_show_panel: z.strictObject({ panel: z.enum([...PANELS, "export"]), sub: z.string().optional() }),
   ui_seek: z.union([z.strictObject({ at: time }), z.strictObject({ id })]),
   ui_select: z.strictObject({ ids: z.array(id) }),
   ui_play: z.strictObject({
@@ -59,6 +60,15 @@ const uiStateSchema = z.strictObject({
   playing: z.boolean(),
   range: z.strictObject({ start: time, duration }).nullable(),
   loop: z.boolean(),
+  export: z
+    .strictObject({
+      open: z.boolean(),
+      sub: z.string().nullable(),
+      srt: z.boolean(),
+      wav: z.boolean(),
+      active: z.string().nullable(),
+    })
+    .optional(),
   subtitleBrowser: z
     .strictObject({ search: z.string(), find: z.string(), replace: z.string(), matchCase: z.boolean() })
     .optional(),
@@ -387,6 +397,11 @@ export async function startHost(
                       : undefined,
                     organize: item.organize,
                   })),
+                  subtitleOverlays:
+                    project.subtitle_overlays?.map((item) => ({
+                      ...item,
+                      tail: printRational(item.tail ?? { numerator: 10n, denominator: 1n }, true),
+                    })) ?? [],
                   cues,
                   styles: project.subtitle_styles,
                   subtitleTracks:
@@ -451,6 +466,12 @@ export async function startHost(
                 JSON.stringify({ id: message.id, envelope: { ok: false, error: { message: String(error) } } }),
               );
           }
+          return;
+        }
+        if (typeof message.id === "string" && message.verb === "export_preferences") {
+          const project = await load();
+          const result = await exportPreferences(options.project as string, project.id, message.request?.value);
+          client.send(JSON.stringify({ id: message.id, envelope: { ok: true, result } }));
           return;
         }
         if (typeof message.id !== "string" || typeof message.verb !== "string") {

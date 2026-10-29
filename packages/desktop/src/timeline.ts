@@ -85,7 +85,17 @@ export interface Recognition {
   remove_fillers?: boolean;
   filler_words?: string[];
 }
+export interface OverlayView {
+  id: string;
+  name: string;
+  timeline_id: string;
+  subtitle_track_id: string;
+  output_path: string;
+  tail: string;
+  last_export: { created_at: string; revision_id: string; size_bytes: number } | null;
+}
 export interface PreviewData {
+  subtitleOverlays?: OverlayView[];
   subtitleTracks?: { id: string; name: string; default_style_id: string }[];
   recognition?: Recognition;
   recognized?: boolean;

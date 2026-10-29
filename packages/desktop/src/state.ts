@@ -17,6 +17,19 @@ export function initialState(): UiState {
 export function applyUi(state: UiState, verb: UiVerb, request: Record<string, unknown>): UiState {
   switch (verb) {
     case "ui_show_panel":
+      if (request.panel === "export")
+        return {
+          ...state,
+          playing: false,
+          export: {
+            srt: true,
+            wav: false,
+            active: null,
+            ...state.export,
+            open: true,
+            sub: (request.sub as string | undefined) ?? null,
+          },
+        };
       return {
         ...state,
         panel: request.panel as UiState["panel"],
