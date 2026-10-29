@@ -4,6 +4,7 @@ import { hostname } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { Envelope, Verb } from "../dispatch.ts";
 import { startPreviewJob } from "../jobs.ts";
+import { decisionSummary } from "../read-views.ts";
 import { applyEdit } from "./edit.ts";
 import { diffProjectEntities, type EntityChange } from "./entities.ts";
 import { newId } from "./id.ts";
@@ -14,7 +15,30 @@ import type { Author, Project } from "./types.ts";
 
 type Input = Record<string, unknown>;
 type State = "open" | "in_review" | "approved" | "rejected";
-interface Session {
+export interface Decision {
+  id: string;
+  seq: number;
+  tag?: string;
+  question: string;
+  options: { id: string; label: string; note?: string; recommended?: boolean }[];
+  allow_other: boolean;
+  refs?: ({ kind: "time"; at: string } | { kind: "entity"; id: string })[];
+  state: "pending" | "answered" | "skipped";
+  answer?: { option_id?: string; text?: string; author: Author; at: string };
+  created_by: Author;
+}
+export interface Session {
+  decisions?: Decision[];
+  log?: {
+    verb: Verb;
+    at: string;
+    author: Author;
+    idempotency_key: string;
+    signature: string;
+    before: Decision[];
+    after: Decision[];
+    envelope: Envelope;
+  }[];
   session_id: string;
   state: State;
   approval: "manual" | "auto";
@@ -49,6 +73,11 @@ const signature = (input: Input) =>
     intent: input.intent,
     dry_run: input.dry_run,
     target: input.target,
+    decisions: input.decisions,
+    decision_id: input.decision_id,
+    option_id: input.option_id,
+    text: input.text,
+    skip: input.skip,
   });
 async function locked<T>(directory: string, action: () => Promise<T>): Promise<T> {
   const path = join(directory, "session.lock");
@@ -105,7 +134,7 @@ const output = (verb: Verb, requestId: string): Envelope => ({
 const reject = (
   verb: Verb,
   id: string,
-  code: "E_SESSION_STATE" | "E_CONFLICT" | "E_NOT_FOUND" | "E_IDEMPOTENCY_MISMATCH",
+  code: "E_SESSION_STATE" | "E_CONFLICT" | "E_NOT_FOUND" | "E_IDEMPOTENCY_MISMATCH" | "E_VALIDATION",
   message: string,
 ): Envelope => {
   const envelope = output(verb, id);
@@ -209,6 +238,8 @@ export async function runSession(verb: Verb, input: Input, id: string): Promise<
       const now = new Date().toISOString();
       const session: Session = {
         session_id,
+        decisions: [],
+        log: [],
         state: "open",
         approval: input.approval as Session["approval"],
         intent: input.intent as string,
@@ -255,6 +286,14 @@ async function runExistingSession(
   }
   const draftPath = join(directory, "draft.zcut.json");
   const draft = openProject({ projectPath: draftPath });
+  if (verb === "session_ask" || verb === "session_answer") {
+    const previous = session.log?.find((entry) => entry.idempotency_key === input.idempotency_key);
+    if (previous) {
+      if (previous.verb !== verb || previous.signature !== signature(input))
+        return reject(verb, id, "E_IDEMPOTENCY_MISMATCH", "Idempotency key was used for another decision request");
+      return previous.envelope;
+    }
+  }
   if (verb === "session_review" && session.review_key === input.idempotency_key && session.review_envelope) {
     if (session.review_signature !== signature(input))
       return reject(verb, id, "E_IDEMPOTENCY_MISMATCH", "Idempotency key was used for another session request");
@@ -270,6 +309,85 @@ async function runExistingSession(
       };
     }
     return reject(verb, id, "E_SESSION_STATE", "Session is closed");
+  }
+  if (verb === "session_ask" || verb === "session_answer") {
+    const current = await readProject(draftPath);
+    if (input.base_revision !== current.revision.id)
+      return reject(verb, id, "E_CONFLICT", "Draft revision differs from current revision");
+    const decisions = session.decisions ?? [];
+    const before = structuredClone(decisions);
+    const now = new Date().toISOString();
+    const result = output(verb, id);
+    if (verb === "session_ask") {
+      const additions = input.decisions as Omit<Decision, "seq" | "state" | "created_by">[];
+      if (decisions.length + additions.length > 50)
+        return reject(verb, id, "E_VALIDATION", "A session can contain at most 50 decisions");
+      const ids = new Set(decisions.map((decision) => decision.id));
+      const optionIds = new Set(decisions.flatMap((decision) => decision.options.map((option) => option.id)));
+      const created: string[] = [];
+      for (const addition of additions) {
+        const decisionId = addition.id ?? newId("dec_");
+        if (ids.has(decisionId)) return reject(verb, id, "E_VALIDATION", "Decision IDs must be unique in a session");
+        ids.add(decisionId);
+        for (const [index, option] of addition.options.entries()) {
+          if (optionIds.has(option.id))
+            return reject(verb, id, "E_VALIDATION", "Option IDs must be unique in a session");
+          optionIds.add(option.id);
+          if (option.recommended && index !== 0)
+            return reject(verb, id, "E_VALIDATION", "Only the first option may be recommended");
+        }
+        decisions.push({
+          ...addition,
+          id: decisionId,
+          seq: decisions.length + 1,
+          allow_other: addition.allow_other ?? true,
+          state: "pending",
+          created_by: input.author as Author,
+        });
+        created.push(decisionId);
+      }
+      result.result = { decision_ids: created };
+      session.state = "open";
+    } else {
+      const decision = decisions.find((item) => item.id === input.decision_id);
+      if (!decision) return reject(verb, id, "E_NOT_FOUND", "Decision not found");
+      if (input.text !== undefined && !decision.allow_other)
+        return reject(verb, id, "E_VALIDATION", "This decision does not allow a text answer");
+      if (input.option_id !== undefined && !decision.options.some((option) => option.id === input.option_id))
+        return reject(verb, id, "E_NOT_FOUND", "Option not found in this decision");
+      decision.state = input.skip === true ? "skipped" : "answered";
+      delete decision.answer;
+      if (input.skip !== true)
+        decision.answer = {
+          ...(input.option_id !== undefined
+            ? { option_id: input.option_id as string }
+            : { text: input.text as string }),
+          author: input.author as Author,
+          at: now,
+        };
+      result.result = { decision_id: decision.id, state: decision.state };
+    }
+    if (input.dry_run === true) {
+      result.status = "dry_run";
+      return result;
+    }
+    result.status = "drafted";
+    session.decisions = decisions;
+    session.updated_at = now;
+    // Keep decisions and their audit/idempotency record in the same atomic replacement.
+    session.log ??= [];
+    session.log.push({
+      verb,
+      at: now,
+      author: input.author as Author,
+      idempotency_key: input.idempotency_key as string,
+      signature: signature(input),
+      before,
+      after: structuredClone(decisions),
+      envelope: result,
+    });
+    await metadata(sessionPath, session);
+    return result;
   }
   if (verb === "edit" || verb === "undo" || verb === "redo") {
     if (session.state === "in_review" && verb !== "edit")
@@ -324,6 +442,7 @@ async function runExistingSession(
     result.result = {
       base_revision: session.base_revision,
       draft_revision: current.revision.id,
+      ...decisionSummary(current, session),
       ...classify(diffProjectEntities(base, current)),
       ops: entries.filter((entry) => entry.kind === "write").flatMap((entry) => entry.ops ?? []),
       verification: result.verification,
@@ -457,6 +576,15 @@ async function approve(
   }
   const result = { ...write, verb: "session_approve" } as Envelope;
   if (write.ok) {
+    const pending = (session.decisions ?? []).filter((decision) => decision.state === "pending").length;
+    if (pending)
+      result.result = {
+        ...result.result,
+        warnings: [
+          ...((result.result?.warnings as unknown[] | undefined) ?? []),
+          { code: "W_DECISIONS_PENDING", count: pending, message: `${pending} decisions are still pending` },
+        ],
+      };
     session.state = "approved";
     session.updated_at = new Date().toISOString();
     session.decision_key = input.idempotency_key as string;
