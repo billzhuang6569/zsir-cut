@@ -3,6 +3,7 @@ import type { UiState } from "../../app-host/src/ui.js";
 import { Button, DecisionProgress } from "./ai-components.js";
 import { Icon } from "./components.js";
 import type { ProjectView } from "./connection.js";
+import { DESKTOP_AUTHOR } from "./connection.js";
 import "./history.css";
 
 export interface HistoryEntry {
@@ -218,7 +219,7 @@ export function useHistoryPanel({
         target: state.history.revision,
         base_revision: project.revision.id,
         idempotency_key: crypto.randomUUID(),
-        author: { kind: "human", name: "桌面用户" },
+        author: DESKTOP_AUTHOR,
         label: `回到：${state.history.label ?? "工程修改"}`.slice(0, 80),
       });
       present();

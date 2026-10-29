@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import type { UiState } from "../../app-host/src/ui.js";
 import { Icon, IconButton } from "./components.js";
 import type { ProjectView } from "./connection.js";
+import { DESKTOP_AUTHOR } from "./connection.js";
 import { mediaDuration, mediaRange, middle, placeMedia, sourceProject } from "./media.js";
 import { mediaUrl, Wave } from "./TimelinePreview.js";
 import { compare, floor, type MediaView, parseRational, seekTarget, timecode } from "./timeline.js";
@@ -147,7 +148,7 @@ export function useMediaPanel({
         project: state.project,
         base_revision: project.revision.id,
         idempotency_key: crypto.randomUUID(),
-        author: { kind: "human", name: "桌面用户" },
+        author: DESKTOP_AUTHOR,
         label,
         ...data,
       })) as { job_id?: string };

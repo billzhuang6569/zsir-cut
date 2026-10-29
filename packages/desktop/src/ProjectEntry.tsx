@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "./ai-components.js";
 import { Icon, IconButton } from "./components.js";
 import type { ProjectView } from "./connection.js";
+import { DESKTOP_AUTHOR } from "./connection.js";
 import "./entry.css";
 
 interface Recent {
@@ -47,6 +48,8 @@ export function ProjectEntry({
   const [recent, setRecent] = useState<Recent[]>([]);
   const [menu, setMenu] = useState(false);
   const [form, setForm] = useState<"new" | "open" | null>(null);
+  const [pathInput, setPathInput] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const [paths, setPaths] = useState<string[]>([]);
   const [name, setName] = useState("未命名工程");
   const [path, setPath] = useState("");
@@ -55,6 +58,7 @@ export function ProjectEntry({
   const [size, setSize] = useState("1920×1080");
   const [language, setLanguage] = useState("zh");
   const [busy, setBusy] = useState(false);
+  const [failureDetail, setFailureDetail] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: Refresh the list when the bound project changes.
   useEffect(() => {
@@ -89,10 +93,12 @@ export function ProjectEntry({
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
     setFailure(null);
+    setFailureDetail(null);
     try {
       await action();
     } catch (error) {
       setFailure(error instanceof Error ? error.message : "操作失败，请重试");
+      setFailureDetail(error instanceof Error && error.cause ? String(error.cause) : null);
     } finally {
       setBusy(false);
     }
@@ -125,6 +131,7 @@ export function ProjectEntry({
     let stop: (() => void) | undefined;
     void getCurrentWindow()
       .onDragDropEvent((event) => {
+        setDragging(event.payload.type === "enter" || event.payload.type === "over");
         if (event.payload.type === "drop") newForm(event.payload.paths);
       })
       .then((unlisten) => {
@@ -148,6 +155,17 @@ export function ProjectEntry({
       const selected = await open({ multiple: false, filters: [{ name: "剪辑工程", extensions: ["zcut.json"] }] });
       if (typeof selected === "string") await switchTo(selected);
     });
+  const failureContent = (
+    <>
+      <p role="alert">{failure || error}</p>
+      {failureDetail && (
+        <details>
+          <summary>错误详情</summary>
+          <pre>{failureDetail}</pre>
+        </details>
+      )}
+    </>
+  );
   const actions = (
     <div className="zc-entry-actions">
       <Button icon="plus" onClick={() => newForm()} disabled={busy}>
@@ -161,36 +179,37 @@ export function ProjectEntry({
   const rows = (
     <ul className="zc-entry-recents">
       {recent.map((row) => (
-        <li key={row.path} className={row.exists ? "" : "is-missing"}>
+        <li key={row.path} className={row.exists ? "" : "is-missing"} title={row.path}>
           <Button disabled={!row.exists || busy} onClick={() => void run(() => switchTo(row.path))}>
-            <Icon name="clip" />
-            {row.exists && config ? (
-              <img
-                className="zc-entry-cover"
-                alt=""
-                src={`http://127.0.0.1:${config.port}/recent-thumb?token=${encodeURIComponent(config.token)}&path=${encodeURIComponent(row.path)}`}
-                onError={(event) => {
-                  event.currentTarget.style.display = "none";
-                }}
-              />
-            ) : (
-              <Icon name="clip" />
-            )}
-            <span>
+            <span className="zc-entry-cover">
+              <Icon name="clip" size={28} />
+              {row.exists && config ? (
+                <img
+                  alt=""
+                  src={`http://127.0.0.1:${config.port}/recent-thumb?token=${encodeURIComponent(config.token)}&path=${encodeURIComponent(row.path)}`}
+                  onError={(event) => {
+                    event.currentTarget.style.display = "none";
+                  }}
+                />
+              ) : null}
+            </span>
+            <span className="zc-entry-caption">
               {row.name}
               <small>
                 {leaf(folder(row.path))} · {row.exists ? relativeTime(row.openedAt) : "文件已不存在"}
               </small>
             </span>
           </Button>
-          <IconButton
-            icon="trash"
-            label={`移除${row.name}`}
-            disabled={busy}
-            onClick={() =>
-              void run(async () => setRecent((await call("recent_remove", { path: row.path })) as Recent[]))
-            }
-          />
+          {!row.exists && (
+            <IconButton
+              icon="trash"
+              label={`移除${row.name}`}
+              disabled={busy}
+              onClick={() =>
+                void run(async () => setRecent((await call("recent_remove", { path: row.path })) as Recent[]))
+              }
+            />
+          )}
         </li>
       ))}
     </ul>
@@ -213,11 +232,12 @@ export function ProjectEntry({
       )}
       {!project && (
         <section
-          className="zc-start zc-pad"
+          className="zc-start"
           aria-label="开始页"
           onDragOver={(event) => event.preventDefault()}
           onDrop={(event) => {
             event.preventDefault();
+            setDragging(false);
             const files = Array.from(event.dataTransfer.files)
               .map((file) => (file as File & { path?: string }).path)
               .filter((path): path is string => Boolean(path));
@@ -226,31 +246,68 @@ export function ProjectEntry({
             else setFailure("浏览器无法读取本机路径，请输入素材路径");
           }}
         >
-          <h1>庄Sir剪辑助手</h1>
-          {actions}
-          <p>拖入视频或音频，新建工程并导入素材</p>
-          {!isTauri() && (
-            <label>
-              素材路径
-              <textarea
-                className="zc-input"
-                aria-label="素材路径"
-                placeholder="每行一个本机绝对路径"
-                onChange={(event) => setPaths(event.target.value.split("\n").filter(Boolean))}
-              />
-              <Button disabled={!paths.length} onClick={() => newForm(paths)}>
-                从素材新建
-              </Button>
-            </label>
-          )}
-          <h2>最近工程</h2>
-          {rows}
-          {(failure || error) && <p role="alert">{failure || error}</p>}
+          <div className="zc-start-content">
+            <header className="zc-entry-brand">
+              <span>
+                <Icon name="clip" size={28} />
+              </span>
+              <h1>庄Sir剪辑助手</h1>
+            </header>
+            {actions}
+            <section
+              className={`zc-entry-drop${dragging ? " is-dragging" : ""}`}
+              aria-label="拖入素材"
+              onDragEnter={(event) => {
+                event.preventDefault();
+                setDragging(true);
+              }}
+              onDragLeave={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false);
+              }}
+            >
+              <Icon name="export" size={28} />
+              <p>拖入视频或音频，新建工程</p>
+              {!isTauri() && (
+                <>
+                  <Button aria-expanded={pathInput} onClick={() => setPathInput(!pathInput)}>
+                    输入路径
+                  </Button>
+                  {pathInput && (
+                    <label className="zc-entry-paths">
+                      素材路径
+                      <textarea
+                        className="zc-input zc-textarea"
+                        rows={3}
+                        aria-label="素材路径"
+                        placeholder="每行一个本机绝对路径"
+                        onChange={(event) => setPaths(event.target.value.split("\n").filter(Boolean))}
+                      />
+                      <Button
+                        variant="primary"
+                        icon="plus"
+                        disabled={!paths.length || busy}
+                        onClick={() => newForm(paths)}
+                      >
+                        从素材新建
+                      </Button>
+                    </label>
+                  )}
+                </>
+              )}
+            </section>
+            {recent.length > 0 && (
+              <section className="zc-entry-recent-section">
+                <h2>最近</h2>
+                {rows}
+              </section>
+            )}
+            {!form && (failure || error) && failureContent}
+          </div>
         </section>
       )}
       {project && failure && (
         <div className="zc-entry-menu zc-pad" role="alert">
-          {failure}
+          {failureContent}
           <Button onClick={() => setFailure(null)}>关闭</Button>
         </div>
       )}
@@ -307,7 +364,7 @@ export function ProjectEntry({
                   timeline: match && video ? {} : { edit_rate: rate, width, height },
                   ...(match && video ? { match_media: video } : {}),
                   ...(language ? { subtitles: { language } } : {}),
-                  author: { kind: "human" },
+                  author: DESKTOP_AUTHOR,
                   idempotency_key: crypto.randomUUID(),
                 });
                 await switchTo(path, true);
@@ -319,7 +376,7 @@ export function ProjectEntry({
                     project: path,
                     paths,
                     base_revision: brief.project.revision.id,
-                    author: { kind: "human" },
+                    author: DESKTOP_AUTHOR,
                     idempotency_key: crypto.randomUUID(),
                     label: `导入 ${paths.length} 个素材`,
                   });
@@ -367,7 +424,7 @@ export function ProjectEntry({
                 <label>
                   画面设置
                   <select
-                    className="zc-input"
+                    className="zc-input zc-entry-select"
                     value={match ? "match" : "manual"}
                     onChange={(event) => setMatch(event.target.value === "match")}
                   >
@@ -384,7 +441,11 @@ export function ProjectEntry({
                   <>
                     <label>
                       帧率
-                      <select className="zc-input" value={rate} onChange={(event) => setRate(event.target.value)}>
+                      <select
+                        className="zc-input zc-entry-select"
+                        value={rate}
+                        onChange={(event) => setRate(event.target.value)}
+                      >
                         {["24000/1001", "24", "25", "30000/1001", "30", "50", "60000/1001", "60"].map(
                           (value, index) => (
                             <option key={value} value={value}>
@@ -396,7 +457,11 @@ export function ProjectEntry({
                     </label>
                     <label>
                       画面尺寸
-                      <select className="zc-input" value={size} onChange={(event) => setSize(event.target.value)}>
+                      <select
+                        className="zc-input zc-entry-select"
+                        value={size}
+                        onChange={(event) => setSize(event.target.value)}
+                      >
                         {["1920×1080", "3840×2160", "1280×720", "1080×1920", "1080×1080"].map((value) => (
                           <option key={value}>{value}</option>
                         ))}
@@ -406,7 +471,11 @@ export function ProjectEntry({
                 )}
                 <label>
                   字幕语言
-                  <select className="zc-input" value={language} onChange={(event) => setLanguage(event.target.value)}>
+                  <select
+                    className="zc-input zc-entry-select"
+                    value={language}
+                    onChange={(event) => setLanguage(event.target.value)}
+                  >
                     <option value="zh">中文</option>
                     <option value="en">英文</option>
                     <option value="">不建字幕轨</option>
@@ -414,13 +483,18 @@ export function ProjectEntry({
                 </label>
               </>
             )}
-            {failure && <p role="alert">{failure}</p>}
+            {failure && failureContent}
             <div className="zc-entry-actions">
-              <Button type="submit" disabled={busy || !path.endsWith(".zcut.json")}>
-                确定
-              </Button>
               <Button disabled={busy} onClick={() => setForm(null)}>
                 取消
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                icon={form === "new" ? "plus" : "folder"}
+                disabled={busy || !path.endsWith(".zcut.json")}
+              >
+                {form === "new" ? "新建" : "打开"}
               </Button>
             </div>
           </form>

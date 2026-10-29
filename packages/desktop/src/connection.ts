@@ -6,6 +6,8 @@ export interface ProjectView extends TimelineView, PreviewData {
   name: string;
   revision: { id: string; seq: number };
 }
+export const DESKTOP_AUTHOR = { kind: "human", name: "桌面用户" } as const;
+
 interface ResultEnvelope {
   ok: boolean;
   result: unknown;
@@ -94,11 +96,15 @@ export function connectHost(
           new Error(
             !envelope.error?.code
               ? (envelope.error?.message ?? "请求失败")
-              : envelope.error?.code === "E_VALIDATION"
+              : envelope.error?.message === "Project file is invalid"
                 ? "工程文件无效"
-                : envelope.error?.code === "E_NOT_FOUND"
-                  ? "找不到工程文件"
-                  : "请求失败，请检查工程后重试",
+                : envelope.error?.code === "E_VALIDATION"
+                  ? envelope.error.message.includes("/author") && envelope.error.message.includes("name")
+                    ? "操作发起人的姓名缺失，无法继续，请重试"
+                    : `请求参数未通过校验：${envelope.error.message}`
+                  : envelope.error?.code === "E_NOT_FOUND"
+                    ? "找不到工程文件"
+                    : `请求失败：${envelope.error?.message ?? "请重试"}`,
             { cause: `${envelope.error?.code ?? ""} ${envelope.error?.message ?? ""}`.trim() },
           ),
         );

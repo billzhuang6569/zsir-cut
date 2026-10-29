@@ -3,6 +3,7 @@ import type { AgentKind, ChatEvent } from "../../app-host/src/agent-events.js";
 import { Button, type Decision, DecisionCard, Markdown, StepRow, toolVerb } from "./ai-components.js";
 import { Icon, IconButton } from "./components.js";
 import type { ProjectView } from "./connection.js";
+import { DESKTOP_AUTHOR } from "./connection.js";
 import "./ai.css";
 
 function toolResultFailed(value: unknown): boolean {
@@ -226,7 +227,7 @@ export function useAiPanel({
       session_id: session.session_id,
       base_revision: verb === "session_approve" ? project?.revision.id : session.draft_revision,
       idempotency_key: crypto.randomUUID(),
-      author: { kind: "human", name: "剪辑师" },
+      author: DESKTOP_AUTHOR,
       ...extra,
     });
   const decisionSessions = ai.sessions.filter((item) => item.state !== "in_review" || item.pending_count > 0);

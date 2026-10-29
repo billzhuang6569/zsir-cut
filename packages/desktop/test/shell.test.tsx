@@ -414,3 +414,48 @@ it("shows Chinese open errors and preserves the kernel code in the tooltip", asy
     vi.unstubAllGlobals();
   }
 });
+
+it("preserves create and open rejection reasons instead of blaming the project file", async () => {
+  class FakeSocket {
+    onmessage: ((event: MessageEvent) => void) | null = null;
+    onclose = null;
+    send(raw: string) {
+      const request = JSON.parse(raw);
+      queueMicrotask(() =>
+        this.onmessage?.(
+          new MessageEvent("message", {
+            data: JSON.stringify({
+              id: request.id,
+              envelope: {
+                ok: false,
+                error: { code: "E_VALIDATION", message: "/author: must have required property 'name'" },
+              },
+            }),
+          }),
+        ),
+      );
+    }
+    close() {}
+  }
+  vi.stubGlobal("WebSocket", FakeSocket);
+  const disconnect = connectHost(
+    { port: 1, token: "test" },
+    {
+      ui: () => initialState(),
+      project: vi.fn(),
+      icon: vi.fn(),
+      error: vi.fn(),
+    },
+  );
+  try {
+    for (const verb of ["create_project", "project_open"]) {
+      await expect(disconnect.call(verb, {})).rejects.toMatchObject({
+        message: "操作发起人的姓名缺失，无法继续，请重试",
+        cause: "E_VALIDATION /author: must have required property 'name'",
+      });
+    }
+  } finally {
+    disconnect();
+    vi.unstubAllGlobals();
+  }
+});

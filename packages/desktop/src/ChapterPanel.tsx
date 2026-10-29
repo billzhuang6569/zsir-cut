@@ -3,6 +3,7 @@ import type { UiState } from "../../app-host/src/ui.js";
 import { chapterGroups, chapterMarkdown, chapterTime } from "./chapters.js";
 import { Icon, IconButton } from "./components.js";
 import type { ProjectView } from "./connection.js";
+import { DESKTOP_AUTHOR } from "./connection.js";
 import { compare, frameAt, frameTime, parseRational, seekTarget, timecode } from "./timeline.js";
 import "./chapters.css";
 
@@ -48,7 +49,7 @@ export function useChapterPanel({
         timeline_id: project.id,
         base_revision: project.revision.id,
         idempotency_key: crypto.randomUUID(),
-        author: { kind: "human", name: "桌面用户" },
+        author: DESKTOP_AUTHOR,
         label,
         ops: [op],
       });

@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { UiState } from "../../app-host/src/ui.js";
 import { Icon, IconButton } from "./components.js";
 import type { ProjectView } from "./connection.js";
+import { DESKTOP_AUTHOR } from "./connection.js";
 import { SubtitleCanvas } from "./SubtitleCanvas.js";
 import { alignment, defaultStyle, textEdit } from "./subtitles.js";
 import { mediaUrl } from "./TimelinePreview.js";
@@ -266,7 +267,7 @@ export function useSubtitlePanel({
         timeline_id: project.id,
         base_revision: project.revision.id,
         idempotency_key: crypto.randomUUID(),
-        author: { kind: "human", name: "桌面用户" },
+        author: DESKTOP_AUTHOR,
         label,
         ops,
       })) as { warnings?: { code: string; cue_ids?: string[] }[] };
@@ -300,7 +301,7 @@ export function useSubtitlePanel({
           media_id: item.id,
           base_revision: baseRevision,
           idempotency_key: crypto.randomUUID(),
-          author: { kind: "human", name: "桌面用户" },
+          author: DESKTOP_AUTHOR,
           label: `识别「${item.name ?? "素材"}」的字幕`,
         })) as { job_id?: string };
         if (result?.job_id) {
