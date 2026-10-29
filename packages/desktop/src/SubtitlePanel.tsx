@@ -736,11 +736,11 @@ export function useSubtitlePanel({
               {["描边白字", "黑底白字", "黄字"].map((name, index) => (
                 <button
                   type="button"
-                  className={`zc-btn zc-sub-preset zc-sub-preset-${index}`}
+                  className={`zc-sub-preset zc-sub-preset-${index}`}
                   aria-label={name}
                   title={name}
                   aria-pressed={
-                    styleDraft.color.toUpperCase() === (index === 2 ? "#FFD447" : "#FFFFFF") &&
+                    styleDraft.color.toUpperCase() === (index === 2 ? "#FFD84A" : "#FFFFFF") &&
                     (index === 1
                       ? box.color === "#000000CC" && outline.width === 0
                       : box.color === "#00000000" && outline.width === 0.06)
@@ -749,7 +749,7 @@ export function useSubtitlePanel({
                   onClick={() =>
                     changeStyle(
                       {
-                        color: index === 2 ? "#FFD447" : "#FFFFFF",
+                        color: index === 2 ? "#FFD84A" : "#FFFFFF",
                         outline: { color: "#000000", width: index === 1 ? 0 : 0.06 },
                         box: {
                           color: index === 1 ? "#000000CC" : "#00000000",
@@ -761,7 +761,7 @@ export function useSubtitlePanel({
                     )
                   }
                 >
-                  字幕
+                  <span>字幕</span>
                 </button>
               ))}
             </div>

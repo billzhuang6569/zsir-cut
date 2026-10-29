@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
 import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -463,7 +464,7 @@ it("edits each track default independently of cue overrides and previews only it
   expect(h.call).not.toHaveBeenCalled();
   await h.click("黄字");
   expect(h.call.mock.lastCall?.[1].ops).toEqual([
-    expect.objectContaining({ op: "update_style", style_id: "sty_en", color: "#FFD447" }),
+    expect.objectContaining({ op: "update_style", style_id: "sty_en", color: "#FFD84A" }),
   ]);
 });
 it("hides single-track selection and renders visual, selectable preset samples", async () => {
@@ -509,4 +510,47 @@ it("supports common fonts, custom fonts and font weight through the existing sty
   ]);
   await select("字重", "700");
   expect(h.call.mock.lastCall?.[1].ops).toEqual([{ op: "update_style", style_id: "sty_1", font_weight: 700 }]);
+});
+
+it("keeps preset samples distinct with the application CSS cascade, including disabled controls", async () => {
+  const sheet = document.createElement("style");
+  sheet.textContent = ["subtitles.css", "ai.css", "shell.css"]
+    .map((name) => readFileSync(`packages/desktop/src/${name}`, "utf8"))
+    .join("\n");
+  document.head.append(sheet);
+  cleanups.push(async () => sheet.remove());
+  const h = await mount(project, "style");
+  const buttons = [...h.container.querySelectorAll<HTMLButtonElement>(".zc-sub-preset")];
+  const samples = buttons.map((button) => button.querySelector("span") as HTMLElement);
+  const appearances = samples.map((sample) => {
+    const css = getComputedStyle(sample);
+    return [css.color, css.backgroundColor];
+  });
+  expect(appearances.map(([color]) => color)).toEqual([
+    "rgb(255, 255, 255)",
+    "rgb(255, 255, 255)",
+    "rgb(255, 216, 74)",
+  ]);
+  expect(new Set(appearances.map((appearance) => JSON.stringify(appearance))).size).toBe(3);
+  expect(getComputedStyle(samples[1] as HTMLElement).backgroundColor).toBe("rgba(0, 0, 0, 0.8)");
+  expect(getComputedStyle(samples[1] as HTMLElement).borderRadius).toBe("4px");
+  for (const index of [0, 2]) {
+    expect(getComputedStyle(samples[index] as HTMLElement).textShadow).toContain("#000");
+    expect(getComputedStyle(samples[index] as HTMLElement).fontWeight).toBe("700");
+  }
+  for (const [index, button] of buttons.entries()) {
+    expect(button.title).toBe(["描边白字", "黑底白字", "黄字"][index]);
+    expect(getComputedStyle(button).backgroundColor).toBe("rgb(51, 51, 51)");
+  }
+  const selected = buttons[0] as HTMLButtonElement;
+  expect(getComputedStyle(selected).borderTopWidth).toBe("1px");
+  expect(getComputedStyle(selected).borderTopColor).toBe("rgb(221, 221, 221)");
+  await h.click("黑底白字");
+  expect(getComputedStyle(buttons[1] as HTMLElement).borderTopColor).toBe("rgb(221, 221, 221)");
+  expect(getComputedStyle(selected).borderTopColor).toBe("rgba(0, 0, 0, 0)");
+  await act(async () => {
+    for (const button of buttons) button.disabled = true;
+  });
+  expect(samples.map((sample) => getComputedStyle(sample).color)).toEqual(appearances.map(([color]) => color));
+  for (const button of buttons) expect(getComputedStyle(button).opacity).toBe("1");
 });

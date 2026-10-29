@@ -309,24 +309,38 @@
 .zc-sub-preset {
   flex: 1;
   min-width: 0;
-  background: var(--raised);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--control-h);
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-md);
+  font: inherit;
+  cursor: pointer;
+  background: #333;
   border: 1px solid transparent;
-  color: #fff;
+  opacity: 1;
 }
 .zc-sub-preset[aria-pressed="true"] {
-  border-color: var(--text-2);
+  border-color: #ddd;
 }
-.zc-sub-preset-0 {
-  -webkit-text-stroke: 1px #000;
-  paint-order: stroke fill;
+.zc-sub-preset > span {
+  color: #fff;
+  font-weight: 700;
+  padding: 2px 6px;
+  text-shadow:
+    -1px -1px 0 #000,
+    1px -1px 0 #000,
+    -1px 1px 0 #000,
+    1px 1px 0 #000;
 }
-.zc-sub-preset-1 {
-  background: #000;
+.zc-sub-preset-1 > span {
+  background: #000000cc;
+  border-radius: 4px;
+  text-shadow: none;
 }
-.zc-sub-preset-2 {
-  color: #ffd447;
-  -webkit-text-stroke: 1px #000;
-  paint-order: stroke fill;
+.zc-sub-preset-2 > span {
+  color: #ffd84a;
 }
 .zc-sub-number {
   grid-template-columns: minmax(0, 1fr) calc(var(--control-h) * 2);
