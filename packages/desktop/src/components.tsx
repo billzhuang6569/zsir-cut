@@ -1,6 +1,7 @@
 import type { ButtonHTMLAttributes, CSSProperties, ReactNode } from "react";
 
 const PATHS: Record<string, string> = {
+  refresh: "M13 6a5 5 0 1 0 0 5M13 2v4H9",
   select: "M3 2l10 5.5-4.5 1.2L7 13z",
   blade: "M3 13 13 3M10 3h3v3",
   marker: "M4 14V2h8l-2 3 2 3H4",

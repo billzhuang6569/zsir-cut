@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { URL as NodeURL } from "node:url";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { UiState } from "../../app-host/src/ui.js";
 import { App } from "../src/App.js";
 import type { ProjectView } from "../src/connection.js";
@@ -13,6 +13,12 @@ import { connectHost } from "../src/connection.js";
 import { applyUi, initialState } from "../src/state.js";
 import { TimelinePreview } from "../src/TimelinePreview.js";
 import { tokenCss } from "../src/tokens.js";
+import { recordingCanvas } from "./canvas.js";
+
+beforeEach(() => {
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => recordingCanvas().context);
+});
+afterEach(() => vi.restoreAllMocks());
 
 describe("desktop shell", () => {
   it("renders six regions and switches the paired subtitle parameter panel", async () => {
@@ -183,7 +189,7 @@ it("opens the project through inspect and receives UI commands", async () => {
       socket?.receive({ type: "ui_request", id: "seek", verb: "ui_seek", request: { at: "2s" } });
       socket?.receive({ type: "ui_request", id: "state", verb: "ui_state", request: {} });
     });
-    expect(container.querySelector('[aria-label="参数区"] h3')?.textContent).toBe("样式");
+    expect(container.querySelector('[aria-label="参数区"] h3')?.textContent).toBe("预设");
     expect(container.querySelectorAll(".zc-clip-video")).toHaveLength(
       fixture.timelines[0].tracks
         .filter((t: { kind: string }) => t.kind === "video")
@@ -195,12 +201,7 @@ it("opens the project through inspect and receives UI commands", async () => {
         .reduce((n: number, t: { clips: unknown[] }) => n + t.clips.length, 0),
     );
     expect(container.querySelectorAll(".zc-clip-subtitle")).toHaveLength(cues.length);
-    expect(container.querySelector<HTMLElement>(".zc-caption")?.style.fontFamily).toContain(
-      '"Hiragino Sans GB", "Heiti SC", "Heiti TC", "Songti SC", sans-serif',
-    );
-    expect(container.querySelector<HTMLElement>(".zc-caption")?.style.getPropertyValue("--cue-size")).toBe(
-      String(fixture.subtitle_styles[0].font_size),
-    );
+    expect(container.querySelector(".zc-subtitle-canvas")).not.toBeNull();
     expect(container.querySelector('[aria-label="Final Cut Pro"]')).toBeNull();
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[aria-label="切割 B"]')?.click();
@@ -269,7 +270,7 @@ it("opens the project through inspect and receives UI commands", async () => {
   }
 });
 
-it("stacks overlapping cues in distinct rows with the earliest at the bottom", async () => {
+it("composites overlapping cues on the shared full-frame canvas", async () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   const project: ProjectView = {
     id: "timeline",
@@ -312,12 +313,10 @@ it("stacks overlapping cues in distinct rows with the earliest at the bottom", a
         />,
       ),
     );
-    const captions = [...container.querySelectorAll<HTMLElement>(".zc-caption")];
-    expect(captions.map((caption) => caption.textContent)).toEqual(["先出现的标题\n第二行", "后来的一句"]);
-    expect(captions.map((caption) => caption.style.gridRow)).toEqual(["2", "1"]);
+    const canvas = container.querySelector(".zc-subtitle-canvas");
+    expect(canvas?.getAttribute("aria-label")).toBe("后来的一句\n先出现的标题\n第二行");
     const css = readFileSync(new NodeURL("../src/timeline.css", import.meta.url), "utf8");
-    expect(css).toMatch(/\.zc-caption\s*\{[^}]*grid-column: 1/s);
-    expect(css).toMatch(/\.zc-caption-stack\s*\{[^}]*display: grid/s);
+    expect(css).toMatch(/\.zc-subtitle-canvas\s*\{[^}]*object-fit: contain/s);
     expect(css).toMatch(/\.zc-ruler-row\s*\{[^}]*position: sticky;[^}]*top: 0/s);
     const shell = readFileSync(new NodeURL("../src/shell.css", import.meta.url), "utf8");
     expect(shell).toMatch(/\.zc-timeline\s*\{[^}]*min-height: 0;[^}]*overflow: auto/s);

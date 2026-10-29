@@ -1,6 +1,7 @@
 import { mapClipTimeToSource } from "../../core/src/project/time-map.ts";
 import {
   add,
+  ceil,
   compare,
   div,
   floor,
@@ -12,7 +13,8 @@ import {
   sub,
 } from "../../core/src/rational.ts";
 import { frameToTimecode } from "../../core/src/timecode.ts";
-export { add, compare, div, floor, mul, parseRational, printRational, rational, sub };
+import type { RenderStyle } from "../../exporters/src/subtitle-render.ts";
+export { add, ceil, compare, div, floor, mul, parseRational, printRational, rational, sub };
 export const zero = rational(0n);
 export type Time = { t: string; tc?: string };
 export interface ClipView {
@@ -46,6 +48,10 @@ export interface TimelineView {
   markers: { id: string; at: Time; text: string; kind: string; level?: 1 | 2 }[];
 }
 export interface CueView {
+  occurrence_id?: string | null;
+  text_override?: boolean;
+  transcript_id?: string;
+  tokens?: { id: string; text: string }[];
   cue_id: string;
   track_id: string;
   start: string;
@@ -54,15 +60,10 @@ export interface CueView {
   style_id: string;
   piece: number;
 }
-export interface StyleView {
+export interface StyleView extends RenderStyle {
   id: string;
-  font_family: string;
-  font_size: number;
-  font_weight?: number;
-  color: string;
-  outline?: { color: string; width: number };
-  box?: { color: string; padding?: number };
-  position?: { anchor: string; margin_v: number };
+  name?: string;
+  version?: number;
 }
 export interface MediaView {
   uses?: number;
@@ -77,7 +78,20 @@ export interface MediaView {
   audio?: { sample_rate: string; channels: number };
   organize?: { note?: string; link?: string; tags?: string[]; folders?: string[]; rating?: number };
 }
+export interface Recognition {
+  language?: string;
+  reference_text?: string;
+  terms?: string[];
+  remove_fillers?: boolean;
+  filler_words?: string[];
+}
 export interface PreviewData {
+  subtitleTracks?: { id: string; name: string; default_style_id: string }[];
+  recognition?: Recognition;
+  recognized?: boolean;
+  recognitionRevision?: number;
+  format?: { width: number; height: number };
+  subtitleWarnings?: { code: string; ids: string[] }[];
   media: MediaView[];
   cues: CueView[];
   styles: StyleView[];

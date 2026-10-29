@@ -5,6 +5,7 @@ import { useChapterPanel } from "./ChapterPanel.js";
 import { connectHost, type ProjectView } from "./connection.js";
 import { useMediaPanel } from "./MediaPanel.js";
 import { sourceProject } from "./media.js";
+import { useSubtitlePanel } from "./SubtitlePanel.js";
 import { applyUi, initialState } from "./state.js";
 import { TimelinePreview } from "./TimelinePreview.js";
 import { seekTarget } from "./timeline.js";
@@ -97,6 +98,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
       void ai.send(text);
     },
   });
+  const subtitles = useSubtitlePanel({ project, state, update, call, config });
   const source = useMemo(
     () => (project && media.selected && state.preview === "media" ? sourceProject(project, media.selected) : null),
     [project, media.selected, state.preview],
@@ -150,6 +152,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
           <h2>{labels[state.panel]}</h2>
           {state.panel === "media" && media.library}
           {state.panel === "chapters" && chapters.controls}
+          {state.panel === "subtitles" && subtitles.controls}
           <div className="zc-ai-body" hidden={state.panel !== "ai"}>
             {ai.chat}
           </div>
@@ -160,23 +163,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
         {state.panel === "ai" && ai.parameters}
         {state.panel === "media" && media.parameters}
         {state.panel === "chapters" && chapters.outline}
-        {state.panel === "subtitles" && (
-          <div className="zc-tabs" role="tablist" aria-label="字幕参数">
-            {["subtitles", "style"].map((sub) => (
-              <button
-                key={sub}
-                type="button"
-                role="tab"
-                aria-selected={(state.sub ?? "subtitles") === sub}
-                className="zc-tab"
-                onClick={() => update({ ...current.current, sub })}
-              >
-                {sub === "style" ? "样式" : "字幕"}
-              </button>
-            ))}
-          </div>
-        )}
-        {state.panel === "subtitles" && state.sub === "style" && <h3>样式</h3>}
+        {state.panel === "subtitles" && subtitles.parameters}
       </section>
       {source && state.media && (
         <TimelinePreview
