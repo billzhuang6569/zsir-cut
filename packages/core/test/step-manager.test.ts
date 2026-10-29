@@ -62,7 +62,7 @@ const sameBytes = (actual: string, expected: string) => {
   parsed.project.revision = baseline.project.revision;
   expect(serializeProject(parsed.project)).toBe(expected);
 };
-const processStep = (seq: number) =>
+const processStep = (seq: number, extra: Record<string, unknown> = {}) =>
   new Promise<Envelope>((done, reject) => {
     const child = spawn(process.execPath, [resolve("packages/cli/src/index.ts"), "edit", project], {
       stdio: ["pipe", "pipe", "pipe"],
@@ -86,7 +86,7 @@ const processStep = (seq: number) =>
         reject(error);
       }
     });
-    child.stdin.end(JSON.stringify(input(seq)));
+    child.stdin.end(JSON.stringify(input(seq, extra)));
   });
 beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), "zcut-steps-"));
@@ -100,27 +100,45 @@ afterEach(async () => {
 });
 
 describe("step manager acceptance", () => {
-  it("executes ten processes in sequence despite steps 6-10 arriving first", async () => {
-    expect((await Promise.all(numbers(6).map(processStep))).map((item) => item.status)).toEqual(
-      Array(5).fill("queued"),
-    );
-    const outputs = await Promise.all(numbers(1, 5).reverse().map(processStep));
-    expect(outputs.every((item) => item.ok)).toBe(true);
-    const entries = await openProject({ projectPath: project }).journal();
-    expect(entries.map((item) => item.batch?.seq)).toEqual(numbers(1));
-    expect(entries.map((item) => item.seq)).toEqual(numbers(2, 11));
-    expect(entries.map((item) => item.label)).toEqual(numbers(1).map((n) => `Step ${n}`));
-    expect(new Set(entries.map((item) => item.request_id)).size).toBe(10);
-    expect(await status()).toMatchObject({
-      state: "complete",
-      count: 10,
-      applied: numbers(1),
-      waiting: [],
-      missing: [],
-    });
-    for (const entry of entries)
-      expect((await openProject({ projectPath: project }).snapshotAt(entry.revision)).revision.id).toBe(entry.revision);
-  }, 30000);
+  it.each([false, true])(
+    "orders ten shuffled processes (omit later base_revision: %s)",
+    async (omit) => {
+      const step = (seq: number) => processStep(seq, omit && seq > 1 ? { base_revision: undefined } : {});
+      expect((await Promise.all([8, 6, 10, 7, 9].map(step))).map((item) => item.status)).toEqual(
+        Array(5).fill("queued"),
+      );
+      const outputs = await Promise.all([4, 2, 5, 3, 1].map(step));
+      expect(outputs.every((item) => item.ok)).toBe(true);
+      const entries = await openProject({ projectPath: project }).journal();
+      expect(entries.map((item) => item.batch?.seq)).toEqual(numbers(1));
+      expect(entries.map((item) => item.seq)).toEqual(numbers(2, 11));
+      expect(entries.map((item) => item.label)).toEqual(numbers(1).map((n) => `Step ${n}`));
+      expect(new Set(entries.map((item) => item.request_id)).size).toBe(10);
+      expect(await status()).toMatchObject({
+        state: "complete",
+        count: 10,
+        applied: numbers(1),
+        waiting: [],
+        missing: [],
+      });
+      for (const entry of entries)
+        expect((await openProject({ projectPath: project }).snapshotAt(entry.revision)).revision.id).toBe(
+          entry.revision,
+        );
+    },
+    30000,
+  );
+
+  it("requires base_revision for step 1 and edits outside a batch", async () => {
+    for (const extra of [{}, { batch: undefined }]) {
+      const { base_revision: _base, ...request } = input(1, extra);
+      expect(await dispatch("edit", request)).toMatchObject({
+        status: "rejected",
+        error: { code: "E_VALIDATION" },
+      });
+    }
+    expect(await openProject({ projectPath: project }).journal()).toEqual([]);
+  });
 
   it("queues a gap, drains 4-10 in the request supplying 4, then undoes the whole batch byte-identically", async () => {
     const before = await readFile(project, "utf8");

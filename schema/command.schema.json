@@ -46,9 +46,14 @@
     },
     "write": {
       "type": "object",
+      "allOf": [{ "$ref": "#/$defs/write_fields" }],
+      "required": ["base_revision"],
+      "properties": { "base_revision": true }
+    },
+    "write_fields": {
+      "type": "object",
       "required": [
         "project",
-        "base_revision",
         "idempotency_key",
         "author"
       ],
@@ -236,7 +241,24 @@
         "type": "object",
         "allOf": [
           {
-            "$ref": "#/$defs/write"
+            "$ref": "#/$defs/write_fields"
+          },
+          {
+            "if": {
+              "required": ["batch"],
+              "properties": {
+                "batch": {
+                  "type": "object",
+                  "required": ["seq"],
+                  "properties": { "seq": { "type": "integer", "minimum": 2 } }
+                }
+              }
+            },
+            "then": {},
+            "else": {
+              "required": ["base_revision"],
+              "properties": { "base_revision": true }
+            }
           },
           {
             "if": {
