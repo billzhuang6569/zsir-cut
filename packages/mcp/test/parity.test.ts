@@ -213,6 +213,10 @@ describe("CLI and MCP", () => {
           },
         },
         ...[
+          [{ op: "set_recognition", terms: [" 飞书 ", "飞书", ""], remove_fillers: true }],
+          [{ op: "replace_text", find: "今天", replace: "现在" }],
+          [{ op: "replace_text", find: "先", replace: "首先" }],
+          [{ op: "replace_text", find: "never matches", replace: "" }],
           [{ op: "update_media", media_id: "med_A", tags: ["A", "A", "B"], rating: 4 }],
           [
             { op: "rename_track", track_id: "trk_v1", name: "视频 Z" },

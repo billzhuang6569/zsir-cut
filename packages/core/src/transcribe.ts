@@ -1,6 +1,6 @@
 // biome-ignore-all lint/style/noNonNullAssertion: Project schema validates cue IDs and segmented token bounds before writeback.
 import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { promisify } from "node:util";
 import { newId, transcriptIds } from "./project/id.ts";
@@ -90,6 +90,9 @@ export async function invokeAsr(
   if (channels.length !== 1) throw new AsrError("E_UNSUPPORTED", "ASR worker accepts one source channel", false);
   if (!media.audio || channels[0]! >= media.audio.channels)
     throw new AsrError("E_ASR_INPUT", "Source channel is unavailable", false);
+  const language = request.language ?? project.recognition?.language;
+  if (language && language !== "auto" && !/^(zh|en)(-|$)/u.test(language))
+    throw new AsrError("E_UNSUPPORTED", "ASR worker supports Chinese and English", false);
   const args = [
     "-m",
     "zsir_asr",
@@ -99,7 +102,7 @@ export async function invokeAsr(
     "--channels",
     String(channels[0]),
     "--language",
-    request.language?.startsWith("zh") ? "zh" : request.language?.startsWith("en") ? "en" : "auto",
+    language?.startsWith("zh") ? "zh" : language?.startsWith("en") ? "en" : "auto",
     "--engine",
     request.engine ?? "auto",
     "--out",
@@ -107,12 +110,29 @@ export async function invokeAsr(
   ];
   if (request.range)
     args.push("--start", workerSeconds(request.range.start), "--duration", workerSeconds(request.range.duration));
-  if (request.hotwords) args.push("--hotwords", resolve(dirname(request.project), request.hotwords));
+  const hotwordsPath = `${out}.hotwords.txt`;
+  if (request.hotwords || project.recognition?.terms?.length) {
+    let fileTerms: string[] = [];
+    if (request.hotwords) {
+      try {
+        fileTerms = (await readFile(resolve(dirname(request.project), request.hotwords), "utf8")).split(/\r?\n/u);
+      } catch {
+        throw new AsrError("E_ASR_INPUT", "Cannot read hotwords file", false);
+      }
+    }
+    const terms = [
+      ...new Set([...(project.recognition?.terms ?? []), ...fileTerms].map((term) => term.trim()).filter(Boolean)),
+    ];
+    await writeFile(hotwordsPath, terms.join("\n"));
+    args.push("--hotwords", hotwordsPath);
+  }
   let failed = false;
   try {
     await execute(python, args, { cwd: workerDirectory, maxBuffer: 1024 * 1024 });
   } catch {
     failed = true;
+  } finally {
+    await rm(hotwordsPath, { force: true });
   }
   let value: unknown;
   try {
@@ -142,7 +162,7 @@ export async function invokeAsr(
     !["zh", "en"].includes(output.language)
   )
     throw new AsrError("E_ASR_INTERNAL", "ASR result does not match media or request", false);
-  if (request.language && request.language !== "auto" && !request.language.startsWith(output.language))
+  if (language && language !== "auto" && !language.startsWith(output.language))
     throw new AsrError("E_ASR_INTERNAL", "ASR language differs from request", false);
   if (
     request.range &&
@@ -185,8 +205,13 @@ export async function invokeAsr(
 }
 
 export function applyTranscription(project: Project, request: TranscribeRequest, result: WorkerResult): void {
+  const configuredLanguage = request.language ?? project.recognition?.language;
   const language =
-    request.language && request.language !== "auto" ? request.language : result.language === "zh" ? "zh-Hans" : "en";
+    configuredLanguage && configuredLanguage !== "auto"
+      ? configuredLanguage
+      : result.language === "zh"
+        ? "zh-Hans"
+        : "en";
   const channels = request.source_channels ?? [0];
   let transcript = project.transcripts.find(
     (item) =>
@@ -256,6 +281,17 @@ export function applyTranscription(project: Project, request: TranscribeRequest,
         ...(token.conf === undefined ? {} : { conf: token.conf }),
       },
     }));
+  if (project.recognition?.remove_fillers) {
+    const fillers = new Set(project.recognition.filler_words ?? ["嗯", "啊", "呃", "额", "哦", "唉", "哎", "诶"]);
+    let count = 0;
+    for (const token of additions) {
+      if (!fillers.has(token.text.replace(/^\p{P}+|\p{P}+$/gu, ""))) continue;
+      token.heard = token.text;
+      token.text = "";
+      count++;
+    }
+    if (count) result.warnings.push({ code: "W_FILLERS_HIDDEN", count });
+  }
   transcript.tokens = [...retained, ...additions].sort((a, b) => compare(a.align.start, b.align.start));
   const affected = new Set(oldTokens.filter((token) => !preserve(token)).map((token) => token.id));
   const oldCues = transcript.cues;

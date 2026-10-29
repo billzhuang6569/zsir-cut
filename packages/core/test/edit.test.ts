@@ -1273,3 +1273,99 @@ describe("format 0.2 operations", () => {
     );
   });
 });
+
+it("normalizes recognition settings in the subtitle domain and supports undo", async () => {
+  await copyFile(new URL("../../../fixtures/regressions/recognition-undo.zcut.json", import.meta.url), path);
+  const before = await read();
+  const output = await edit([
+    {
+      op: "set_recognition",
+      language: "zh",
+      reference_text: "  原样  ",
+      terms: [" 飞书 ", "", "飞书", " 豆包 "],
+      remove_fillers: true,
+    },
+  ]);
+  expect(output.status).toBe("applied");
+  expect((await read()).recognition).toEqual({
+    language: "zh",
+    reference_text: "  原样  ",
+    terms: ["飞书", "豆包"],
+    remove_fillers: true,
+  });
+  expect((await edit([{ op: "set_recognition", terms: ["飞书", "豆包"] }])).status).toBe("no_op");
+  expect(
+    (
+      await edit([
+        { op: "set_recognition", language: "en" },
+        { op: "rename_track", track_id: "trk_v1", name: "X" },
+      ])
+    ).error?.code,
+  ).toBe("E_MIXED_DOMAIN");
+  await validateAndUndo(before);
+});
+
+async function replacementFixture() {
+  const value = await read();
+  const item = value.transcripts[0]!;
+  for (const cue of item.cues) {
+    cue.state = "auto";
+    delete cue.timing;
+    delete cue.breaks;
+  }
+  for (const token of item.tokens) token.state = "auto";
+  const cue = item.cues[0]!;
+  const first = item.tokens.findIndex((token) => token.id === cue.first_token);
+  item.tokens[first]!.text = "飞 ";
+  item.tokens[first + 1]!.text = "";
+  item.tokens[first + 1]!.heard = "嗯";
+  item.tokens[first + 2]!.text = "书";
+  cue.last_token = item.tokens[first + 2]!.id;
+  const locked = item.cues[1]!;
+  locked.timing = { locked: true };
+  const lockedFirst = item.tokens.findIndex((token) => token.id === locked.first_token);
+  item.tokens[lockedFirst]!.text = "飞 书";
+  await writeFile(path, serializeProject(value));
+  return { item, cue, locked, first };
+}
+
+it("replaces across visible and hidden tokens, preserves heard, skips locks and undoes", async () => {
+  const { cue, locked, first } = await replacementFixture();
+  const before = await read();
+  const output = await edit([{ op: "replace_text", find: "飞 书", replace: "飞书" }]);
+  expect(output.status, JSON.stringify(output)).toBe("applied");
+  expect(output.result?.warnings).toEqual([{ code: "W_REPLACE_SKIPPED_LOCKED", cue_ids: [locked.id] }]);
+  const item = (await read()).transcripts[0]!;
+  expect(item.tokens[first]).toMatchObject({ text: "飞书", heard: "飞 嗯书", state: "edited" });
+  expect(item.cues.find((entry) => entry.id === cue.id)).toMatchObject({
+    first_token: item.tokens[first]!.id,
+    last_token: item.tokens[first]!.id,
+  });
+  expect((await edit([{ op: "replace_text", find: "不存在", replace: "" }])).status).toBe("no_op");
+  expect((await edit([{ op: "replace_text", find: "飞 书", replace: "飞书", force: true }])).error?.code).toBe(
+    "E_SESSION_STATE",
+  );
+  await validateAndUndo(before);
+});
+
+it("handles non-overlapping repeated matches, partial tokens, empty replacement and filters", async () => {
+  const { item, cue, first } = await replacementFixture();
+  const value = await read();
+  value.transcripts[0]!.tokens[first]!.text = "aAaA尾";
+  await writeFile(path, serializeProject(value));
+  expect(
+    (await edit([{ op: "replace_text", find: "aa", replace: "X", match_case: true, cue_ids: [cue.id] }])).status,
+  ).toBe("no_op");
+  expect(
+    (await edit([{ op: "replace_text", find: "aa", replace: "B", transcript_ids: [item.id], cue_ids: [cue.id] }]))
+      .status,
+  ).toBe("applied");
+  expect((await read()).transcripts[0]!.tokens[first]!.text).toBe("BB");
+  const result = await edit([{ op: "replace_text", find: "BB", replace: "", cue_ids: [cue.id] }]);
+  expect(result.status, JSON.stringify(result)).toBe("applied");
+  expect((await read()).transcripts[0]!.tokens[first]).toMatchObject({ text: "", state: "edited", heard: "aAaA尾" });
+  expect((await edit([{ op: "replace_text", find: "尾", replace: "X", transcript_ids: [] }])).status).toBe("no_op");
+  expect((await edit([{ op: "replace_text", find: "尾", replace: "X", cue_ids: ["cue_missing"] }])).error?.code).toBe(
+    "E_NOT_FOUND",
+  );
+});
