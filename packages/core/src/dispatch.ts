@@ -2,6 +2,13 @@ import { readFile, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+  checkDirectFiles,
+  DirectExportExists,
+  type DirectProfile,
+  directFiles,
+  runDirectExport,
+} from "./direct-export.ts";
+import {
   defaultProfile,
   type Exporter,
   lossReport,
@@ -535,6 +542,56 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
       const project = parsed.project;
       if (request.base_revision !== project.revision.id)
         return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Base revision differs from project");
+      if (request.profile === "direct-srt" || request.profile === "direct-audio-wav") {
+        if (request.overlay === true)
+          return errorEnvelope(verb, requestId, "rejected", "E_UNSUPPORTED", "Overlay export is not implemented");
+        const timeline = project.timelines.find(
+          (item) => item.id === (request.timeline_id ?? project.timelines[0]?.id),
+        );
+        if (!timeline) return errorEnvelope(verb, requestId, "rejected", "E_NOT_FOUND", "Timeline not found");
+        const issues = validateProjectSemantics(project, parsed.issues);
+        if (issues.some((item) => item.severity === "error"))
+          return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Project semantics are invalid");
+        const profile: DirectProfile = request.profile;
+        const files = directFiles(project, timeline, profile, request.subtitle_languages as string[] | undefined);
+        const outputDirectory = resolve((request.output as string | undefined) ?? dirname(request.project as string));
+        try {
+          await checkDirectFiles(outputDirectory, files);
+          const output = basic(verb, requestId);
+          if (request.dry_run) {
+            output.status = "dry_run";
+            output.result = { files: files.map((file) => ({ name: file.name })) };
+          } else if (!options.worker) {
+            const jobId = await startExportJob(request.project as string, project.id, request, "direct");
+            output.status = "accepted";
+            output.result = { job_id: jobId };
+          } else {
+            const result = await runDirectExport(
+              project,
+              timeline,
+              request.project as string,
+              outputDirectory,
+              profile,
+              files,
+            );
+            output.status = "applied";
+            output.result = result;
+            output.verification = {
+              level: "L1",
+              passed: true,
+              issues: [
+                ...issues,
+                ...result.warnings.map(({ code, severity, message, ids }) => ({ code, severity, message, ids })),
+              ],
+            };
+          }
+          return output;
+        } catch (error) {
+          if (error instanceof DirectExportExists)
+            return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", error.message);
+          throw error;
+        }
+      }
       const profile = (request.profile as ProfileId | undefined) ?? (await defaultProfile());
       if (!profile || !Object.hasOwn(PROFILES, profile))
         return errorEnvelope(verb, requestId, "rejected", "E_UNSUPPORTED", "No supported profile selected");
