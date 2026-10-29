@@ -3,10 +3,11 @@ import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
+import type { Envelope } from "../../core/src/index.ts";
 import { VERBS } from "../../core/src/index.ts";
-import { createMcpServer, startHost } from "../src/index.js";
+import { createMcpServer, readAiState, startHost } from "../src/index.js";
 import { UI_VERBS } from "../src/ui.js";
 
 let host: Awaited<ReturnType<typeof startHost>> | undefined;
@@ -147,4 +148,62 @@ it("serves valid MCP schemas and no-UI failures without a network listener", asy
     await client.close();
     await server.close();
   }
+});
+
+it("authenticates Streamable HTTP, lists 29 tools and calls inspect using the SDK", async () => {
+  const { StreamableHTTPClientTransport } = await import("@modelcontextprotocol/sdk/client/streamableHttp.js");
+  host = await startHost({ project });
+  const url = new URL(`http://127.0.0.1:${host.port}/mcp`);
+  for (const headers of [{}, { Authorization: "Bearer wrong" }]) {
+    expect((await fetch(url, { method: "POST", headers })).status).toBe(401);
+  }
+  const client = new Client({ name: "http-test", version: "1" });
+  const transport = new StreamableHTTPClientTransport(url, {
+    requestInit: { headers: { Authorization: `Bearer ${host.token}` } },
+  });
+  // SDK callback declarations do not support exactOptionalPropertyTypes.
+  await client.connect(transport as import("@modelcontextprotocol/sdk/shared/transport.js").Transport);
+  try {
+    expect((await client.listTools()).tools).toHaveLength(29);
+    expect(
+      (await client.callTool({ name: "zcut_inspect", arguments: { project, view: "brief" } })).structuredContent,
+    ).toMatchObject({ ok: true, verb: "inspect" });
+    await expect(
+      client.callTool({ name: "zcut_inspect", arguments: { project: "/other.zcut.json", view: "brief" } }),
+    ).rejects.toThrow("current project");
+  } finally {
+    await client.close();
+  }
+});
+
+it("reads complete draft summaries and batch status without mutating sessions", async () => {
+  const kernel = vi.fn(async (verb: string, raw: unknown) => {
+    const input = raw as Record<string, unknown>;
+    let result: unknown;
+    if (verb === "inspect" && input.view === "brief") result = { sessions: [{ id: "ses_test" }] };
+    else if (verb === "inspect" && input.view === "session")
+      result = { session_id: "ses_test", base_revision: "rev_base", draft_revision: "rev_current", decisions: [] };
+    else if (verb === "inspect")
+      result = {
+        entries: input.before
+          ? [{ revision: "rev_0" }]
+          : Array.from({ length: 200 }, (_, i) => ({ revision: `rev_${i + 1}` })),
+      };
+    else if (verb === "diff") result = { changes: [{ entity: "clip" }, { entity: "cue" }] };
+    else result = { state: "open", count: 3, applied: [1] };
+    return { ok: true, result } as Envelope;
+  });
+  expect(await readAiState(kernel, project, ["bat_test"])).toMatchObject({
+    sessions: [{ session_id: "ses_test", revision_count: 201, changes: [{ entity: "clip" }, { entity: "cue" }] }],
+    batches: [{ state: "open", count: 3, applied: [1] }],
+  });
+  expect(kernel).toHaveBeenCalledWith("inspect", {
+    project,
+    view: "history",
+    session_id: "ses_test",
+    limit: 200,
+    before: "rev_200",
+  });
+  expect(kernel).toHaveBeenCalledWith("diff", { project, session_id: "ses_test", from: "rev_base", to: "rev_current" });
+  expect(kernel.mock.calls.every(([verb]) => ["inspect", "diff", "batch_status"].includes(verb))).toBe(true);
 });

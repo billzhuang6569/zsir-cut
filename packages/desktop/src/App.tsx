@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { PANELS, type Panel, type UiState } from "../../app-host/src/ui.js";
+import { type AiNotice, useAiPanel } from "./AiPanel.js";
 import { connectHost, type ProjectView } from "./connection.js";
 import { applyUi, initialState } from "./state.js";
 import { TimelinePreview } from "./TimelinePreview.js";
@@ -15,6 +16,14 @@ export function App({ config }: { config?: { port: number; token: string } }) {
   const connection = useRef<ReturnType<typeof connectHost> | null>(null);
   const projectRef = useRef(project);
   projectRef.current = project;
+  const [notices, setNotices] = useState<AiNotice[]>([]);
+  const [aiRevision, setAiRevision] = useState(0);
+  const call = useCallback(
+    (verb: string, request: Record<string, unknown>) =>
+      connection.current?.call(verb, request) ?? Promise.reject(new Error("宿主未连接")),
+    [],
+  );
+  const ai = useAiPanel({ call, path: state.project, project, notices, revision: aiRevision });
   const dragging = useRef(false);
   const [errorDetail, setErrorDetail] = useState<string | undefined>();
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +48,8 @@ export function App({ config }: { config?: { port: number; token: string } }) {
         setProject(view);
         setError(null);
       },
+      chat: (notice) => setNotices((old) => [...old, notice]),
+      aiChanged: () => setAiRevision((value) => value + 1),
       icon: () => {},
       error: (message, detail) => {
         setError(message);
@@ -86,10 +97,12 @@ export function App({ config }: { config?: { port: number; token: string } }) {
           className="zc-pad"
         >
           <h2>{labels[state.panel]}</h2>
+          <div hidden={state.panel !== "ai"}>{ai.chat}</div>
         </div>
       </section>
       <section aria-label="参数区" className="zc-parameters zc-pad" data-panel={state.panel}>
         <h2>{parameters[state.panel]}</h2>
+        {state.panel === "ai" && ai.parameters}
         {state.panel === "subtitles" && (
           <div className="zc-tabs" role="tablist" aria-label="字幕参数">
             {["subtitles", "style"].map((sub) => (
