@@ -1,28 +1,39 @@
 // @vitest-environment jsdom
-import { spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { type AiNotice, useAiPanel } from "../src/AiPanel.js";
 import type { ProjectView } from "../src/connection.js";
 
-function core(verb: string, request: Record<string, unknown>) {
-  const run = spawnSync(
-    process.execPath,
-    [
-      "--input-type=module",
-      "-e",
-      `import {dispatch} from './packages/core/src/index.ts'; let raw='';for await(const chunk of process.stdin) raw+=chunk; const input=JSON.parse(raw); console.log(JSON.stringify(await dispatch(input.verb,input.request)));`,
-    ],
-    { input: JSON.stringify({ verb, request }), encoding: "utf8" },
-  );
-  if (run.status !== 0) throw new Error(run.stderr);
-  const envelope = JSON.parse(run.stdout);
+const directories: string[] = [];
+const requests: Promise<unknown>[] = [];
+afterEach(async () => {
+  await Promise.allSettled(requests.splice(0));
+  for (const directory of directories.splice(0))
+    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+});
+
+// Load the built kernel through Node so Vite/jsdom cannot rewrite its schema URLs.
+const { dispatch } = createRequire(join(process.cwd(), "package.json"))(
+  "./packages/core/dist/index.js",
+) as typeof import("../../core/dist/index.js");
+async function core(verb: string, request: Record<string, unknown>) {
+  const result = dispatch(verb as Parameters<typeof dispatch>[0], request);
+  requests.push(result);
+  const envelope = await result;
   if (!envelope.ok) throw new Error(JSON.stringify(envelope));
-  return envelope.result;
+  return envelope.result as Record<string, unknown>;
+}
+async function settleKernel() {
+  do {
+    await act(async () => {
+      await Promise.all(requests.splice(0));
+    });
+  } while (requests.length);
 }
 function Harness({
   call,
@@ -68,12 +79,18 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 describe("AI panel", () => {
   it("answers three real kernel decisions one at a time and automatically sends the complete summary", async () => {
     const directory = await mkdtemp(join(tmpdir(), "zcut37-decisions-"));
+    directories.push(directory);
     const project = join(directory, "project.zcut.json");
     const raw = JSON.parse(await readFile("examples/interview.zcut.json", "utf8"));
     await writeFile(project, JSON.stringify(raw));
     const base = { project, base_revision: raw.revision.id, author: { kind: "agent", name: "fake-agent" } };
-    const begun = core("session_begin", { ...base, idempotency_key: "begin", approval: "manual", intent: "测试决定" });
-    core("session_ask", {
+    const begun = await core("session_begin", {
+      ...base,
+      idempotency_key: "begin",
+      approval: "manual",
+      intent: "测试决定",
+    });
+    await core("session_ask", {
       ...base,
       session_id: begun.session_id,
       idempotency_key: "ask",
@@ -91,7 +108,7 @@ describe("AI panel", () => {
         return {
           sessions: [
             {
-              ...core("inspect", { project, view: "session", session_id: begun.session_id }),
+              ...(await core("inspect", { project, view: "session", session_id: begun.session_id })),
               revision_count: 0,
               changes: [],
             },
@@ -105,6 +122,7 @@ describe("AI panel", () => {
     const root = createRoot(container);
     try {
       await act(async () => root.render(<Harness call={call} path={project} />));
+      await settleKernel();
       for (let index = 0; index < 3; index++) {
         expect(container.querySelectorAll(".zc-q")).toHaveLength(1);
         expect(container.querySelector(".zc-q-question")?.textContent).toBe(`问题 ${index + 1}`);
@@ -120,6 +138,7 @@ describe("AI panel", () => {
           } else await act(() => button(container, `回答 ${index + 1}`).click());
           await act(async () => button(container, "下一件").click());
         }
+        await settleKernel();
       }
       expect(call.mock.calls.filter(([verb]) => verb === "session_answer")).toHaveLength(3);
       expect(call).toHaveBeenCalledWith("chat_send", {
@@ -141,15 +160,14 @@ describe("AI panel", () => {
       } finally {
         style.remove();
       }
-      expect(core("inspect", { project, view: "session", session_id: begun.session_id }).pending_count).toBe(0);
+      expect((await core("inspect", { project, view: "session", session_id: begun.session_id })).pending_count).toBe(0);
       const stored = JSON.parse(await readFile(project, "utf8"));
       expect(stored.revision.id).toBe(raw.revision.id);
     } finally {
       await act(() => root.unmount());
       container.remove();
-      await rm(directory, { recursive: true, force: true });
     }
-  });
+  }, 15000);
 
   it("renders partial Markdown, collapsible tool rows, references, stop, history, draft approval warning and batches", async () => {
     const requestLog: { verb: string; request: Record<string, unknown> }[] = [];

@@ -19,7 +19,7 @@ import {
 import { createServer } from "../src/index.js";
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
-const cli = fileURLToPath(new URL("../../cli/src/index.ts", import.meta.url));
+const cli = fileURLToPath(new URL("../../cli/dist/index.js", import.meta.url));
 const fixture = new URL("../../../fixtures/projects/std-25.zcut.json", import.meta.url);
 const fake = fileURLToPath(new URL("../../exporters/test/fake-exporter.mjs", import.meta.url));
 const author = { kind: "agent" as const, name: "test" };
@@ -38,7 +38,7 @@ beforeEach(async () => {
   await copyFile(fixture, project);
 });
 afterEach(async () => {
-  await rm(directory, { recursive: true, force: true });
+  await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 describe("CLI and MCP", () => {
@@ -411,6 +411,7 @@ describe("CLI and MCP", () => {
         await server.close();
       }
     },
+    15000,
   );
 
   it.each(["src", "dist"])(

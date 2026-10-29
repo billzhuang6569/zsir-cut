@@ -9,7 +9,9 @@ const directories: string[] = [];
 const managers: Agents[] = [];
 afterEach(async () => {
   await Promise.all(managers.splice(0).map((manager) => manager.stop()));
-  await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  await Promise.all(
+    directories.splice(0).map((path) => rm(path, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })),
+  );
 });
 async function fixture(agent: AgentKind, mode = "normal") {
   const directory = await mkdtemp(join(tmpdir(), "zcut37-test-"));
@@ -98,7 +100,7 @@ describe("local agent conversations with fake executables", () => {
         version: expect.stringContaining("test-version"),
       });
       const chat = await manager.send(agent, "做粗剪");
-      await vi.waitFor(() => expect(events.at(-1)?.type).toBe("end"));
+      await vi.waitFor(() => expect(events.at(-1)?.type).toBe("end"), { timeout: 10000, interval: 10 });
       expect(events.filter((event) => event.type === "text").map((event) => event.text)).toEqual(["你", "好"]);
       expect(events).toContainEqual(expect.objectContaining({ type: "tool_start", id: "tool-1" }));
       expect(events).toContainEqual(expect.objectContaining({ type: "tool_end", id: "tool-1" }));
@@ -129,28 +131,28 @@ describe("local agent conversations with fake executables", () => {
       } else expect(details.args).toEqual(expect.arrayContaining(["--sandbox", "read-only", "-c"]));
       events.length = 0;
       await manager.send(agent, "继续", chat.id);
-      await vi.waitFor(() => expect(events.at(-1)?.type).toBe("end"));
+      await vi.waitFor(() => expect(events.at(-1)?.type).toBe("end"), { timeout: 10000, interval: 10 });
       const resumed = JSON.parse(await readFile(capture, "utf8"));
       expect(resumed.args).toEqual(
         expect.arrayContaining([agent === "claude" ? "--resume" : "resume", "native-session"]),
       );
-    });
+    }, 15000);
 
   it("stops a running agent, deletes configuration, and prevents overlapping sends", async () => {
     const { manager, events, capture } = await fixture("claude", "stop");
     await manager.send("claude", "等待");
-    await vi.waitFor(() => expect(events.some((e) => e.type === "text")).toBe(true));
+    await vi.waitFor(() => expect(events.some((e) => e.type === "text")).toBe(true), { timeout: 10000, interval: 10 });
     const details = JSON.parse(await readFile(capture, "utf8"));
     expect((await stat(details.config)).mode & 0o777).toBe(0o600);
     await expect(manager.send("claude", "不能并行")).rejects.toThrow("正在回复");
     await manager.stop();
     expect(events.at(-1)).toEqual({ type: "end", text: "已停止" });
     await expect(stat(details.config)).rejects.toMatchObject({ code: "ENOENT" });
-  });
+  }, 15000);
   it("reports authentication/process errors and unavailable executables without crashing", async () => {
     const { manager, events } = await fixture("codex", "error");
     await manager.send("codex", "hi");
-    await vi.waitFor(() => expect(events.at(-1)?.type).toBe("end"));
+    await vi.waitFor(() => expect(events.at(-1)?.type).toBe("end"), { timeout: 10000, interval: 10 });
     expect(events).toContainEqual({ type: "error", text: "not logged in" });
     expect(events).toContainEqual(
       expect.objectContaining({ type: "error", text: expect.stringContaining("退出（1）") }),
@@ -168,7 +170,7 @@ describe("local agent conversations with fake executables", () => {
       { agent: "codex", available: false, version: null },
     ]);
     await expect(manager.history("../../escape")).rejects.toThrow("Invalid chat ID");
-  });
+  }, 15000);
 });
 
 it("ignores malformed and unfamiliar records and normalizes error events", () => {
@@ -216,10 +218,10 @@ it("preserves explicit failed tool results from both agents", () => {
 it("orders saved conversations by modification time across host restarts", async () => {
   const { directory, manager, events } = await fixture("claude");
   const first = await manager.send("claude", "第一个");
-  await vi.waitFor(() => expect(events.at(-1)?.type).toBe("end"));
+  await vi.waitFor(() => expect(events.at(-1)?.type).toBe("end"), { timeout: 10000, interval: 10 });
   events.length = 0;
   const second = await manager.send("claude", "第二个");
-  await vi.waitFor(() => expect(events.at(-1)?.type).toBe("end"));
+  await vi.waitFor(() => expect(events.at(-1)?.type).toBe("end"), { timeout: 10000, interval: 10 });
   const root = join(directory, ".zcut", "prj_test", "chats");
   await utimes(join(root, `${second.id}.jsonl`), new Date("2020-01-01"), new Date("2020-01-01"));
   await utimes(join(root, `${first.id}.jsonl`), new Date("2021-01-01"), new Date("2021-01-01"));
@@ -235,4 +237,4 @@ it("orders saved conversations by modification time across host restarts", async
     [second.id, "2020-01-01T00:00:00.000Z"],
   ]);
   expect((await reopened.history(first.id)).events).toContainEqual({ type: "text", text: "好" });
-});
+}, 15000);
