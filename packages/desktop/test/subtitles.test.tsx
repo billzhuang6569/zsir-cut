@@ -42,6 +42,7 @@ const project: ProjectView = {
     { cue_id: "cue_free", track_id: "trk_s", start: "3s", end: "5s", text: "自由字幕", piece: 0, style_id: "sty_1" },
   ],
   styles: [{ ...defaultStyle, id: "sty_1", name: "正文", version: 3 }],
+  subtitleTracks: [{ id: "trk_s", name: "字幕 A", default_style_id: "sty_1" }],
   recognition: { language: "zh", terms: ["专有名词"] },
   recognized: true,
   recognitionRevision: 4,
@@ -120,7 +121,7 @@ async function mount(
 }
 it("submits only changed recognition fields on blur and preserves terms", async () => {
   const h = await mount();
-  expect(h.container.textContent).toContain("上次识别 · 修订 4 · 2 条字幕");
+  expect(h.container.textContent).toContain("已识别 · 第 4 版 · 2 条字幕");
   await h.input("参考文本", "参考稿");
   expect(h.call).not.toHaveBeenCalled();
   await h.blur("参考文本");
@@ -133,8 +134,10 @@ it("submits only changed recognition fields on blur and preserves terms", async 
       ops: [{ op: "set_recognition", reference_text: "参考稿" }],
     }),
   );
+  expect(h.container.querySelector('input[aria-label="添加专有名词"]')).toBeNull();
+  await h.click("添加专有名词");
   await h.input("添加专有名词", "新词");
-  await h.blur("添加专有名词");
+  await h.key(h.find("添加专有名词"), "Enter");
   expect(h.call.mock.lastCall?.[1].ops).toEqual([{ op: "set_recognition", terms: ["专有名词", "新词"] }]);
   await h.click("删除专有名词「专有名词」");
   expect(h.call.mock.lastCall?.[1].ops).toEqual([{ op: "set_recognition", terms: [] }]);
@@ -152,6 +155,7 @@ it("replaces text, reports locked skips and highlights affected rows", async () 
   const h = await mount(project, "subtitles", () => ({
     warnings: [{ code: "W_REPLACE_SKIPPED_LOCKED", cue_ids: ["cue_1"] }],
   }));
+  await h.click("查找替换");
   await h.input("查找", "你好");
   await h.input("替换为", "您好");
   await h.click("全部替换");
@@ -398,4 +402,111 @@ it("preserves stripped punctuation and edits the correct repeated token on each 
   };
   expect(textEdit(repeated, "您好\n你好。")).toMatchObject({ from_token: "a", to_token: "a", text: "您好。" });
   expect(textEdit({ ...cue, text: "不匹配的覆盖稿" }, "新文字")).toBeNull();
+});
+
+it("shows the success strip without an unknown revision and saves readable language choices as codes", async () => {
+  const { recognitionRevision: _revision, ...view } = project;
+  const h = await mount(view);
+  const status = h.container.querySelector(".zc-sub-status");
+  expect(status?.textContent).toBe("已识别 · 2 条字幕");
+  expect(status?.classList.contains("is-recognized")).toBe(true);
+  expect(status?.querySelector(".zc-dot")).not.toBeNull();
+  const language = h.find<HTMLSelectElement>("语言");
+  expect(language.selectedOptions[0]?.textContent).toBe("中文（普通话）");
+  await act(async () => {
+    language.value = "en";
+    language.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  expect(h.call.mock.lastCall?.[1].ops).toEqual([{ op: "set_recognition", language: "en" }]);
+  expect(h.find<HTMLTextAreaElement>("参考文本").placeholder).toBe("粘贴采访提纲、文稿或人名表，AI 会从里面找专有名词");
+});
+it("opens filler chips separately from the switch and supports adding and removing words", async () => {
+  const h = await mount();
+  expect(h.find("去除水词").getAttribute("role")).toBe("switch");
+  expect(h.find("去除水词").closest("label")?.title).toContain("时间不动");
+  expect(h.container.querySelector('[aria-label="水词"]')).toBeNull();
+  await h.click("编辑水词表");
+  expect(h.container.querySelectorAll('[aria-label="水词"] .zc-tag')).toHaveLength(8);
+  await h.click("添加水词");
+  await h.input("添加水词", "那个");
+  await h.key(h.find("添加水词"), "Enter");
+  expect(h.call.mock.lastCall?.[1].ops).toEqual([
+    { op: "set_recognition", filler_words: ["嗯", "啊", "呃", "额", "哦", "唉", "哎", "诶", "那个"] },
+  ]);
+  await h.click("删除水词「嗯」");
+  expect(h.call.mock.lastCall?.[1].ops).toEqual([
+    { op: "set_recognition", filler_words: ["啊", "呃", "额", "哦", "唉", "哎", "诶"] },
+  ]);
+  expect(h.container.querySelector("details")).toBeNull();
+});
+it("edits each track default independently of cue overrides and previews only its own cues", async () => {
+  const h = await mount(
+    {
+      ...project,
+      subtitleTracks: [
+        ...(project.subtitleTracks ?? []),
+        { id: "trk_en", name: "English", default_style_id: "sty_en" },
+      ],
+      styles: [...project.styles, { ...defaultStyle, id: "sty_en", font_size: 0.07 }],
+      cues: [
+        { ...cue, style_id: "sty_en" },
+        { ...cue, cue_id: "en", track_id: "trk_en", text: "English sample", start: "6s", end: "8s", style_id: "sty_1" },
+      ],
+    },
+    "style",
+  );
+  expect(h.find<HTMLInputElement>("字号").value).toBe("0.045");
+  expect(h.container.querySelector(".zc-sub-sample canvas")?.getAttribute("aria-label")).toBe("你好世界");
+  await h.click("English");
+  expect(h.find<HTMLInputElement>("字号").value).toBe("0.07");
+  expect(h.container.querySelector(".zc-sub-sample canvas")?.getAttribute("aria-label")).toBe("English sample");
+  expect(h.call).not.toHaveBeenCalled();
+  await h.click("黄字");
+  expect(h.call.mock.lastCall?.[1].ops).toEqual([
+    expect.objectContaining({ op: "update_style", style_id: "sty_en", color: "#FFD447" }),
+  ]);
+});
+it("hides single-track selection and renders visual, selectable preset samples", async () => {
+  const h = await mount(project, "style");
+  expect(h.container.querySelector('[aria-label="字幕样式轨道"]')).toBeNull();
+  const presets = h.container.querySelectorAll(".zc-sub-preset");
+  expect([...presets].map((p) => p.textContent)).toEqual(["字幕", "字幕", "字幕"]);
+  expect(presets[0]?.getAttribute("aria-pressed")).toBe("true");
+  await h.click("黑底白字");
+  expect(presets[1]?.getAttribute("aria-pressed")).toBe("true");
+  expect(presets[0]?.getAttribute("aria-pressed")).toBe("false");
+});
+
+it("uses the selected track cue at the playhead and falls back to its first cue in a gap", async () => {
+  const h = await mount({
+    ...project,
+    cues: [cue, { ...cue, cue_id: "later", text: "当前字幕", start: "5s", end: "7s" }],
+  });
+  await h.click("当前字幕");
+  await h.click("样式");
+  expect(h.container.querySelector(".zc-sub-sample canvas")?.getAttribute("aria-label")).toBe("当前字幕");
+  expect(h.call).not.toHaveBeenCalled();
+});
+it("supports common fonts, custom fonts and font weight through the existing style operation", async () => {
+  const h = await mount(project, "style");
+  const select = async (label: string, value: string) =>
+    act(async () => {
+      const element = h.find<HTMLSelectElement>(label);
+      element.value = value;
+      element.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  expect(h.find<HTMLSelectElement>("字体族").textContent).toContain("思源黑体");
+  await select("字体族", "Source Han Sans SC");
+  expect(h.call.mock.lastCall?.[1].ops).toEqual([
+    { op: "update_style", style_id: "sty_1", font_family: "Source Han Sans SC" },
+  ]);
+  await select("字体族", "other");
+  expect(h.call).toHaveBeenCalledTimes(1);
+  await h.input("其他字体", "Custom Font");
+  await h.blur("其他字体");
+  expect(h.call.mock.lastCall?.[1].ops).toEqual([
+    { op: "update_style", style_id: "sty_1", font_family: "Custom Font" },
+  ]);
+  await select("字重", "700");
+  expect(h.call.mock.lastCall?.[1].ops).toEqual([{ op: "update_style", style_id: "sty_1", font_weight: 700 }]);
 });

@@ -86,6 +86,7 @@ export interface Recognition {
   filler_words?: string[];
 }
 export interface PreviewData {
+  subtitleTracks?: { id: string; name: string; default_style_id: string }[];
   recognition?: Recognition;
   recognized?: boolean;
   recognitionRevision?: number;

@@ -389,6 +389,14 @@ export async function startHost(
                   })),
                   cues,
                   styles: project.subtitle_styles,
+                  subtitleTracks:
+                    timeline?.tracks
+                      .filter((track) => track.kind === "subtitle")
+                      .map((track) => ({
+                        id: track.id,
+                        name: track.name,
+                        default_style_id: track.default_style_id,
+                      })) ?? [],
                   recognition: project.recognition,
                   recognized: project.transcripts.some((item) => item.raw_runs.some((run) => run.kind === "asr")),
                   recognitionRevision: lastRecognition?.seq,

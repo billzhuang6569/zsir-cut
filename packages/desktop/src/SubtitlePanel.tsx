@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { UiState } from "../../app-host/src/ui.js";
-import { IconButton } from "./components.js";
+import { Icon, IconButton } from "./components.js";
 import type { ProjectView } from "./connection.js";
 import { SubtitleCanvas } from "./SubtitleCanvas.js";
 import { alignment, defaultStyle, textEdit } from "./subtitles.js";
@@ -22,16 +22,107 @@ import {
 } from "./timeline.js";
 import "./subtitles.css";
 
+const languages = [
+  ["zh", "中文（普通话）"],
+  ["en", "English"],
+  ["yue", "中文（粤语）"],
+  ["ja", "日本語"],
+  ["ko", "한국어"],
+];
+const fonts = [
+  ["PingFang SC", "苹方"],
+  ["Hiragino Sans GB", "冬青黑体"],
+  ["Source Han Sans SC", "思源黑体"],
+  ["Noto Sans CJK SC", "Noto Sans CJK"],
+  ["Microsoft YaHei", "微软雅黑"],
+];
+function SelectSetting({
+  label,
+  value,
+  options,
+  save,
+}: {
+  label: string;
+  value: string;
+  options: string[][];
+  save: (value: string) => void;
+}) {
+  return (
+    <label className="zc-sub-setting">
+      {label}
+      <span className="zc-sub-select">
+        <select className="zc-input" aria-label={label} value={value} onChange={(e) => save(e.target.value)}>
+          {!options.some(([id]) => id === value) && <option value={value}>{value}</option>}
+          {options.map(([id, name]) => (
+            <option key={id} value={id}>
+              {name}
+            </option>
+          ))}
+        </select>
+        <Icon name="down" />
+      </span>
+    </label>
+  );
+}
+function Terms({ label, values, save }: { label: string; values: string[]; save: (values: string[]) => void }) {
+  const [adding, setAdding] = useState(false);
+  const [text, setText] = useState("");
+  return (
+    <fieldset className="zc-sub-terms" aria-label={label}>
+      {values.map((value) => (
+        <span className="zc-tag" key={value}>
+          {value}
+          <button
+            type="button"
+            aria-label={`删除${label}「${value}」`}
+            onClick={() => save(values.filter((v) => v !== value))}
+          >
+            ×
+          </button>
+        </span>
+      ))}
+      {adding ? (
+        <input
+          className="zc-input"
+          aria-label={`添加${label}`}
+          placeholder="输入后按回车"
+          value={text}
+          ref={(input) => input?.focus()}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing) return;
+            if (e.key === "Enter" && text.trim()) {
+              e.preventDefault();
+              save([...new Set([...values, text.trim()])]);
+              setText("");
+              setAdding(false);
+            }
+            if (e.key === "Escape") {
+              setText("");
+              setAdding(false);
+            }
+          }}
+        />
+      ) : (
+        <IconButton icon="plus" label={`添加${label}`} onClick={() => setAdding(true)} />
+      )}
+    </fieldset>
+  );
+}
 function TextSetting({
   label,
   value,
   save,
   multiline = false,
+  placeholder,
+  color = false,
 }: {
   label: string;
   value: string;
   save: (value: string) => void;
   multiline?: boolean;
+  placeholder?: string;
+  color?: boolean;
 }) {
   const id = useId();
   const props = {
@@ -39,13 +130,15 @@ function TextSetting({
     className: "zc-input",
     "aria-label": label,
     defaultValue: value,
+    placeholder,
     onBlur: (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
       if (e.target.value !== value) save(e.target.value);
     },
   };
   return (
-    <label className="zc-sub-setting" htmlFor={id}>
-      {label}
+    <label className={`zc-sub-setting${color ? " zc-sub-color" : ""}`} htmlFor={id}>
+      <span>{label}</span>
+      {color && <span className="zc-sub-swatch" style={{ backgroundColor: value }} aria-hidden="true" />}
       {multiline ? (
         <textarea key={value} {...props} rows={4} />
       ) : (
@@ -81,8 +174,8 @@ function NumberSetting({
     if (input.checkValidity() && input.value !== "") save(Number(input.value));
   };
   return (
-    <label className="zc-sub-setting">
-      {label}
+    <label className="zc-sub-setting zc-sub-number">
+      <span>{label}</span>
       <input
         aria-label={label}
         type="range"
@@ -138,7 +231,10 @@ export function useSubtitlePanel({
   const [editing, setEditing] = useState<string | null>(null),
     [draft, setDraft] = useState("");
   const [skipped, setSkipped] = useState<string[]>([]);
-  const [term, setTerm] = useState("");
+  const [fillersOpen, setFillersOpen] = useState(false);
+  const [replaceOpen, setReplaceOpen] = useState(false);
+  const [styleTrackId, setStyleTrackId] = useState("");
+  const [customFont, setCustomFont] = useState(false);
   const browser = state.subtitleBrowser ?? { search: "", find: "", replace: "", matchCase: false };
   const setBrowser = (patch: Partial<typeof browser>) =>
     update({ ...state, subtitleBrowser: { ...browser, ...patch } });
@@ -147,9 +243,12 @@ export function useSubtitlePanel({
   useEffect(() => setRemoveFillers(recognition.remove_fillers ?? false), [recognition.remove_fillers]);
   const cues = project?.cues ?? [];
   const at = project ? seekTarget(project, cues, state.playhead) : "0s";
-  const selected =
-    cues.find((cue) => state.selected.includes(cue.cue_id)) ?? cues.find((cue) => contains(cue.start, cue.end, at));
-  const style = project?.styles.find((item) => item.id === selected?.style_id) ?? project?.styles[0];
+  const subtitleTracks = project?.subtitleTracks ?? project?.tracks.filter((track) => track.kind === "subtitle") ?? [];
+  const styleTrack = subtitleTracks.find((track) => track.id === styleTrackId) ?? subtitleTracks[0];
+  const trackCues = cues.filter((cue) => cue.track_id === styleTrack?.id);
+  const sample = trackCues.find((cue) => contains(cue.start, cue.end, at)) ?? trackCues[0];
+  const styleId = styleTrack && "default_style_id" in styleTrack ? styleTrack.default_style_id : trackCues[0]?.style_id;
+  const style = project?.styles.find((item) => item.id === styleId);
   const [styleDraft, setStyleDraft] = useState<StyleView>(style ?? defaultStyle);
   useEffect(() => setStyleDraft(style ?? defaultStyle), [style]);
   const committedStyle = useRef(style);
@@ -320,55 +419,29 @@ export function useSubtitlePanel({
     config && clip ? mediaUrl(config, "thumb", clip.media_id, printRational(sourceAt(clip, at), true)) : undefined;
   const controls = (
     <div className="zc-sub-controls">
-      <p className="zc-sub-status">
+      <p className={`zc-sub-status${project?.recognized ? " is-recognized" : ""}`}>
+        <span className="zc-dot" aria-hidden="true" />
         {project?.recognized
-          ? `上次识别 · ${project.recognitionRevision ? `修订 ${project.recognitionRevision}` : "修订未知"} · ${cues.length} 条字幕`
+          ? `已识别${project.recognitionRevision !== undefined ? ` · 第 ${project.recognitionRevision} 版` : ""} · ${cues.length} 条字幕`
           : "还没有识别"}
       </p>
       <fieldset disabled={!project || busy}>
-        <TextSetting
+        <SelectSetting
           label="语言"
           value={recognition.language ?? "zh"}
+          options={languages}
           save={(language) => setRecognition({ language })}
         />
         <TextSetting
           label="参考文本"
+          placeholder="粘贴采访提纲、文稿或人名表，AI 会从里面找专有名词"
           multiline
           value={recognition.reference_text ?? ""}
           save={(reference_text) => setRecognition({ reference_text })}
         />
         <h3>专有名词</h3>
-        <div className="zc-sub-terms">
-          {recognition.terms?.map((name) => (
-            <span className="zc-tag" key={name}>
-              {name}
-              <button
-                type="button"
-                aria-label={`删除专有名词「${name}」`}
-                onClick={() => setRecognition({ terms: recognition.terms?.filter((t) => t !== name) ?? [] })}
-              >
-                ×
-              </button>
-            </span>
-          ))}
-        </div>
-        <input
-          className="zc-input"
-          aria-label="添加专有名词"
-          placeholder="输入后按回车"
-          value={term}
-          onChange={(e) => setTerm(e.target.value)}
-          onBlur={() => {
-            if (term.trim()) {
-              setRecognition({ terms: [...new Set([...(recognition.terms ?? []), term.trim()])] });
-              setTerm("");
-            }
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") e.currentTarget.blur();
-          }}
-        />
-        <label className="zc-switch-row">
+        <Terms label="专有名词" values={recognition.terms ?? []} save={(terms) => setRecognition({ terms })} />
+        <label className="zc-switch-row" title="嗯、啊、呃……整个字词是语气词时，字幕里不显示，时间不动">
           去除水词
           <input
             type="checkbox"
@@ -384,33 +457,29 @@ export function useSubtitlePanel({
             }}
           />
         </label>
-        <details>
-          <summary>水词表</summary>
-          <TextSetting
-            label="水词（每行一个）"
-            multiline
-            value={(recognition.filler_words ?? ["嗯", "啊", "呃", "额", "哦", "唉", "哎", "诶"]).join("\n")}
-            save={(value) =>
-              setRecognition({
-                filler_words: [
-                  ...new Set(
-                    value
-                      .split("\n")
-                      .map((v) => v.trim())
-                      .filter(Boolean),
-                  ),
-                ],
-              })
-            }
+        <button
+          type="button"
+          className="zc-btn zc-btn-ghost"
+          aria-expanded={fillersOpen}
+          onClick={() => setFillersOpen(!fillersOpen)}
+        >
+          编辑水词表
+        </button>
+        {fillersOpen && (
+          <Terms
+            label="水词"
+            values={recognition.filler_words ?? ["嗯", "啊", "呃", "额", "哦", "唉", "哎", "诶"]}
+            save={(filler_words) => setRecognition({ filler_words })}
           />
-        </details>
+        )}
       </fieldset>
       <button
         type="button"
-        className="zc-btn zc-btn-primary"
+        className="zc-btn zc-btn-primary zc-sub-recognize"
         disabled={!project?.media.some((m) => m.audio) || busy}
         onClick={() => void transcribe()}
       >
+        <Icon name="refresh" />
         {progress === null ? "重新识别" : `识别中 ${Math.round(progress * 100)}%`}
       </button>
       {progress !== null && <progress aria-label="识别进度" max={1} value={progress} />}
@@ -438,49 +507,72 @@ export function useSubtitlePanel({
       </div>
       {state.sub !== "style" ? (
         <>
-          <input
-            className="zc-input"
-            aria-label="搜索字幕"
-            placeholder="搜索字幕"
-            value={browser.search}
-            onChange={(e) => setBrowser({ search: e.target.value })}
-          />
-          <details>
-            <summary>查找替换</summary>
-            <input
-              className="zc-input"
-              aria-label="查找"
-              value={browser.find}
-              onChange={(e) => setBrowser({ find: e.target.value })}
-            />
-            <input
-              className="zc-input"
-              aria-label="替换为"
-              value={browser.replace}
-              onChange={(e) => setBrowser({ replace: e.target.value })}
-            />
-            <label>
+          <div className="zc-sub-search-row">
+            <label className="zc-sub-search">
+              <Icon name="search" />
               <input
-                type="checkbox"
-                checked={browser.matchCase}
-                onChange={(e) => setBrowser({ matchCase: e.target.checked })}
+                className="zc-input"
+                aria-label="搜索字幕"
+                placeholder="搜索字幕"
+                value={browser.search}
+                onChange={(e) => setBrowser({ search: e.target.value })}
               />
-              区分大小写
             </label>
-            <button
-              className="zc-btn zc-btn-secondary"
-              type="button"
-              disabled={!project || busy || !browser.find}
-              onClick={() =>
-                void write(
-                  [{ op: "replace_text", find: browser.find, replace: browser.replace, match_case: browser.matchCase }],
-                  "全部替换字幕文字",
-                )
-              }
-            >
-              全部替换
-            </button>
-          </details>
+            <IconButton
+              icon="replace"
+              label="查找替换"
+              aria-expanded={replaceOpen}
+              onClick={() => setReplaceOpen(!replaceOpen)}
+            />
+          </div>
+          {replaceOpen && (
+            <div className="zc-sub-replace">
+              <input
+                className="zc-input"
+                aria-label="查找"
+                value={browser.find}
+                onChange={(e) => setBrowser({ find: e.target.value })}
+              />
+              <input
+                className="zc-input"
+                aria-label="替换为"
+                value={browser.replace}
+                onChange={(e) => setBrowser({ replace: e.target.value })}
+              />
+              <label className="zc-switch-row">
+                <input
+                  className="zc-switch"
+                  role="switch"
+                  aria-label="区分大小写"
+                  aria-checked={browser.matchCase}
+                  type="checkbox"
+                  checked={browser.matchCase}
+                  onChange={(e) => setBrowser({ matchCase: e.target.checked })}
+                />
+                区分大小写
+              </label>
+              <button
+                className="zc-btn zc-btn-secondary"
+                type="button"
+                disabled={!project || busy || !browser.find}
+                onClick={() =>
+                  void write(
+                    [
+                      {
+                        op: "replace_text",
+                        find: browser.find,
+                        replace: browser.replace,
+                        match_case: browser.matchCase,
+                      },
+                    ],
+                    "全部替换字幕文字",
+                  )
+                }
+              >
+                全部替换
+              </button>
+            </div>
+          )}
           {!!skipped.length && <output className="zc-sub-attention">跳过 {skipped.length} 条锁定字幕</output>}
           {!visible.length && <p className="zc-muted">暂无字幕</p>}
           <div className="zc-sub-list">
@@ -602,6 +694,24 @@ export function useSubtitlePanel({
         </>
       ) : (
         <>
+          {subtitleTracks.length > 1 && (
+            <fieldset className="zc-seg zc-sub-tracks" aria-label="字幕样式轨道">
+              {subtitleTracks.map((track) => (
+                <button
+                  type="button"
+                  className="zc-btn zc-btn-ghost"
+                  key={track.id}
+                  aria-pressed={track.id === styleTrack?.id}
+                  onClick={() => {
+                    setStyleTrackId(track.id);
+                    setCustomFont(false);
+                  }}
+                >
+                  {track.name}
+                </button>
+              ))}
+            </fieldset>
+          )}
           <div
             className="zc-sub-sample"
             style={{
@@ -612,7 +722,7 @@ export function useSubtitlePanel({
             <SubtitleCanvas
               cues={[
                 {
-                  text: cues.find((cue) => contains(cue.start, cue.end, at))?.text ?? "字幕样式预览",
+                  text: sample?.text ?? "字幕样式预览",
                   style_id: styleDraft.id,
                 },
               ]}
@@ -626,7 +736,15 @@ export function useSubtitlePanel({
               {["描边白字", "黑底白字", "黄字"].map((name, index) => (
                 <button
                   type="button"
-                  className="zc-btn zc-btn-secondary"
+                  className={`zc-btn zc-sub-preset zc-sub-preset-${index}`}
+                  aria-label={name}
+                  title={name}
+                  aria-pressed={
+                    styleDraft.color.toUpperCase() === (index === 2 ? "#FFD447" : "#FFFFFF") &&
+                    (index === 1
+                      ? box.color === "#000000CC" && outline.width === 0
+                      : box.color === "#00000000" && outline.width === 0.06)
+                  }
                   key={name}
                   onClick={() =>
                     changeStyle(
@@ -643,22 +761,48 @@ export function useSubtitlePanel({
                     )
                   }
                 >
-                  {name}
+                  字幕
                 </button>
               ))}
             </div>
             <h3>字体</h3>
-            <TextSetting
+            <SelectSetting
               label="字体族"
-              value={styleDraft.font_family}
-              save={(font_family) => changeStyle({ font_family }, true)}
+              value={
+                customFont || !fonts.some(([value]) => value === styleDraft.font_family)
+                  ? "other"
+                  : styleDraft.font_family
+              }
+              options={[...fonts, ["other", "其他…"]]}
+              save={(font_family) => {
+                setCustomFont(font_family === "other");
+                if (font_family !== "other") changeStyle({ font_family }, true);
+              }}
             />
-            {number("字重", styleDraft.font_weight ?? 400, 100, 900, 100, (font_weight) => ({ font_weight }))}
+            {(customFont || !fonts.some(([value]) => value === styleDraft.font_family)) && (
+              <TextSetting
+                label="其他字体"
+                value={styleDraft.font_family}
+                save={(font_family) => changeStyle({ font_family }, true)}
+              />
+            )}
+            <SelectSetting
+              label="字重"
+              value={String(styleDraft.font_weight ?? 400)}
+              options={Array.from({ length: 9 }, (_, i) => [String((i + 1) * 100), String((i + 1) * 100)])}
+              save={(value) => changeStyle({ font_weight: Number(value) }, true)}
+            />
             {number("字号", styleDraft.font_size, 0.01, 0.2, 0.001, (font_size) => ({ font_size }))}
             <h3>颜色</h3>
-            <TextSetting label="文字颜色" value={styleDraft.color} save={(color) => changeStyle({ color }, true)} />
+            <TextSetting
+              color
+              label="文字颜色"
+              value={styleDraft.color}
+              save={(color) => changeStyle({ color }, true)}
+            />
             <h3>描边</h3>
             <TextSetting
+              color
               label="描边颜色"
               value={outline.color}
               save={(color) => changeStyle({ outline: { ...outline, color } }, true)}
@@ -666,6 +810,7 @@ export function useSubtitlePanel({
             {number("描边宽度", outline.width, 0, 0.3, 0.01, (width) => ({ outline: { ...outline, width } }))}
             <h3>底板</h3>
             <TextSetting
+              color
               label="底板颜色"
               value={box.color}
               save={(color) => changeStyle({ box: { ...box, color } }, true)}
