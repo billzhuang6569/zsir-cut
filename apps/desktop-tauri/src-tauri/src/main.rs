@@ -22,11 +22,14 @@ fn main() {
     let app = tauri::Builder::default()
         .setup(|app| {
             let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+            let project = std::env::var_os("ZCUT_PROJECT")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| root.join("examples/interview.zcut.json"));
             let child = Command::new("node")
                 .current_dir(&root)
                 .arg(root.join("packages/app-host/dist/index.js"))
                 .args(["--desktop", "--project"])
-                .arg(root.join("examples/interview.zcut.json"))
+                .arg(&project)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::inherit())

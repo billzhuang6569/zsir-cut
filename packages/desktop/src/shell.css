@@ -119,6 +119,7 @@ h3 {
   background: var(--raised);
 }
 .zc-timeline {
+  min-height: 0;
   grid-column: 1 / -1;
   background: var(--bg-timeline);
   overflow: auto;

@@ -14,9 +14,18 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import { WebSocket, WebSocketServer } from "ws";
 import { z } from "zod";
 import type { DispatchOptions, Envelope, Verb } from "../../core/dist/index.js";
+import { mediaChannel } from "./media.js";
 import { PANELS, UI_VERBS, type UiEnvelope, type UiVerb } from "./ui.js";
 
-const { dispatch, commandSchemaForVerb, newId, VERBS }: typeof import("../../core/dist/index.js") = await import(
+const {
+  dispatch,
+  commandSchemaForVerb,
+  newId,
+  VERBS,
+  parseProject,
+  projectSubtitles,
+  printRational,
+}: typeof import("../../core/dist/index.js") = await import(
   new URL(import.meta.url.endsWith(".ts") ? "../../core/src/index.ts" : "../../core/dist/index.js", import.meta.url)
     .href
 );
@@ -123,8 +132,15 @@ export async function startHost(
 ) {
   const token = options.token ?? randomBytes(32).toString("hex");
   if (!token) throw new Error("Token must not be empty");
-  const http = createHttpServer((_request, response) => {
-    response.writeHead(404).end();
+  const load = async () => {
+    if (!options.project) throw new Error("No project");
+    const parsed = parseProject(await readFile(options.project, "utf8"));
+    if (!parsed.ok) throw new Error("Invalid project");
+    return parsed.project;
+  };
+  const serve = mediaChannel(options.project, token, load);
+  const http = createHttpServer((request, response) => {
+    void serve(request, response);
   });
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
   let ui: WebSocket | undefined;
@@ -198,6 +214,37 @@ export async function startHost(
                 : uiEnvelope(item.verb, "E_INTERNAL", "Invalid UI state"),
             );
           }
+          return;
+        }
+        if (message.type === "preview_data" && typeof message.id === "string") {
+          const project = await load();
+          const timeline = project.timelines[0];
+          const defaultStyles = new Map(
+            timeline?.tracks.flatMap((track) =>
+              track.kind === "subtitle" ? [[track.id, track.default_style_id] as const] : [],
+            ) ?? [],
+          );
+          const cues = timeline
+            ? projectSubtitles(project, timeline.id).cues.map((cue) => ({
+                ...cue,
+                style_id: defaultStyles.get(cue.track_id) ?? cue.style_id,
+                start: printRational(cue.start, true),
+                end: printRational(cue.end, true),
+              }))
+            : [];
+          client.send(
+            JSON.stringify({
+              id: message.id,
+              envelope: {
+                ok: true,
+                result: {
+                  media: project.media.map((item) => ({ id: item.id, name: item.name, kind: item.kind })),
+                  cues,
+                  styles: project.subtitle_styles,
+                },
+              },
+            }),
+          );
           return;
         }
         if (typeof message.id !== "string" || !VERBS.includes(message.verb)) {
