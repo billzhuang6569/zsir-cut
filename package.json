@@ -16,7 +16,7 @@
     "fixtures:bind": "node fixtures/synth/cli.ts bind",
     "fixtures:check": "node fixtures/synth/cli.ts check",
     "fixtures:relocate": "node fixtures/synth/cli.ts relocate",
-    "desktop:dev": "pnpm typecheck && pnpm --filter @zsir-cut/desktop-tauri dev"
+    "desktop:dev": "node apps/desktop-tauri/dev.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.2.4",

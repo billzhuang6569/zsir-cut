@@ -2,6 +2,8 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { PANELS, type Panel, type UiState } from "../../app-host/src/ui.js";
 import { connectHost, type ProjectView } from "./connection.js";
 import { applyUi, initialState } from "./state.js";
+import { TimelinePreview } from "./TimelinePreview.js";
+import { seekTarget } from "./timeline.js";
 
 const labels: Record<Panel, string> = { ai: "AI", media: "素材", chapters: "章节", subtitles: "字幕" };
 const parameters: Record<Panel, string> = { ai: "决定", media: "素材信息", chapters: "章节大纲", subtitles: "字幕" };
@@ -10,7 +12,11 @@ export function App({ config }: { config?: { port: number; token: string } }) {
   const [state, setState] = useState<UiState>(initialState);
   const current = useRef(state);
   const [project, setProject] = useState<ProjectView | null>(null);
-  const [fcpIcon, setFcpIcon] = useState<string | null>(null);
+  const connection = useRef<ReturnType<typeof connectHost> | null>(null);
+  const projectRef = useRef(project);
+  projectRef.current = project;
+  const dragging = useRef(false);
+  const [errorDetail, setErrorDetail] = useState<string | undefined>();
   const [error, setError] = useState<string | null>(null);
   const update = useCallback((next: UiState) => {
     current.current = next;
@@ -18,9 +24,13 @@ export function App({ config }: { config?: { port: number; token: string } }) {
   }, []);
   useEffect(() => {
     if (!config) return;
-    return connectHost(config, {
-      ui: (verb, request) => {
+    const host = connectHost(config, {
+      ui: async (verb, request) => {
+        while (dragging.current && verb !== "ui_state") await new Promise((resolve) => setTimeout(resolve, 16));
+        const view = projectRef.current;
         const next = applyUi(current.current, verb, request);
+        if (view && verb === "ui_seek") next.playhead = { at: seekTarget(view, view.cues, next.playhead) };
+        if (verb === "ui_play" && next.range) next.playhead = { at: next.range.start };
         update(next);
         return next;
       },
@@ -29,9 +39,17 @@ export function App({ config }: { config?: { port: number; token: string } }) {
         setProject(view);
         setError(null);
       },
-      icon: setFcpIcon,
-      error: setError,
+      icon: () => {},
+      error: (message, detail) => {
+        setError(message);
+        setErrorDetail(detail);
+      },
     });
+    connection.current = host;
+    return () => {
+      host();
+      connection.current = null;
+    };
   }, [config, update]);
   return (
     <main className="zc-shell">
@@ -40,9 +58,6 @@ export function App({ config }: { config?: { port: number; token: string } }) {
         <span>{project?.name ?? "未打开工程"}</span>
         {project && <span className="zc-muted">r{project.revision.seq}</span>}
         <span className="zc-grow" />
-        <span role="img" className="zc-app-tile" aria-label="Final Cut Pro">
-          {fcpIcon ? <img src={fcpIcon} alt="Final Cut Pro" /> : "FCP"}
-        </span>
         <button type="button" className="zc-btn" disabled>
           导出
         </button>
@@ -73,9 +88,6 @@ export function App({ config }: { config?: { port: number; token: string } }) {
           <h2>{labels[state.panel]}</h2>
         </div>
       </section>
-      <section aria-label="预览" className="zc-viewer">
-        {error && <p role="alert">{error}</p>}
-      </section>
       <section aria-label="参数区" className="zc-parameters zc-pad" data-panel={state.panel}>
         <h2>{parameters[state.panel]}</h2>
         {state.panel === "subtitles" && (
@@ -96,20 +108,16 @@ export function App({ config }: { config?: { port: number; token: string } }) {
         )}
         {state.panel === "subtitles" && state.sub === "style" && <h3>样式</h3>}
       </section>
-      <section aria-label="工具栏" className="zc-toolbar">
-        {["选择", "切割", "加标记", "撤销", "重做", "吸附", "缩放"].map((label) => (
-          <button key={label} type="button" className="zc-tool" disabled>
-            {label}
-          </button>
-        ))}
-      </section>
-      <section aria-label="时间线" className="zc-timeline">
-        {project?.tracks.map((track) => (
-          <div key={track.id} className={`zc-track zc-track-${track.kind}`}>
-            <span className="zc-track-name">{track.name}</span>
-          </div>
-        ))}
-      </section>
+      <TimelinePreview
+        project={project}
+        state={state}
+        update={update}
+        config={config}
+        error={error}
+        errorDetail={errorDetail}
+        dragging={dragging}
+        call={(verb, request) => connection.current?.call(verb, request) ?? Promise.reject(new Error("宿主未连接"))}
+      />
     </main>
   );
 }
