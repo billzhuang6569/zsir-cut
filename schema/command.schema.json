@@ -1160,6 +1160,80 @@
         {
           "type": "object",
           "required": [
+            "op"
+          ],
+          "properties": {
+            "op": {
+              "const": "set_recognition"
+            },
+            "language": {
+              "type": "string"
+            },
+            "reference_text": {
+              "type": "string"
+            },
+            "terms": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "remove_fillers": {
+              "type": "boolean"
+            },
+            "filler_words": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "op",
+            "find",
+            "replace"
+          ],
+          "properties": {
+            "op": {
+              "const": "replace_text"
+            },
+            "find": {
+              "type": "string",
+              "minLength": 1
+            },
+            "replace": {
+              "type": "string"
+            },
+            "transcript_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/id"
+              },
+              "uniqueItems": true
+            },
+            "cue_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/id"
+              },
+              "uniqueItems": true
+            },
+            "match_case": {
+              "type": "boolean"
+            },
+            "force": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
             "op",
             "transcript_id",
             "from_token",

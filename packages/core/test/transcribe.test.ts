@@ -81,6 +81,7 @@ const path = require('node:path');
 const args = process.argv.slice(2);
 const arg = (name) => args.includes(name) ? args[args.indexOf(name) + 1] : undefined;
 fs.writeFileSync(path.join(process.cwd(), 'worker-args.json'), JSON.stringify(args));
+if (arg('--hotwords')) fs.writeFileSync(path.join(process.cwd(), 'worker-hotwords.txt'), fs.readFileSync(arg('--hotwords')));
 const scenario = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'scenario.json'), 'utf8'));
 const input = fs.readFileSync(arg('--input'));
 const output = scenario.error ? {schema:'zsir-cut/asr-error',schema_version:'0.1',code:scenario.error,message:'model unavailable',retryable:false} : {
@@ -311,4 +312,87 @@ it("continues short token and cue IDs when transcribing again", async () => {
   expect(next.tokens[0]!.id).toBe(`tok_${tag}_4`);
   expect(next.cues[0]!.id).toBe(`cue_${tag}_3`);
   expect(next.ext).toEqual(first.ext);
+});
+
+it("merges recognition terms with file hotwords and changes their cache digest", async () => {
+  const sample = JSON.parse(await readFile(path, "utf8"));
+  sample.recognition = { language: "zh", terms: ["飞书", "豆包工作"] };
+  await writeFile(path, JSON.stringify(sample));
+  await writeFile(join(directory, "hotwords.txt"), " 飞书 \n其他\n\n其他\n");
+  const execute = async (key: string, language?: string) => {
+    const accepted = await dispatch(
+      "transcribe",
+      { ...request((await project()).revision.id, key), hotwords: "hotwords.txt", ...(language ? { language } : {}) },
+      { asrPython: python, asrWorkerDirectory: directory },
+    );
+    expect((await finish((accepted.result as { job_id: string }).job_id)).state).toBe("succeeded");
+    return readFile(join(directory, "worker-hotwords.txt"), "utf8");
+  };
+  const before = await execute("terms-1");
+  expect(before).toBe("飞书\n豆包工作\n其他");
+  const args = JSON.parse(await readFile(join(directory, "worker-args.json"), "utf8"));
+  expect(args[args.indexOf("--language") + 1]).toBe("zh");
+  const changed = JSON.parse(await readFile(path, "utf8"));
+  changed.recognition.terms.push("新词");
+  await writeFile(path, JSON.stringify(changed));
+  const after = await execute("terms-2", "auto");
+  expect(createHash("sha256").update(after).digest("hex")).not.toBe(createHash("sha256").update(before).digest("hex"));
+  const override = JSON.parse(await readFile(join(directory, "worker-args.json"), "utf8"));
+  expect(override[override.indexOf("--language") + 1]).toBe("auto");
+});
+
+it("hides whole default fillers only, keeps heard and joins cues across hidden tokens", async () => {
+  const words = ["开头", "嗯", "啊！", "（呃）", "额", "哦", "唉", "哎", "诶", "那个", "嗯嗯", "结尾"];
+  const sample = JSON.parse(await readFile(path, "utf8"));
+  sample.recognition = { remove_fillers: true };
+  await writeFile(path, JSON.stringify(sample));
+  await writeFile(
+    join(directory, "scenario.json"),
+    JSON.stringify({
+      tokens: words.map((text, i) => ({ text, start_ms: 1000 + i * 80, end_ms: 1080 + i * 80, conf: null })),
+    }),
+  );
+  const job = await run();
+  expect(job.state, JSON.stringify(job.envelope)).toBe("succeeded");
+  expect(job.envelope?.result?.warnings).toContainEqual({ code: "W_FILLERS_HIDDEN", count: 8 });
+  const item = (await project()).transcripts[0]!;
+  expect(item.tokens.slice(1, 9).map((token) => token.text)).toEqual(Array(8).fill(""));
+  expect(item.tokens.slice(1, 9).map((token) => token.heard)).toEqual(words.slice(1, 9));
+  expect(item.tokens.every((token) => token.state === "auto")).toBe(true);
+  expect(item.tokens[9]!.text).toBe("那个");
+  expect(item.tokens[10]!.text).toBe("嗯嗯");
+  expect(item.cues).toHaveLength(1);
+  expect(item.cues[0]).toMatchObject({ first_token: item.tokens[0]!.id, last_token: item.tokens.at(-1)!.id });
+  const changed = JSON.parse(await readFile(path, "utf8"));
+  changed.recognition.filler_words = ["那个"];
+  changed.transcripts[0].tokens[0].text = "那个";
+  changed.transcripts[0].tokens[0].state = "edited";
+  await writeFile(path, JSON.stringify(changed));
+  const again = await run(changed.revision.id, "custom-fillers");
+  expect(again.state).toBe("succeeded");
+  expect(again.envelope?.result?.warnings).toContainEqual({ code: "W_FILLERS_HIDDEN", count: 1 });
+  const next = (await project()).transcripts[0]!;
+  expect(next.tokens[0]).toMatchObject({ text: "那个", state: "edited" });
+  expect(next.tokens[9]).toMatchObject({ text: "", heard: "那个", state: "auto" });
+  expect(next.tokens[1]!.text).toBe("嗯");
+  const partial = JSON.parse(await readFile(path, "utf8"));
+  partial.recognition.filler_words = ["那个", "嗯"];
+  await writeFile(path, JSON.stringify(partial));
+  await writeFile(
+    join(directory, "scenario.json"),
+    JSON.stringify({ tokens: [{ text: "那个", start_ms: 1720, end_ms: 1800, conf: null }] }),
+  );
+  const accepted = await dispatch(
+    "transcribe",
+    { ...request(partial.revision.id, "partial-fillers"), range: { start: "43/25s", duration: "2/25s" } },
+    { asrPython: python, asrWorkerDirectory: directory },
+  );
+  const partialJob = await finish((accepted.result as { job_id: string }).job_id);
+  expect(partialJob.state, JSON.stringify(partialJob.envelope)).toBe("succeeded");
+  expect(partialJob.envelope?.result?.warnings).toContainEqual({ code: "W_FILLERS_HIDDEN", count: 1 });
+  expect((await project()).transcripts[0]!.tokens[1]).toMatchObject({
+    id: next.tokens[1]!.id,
+    text: "嗯",
+    state: "auto",
+  });
 });

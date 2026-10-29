@@ -691,6 +691,7 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
       const ops = request.ops as ({ op: string } & Record<string, unknown>)[];
       const store = openProject({ projectPath: request.project as string });
       const entityOps: Record<string, string> = {};
+      const result = {};
       const mutator = (project: Parameters<typeof applyEdit>[0]) =>
         applyEdit(
           project,
@@ -698,11 +699,14 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
           entityOps,
           `${request.base_revision}:${request.idempotency_key}`,
           request.timeline_id as string | undefined,
+          false,
+          undefined,
+          result,
         );
       const write = writeRequest("edit", requestId, request);
       return request.dry_run === true
-        ? await store.previewWrite(write, mutator, entityOps)
-        : await store.commitWrite(write, mutator, entityOps);
+        ? await store.previewWrite(write, mutator, entityOps, result)
+        : await store.commitWrite(write, mutator, entityOps, result);
     }
     if (verb === "undo" || verb === "redo") {
       const store = openProject({ projectPath: request.project as string });

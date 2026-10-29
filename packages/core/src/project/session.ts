@@ -158,11 +158,17 @@ const classify = (changes: EntityChange[]) => ({
   timeline_changes: changes.filter(
     (change) =>
       !subtitleEntities.has(change.entity) &&
+      !(
+        change.entity === "project" &&
+        JSON.stringify(change.before?.recognition) !== JSON.stringify(change.after?.recognition)
+      ) &&
       !(change.entity === "track" && (change.after ?? change.before)?.kind === "subtitle"),
   ),
   subtitle_changes: changes.filter(
     (change) =>
       subtitleEntities.has(change.entity) ||
+      (change.entity === "project" &&
+        JSON.stringify(change.before?.recognition) !== JSON.stringify(change.after?.recognition)) ||
       (change.entity === "track" && (change.after ?? change.before)?.kind === "subtitle"),
   ),
 });
@@ -279,6 +285,7 @@ async function runExistingSession(
     if (verb === "edit") {
       const ops = input.ops as ({ op: string } & Record<string, unknown>)[];
       const entityOps: Record<string, string> = {};
+      const result = {};
       const mutator = (candidate: Project) =>
         applyEdit(
           candidate,
@@ -287,11 +294,13 @@ async function runExistingSession(
           `${input.base_revision}:${input.idempotency_key}`,
           input.timeline_id as string | undefined,
           session.approval === "manual",
+          undefined,
+          result,
         );
       applied =
         input.dry_run === true
-          ? await draft.previewWrite(request, mutator, entityOps)
-          : await draft.commitWrite(request, mutator, entityOps);
+          ? await draft.previewWrite(request, mutator, entityOps, result)
+          : await draft.commitWrite(request, mutator, entityOps, result);
     } else applied = await draft[verb](request);
     if (session.state === "in_review" && verb === "edit" && applied.ok && applied.status !== "dry_run") {
       session.state = "open";

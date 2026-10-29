@@ -689,7 +689,9 @@ export function applyEdit(
   timelineId?: string,
   allowForce = false,
   idTime?: string,
+  result: Record<string, unknown> = {},
 ): void {
+  const warnings: Record<string, unknown>[] = [];
   let serial = 0;
   const generate = (prefix: string) =>
     newId(prefix, {
@@ -716,7 +718,7 @@ export function applyEdit(
   }
   for (const op of ops) {
     const before = structuredClone(project);
-    if (SUBTITLE_OPS.has(op.op)) applySubtitleEdit(project, timeline, op, generate, allowForce);
+    if (SUBTITLE_OPS.has(op.op)) applySubtitleEdit(project, timeline, op, generate, allowForce, warnings);
     else applyOne(project, timeline, op, generate);
     const oldClips = before.timelines.flatMap((item) => mediaTracks(item).flatMap((track) => track.clips));
     const oldById = new Map(oldClips.map((clip) => [clip.id, clip]));
@@ -745,10 +747,13 @@ export function applyEdit(
     }
     for (const change of diffProjectEntities(before, project)) entityOps[change.key] = op.op;
   }
+  if (warnings.length) result.warnings = warnings;
 }
 
 export const SUBTITLE_OPS = new Set([
   "edit_text",
+  "replace_text",
+  "set_recognition",
   "hide_tokens",
   "set_token_state",
   "resegment",
