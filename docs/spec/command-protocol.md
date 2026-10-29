@@ -470,8 +470,8 @@
 
 | 动词 | 参数 | 作用 |
 |---|---|---|
-| `ui_state` | 无 | 读当前界面：打开的工程、当前标签（`ai`、`media`、`chapters`、`subtitles`）、参数区子标签、播放头位置、选中对象、是否在播放 |
-| `ui_show_panel` | `panel`，可选 `sub` | 切换功能区标签，例如 `subtitles` 加 `sub: "style"` |
+| `ui_state` | 无 | 读当前界面：打开的工程、当前标签（`ai`、`media`、`chapters`、`subtitles`）、参数区子标签、历史面板是否打开、播放头位置、选中对象、是否在播放 |
+| `ui_show_panel` | `panel`，可选 `sub` | 切换功能区标签，例如 `subtitles` 加 `sub: "style"`（字幕面板的 `sub` 取 `subtitles`、`style`）；`panel` 取 `history` 时在参数区打开历史面板，不改功能区标签 |
 | `ui_seek` | `at`（序列时间）或 `id`（片段、标记、字幕条、章节） | 把播放头移到那里并滚动到可见 |
 | `ui_select` | `ids` | 选中这些对象，空数组表示取消选中 |
 | `ui_play` | `range`（可选）、`loop`（可选） | 播放一段；不带 `range` 从播放头开始 |
