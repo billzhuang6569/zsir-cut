@@ -24,6 +24,9 @@ def test_cache_key_is_stable_and_parameter_sensitive():
     changed = list(args)
     changed[1] = [1]
     assert worker.cache_key(*args) != worker.cache_key(*changed)
+    changed = list(args)
+    changed[8] = "sha256:changed-terms"
+    assert worker.cache_key(*args) != worker.cache_key(*changed)
 
 
 def test_jieba_group_and_punctuation():

@@ -637,7 +637,9 @@ export function openProject(options: OpenProjectOptions) {
         )
         .map((change) => change.key);
       if (conflicts.length) throw new UndoConflict(conflicts, "Entity changed after target revision");
-      Object.assign(project, restoreEntities(project, targetEntry.changes, direction === "undo" ? "before" : "after"));
+      const restored = restoreEntities(project, targetEntry.changes, direction === "undo" ? "before" : "after");
+      if (!restored.recognition) delete project.recognition;
+      Object.assign(project, restored);
     };
     return write(request, mutator, direction, target);
   }
@@ -655,6 +657,7 @@ export function openProject(options: OpenProjectOptions) {
       request: WriteRequest,
       mutator: (project: Project) => void,
       entityOps: Record<string, string> = {},
+      result: Record<string, unknown> = {},
     ): Promise<WriteEnvelope> => {
       const parsed = parseProject(await readFile(projectPath, "utf8"));
       if (!parsed.ok) throw new Error("Project file is invalid");
@@ -667,7 +670,7 @@ export function openProject(options: OpenProjectOptions) {
         receipt: { before: before.revision.id, after: null, idempotency_key: request.idempotency_key, replayed: false },
         changes: [],
         verification: { level: "none", passed: false, issues: [] },
-        result: {},
+        result,
         error: null,
       };
       const reject = (code: ErrorCode, message: string) => {
