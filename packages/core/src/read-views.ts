@@ -1,6 +1,7 @@
 // biome-ignore-all lint/style/noNonNullAssertion: Token and time-map indexes are checked before use.
 import { readdir, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { serializeProject } from "./project/io.ts";
 import { projectSubtitles } from "./project/projection.ts";
 import { validateProjectSemantics } from "./project/semantics.ts";
 import type { Session } from "./project/session.ts";
@@ -150,7 +151,7 @@ export async function inspect(
     };
   }
   if (input.view === "entity") {
-    const raw = JSON.parse(await readFile(projectPath, "utf8")) as Project;
+    const raw = JSON.parse(serializeProject(project)) as Project;
     const found = entity(raw, input.id as string);
     if (!found) throw new Error(`E_NOT_FOUND: ${input.id}`);
     return found;
@@ -172,7 +173,8 @@ export async function inspect(
       entries: journal
         .slice(0, before)
         .reverse()
-        .slice(0, (input.limit as number | undefined) ?? 20),
+        .slice(0, (input.limit as number | undefined) ?? 20)
+        .map((entry) => ({ ...entry, label: entry.label ?? null, batch: entry.batch ?? null })),
     };
   }
   if (input.view === "timeline") {

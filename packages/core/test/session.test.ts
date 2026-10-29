@@ -31,7 +31,14 @@ const load = async () => {
 const send = async (verb: Parameters<typeof dispatch>[0], data: Record<string, unknown>, base = "rev_fixture_1") => {
   const input = ["diff", "validate"].includes(verb)
     ? { project, ...data }
-    : { project, base_revision: base, idempotency_key: `key-${++serial}`, author, ...data };
+    : {
+        project,
+        base_revision: base,
+        idempotency_key: `key-${++serial}`,
+        author,
+        ...(verb === "edit" ? { label: "Test edit" } : {}),
+        ...data,
+      };
   expect(validateCommand(verb, input).valid).toBe(true);
   const result = await dispatch(verb, input);
   expect(validateEnvelope(result)).toMatchObject({ valid: true });
@@ -226,6 +233,7 @@ describe("sessions and diff", () => {
       base_revision: "rev_fixture_1",
       idempotency_key: "direct",
       author,
+      label: "Test edit",
       ops: [label("clp_v1", "draft label")],
     });
     expect(direct.status).toBe("applied");

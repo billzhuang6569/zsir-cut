@@ -75,6 +75,7 @@ describe("create_project", () => {
         author,
         base_revision: (await read()).revision.id,
         idempotency_key: `track-${index}`,
+        label: "Test edit",
         ops: [{ op: "add_track", kind: "video" }],
       });
       expect(result.status).toBe("applied");
@@ -205,7 +206,13 @@ describe("create_project", () => {
       "E_VALIDATION",
     );
     const changed = await openProject({ projectPath: project }).commitWrite(
-      { ...storedRequest(request), verb: "edit", base_revision: first.receipt?.after ?? "", idempotency_key: "rename" },
+      {
+        ...storedRequest(request),
+        verb: "edit",
+        label: "Test edit",
+        base_revision: first.receipt?.after ?? "",
+        idempotency_key: "rename",
+      },
       (candidate) => {
         candidate.name = "修改后的名称";
       },
@@ -423,6 +430,7 @@ describe("create_project", () => {
         author,
         base_revision: imported.receipt?.after,
         idempotency_key: "place",
+        label: "Test edit",
         ops: [
           {
             op: "place",

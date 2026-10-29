@@ -14,6 +14,7 @@ const codes: Record<string, number> = {
   drafted: 0,
   no_op: 0,
   accepted: 0,
+  queued: 0,
   failed: 1,
   rejected: 2,
   conflict: 3,

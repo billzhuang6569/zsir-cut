@@ -36,6 +36,7 @@ it.each([
         base_revision: project.revision.id,
         idempotency_key: "pause",
         author: { kind: "agent", name: "test" },
+        label: "Test edit",
         ops: [
           {
             op: "remove_span",
