@@ -622,5 +622,11 @@ export function useAiPanel({
       )}
     </>
   );
-  return { chat, parameters };
+  return {
+    chat,
+    parameters,
+    send,
+    setInput,
+    canSend: Boolean(path) && !generating && available.some((item) => item.agent === agent),
+  };
 }

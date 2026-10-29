@@ -10,13 +10,18 @@ export function initialState(): UiState {
     playing: false,
     range: null,
     loop: false,
+    chapters: { levels: 2, timecodes: true },
   };
 }
 
 export function applyUi(state: UiState, verb: UiVerb, request: Record<string, unknown>): UiState {
   switch (verb) {
     case "ui_show_panel":
-      return { ...state, panel: request.panel as UiState["panel"], sub: (request.sub as string | undefined) ?? null };
+      return {
+        ...state,
+        panel: request.panel as UiState["panel"],
+        sub: (request.sub as string | undefined) ?? (request.panel === "chapters" ? "outline" : null),
+      };
     case "ui_seek":
       return { ...state, playhead: typeof request.at === "string" ? { at: request.at } : { id: request.id as string } };
     case "ui_select":

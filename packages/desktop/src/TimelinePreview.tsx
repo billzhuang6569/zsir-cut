@@ -267,6 +267,8 @@ export function TimelinePreview({
     element.addEventListener("loadedmetadata", sync);
     return () => element.removeEventListener("loadedmetadata", sync);
   }, [clip, source, speed, state.playing, direction, hideViewer]);
+  const markerDrag = useRef<number | null>(null);
+  const markerMoved = useRef(false);
   const write = async (verb: string, label: string, ops?: unknown[]) => {
     if (!project || busy) return;
     setBusy(true);
@@ -592,7 +594,53 @@ export function TimelinePreview({
                         title={marker.text}
                         aria-label={marker.text}
                         style={{ left: pixelAt(marker.at.t, scale) }}
-                        onClick={() => seek(marker.at.t)}
+                        onPointerDown={(event) => {
+                          if (marker.kind !== "chapter" || busy) return;
+                          event.stopPropagation();
+                          markerMoved.current = false;
+                          markerDrag.current = event.clientX;
+                          dragging.current = true;
+                          event.currentTarget.setPointerCapture?.(event.pointerId);
+                        }}
+                        onPointerMove={(event) => {
+                          if (markerDrag.current === null) return;
+                          event.stopPropagation();
+                          const ruler = event.currentTarget.parentElement;
+                          if (ruler)
+                            event.currentTarget.style.left = `${pixelAt(seekTarget(project, project.cues, { at: dropPoint(event.clientX, ruler) ?? marker.at.t }), scale)}px`;
+                        }}
+                        onPointerUp={(event) => {
+                          if (markerDrag.current === null) return;
+                          event.stopPropagation();
+                          const moved = Math.abs(event.clientX - markerDrag.current) > 2;
+                          markerMoved.current = moved;
+                          markerDrag.current = null;
+                          dragging.current = false;
+                          event.currentTarget.style.left = `${pixelAt(marker.at.t, scale)}px`;
+                          const ruler = event.currentTarget.parentElement;
+                          if (!moved || !ruler) return;
+                          const target = seekTarget(project, project.cues, {
+                            at: dropPoint(event.clientX, ruler) ?? marker.at.t,
+                          });
+                          if (target !== marker.at.t)
+                            void write("edit", `移动章节「${marker.text}」`, [
+                              { op: "update_marker", marker_id: marker.id, at: target },
+                            ]);
+                        }}
+                        onPointerCancel={(event) => {
+                          markerDrag.current = null;
+                          dragging.current = false;
+                          event.currentTarget.style.left = `${pixelAt(marker.at.t, scale)}px`;
+                        }}
+                        onLostPointerCapture={(event) => {
+                          markerDrag.current = null;
+                          dragging.current = false;
+                          event.currentTarget.style.left = `${pixelAt(marker.at.t, scale)}px`;
+                        }}
+                        onClick={() => {
+                          if (!markerMoved.current) seek(marker.at.t);
+                          markerMoved.current = false;
+                        }}
                       >
                         ▼
                       </button>

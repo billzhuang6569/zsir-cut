@@ -11,6 +11,7 @@ export interface UiState {
   playing: boolean;
   range: { start: string; duration: string } | null;
   loop: boolean;
+  chapters?: { levels: 1 | 2; timecodes: boolean } | undefined;
   mediaBrowser?: { scope: string; search: string; size: number } | undefined;
   preview?: "media" | "timeline" | undefined;
   media?: { id: string; at: string; in: string | null; out: string | null } | undefined;

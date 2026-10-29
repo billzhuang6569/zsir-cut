@@ -1,0 +1,190 @@
+.zc-chapter-controls,
+.zc-chapter-outline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+.zc-chapter-views {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  gap: var(--space-2);
+}
+.zc-chapter-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-6) var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--raised);
+  color: var(--text);
+  font-size: var(--label-size);
+  cursor: pointer;
+}
+.zc-chapter-view:disabled {
+  background: transparent;
+  color: var(--text-off);
+  cursor: not-allowed;
+}
+.zc-chapter-view small {
+  font-size: var(--caption-size);
+}
+.zc-chapter-controls h3 {
+  margin-bottom: var(--space-5);
+  color: var(--text-4);
+  font-size: var(--label-size);
+  font-weight: var(--label-weight);
+}
+.zc-chapter-setting,
+.zc-chapter-stats,
+.zc-chapter-stats > span,
+.zc-chapter-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.zc-chapter-setting {
+  justify-content: space-between;
+  margin-bottom: var(--space-5);
+}
+.zc-chapter-setting select {
+  background: var(--raised);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: var(--space-2);
+  font: inherit;
+}
+.zc-chapter-action {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.zc-chapter-action:disabled {
+  color: var(--text-off);
+  cursor: not-allowed;
+}
+.zc-chapter-stats,
+.zc-chapter-row time {
+  color: var(--text-4);
+  font-family: var(--font-mono);
+  font-size: var(--timecode-sm-size);
+}
+.zc-chapter-stats {
+  gap: var(--space-6);
+}
+.zc-chapter-row {
+  position: relative;
+  padding: var(--space-3) var(--space-2);
+  border-radius: var(--radius-md);
+}
+.zc-chapter-row:has([aria-current]) {
+  background: var(--raised);
+}
+.zc-chapter-row.is-section {
+  margin-left: var(--space-10);
+}
+.zc-chapter-hash {
+  color: var(--text-off);
+  font-family: var(--font-mono);
+}
+.zc-chapter-title {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  padding: var(--space-2) 0;
+  text-align: left;
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--title-size);
+  font-weight: var(--title-weight);
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.is-section .zc-chapter-title {
+  font-size: var(--body-size);
+  font-weight: var(--body-weight);
+}
+.zc-chapter-row time {
+  white-space: nowrap;
+}
+.zc-chapter-menu summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-btn-compact);
+  height: var(--icon-btn-compact);
+  color: var(--text-4);
+}
+.zc-chapter-menu > div {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 2;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+}
+.zc-chapter-menu button {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  min-height: var(--control-h);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  cursor: pointer;
+}
+.zc-chapter-menu button:disabled {
+  color: var(--text-off);
+}
+.zc-chapter-row .zc-input {
+  min-width: 0;
+  flex: 1;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  font: inherit;
+}
+.zc-chapter-switch {
+  appearance: none;
+  flex-shrink: 0;
+  width: var(--control-h);
+  height: calc(var(--space-8) + var(--space-1));
+  margin: 0;
+  border-radius: var(--radius-pill);
+  background: var(--line-strong);
+  position: relative;
+  cursor: pointer;
+}
+.zc-chapter-switch::after {
+  content: "";
+  position: absolute;
+  top: var(--space-1);
+  left: var(--space-1);
+  width: var(--space-7);
+  height: var(--space-7);
+  border-radius: var(--radius-pill);
+  background: var(--text-3);
+}
+.zc-chapter-switch:checked {
+  background: var(--text);
+}
+.zc-chapter-switch:checked::after {
+  left: var(--space-8);
+  background: var(--bg);
+}
