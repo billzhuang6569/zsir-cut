@@ -1,0 +1,402 @@
+.zc-export-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--bg);
+  padding: var(--space-8);
+  overflow: auto;
+}
+.zc-export-panel {
+  position: relative;
+  max-width: 1400px;
+  margin: auto;
+  padding: var(--space-8);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  background: var(--panel);
+}
+.zc-export-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-8);
+}
+.zc-export-graph {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(480px, 1.4fr);
+  gap: 80px;
+  align-items: start;
+}
+.zc-export-preview {
+  position: sticky;
+  top: var(--space-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding-top: 100px;
+}
+.zc-export-preview .zc-picture {
+  position: relative;
+  width: 100%;
+  background: var(--bg-viewer);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.zc-export-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.zc-export-preview p,
+.zc-export-node p,
+.zc-export-node small {
+  color: var(--text-3);
+  font-size: var(--caption-size);
+}
+.zc-export-destinations {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-7);
+}
+.zc-export-destinations::before {
+  content: "";
+  position: absolute;
+  top: 40px;
+  bottom: 60px;
+  left: -40px;
+  border-left: 1px solid var(--line-strong);
+}
+.zc-export-node {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.zc-export-node::before {
+  content: "";
+  position: absolute;
+  width: 40px;
+  top: 40px;
+  left: -40px;
+  border-top: 1px solid var(--line-strong);
+}
+.zc-export-node:first-child::after {
+  content: "";
+  position: absolute;
+  top: 40px;
+  left: -80px;
+  width: 40px;
+  height: 180px;
+  border-left: 1px solid var(--line-strong);
+  border-top: 1px solid var(--line-strong);
+}
+.zc-export-location,
+.zc-export-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.zc-export-location .zc-input {
+  width: 100%;
+}
+.zc-export-path {
+  color: var(--text-3);
+  font-size: var(--caption-size);
+  overflow-wrap: anywhere;
+}
+.zc-export-status progress {
+  appearance: none;
+  height: var(--space-2);
+  width: 100%;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--raised);
+  accent-color: var(--approved-ink);
+}
+.zc-export-status progress::-webkit-progress-bar {
+  background: var(--raised);
+  border-radius: var(--radius-md);
+}
+.zc-export-status progress::-webkit-progress-value {
+  background: var(--approved-ink);
+  border-radius: var(--radius-md);
+}
+.zc-export-status progress::-moz-progress-bar {
+  background: var(--approved-ink);
+}
+.zc-export-panel [role="alert"] {
+  color: var(--attention);
+}
+.zc-export-confirm {
+  position: fixed;
+  z-index: 1;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(520px, 90vw);
+  padding: var(--space-8);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-6);
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-xl);
+  box-shadow: 0 0 0 100vmax #0009;
+}
+.zc-export-confirm h3,
+.zc-export-confirm label,
+.zc-export-confirm ul {
+  width: 100%;
+}
+.zc-export-confirm label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.zc-overlay-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding-block: var(--space-4);
+  border-bottom: 1px solid var(--line);
+}
+.zc-overlay-row > .zc-btn {
+  height: auto;
+  flex: 1;
+  justify-content: start;
+  padding: var(--space-4);
+}
+.zc-overlay-row small {
+  display: block;
+}
+.zc-overlay-row .zc-export-status {
+  flex-basis: 100%;
+}
+.zc-export-later {
+  opacity: 0.35;
+  padding: var(--space-4);
+}
+@media (max-width: 900px) {
+  .zc-export-graph {
+    grid-template-columns: 1fr;
+    gap: var(--space-8);
+  }
+  .zc-export-preview {
+    position: static;
+    padding-top: 0;
+    max-width: 480px;
+  }
+  .zc-export-node::before,
+  .zc-export-node::after,
+  .zc-export-destinations::before {
+    display: none;
+  }
+}
+
+.zc-file {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  width: 84px;
+}
+.zc-file-page {
+  fill: var(--raised);
+  stroke: var(--line-strong);
+}
+.zc-file-fold {
+  fill: var(--raised-2);
+  stroke: var(--line-strong);
+}
+.zc-file-ext {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  fill: var(--on-primary);
+}
+.zc-file-name {
+  max-width: 84px;
+  color: var(--text-2);
+  font-size: 11px;
+  text-align: center;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+}
+.zc-file-sub {
+  color: var(--text-4);
+  font-size: 11px;
+}
+.zc-file-toggle {
+  position: relative;
+  padding: var(--space-4) var(--space-3);
+  border-radius: var(--radius-lg);
+  border: 1px dashed var(--line-strong);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  opacity: 0.55;
+}
+.zc-file-toggle.is-on {
+  border: 1px solid var(--text);
+  background: var(--raised);
+  opacity: 1;
+}
+.zc-file-check {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text);
+  color: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.zc-dest {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto 16px;
+  align-items: center;
+  column-gap: var(--space-6);
+  width: 100%;
+  max-width: 560px;
+  box-sizing: border-box;
+  padding: var(--space-5) var(--space-5) var(--space-5) var(--space-6);
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.zc-dest:hover,
+.zc-dest.is-hot {
+  background: var(--panel-2);
+  border-color: var(--text);
+}
+.zc-dest-name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.zc-dest-name .zc-heading {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.zc-dest-ok {
+  display: inline-flex;
+  color: var(--approved-ink);
+}
+.zc-dest-files {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+.zc-dest-files .zc-file {
+  width: 64px;
+}
+.zc-dest-files .zc-file svg {
+  width: 30px;
+  height: 36px;
+}
+.zc-dest-files .zc-file-sub {
+  display: none;
+}
+.zc-app-tile {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: var(--radius-xl);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+  font-weight: 700;
+  font-size: 14px;
+}
+.zc-app-logo {
+  display: block;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-xl);
+}
+.zc-dest-chev {
+  display: flex;
+  align-items: center;
+  color: var(--text-4);
+}
+.zc-dest:hover .zc-dest-chev,
+.zc-dest.is-hot .zc-dest-chev {
+  color: var(--text);
+}
+.zc-app-logo {
+  object-fit: contain;
+}
+.zc-dest {
+  max-width: none;
+}
+.zc-dest:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.zc-files {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.zc-export-graph {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.zc-export-panel .zc-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: var(--input-h);
+  padding: 0 var(--space-5);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+.zc-export-panel select.zc-input {
+  appearance: none;
+  padding-right: var(--space-7);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 16 16'%3E%3Cpath d='m4 6 4 4 4-4' fill='none' stroke='%23888'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--space-4) center;
+}
+.zc-export-panel .zc-input::placeholder {
+  color: var(--text-4);
+}
+.zc-export-panel .zc-input:focus {
+  border-color: var(--text);
+}
+.zc-export-panel .zc-warn {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--attention-soft);
+  color: var(--attention);
+  font-size: 12px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
