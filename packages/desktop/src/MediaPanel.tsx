@@ -415,10 +415,10 @@ export function useMediaPanel({
               <>
                 <Icon name={m.kind === "audio" ? "audio" : m.kind === "image" ? "image" : "clip"} />
                 <strong title={m.name}>{m.name ?? "未命名素材"}</strong>
-                <span>{durationText(m)}</span>
+                <span>{m.kind !== "image" && durationText(m)}</span>
                 <span className="zc-media-spec">
                   {m.video
-                    ? `${m.video.width} × ${m.video.height} · ${m.video.rate} 帧/秒`
+                    ? `${m.video.width} × ${m.video.height}${m.kind === "video" ? ` · ${m.video.rate} 帧/秒` : ""}`
                     : `${m.audio?.sample_rate ?? "—"} Hz`}
                 </span>
                 <span role="img" aria-label={`评分 ${m.organize?.rating ?? 0} 星`}>
@@ -446,7 +446,7 @@ export function useMediaPanel({
                     {m.kind === "audio" && <Icon name="audio" />}
                     {used(m) ? `已用 ${used(m)} 段` : "未用"}
                   </span>
-                  <span className="zc-media-duration">{durationText(m)}</span>
+                  {m.kind !== "image" && <span className="zc-media-duration">{durationText(m)}</span>}
                   {state.media?.id === m.id && (state.media.in || state.media.out) && (
                     <RangeBar media={m} state={state} />
                   )}
@@ -553,30 +553,49 @@ export function useMediaPanel({
               ))}
             </fieldset>
           </dd>
-          <dt>尺寸</dt>
-          <dd>
-            {selected.video
-              ? `${selected.video.width} × ${selected.video.height}`
-              : `${selected.audio?.sample_rate ?? "—"} Hz · ${selected.audio?.channels ?? "—"} 声道`}
-          </dd>
-          <dt>帧率</dt>
-          <dd>{selected.video ? `${selected.video.rate} 帧/秒` : "—"}</dd>
-          <dt>时长</dt>
-          <dd>{durationText(selected)}</dd>
+          {selected.kind === "audio" ? (
+            <>
+              <dt>采样率</dt>
+              <dd>{selected.audio?.sample_rate ?? "—"} Hz</dd>
+              <dt>声道</dt>
+              <dd>{selected.audio?.channels ?? "—"}</dd>
+            </>
+          ) : (
+            <>
+              <dt>尺寸</dt>
+              <dd>{selected.video ? `${selected.video.width} × ${selected.video.height}` : "—"}</dd>
+            </>
+          )}
+          {selected.kind === "video" && (
+            <>
+              <dt>帧率</dt>
+              <dd>{selected.video ? `${selected.video.rate} 帧/秒` : "—"}</dd>
+            </>
+          )}
+          {selected.kind !== "image" && (
+            <>
+              <dt>时长</dt>
+              <dd>{durationText(selected)}</dd>
+            </>
+          )}
           <dt>格式</dt>
           <dd>{selected.name?.split(".").at(-1)?.toUpperCase()}</dd>
           <dt>卷名</dt>
           <dd>{selected.reel ?? "—"}</dd>
-          <dt>选中范围</dt>
-          <dd>
-            {range &&
-              timecode(range.source_start, {
-                edit_rate: selected.kind === "video" ? (selected.video?.rate ?? "25") : "25",
-                start_timecode: selected.start_timecode ?? "00:00:00:00",
-                drop_frame: Boolean(selected.start_timecode?.includes(";")),
-              } as ProjectView)}{" "}
-            · {range && durationText({ ...selected, kind: "video", duration: range.duration })}
-          </dd>
+          {selected.kind !== "image" && (
+            <>
+              <dt>选中范围</dt>
+              <dd>
+                {range &&
+                  timecode(range.source_start, {
+                    edit_rate: selected.kind === "video" ? (selected.video?.rate ?? "25") : "25",
+                    start_timecode: selected.start_timecode ?? "00:00:00:00",
+                    drop_frame: Boolean(selected.start_timecode?.includes(";")),
+                  } as ProjectView)}{" "}
+                · {range && durationText({ ...selected, kind: "video", duration: range.duration })}
+              </dd>
+            </>
+          )}
           <dt>时间线使用</dt>
           <dd>{used(selected)} 段</dd>
         </dl>

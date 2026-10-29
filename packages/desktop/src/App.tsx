@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { PANELS, type Panel, type UiState } from "../../app-host/src/ui.js";
 import { type AiNotice, useAiPanel } from "./AiPanel.js";
+import { useChapterPanel } from "./ChapterPanel.js";
 import { connectHost, type ProjectView } from "./connection.js";
 import { useMediaPanel } from "./MediaPanel.js";
 import { sourceProject } from "./media.js";
@@ -83,6 +84,19 @@ export function App({ config }: { config?: { port: number; token: string } }) {
     };
   }, [config, update]);
   const media = useMediaPanel({ project, state, update, call, config });
+  const chapters = useChapterPanel({
+    project,
+    state,
+    update,
+    call,
+    canGenerate: ai.canSend,
+    generate: () => {
+      const text = "按现在的剪辑和字幕重新分章，一级标题不超过 5 个";
+      update(applyUi(current.current, "ui_show_panel", { panel: "ai" }));
+      ai.setInput(text);
+      void ai.send(text);
+    },
+  });
   const source = useMemo(
     () => (project && media.selected && state.preview === "media" ? sourceProject(project, media.selected) : null),
     [project, media.selected, state.preview],
@@ -135,6 +149,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
         >
           <h2>{labels[state.panel]}</h2>
           {state.panel === "media" && media.library}
+          {state.panel === "chapters" && chapters.controls}
           <div className="zc-ai-body" hidden={state.panel !== "ai"}>
             {ai.chat}
           </div>
@@ -144,6 +159,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
         <h2>{parameters[state.panel]}</h2>
         {state.panel === "ai" && ai.parameters}
         {state.panel === "media" && media.parameters}
+        {state.panel === "chapters" && chapters.outline}
         {state.panel === "subtitles" && (
           <div className="zc-tabs" role="tablist" aria-label="字幕参数">
             {["subtitles", "style"].map((sub) => (

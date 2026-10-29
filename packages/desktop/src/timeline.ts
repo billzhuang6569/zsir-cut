@@ -43,7 +43,7 @@ export interface TimelineView {
   drop_frame: boolean;
   duration: Time;
   tracks: TrackView[];
-  markers: { id: string; at: Time; text: string; kind: string }[];
+  markers: { id: string; at: Time; text: string; kind: string; level?: 1 | 2 }[];
 }
 export interface CueView {
   cue_id: string;

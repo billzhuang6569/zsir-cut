@@ -465,3 +465,27 @@ it("renders cached peaks for audio cards and a single image thumbnail", async ()
     await h.close();
   }
 });
+
+it.each(["audio", "image", "video"])("shows only applicable media metadata for %s", async (kind) => {
+  const view = { ...project, media: [{ ...media, kind }] };
+  const ui = await mount(false, false, view);
+  try {
+    await ui.select();
+    const labels = [...ui.container.querySelectorAll(".zc-media-info dt")].map((node) => node.textContent);
+    if (kind === "audio") {
+      expect(labels).toContain("采样率");
+      expect(labels).toContain("声道");
+      expect(labels).not.toContain("尺寸");
+      expect(labels).not.toContain("帧率");
+      expect(ui.container.querySelector(".zc-media-info")?.textContent).toContain("48000 Hz");
+    } else {
+      expect(labels).toContain("尺寸");
+      expect(labels.includes("帧率")).toBe(kind === "video");
+    }
+    expect(labels.includes("时长")).toBe(kind !== "image");
+    expect(labels.includes("选中范围")).toBe(kind !== "image");
+    expect(Boolean(ui.container.querySelector(".zc-media-duration"))).toBe(kind !== "image");
+  } finally {
+    await ui.close();
+  }
+});

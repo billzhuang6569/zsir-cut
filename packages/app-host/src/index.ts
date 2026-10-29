@@ -56,6 +56,7 @@ const uiStateSchema = z.strictObject({
   playing: z.boolean(),
   range: z.strictObject({ start: time, duration }).nullable(),
   loop: z.boolean(),
+  chapters: z.strictObject({ levels: z.union([z.literal(1), z.literal(2)]), timecodes: z.boolean() }).optional(),
   mediaBrowser: z
     .strictObject({ scope: z.string(), search: z.string(), size: z.number().int().min(110).max(280) })
     .optional(),
