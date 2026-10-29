@@ -76,6 +76,7 @@
 |---|---|---|
 | `applied` | 已写入主工程并通过校验 | 继续 |
 | `drafted` | 已写入编辑会话的草稿 | 继续，最后提交审批 |
+| `queued` | 批次里的这一步已收下，在等前面的序号（6.1） | 继续发其余的步骤；用 `batch_status` 查进度 |
 | `dry_run` | 只演算，`changes` 是预测结果。不写文件、不写日志、不记幂等，所以正式提交可以沿用同一个幂等键 | 确认后去掉 `dry_run` 重发 |
 | `no_op` | 请求合法，但没有任何改变 | 继续 |
 | `accepted` | 长任务已入队，`result.job_id` 可查 | 用 `job_status` 查进度 |
@@ -137,6 +138,7 @@
 ├─ idempotency.jsonl    每个写请求一行
 ├─ snapshots/           定期全量快照，加速回放
 ├─ sessions/<session_id>/
+├─ batches/<batch_id>/  批次的排队与状态，见 6.1
 └─ jobs/<job_id>/
 ```
 
@@ -144,13 +146,15 @@
 
 | 字段 | 说明 |
 |---|---|
-| `kind` | `write`、`undo`、`redo`、`recovered` |
+| `kind` | `write`、`undo`、`redo`、`restore`、`recovered` |
 | `revision` / `parent` / `seq` | 修订 ID、父修订 ID、序号 |
 | `at` / `author` | 时间、作者 |
 | `verb` / `request_id` / `idempotency_key` | 产生它的请求 |
 | `ops` | 请求里的操作原文，用于审计和编辑会话重放 |
 | `changes` | 实体级快照：每个改动的实体一条，含 `key`、`entity`、`before`、`after`、`before_parent`、`after_parent`、`before_index`、`after_index` |
-| `target` | `undo`、`redo` 条目指向的修订 |
+| `target` | `undo`、`redo`、`restore` 条目指向的修订 |
+| `label` | 这一步的说明，给人看（6.1）。写请求带了 `label` 就照抄；界面操作由界面填 |
+| `batch` | 属于批次时为 `{id, seq, count}`，否则为 null |
 
 **实体与键**：
 
@@ -174,6 +178,50 @@
 **幂等记录**（`idempotency.jsonl` 的一行）：`idempotency_key`、`request_hash`（去掉 `request_id` 后按规范 JSON 计算的 SHA-256）、`at`、完整的结果信封。至少保留 7 天或最近 1000 条，取较多者，清理在写入时顺带进行。
 
 **可追溯**：被删的内容永远能从日志里找到：它来自哪个修订、哪个 `occurrence_id`、谁删的。
+
+### 6.1 步骤、批次与回到任意一步
+
+产品说明见 `product.md` 6.1。一个修订就是历史面板里的一「步」。
+
+**说明**：所有写请求（`edit`、`undo`、`redo`、`restore`、`session_approve`）可以带 `label`，一句给人看的话，不超过 80 个字。Agent 发的 `edit` 必须带，缺了返回 `E_VALIDATION`；人在界面上的操作由界面生成。CLI 手工调用可以省略，日志里记为 null。
+
+**批次参数**：`edit` 可以带 `batch: {id, seq, count}`。
+
+| 字段 | 规则 |
+|---|---|
+| `id` | 调用方生成，`bat_` 开头，同一工程内唯一 |
+| `count` | 这一批一共几步，1 到 200。同一批次所有步骤的 `count` 必须相同，不同返回 `E_VALIDATION` |
+| `seq` | 第几步，1 到 `count` |
+| `timeout_s` | 只在第 1 步上有效：缺序号时等多久，5 到 600，默认 30 |
+
+批次的写入目标由第 1 步决定：带 `session_id` 就是该会话的草稿，否则是主工程。后面的步骤 `session_id` 必须相同。
+
+**执行规则**（写锁内完成，不需要常驻进程）：
+
+1. 收到一步，先按第 5 节查幂等。同一批次、同一序号再来一次而请求不同，返回 `rejected`、`E_BATCH_SEQ_TAKEN`。
+2. 把这一步存进 `.zcut/<project_id>/batches/<batch_id>/`（每步一个文件，按序号命名），连同请求原文和收到的时间。
+3. 从批次里下一个该执行的序号开始，只要那一步已经到了，就按第 5 节写入步骤 4 到 8 执行它：每步一个修订，日志条目带 `batch` 和 `label`。只有第 1 步核对 `base_revision`；后面的步骤接着上一步的结果，`base_revision` 不核对。
+4. 这次请求自己的那一步执行了，返回 `applied`（会话里为 `drafted`），`result.batch` 写出本次连带执行了哪些序号。还没轮到它，返回 `queued`，`result.batch` 写出在等哪些序号。
+5. 某一步应用失败（例如 L1 校验不过）：批次变为 `failed`，这一步不写，后面已存的步骤作废。触发执行的那次请求返回 `rejected`，`result.batch.failed_seq` 是失败的序号，`error` 是失败原因。已执行的步骤保留。
+6. **批次打开期间，同一目标上别的写入要等。** 不属于这个批次的写请求返回 `failed`、`E_BATCH_OPEN`、`retryable: true`，`details` 写出批次 ID、已执行几步、还在等哪些序号。界面据此显示「AI 正在做第 x / n 步」。
+7. **超时**：批次从最后一次收到步骤起，超过 `timeout_s` 还缺序号，就变为 `expired`：已执行的保留，没执行的作废。超时在下一次加锁时顺带检查（任何写请求或 `batch_status`），不需要定时器。超时之后再来的这个批次的步骤，返回 `rejected`、`E_BATCH_CLOSED`。
+8. 全部序号执行完，批次变为 `complete`。
+
+**`batch_status`**（读）：参数 `batch_id`。返回 `state`（`open`、`complete`、`failed`、`expired`）、`count`、`applied`（已执行的序号）、`waiting`（已收到、在排队的序号）、`missing`（还没收到的序号）、每一步的修订 ID、`failed_seq` 和原因。顺带执行第 7 条的超时检查，所以它也会写批次状态文件，但不产生修订。
+
+**整批撤销**：`undo` 可以带 `batch_id` 代替 `target`：把这个批次已执行的全部修订合起来，按第 6 节的规则核对和恢复，写成一个 `undo` 修订。某个实体之后被别的修订改过，返回 `E_UNDO_CONFLICT`。
+
+**回到任意一步**：`restore`，参数 `target`（修订 ID）加写请求的公共字段。
+
+1. 按 7.5 节 `diff` 的方法还原出目标修订的完整工程内容。
+2. 把当前工程整体换成它，作为一个新修订写入，`kind` 为 `restore`，`changes` 是当前到目标的实体差异。之后的修订都还在日志里，可以再 `restore` 回去。
+3. 目标修订早于某个 `recovered` 修订时，返回 `rejected`、`E_UNSUPPORTED`。
+4. 目标就是当前修订时返回 `no_op`。
+5. `restore` 只用于主工程。带 `session_id` 返回 `rejected`、`E_SESSION_STATE`：草稿批准时要按日志重放，回到草稿的某一步没有可重放的操作原文。草稿里退回用 `undo`。
+
+**看某一步时的样子**：`inspect` 的 `timeline` 和 `entity` 视图可以带 `at_revision`，返回那个修订时的内容，只读，不加锁。`render_preview` 和 `view_timeline` 同样可以带 `at_revision`。
+
+**历史视图**：`inspect` 的 `history` 视图每条带上 `label`、`batch`、`kind`，界面据此画历史面板：同一批次折叠成一组，组名是第 1 步的 `label`。
 
 ## 7. 编辑会话：Agent 剪完，人审批
 
@@ -276,7 +324,9 @@
 | `diff` | 读 | 比较两个修订，输出实体级差异 |
 | `import_media` | 写 | 探测素材、计算指纹，加入 `media[]`；`relink` 模式为离线素材找回文件，见 9.2、9.3 |
 | `edit` | 写 | 应用一组有序操作，见第 10 节 |
-| `undo` / `redo` | 写 | 见第 6 节 |
+| `undo` / `redo` | 写 | 见第 6 节；`undo` 可以带 `batch_id` 整批撤销（6.1） |
+| `restore` | 写 | 回到任意一步：把工程换成某个历史修订的内容，写成新修订（6.1） |
+| `batch_status` | 读 | 查批次进度（6.1） |
 | `transcribe` | 写，长任务 | 跑识别和对齐，写入母稿第 1、3 层，并生成初始的第 2、4 层 |
 | `session_begin` / `session_review` / `session_approve` / `session_reject` | 会话 | 见第 7 节 |
 | `session_ask` / `session_answer` | 会话 | 写入、回答决定，见 7.6 |
@@ -287,7 +337,7 @@
 | `record_handoff_check` | 写交接包 | 把 `host_import` 或 `host_render_comparison` 的检查结果写进交接包的 `manifest.json`，不改工程。参数：`package`（交接包目录）、`check`（两者之一）、`status`、`host_version`、`by`、`notes`、`items`（逐项的 `check`、`status`、`notes`）。不需要 `base_revision`，不写工程日志；同一项检查再次记录时整体覆盖，所以天然幂等 |
 | `job_status` | 读 | 查长任务进度与结果 |
 
-共 21 个。新增动词要先改本文。另有只在桌面版运行时存在的界面动词，见 9.6，不计入这 21 个。
+共 23 个。新增动词要先改本文。另有只在桌面版运行时存在的界面动词，见 9.6，不计入这 21 个。
 
 ### 9.1 给 Agent 的读视图
 
@@ -482,6 +532,9 @@
 | `E_IO` | `failed` | 读写文件失败，`retryable` 说明能否重试 |
 | `E_INTERNAL` | `failed` | 内核错误 |
 | `E_APP_NOT_RUNNING` | `failed` | 调用了界面动词（9.6），但桌面版没在运行；`retryable` 为 true |
+| `E_BATCH_OPEN` | `failed` | 同一目标上有一个批次还没执行完，这次写入要等；`retryable` 为 true（6.1） |
+| `E_BATCH_SEQ_TAKEN` | `rejected` | 同一批次的这个序号已经收到过另一个不同的请求（6.1） |
+| `E_BATCH_CLOSED` | `rejected` | 批次已经完成、失败或超时，不再收步骤（6.1） |
 
 警告码（写在结果信封的 `result.warnings` 数组里，每项 `{code, …}`，不改变 `status`；信封顶层没有 `warnings` 字段）：本文新增的有 `W_DECISIONS_PENDING`（批准时还有没回答的决定，7.4）、`W_REPLACE_SKIPPED_LOCKED`（查找替换跳过了锁定的字幕条，见 `edit-ops.md`）、`W_FILLERS_HIDDEN`（识别后自动隐藏了水词，附个数，见 `asr-worker.md` 第 6 节）。校验类警告见 `timeline-schema.md` 第 8 节。
 

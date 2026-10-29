@@ -31,6 +31,10 @@
 
 3.2、3.3、3.4 在 3.1 合并后可以并行，它们改的文件不重叠：3.2 在会话模块，3.3 在字幕域和识别，3.4 在导出器。
 
+| 编号 | 内容 | 依赖 | 验收 |
+|---|---|---|---|
+| 3.12 | 步骤管理器内核（`command-protocol.md` 6.1）：写请求的 `label`（Agent 的 `edit` 必填）；`edit` 的 `batch` 参数、磁盘排队、按序号执行、失败与超时、`E_BATCH_OPEN` / `E_BATCH_SEQ_TAKEN` / `E_BATCH_CLOSED`；`batch_status`；`undo` 的 `batch_id`；`restore`；`inspect` 和 `render_preview`、`view_timeline` 的 `at_revision`；`history` 视图带 `label`、`batch`、`kind`；日志条目新字段；`schema/command.schema.json` 和 `schema/envelope.schema.json` 按规格改（本任务明确允许） | 3.2–3.4 | 一个 10 步的批次，用 10 个进程乱序并发发出（先发 6–10，再发 1–5），日志里的修订顺序严格是 1 到 10，每一步的 `batch.seq` 对得上；缺第 4 步时 5 以后都返回 `queued`，补上第 4 步那次请求连带执行 4–10；第 3 步校验失败时 4–10 作废、1–2 保留；缺序号超时后状态为 `expired`，之后再来的步骤返回 `E_BATCH_CLOSED`；批次打开时别的写入返回 `E_BATCH_OPEN`；整批撤销后工程与批次前逐字节相同（除修订）；`restore` 到 3 个修订以前再 `restore` 回来，两次都和对应修订逐字节相同（除修订）；CLI 与 MCP 对等 |
+
 ## 桌面版任务（Codex，等 Bill 验收设计稿后开始）
 
 | 编号 | 内容 | 依赖 |
@@ -42,6 +46,7 @@
 | 3.9 | 章节面板：大纲视图，点击跳转，复制 Markdown | 3.1、3.6 |
 | 3.10 | 字幕面板：识别设置、字幕列表（搜索、查找替换、逐条编辑）、样式 | 3.3、3.6 |
 | 3.11 | 导出面板：节点图、三家去处和直接导出 | 3.4、3.5 |
+| 3.13 | 历史面板：按 `history` 视图列出步骤，批次折叠成组；点一步预览（`at_revision`）；「回到这一步」调用 `restore`；批次进行中显示「AI 正在做第 x / n 步」 | 3.6、3.12 |
 
 ### 3.5 详细说明
 
