@@ -73,6 +73,7 @@ const signature = (input: Input) =>
     intent: input.intent,
     dry_run: input.dry_run,
     target: input.target,
+    label: input.label,
     decisions: input.decisions,
     decision_id: input.decision_id,
     option_id: input.option_id,
@@ -173,12 +174,25 @@ const writeRequest = (verb: WriteRequest["verb"], id: string, input: Input, ops:
   ops,
   ...(typeof input.timeline_id === "string" ? { timeline_id: input.timeline_id } : {}),
   ...(typeof input.target === "string" ? { target: input.target } : {}),
+  ...(typeof input.label === "string" ? { label: input.label } : {}),
+  ...(typeof input.project === "string" ? { project: input.project } : {}),
+  ...(typeof input.session_id === "string" ? { session_id: input.session_id } : {}),
+  ...(input.dry_run === true ? { dry_run: true } : {}),
+  ...(input.batch ? { batch: input.batch as NonNullable<WriteRequest["batch"]> } : {}),
+  ...(typeof input.batch_id === "string" ? { batch_id: input.batch_id } : {}),
 });
 const activeWrites = (entries: JournalEntry[]) => {
   const undone = new Set<string>();
   for (const entry of entries) {
-    if (entry.kind === "undo" && entry.target) undone.add(entry.target);
-    if (entry.kind === "redo" && entry.target) undone.delete(entry.target);
+    const targets = entry.batch_id
+      ? entries.filter((item) => item.batch?.id === entry.batch_id).map((item) => item.revision)
+      : entry.target
+        ? [entry.target]
+        : [];
+    for (const revision of targets) {
+      if (entry.kind === "undo") undone.add(revision);
+      if (entry.kind === "redo") undone.delete(revision);
+    }
   }
   return entries.filter((entry) => entry.kind === "write" && !undone.has(entry.revision));
 };
@@ -291,7 +305,13 @@ async function runExistingSession(
     throw error;
   }
   const draftPath = join(directory, "draft.zcut.json");
-  const draft = openProject({ projectPath: draftPath });
+  const main = await readProject(projectPath);
+  const draft = openProject({
+    projectPath: draftPath,
+    batchRoot: join(dirname(projectPath), ".zcut", main.id),
+    sessionId,
+    manualApproval: session.approval === "manual",
+  });
   if (verb === "session_ask" || verb === "session_answer") {
     const previous = session.log?.find((entry) => entry.idempotency_key === input.idempotency_key);
     if (previous) {
@@ -315,6 +335,21 @@ async function runExistingSession(
       };
     }
     return reject(verb, id, "E_SESSION_STATE", "Session is closed");
+  }
+  if (!["edit", "undo", "redo"].includes(verb)) {
+    const batch = await draft.batchBlocker();
+    if (batch) {
+      const result = output(verb, id);
+      result.ok = false;
+      result.status = "failed";
+      result.error = {
+        code: "E_BATCH_OPEN",
+        message: "A batch is open on this draft",
+        retryable: true,
+        details: batch,
+      };
+      return result;
+    }
   }
   if (verb === "session_ask" || verb === "session_answer") {
     const current = await readProject(draftPath);
@@ -574,6 +609,7 @@ async function approve(
   if (
     write.status === "rejected" &&
     write.error?.code !== "E_IDEMPOTENCY_MISMATCH" &&
+    write.error?.code !== "E_BATCH_OPEN" &&
     main.revision.id !== session.base_revision
   ) {
     const result = reject("session_approve", id, "E_CONFLICT", "Session replay failed");

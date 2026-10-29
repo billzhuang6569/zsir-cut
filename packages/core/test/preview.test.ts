@@ -438,6 +438,7 @@ it("checks draft media from the main directory and renders review's exact revisi
     base_revision: "rev_preview",
     idempotency_key: "place",
     author,
+    label: "Test edit",
     ops: ["0s", "1s"].map((source_start) => ({
       op: "place",
       media_id: "med_barcode",
@@ -482,6 +483,7 @@ it("checks draft media from the main directory and renders review's exact revisi
     base_revision: placed.receipt?.after,
     idempotency_key: "continue",
     author,
+    label: "Test edit",
     ops: [
       {
         op: "place",

@@ -36,6 +36,7 @@ const request = (
   base_revision,
   idempotency_key,
   author,
+  label: "Test edit",
   verb,
   request_id: `req_${idempotency_key.replaceAll("-", "_")}`,
   ops: [{ op: "set_clip", clip_id: "clp_v1", label: "edited" }],
