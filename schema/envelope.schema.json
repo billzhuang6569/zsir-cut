@@ -8,11 +8,9 @@
   "additionalProperties": false,
   "properties": {
     "ok": { "type": "boolean" },
-    "status": { "enum": ["applied", "drafted", "dry_run", "no_op", "accepted", "rejected", "conflict", "failed", "committed_unverified"] },
+    "status": { "enum": ["applied", "drafted", "dry_run", "no_op", "accepted", "rejected", "conflict", "failed", "committed_unverified", "queued"] },
     "verb": {
-      "enum": ["inspect", "read_transcript", "validate", "diff", "import_media", "edit", "undo", "redo", "transcribe",
-               "session_begin", "session_review", "session_approve", "session_reject",
-               "render_preview", "view_timeline", "export", "create_project", "record_handoff_check", "job_status", "session_ask", "session_answer"]
+      "enum": ["inspect", "read_transcript", "validate", "diff", "import_media", "edit", "undo", "redo", "transcribe", "session_begin", "session_review", "session_approve", "session_reject", "render_preview", "view_timeline", "export", "create_project", "record_handoff_check", "job_status", "session_ask", "session_answer", "restore", "batch_status"]
     },
     "request_id": { "type": "string", "pattern": "^req_[A-Za-z0-9_-]{1,64}$" },
     "receipt": {
@@ -79,7 +77,7 @@
           "required": ["code", "message", "retryable"],
           "additionalProperties": false,
           "properties": {
-            "code": { "enum": ["E_CONFLICT", "E_IDEMPOTENCY_MISMATCH", "E_VALIDATION", "E_NOT_FOUND", "E_MIXED_DOMAIN", "E_LOCKED", "E_UNDO_CONFLICT", "E_SESSION_STATE", "E_UNSUPPORTED", "E_IO", "E_INTERNAL"] },
+            "code": { "enum": ["E_CONFLICT", "E_IDEMPOTENCY_MISMATCH", "E_VALIDATION", "E_NOT_FOUND", "E_MIXED_DOMAIN", "E_LOCKED", "E_UNDO_CONFLICT", "E_SESSION_STATE", "E_UNSUPPORTED", "E_IO", "E_INTERNAL", "E_BATCH_OPEN", "E_BATCH_SEQ_TAKEN", "E_BATCH_CLOSED"] },
             "message": { "type": "string" },
             "retryable": { "type": "boolean" },
             "details": { "type": "object" }
@@ -91,7 +89,7 @@
   "allOf": [
     { "if": { "properties": { "status": { "enum": ["rejected", "conflict", "failed"] } } },
       "then": { "properties": { "ok": { "const": false }, "error": { "type": "object" } } } },
-    { "if": { "properties": { "status": { "enum": ["applied", "drafted", "dry_run", "no_op", "accepted"] } } },
+    { "if": { "properties": { "status": { "enum": ["applied", "drafted", "dry_run", "no_op", "accepted", "queued"] } } },
       "then": { "properties": { "ok": { "const": true }, "error": { "type": "null" } } } },
     { "if": { "properties": { "status": { "const": "committed_unverified" } } },
       "then": { "properties": { "ok": { "const": false } } } }

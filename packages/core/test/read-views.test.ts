@@ -111,6 +111,7 @@ describe("read views", () => {
         base_revision: "rev_fixture_1",
         idempotency_key: "one",
         author: { kind: "agent", name: "test" },
+        label: "Test edit",
         ops: [],
       },
       (candidate) => {
@@ -125,6 +126,7 @@ describe("read views", () => {
         base_revision: first.receipt.after,
         idempotency_key: "two",
         author: { kind: "agent", name: "test" },
+        label: "Test edit",
         ops: [],
       },
       (candidate) => {
@@ -203,6 +205,7 @@ describe("read views", () => {
       base_revision: "rev_fixture_1",
       idempotency_key: "remove-first-words",
       author: { kind: "agent", name: "test" },
+      label: "Test edit",
       ops: [
         {
           op: "remove_span",

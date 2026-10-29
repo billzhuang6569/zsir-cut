@@ -52,6 +52,8 @@ export const VERBS = [
   "edit",
   "undo",
   "redo",
+  "restore",
+  "batch_status",
   "transcribe",
   "session_begin",
   "session_review",
@@ -113,7 +115,8 @@ export function errorEnvelope(
     | "E_SESSION_STATE"
     | "E_NOT_FOUND"
     | "E_CONFLICT"
-    | "E_IDEMPOTENCY_MISMATCH",
+    | "E_IDEMPOTENCY_MISMATCH"
+    | "E_BATCH_OPEN",
   message: string,
   retryable = false,
 ): Envelope {
@@ -125,7 +128,7 @@ export function errorEnvelope(
 }
 
 function writeRequest(
-  verb: "edit" | "import_media" | "transcribe" | "undo" | "redo",
+  verb: "edit" | "import_media" | "transcribe" | "undo" | "redo" | "restore",
   requestId: string,
   input: Request,
 ): WriteRequest {
@@ -155,6 +158,12 @@ function writeRequest(
             : [],
     ...(typeof input.timeline_id === "string" ? { timeline_id: input.timeline_id } : {}),
     ...(typeof input.target === "string" ? { target: input.target } : {}),
+    ...(typeof input.label === "string" ? { label: input.label } : {}),
+    ...(typeof input.project === "string" ? { project: input.project } : {}),
+    ...(typeof input.session_id === "string" ? { session_id: input.session_id } : {}),
+    ...(input.dry_run === true ? { dry_run: true } : {}),
+    ...(input.batch ? { batch: input.batch as NonNullable<WriteRequest["batch"]> } : {}),
+    ...(typeof input.batch_id === "string" ? { batch_id: input.batch_id } : {}),
   };
 }
 
@@ -290,6 +299,7 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
       "diff",
       "render_preview",
       "view_timeline",
+      "batch_status",
     ].includes(verb)
   )
     return errorEnvelope(verb, requestId, "rejected", "E_SESSION_STATE", "Verb cannot enter a session");
@@ -315,6 +325,8 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
     verb !== "diff" &&
     verb !== "undo" &&
     verb !== "redo" &&
+    verb !== "restore" &&
+    verb !== "batch_status" &&
     verb !== "import_media" &&
     verb !== "transcribe" &&
     verb !== "edit" &&
@@ -397,7 +409,7 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
     }
     if (verb === "render_preview" || verb === "view_timeline") {
       const extra = Object.keys(request).filter(
-        (key) => !["project", "author", "session_id", "timeline_id", "output"].includes(key),
+        (key) => !["project", "author", "session_id", "timeline_id", "output", "at_revision"].includes(key),
       );
       if (extra.length)
         return errorEnvelope(
@@ -414,7 +426,10 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
         return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Invalid timeline_id or output");
       const parsed = parseProject(await readFile(options.previewProjectPath ?? projectPath, "utf8"));
       if (!parsed.ok) return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Project file is invalid");
-      const project = parsed.project;
+      const project =
+        request.at_revision && !options.previewProjectPath
+          ? await openProject({ projectPath }).snapshotAt(request.at_revision as string)
+          : parsed.project;
       const timeline = project.timelines.find((item) => item.id === (request.timeline_id ?? project.timelines[0]?.id));
       if (!timeline) return errorEnvelope(verb, requestId, "rejected", "E_NOT_FOUND", "Timeline not found");
       if (timelineFrames(timeline) <= 0n)
@@ -465,6 +480,19 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
             "Idempotency key was used for another request",
           );
         if (replay) return replay;
+        const batch = await openProject({ projectPath: request.project as string }).batchBlocker();
+        if (batch) {
+          const output = errorEnvelope(
+            verb,
+            requestId,
+            "failed",
+            "E_BATCH_OPEN",
+            "A batch is open on this target",
+            true,
+          );
+          if (output.error) output.error.details = batch;
+          return output;
+        }
       }
       if (!options.worker && request.base_revision !== parsed.project.revision.id)
         return errorEnvelope(verb, requestId, "conflict", "E_CONFLICT", "Base revision differs from current revision");
@@ -712,11 +740,21 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
         ? await store.previewWrite(write, mutator, entityOps, result)
         : await store.commitWrite(write, mutator, entityOps, result);
     }
-    if (verb === "undo" || verb === "redo") {
+    if (verb === "undo" || verb === "redo" || verb === "restore") {
       const store = openProject({ projectPath: request.project as string });
       return await store[verb](writeRequest(verb, requestId, request));
     }
     if (verb === "import_media") return await importMedia(request, requestId, options.probe ?? ffprobe);
+    if (verb === "batch_status") {
+      const main = parseProject(await readFile(mediaProjectPath, "utf8"));
+      if (!main.ok) return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Project file is invalid");
+      const output = basic(verb, requestId);
+      output.result = await openProject({
+        projectPath,
+        batchRoot: join(dirname(resolve(mediaProjectPath)), ".zcut", main.project.id),
+      }).batchStatus(request.batch_id as string);
+      return output;
+    }
     if (verb === "diff") {
       const store = openProject({ projectPath });
       try {
@@ -733,6 +771,8 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
       }
     }
     const parsed = parseProject(await readFile(projectPath, "utf8"));
+    if (parsed.ok && request.at_revision)
+      parsed.project = await openProject({ projectPath }).snapshotAt(request.at_revision as string);
     if (!parsed.ok) return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Project file is invalid");
     if (verb === "inspect" || verb === "read_transcript") {
       try {
@@ -761,8 +801,11 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
     output.result = {};
     return output;
   } catch (error) {
+    if (error instanceof HistoryError) return errorEnvelope(verb, requestId, "rejected", error.code, error.message);
     if (verb === "job_status" && (error as NodeJS.ErrnoException).code === "ENOENT")
       return errorEnvelope(verb, requestId, "rejected", "E_NOT_FOUND", "Job not found");
-    return errorEnvelope(verb, requestId, "failed", "E_IO", String(error), true);
+    const output = errorEnvelope(verb, requestId, "failed", "E_IO", String(error), true);
+    if (output.error && (error as { reason?: string }).reason === "busy") output.error.details = { reason: "busy" };
+    return output;
   }
 }

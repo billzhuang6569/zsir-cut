@@ -34,6 +34,7 @@ const request = (ops: Record<string, unknown>[], revision = "rev_fixture_1", ext
   base_revision: revision,
   idempotency_key: `edit-${++counter}`,
   author,
+  label: "Test edit",
   ops,
   ...extra,
 });

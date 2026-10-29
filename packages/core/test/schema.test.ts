@@ -265,6 +265,7 @@ describe("request error diagnostics", () => {
     project: "test.zcut.json",
     base_revision: "rev_test",
     idempotency_key: "test",
+    label: "Test edit",
     author: { kind: "agent", name: "test" },
   };
   const place = {

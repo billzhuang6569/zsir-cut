@@ -62,13 +62,13 @@ describe("desktop host", () => {
     }
   });
 
-  it("lists all 27 MCP tools, reports no UI, and forwards UI requests", async () => {
+  it("lists all kernel and UI MCP tools, reports no UI, and forwards UI requests", async () => {
     const socket = await connect();
     const client = await mcpClient();
     try {
       const tools = await client.listTools();
       expect(tools.tools.map((tool) => tool.name)).toEqual([...VERBS, ...UI_VERBS].map((verb) => `zcut_${verb}`));
-      expect(tools.tools).toHaveLength(27);
+      expect(tools.tools).toHaveLength(VERBS.length + UI_VERBS.length);
       const missing = await client.callTool({ name: "zcut_ui_seek", arguments: { at: "1s" } });
       expect(missing.structuredContent).toMatchObject({
         status: "failed",
@@ -117,7 +117,7 @@ it("serves valid MCP schemas and no-UI failures without a network listener", asy
   await Promise.all([server.connect(left), client.connect(right)]);
   try {
     const tools = await client.listTools();
-    expect(tools.tools).toHaveLength(27);
+    expect(tools.tools).toHaveLength(VERBS.length + UI_VERBS.length);
     expect(tools.tools.map((tool) => tool.name)).toEqual([...VERBS, ...UI_VERBS].map((verb) => `zcut_${verb}`));
     for (const verb of UI_VERBS) {
       expect(

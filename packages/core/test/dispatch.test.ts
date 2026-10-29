@@ -67,6 +67,7 @@ const request = (key: string, extra: Record<string, unknown>, base_revision = "r
   base_revision,
   idempotency_key: key,
   author,
+  label: "Test edit",
   ...extra,
 });
 

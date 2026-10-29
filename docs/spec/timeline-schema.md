@@ -88,19 +88,27 @@ Project
 │  └─ markers[]
 ├─ transcripts[]      字幕母稿：第 1–4 层
 ├─ subtitle_styles[]  字幕样式：第 5 层
+├─ subtitle_overlays[] 字幕叠层的导出设置（可选）
 └─ ext
 ```
 
 ### 4.1 工程头
 
 - `schema`：固定为 `"zsir-cut/timeline"`。
-- `schema_version`：`"主版本.次版本"`，当前 `"0.2"`。0.1 到 0.2 只新增了可选字段（4.1 的 `recognition`、4.2 的 `organize`、4.6 的 `level`），迁移不改内容，只改版本号。1.0 之前格式还会变，读取方只接受自己认识的版本：更旧的版本按迁移链升级后再读，更新的版本一律拒绝，并提示升级 zsir-cut。每次升版本都要在代码里写一条迁移，迁移链从任何旧版本都能走到当前版本。1.0 之后再放宽为「次版本更高时可以读」。
+- `schema_version`：`"主版本.次版本"`，当前 `"0.3"`。0.1 到 0.2 只新增了可选字段（4.1 的 `recognition`、4.2 的 `organize`、4.6 的 `level`）；0.2 到 0.3 只新增了可选字段（4.1 的 `subtitle_overlays`、5 节样式的 `box.radius`、`position.offset_x`、`position.max_width`、`line_spacing`）。两次迁移都不改内容，只改版本号。1.0 之前格式还会变，读取方只接受自己认识的版本：更旧的版本按迁移链升级后再读，更新的版本一律拒绝，并提示升级 zsir-cut。每次升版本都要在代码里写一条迁移，迁移链从任何旧版本都能走到当前版本。1.0 之后再放宽为「次版本更高时可以读」。
 - `recognition`（可选）：字幕识别设置，桌面版「字幕」面板左侧编辑的就是它。`transcribe` 读取它，见 `asr-worker.md` 第 6 节。
   - `language`：识别语言，例如 `"zh"`。
   - `reference_text`：用户贴进来的参考文本，例如提纲、文稿、人名表。原样保存，不参与识别。
   - `terms`：专有名词数组，每项一个字符串，去重，按加入顺序。通常由 Agent 从 `reference_text` 里抽出，用户可以增删。识别时作为热词。
   - `remove_fillers`：布尔，默认 false。为 true 时识别后自动隐藏水词。
   - `filler_words`：水词表，字符串数组。没写时用默认表：`嗯`、`啊`、`呃`、`额`、`哦`、`唉`、`哎`、`诶`。默认表只收纯语气词；「那个」「就是」这类也可能是正常用词，只有用户自己加进来才处理。
+- `subtitle_overlays`（可选）：字幕叠层的导出设置，见 `handoff-profile.md` 第 9 节。每项：
+  - `id`：`ovl_` 开头。
+  - `name`：给人看的名字，例如「中文字幕」。
+  - `timeline_id`、`subtitle_track_id`：渲染哪条时间线上的哪条字幕轨。
+  - `output_path`：输出文件的绝对路径，以 `.mov` 结尾。再次导出时写回这里。
+  - `tail`：比时间线多留的时长，有理数秒，默认 `"10s"`，0 到 `"600s"`。
+  - `last_export`：最近一次成功导出的修订 ID、时间、文件大小；从没导出过为 null。由 `export` 写入，`edit` 不能改。
 - `revision`：当前修订。`seq` 每次变更加一；`id` 是本次修订的 ID；`parent` 是上一次修订的 ID；`author.kind` 取 `human`、`agent` 或 `system`。命令带上 `base_revision`，写入前必须核对，规则见 `command-protocol.md`。修订历史存在工程旁边的日志里，不进工程文件。
 
 ### 4.2 媒体 `media[]`
@@ -227,6 +235,8 @@ FCP 12.4 实测与此一致：25 帧倒放段从源 44 秒倒放到 40 秒，片
 | 3 对齐数据 | `tokens[].align` | 字词在源媒体中的 `start`、`end`、`conf`，以及产生它的对齐运行 |
 | 4 字幕编排 | `transcripts[].cues[]` | 断句、分组、换行、显示时长覆盖值 |
 | 5 视觉样式 | `subtitle_styles[]` | 字体、字号、颜色、描边、底板、位置、模板版本 |
+
+第 5 层字幕样式 `subtitle_styles[]` 的字段：`id`、`name`、`version`、`font_family`、`font_weight`（100–900）、`font_size`（时间线高度的比例）、`color`（`#RRGGBB` 或带透明度的 `#RRGGBBAA`）、`outline`（`color`，`width` 为字号的比例）、`box`（底板：`color` 可带透明度，`padding` 为字号的比例，`radius` 为字号的比例，默认 0）、`position`（`anchor` 取 `bottom`、`top`、`middle`；`margin_v` 为时间线高度的比例；`offset_x` 为时间线宽度的比例，默认 0，正数向右；`max_width` 为时间线宽度的比例，默认 0.8）、`line_spacing`（行距倍数，默认 1.2）、`max_lines`。0.3 新增 `box.radius`、`position.offset_x`、`position.max_width`、`line_spacing`，都是可选的。
 
 ### 5.1 转写母稿 `transcripts[]`
 
