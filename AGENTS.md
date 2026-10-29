@@ -17,11 +17,12 @@ zsir-cut（庄Sir剪辑助手）是剪辑师和 AI Agent 共用的时间线中�
 按顺序：
 
 1. `docs/plan.md`：工作计划和当前所处的步骤。
-2. `docs/spec/timeline-schema.md`：工程文件结构。
-3. `docs/spec/command-protocol.md`：动词、结果信封、修订与幂等。
-4. `docs/spec/handoff-profile.md`：导出、交接包、损失报告。
-5. `docs/adr/`：已定决策和理由。
-6. 任务说明本身。
+2. `docs/product.md`：产品设计、界面布局和路线图。界面相关任务必读。
+3. `docs/spec/timeline-schema.md`：工程文件结构。
+4. `docs/spec/command-protocol.md`：动词、结果信封、修订与幂等。
+5. `docs/spec/handoff-profile.md`：导出、交接包、损失报告。
+6. `docs/adr/`：已定决策和理由。
+7. 任务说明本身。
 
 ## spec 是合同
 
