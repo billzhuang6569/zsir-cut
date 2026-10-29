@@ -1,0 +1,121 @@
+.zc-sub-controls,
+.zc-sub-parameters,
+.zc-sub-style {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-width: 0;
+}
+.zc-sub-controls fieldset,
+.zc-sub-style {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.zc-sub-setting {
+  display: grid;
+  gap: var(--space-3);
+  margin-block: var(--space-4);
+  color: var(--text-3);
+}
+.zc-sub-setting textarea {
+  height: auto;
+  resize: vertical;
+  padding: var(--space-4);
+}
+.zc-sub-status {
+  padding: var(--space-5);
+  background: var(--raised);
+  border-radius: var(--radius-md);
+  color: var(--text-3);
+}
+.zc-sub-terms,
+.zc-sub-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.zc-sub-terms button {
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+}
+.zc-sub-list {
+  display: flex;
+  flex-direction: column;
+}
+.zc-sub-row {
+  display: grid;
+  grid-template-columns: var(--control-h) minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  min-height: calc(var(--control-h) + var(--space-6));
+  padding-block: var(--space-4);
+}
+.zc-sub-row > span {
+  text-align: center;
+}
+.zc-sub-text {
+  font: inherit;
+  color: var(--text);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  padding: var(--space-3);
+  white-space: pre-wrap;
+}
+.zc-sub-row.is-selected {
+  background: var(--raised);
+}
+.zc-sub-row.is-skipped {
+  background: var(--attention-soft);
+}
+.zc-sub-attention {
+  color: var(--attention);
+}
+.zc-sub-row textarea {
+  height: calc(var(--input-h) * 2);
+  resize: vertical;
+}
+.zc-sub-actions {
+  display: flex;
+  visibility: hidden;
+}
+.zc-sub-row:hover .zc-sub-actions,
+.zc-sub-row:focus-within .zc-sub-actions {
+  visibility: visible;
+}
+.zc-sub-align {
+  display: grid;
+  grid-template-columns: repeat(3, var(--control-h));
+  gap: var(--space-3);
+}
+.zc-sub-align button {
+  height: var(--control-h);
+  background: var(--raised);
+  color: var(--text-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.zc-sub-align button[aria-pressed="true"] {
+  color: var(--text);
+  border-color: var(--text);
+}
+.zc-sub-sample {
+  position: relative;
+  background-color: var(--bg);
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+}
+
+.zc-sub-setting input[type="range"] {
+  width: 100%;
+  accent-color: var(--text);
+}

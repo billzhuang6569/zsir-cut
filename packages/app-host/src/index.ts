@@ -27,6 +27,9 @@ const {
   VERBS,
   parseProject,
   projectSubtitles,
+  validateProjectSemantics,
+  displayRanges,
+  openProject,
   printRational,
 }: typeof import("../../core/dist/index.js") = await import(
   new URL(import.meta.url.endsWith(".ts") ? "../../core/src/index.ts" : "../../core/dist/index.js", import.meta.url)
@@ -56,6 +59,9 @@ const uiStateSchema = z.strictObject({
   playing: z.boolean(),
   range: z.strictObject({ start: time, duration }).nullable(),
   loop: z.boolean(),
+  subtitleBrowser: z
+    .strictObject({ search: z.string(), find: z.string(), replace: z.string(), matchCase: z.boolean() })
+    .optional(),
   chapters: z.strictObject({ levels: z.union([z.literal(1), z.literal(2)]), timecodes: z.boolean() }).optional(),
   mediaBrowser: z
     .strictObject({ scope: z.string(), search: z.string(), size: z.number().int().min(110).max(280) })
@@ -233,7 +239,8 @@ export async function startHost(
   };
   const kernel = async (verb: Verb, input: unknown) => {
     const envelope = await dispatch(verb, input, options.dispatchOptions);
-    if (envelope.receipt) notify("project_changed");
+    const job = verb === "job_status" ? (envelope.result as { envelope?: { receipt?: unknown } } | null) : null;
+    if (envelope.receipt || job?.envelope?.receipt) notify("project_changed");
     const request = input as { batch?: { id?: string } };
     if (envelope.ok && request?.batch?.id) batches.add(request.batch.id);
     if (["session_begin", "session_ask", "session_answer", "session_review", "session_approve", "edit"].includes(verb))
@@ -322,15 +329,27 @@ export async function startHost(
         if (message.type === "preview_data" && typeof message.id === "string") {
           const project = await load();
           const timeline = project.timelines[0];
-          const defaultStyles = new Map(
-            timeline?.tracks.flatMap((track) =>
-              track.kind === "subtitle" ? [[track.id, track.default_style_id] as const] : [],
-            ) ?? [],
-          );
+          const journal = options.project ? await openProject({ projectPath: options.project }).journal() : [];
+          const lastRecognition = journal.findLast((entry) => entry.verb === "transcribe");
           const cues = timeline
             ? projectSubtitles(project, timeline.id).cues.map((cue) => ({
                 ...cue,
-                style_id: defaultStyles.get(cue.track_id) ?? cue.style_id,
+                text_override: timeline.tracks.some(
+                  (track) =>
+                    track.kind === "subtitle" &&
+                    track.id === cue.track_id &&
+                    track.overrides.some(
+                      (item) =>
+                        item.occurrence_id === cue.occurrence_id &&
+                        item.cue_id === cue.cue_id &&
+                        item.text !== undefined,
+                    ),
+                ),
+                transcript_id: project.transcripts.find((item) => item.cues.some((row) => row.id === cue.cue_id))?.id,
+                tokens: project.transcripts
+                  .find((item) => item.cues.some((row) => row.id === cue.cue_id))
+                  ?.tokens.filter((token) => cue.token_ids.includes(token.id))
+                  .map(({ id, text }) => ({ id, text })),
                 start: printRational(cue.start, true),
                 end: printRational(cue.end, true),
               }))
@@ -370,6 +389,18 @@ export async function startHost(
                   })),
                   cues,
                   styles: project.subtitle_styles,
+                  recognition: project.recognition,
+                  recognized: project.transcripts.some((item) => item.raw_runs.some((run) => run.kind === "asr")),
+                  recognitionRevision: lastRecognition?.seq,
+                  format: timeline ? { width: timeline.format.width, height: timeline.format.height } : undefined,
+                  subtitleWarnings: [
+                    ...validateProjectSemantics(project).filter((issue) => issue.code.startsWith("W_SUB_")),
+                    ...project.transcripts.flatMap((transcript) =>
+                      displayRanges(transcript).flatMap((row) =>
+                        row.warnings.map((code) => ({ code, ids: [row.cue.id] })),
+                      ),
+                    ),
+                  ],
                 },
               },
             }),

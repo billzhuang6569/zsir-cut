@@ -2,10 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { UiState } from "../../app-host/src/ui.js";
-import { subtitleFontFamily } from "../../exporters/src/subtitle-render.ts";
 import { Clip, Icon, IconButton } from "./components.js";
 import type { ProjectView } from "./connection.js";
 import { useReverseAudio } from "./reverse-audio.js";
+import { SubtitleCanvas } from "./SubtitleCanvas.js";
 import {
   add,
   type ClipView,
@@ -394,7 +394,10 @@ export function TimelinePreview({
             </p>
           )}
           {viewerOnly && <h3>{project?.name}</h3>}
-          <div className="zc-picture">
+          <div
+            className="zc-picture"
+            style={{ aspectRatio: `${project?.format?.width ?? 1920} / ${project?.format?.height ?? 1080}` }}
+          >
             {src && media?.kind === "image" ? (
               <img src={src} alt={media.name ?? "预览"} />
             ) : (
@@ -415,51 +418,7 @@ export function TimelinePreview({
                 近似
               </span>
             )}
-            {project?.tracks
-              .filter((track) => track.kind === "subtitle")
-              .map((track) => {
-                const active = captions
-                  .filter((cue) => cue.track_id === track.id)
-                  .sort((a, b) => compare(parseRational(a.start, true), parseRational(b.start, true)));
-                const position = project.styles.find((style) => style.id === active[0]?.style_id)?.position;
-                return (
-                  <div
-                    key={track.id}
-                    className="zc-caption-stack"
-                    style={
-                      position?.anchor === "top"
-                        ? { top: `${position.margin_v * 100}%` }
-                        : position?.anchor === "middle"
-                          ? { top: "50%" }
-                          : { bottom: `${(position?.margin_v ?? 0.08) * 100}%` }
-                    }
-                  >
-                    {active.map((cue, index) => {
-                      const style = project.styles.find((item) => item.id === cue.style_id);
-                      return (
-                        <span
-                          key={`${cue.cue_id}-${cue.piece}`}
-                          className="zc-caption"
-                          style={{
-                            gridRow: active.length - index,
-                            fontFamily: subtitleFontFamily(style?.font_family),
-                            ...{ "--cue-size": style?.font_size },
-                            fontWeight: style?.font_weight,
-                            color: style?.color,
-                            background: style?.box?.color,
-                            padding: style?.box?.padding,
-                            WebkitTextStroke: style?.outline
-                              ? `${style.outline.width}em ${style.outline.color}`
-                              : undefined,
-                          }}
-                        >
-                          {cue.text}
-                        </span>
-                      );
-                    })}
-                  </div>
-                );
-              })}
+            <SubtitleCanvas cues={captions} styles={project?.styles ?? []} format={project?.format} />
           </div>
           <div className="zc-player">
             <IconButton

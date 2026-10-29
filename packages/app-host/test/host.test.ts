@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { copyFile, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -62,6 +62,9 @@ describe("desktop host", () => {
         envelope: {
           ok: true,
           result: {
+            format: { width: 1920, height: 1080 },
+            recognized: false,
+            subtitleWarnings: [],
             media: [
               {
                 duration: "60001/1000s",
@@ -72,6 +75,28 @@ describe("desktop host", () => {
           },
         },
       });
+      const subtitles = JSON.parse(
+        await readFile(new URL("../../../examples/interview.zcut.json", import.meta.url), "utf8"),
+      );
+      subtitles.recognition = { language: "zh", reference_text: "完整参考稿", terms: ["专有名词"] };
+      subtitles.subtitle_styles.push({ ...subtitles.subtitle_styles[0], id: "sty_override", name: "覆盖样式" });
+      subtitles.timelines[0].tracks
+        .find((track: { kind: string }) => track.kind === "subtitle")
+        .overrides.push({ occurrence_id: "occ_1", cue_id: "cue_1", text: "覆盖文字", style_id: "sty_override" });
+      await writeFile(project, JSON.stringify(subtitles));
+      const preview = await send({ id: "subtitle-preview", type: "preview_data" });
+      expect(preview.envelope.result).toMatchObject({ recognition: subtitles.recognition, recognized: true });
+      expect(preview.envelope.result.cues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            cue_id: "cue_1",
+            transcript_id: "trs_cam_a_zh",
+            style_id: "sty_override",
+            text_override: true,
+            tokens: expect.arrayContaining([{ id: "tok_01", text: "我们" }]),
+          }),
+        ]),
+      );
       await writeFile(project, "{}");
       expect(await send({ id: "failed-preview", type: "preview_data" })).toMatchObject({
         envelope: { ok: false, error: { message: expect.stringContaining("Invalid project") } },
@@ -156,6 +181,7 @@ describe("desktop host", () => {
         playing: false,
         range: null,
         loop: false,
+        subtitleBrowser: { search: "关键词", find: "旧词", replace: "新词", matchCase: true },
       };
       socket.on("message", (raw) => {
         const message = JSON.parse(raw.toString());
@@ -168,7 +194,10 @@ describe("desktop host", () => {
       expect(JSON.parse((await bootstrap)[0].toString())).toMatchObject({ type: "bootstrap", project });
       await client.callTool({ name: "zcut_ui_show_panel", arguments: { panel: "subtitles", sub: "style" } });
       const shown = await client.callTool({ name: "zcut_ui_state", arguments: {} });
-      expect(shown.structuredContent).toMatchObject({ status: "no_op", result: { panel: "subtitles", sub: "style" } });
+      expect(shown.structuredContent).toMatchObject({
+        status: "no_op",
+        result: { panel: "subtitles", sub: "style", subtitleBrowser: state.subtitleBrowser },
+      });
       const closed = once(socket, "close");
       socket.close();
       await closed;
