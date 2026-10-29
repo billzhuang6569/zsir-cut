@@ -282,14 +282,27 @@ export interface StyleOutline {
   width: number;
 }
 
+export interface SubtitleOverlay {
+  id: string;
+  name: string;
+  timeline_id: string;
+  subtitle_track_id: string;
+  output_path: string;
+  tail?: Rational;
+  last_export: { revision_id: string; created_at: string; size_bytes: number } | null;
+}
+
 export interface StyleBox {
   color: string;
   padding?: number;
+  radius?: number;
 }
 
 export interface StylePosition {
   anchor: "bottom" | "top" | "middle";
   margin_v: number;
+  offset_x?: number;
+  max_width?: number;
 }
 
 export interface SubtitleStyle {
@@ -304,16 +317,18 @@ export interface SubtitleStyle {
   box?: StyleBox;
   position?: StylePosition;
   max_lines?: number;
+  line_spacing?: number;
   ext?: Extension;
 }
 
 export interface Project {
   schema: "zsir-cut/timeline";
-  schema_version: "0.2";
+  schema_version: "0.3";
   id: string;
   name: string;
   revision: Revision;
   recognition?: Recognition;
+  subtitle_overlays?: SubtitleOverlay[];
   media: Media[];
   timelines: Timeline[];
   transcripts: Transcript[];

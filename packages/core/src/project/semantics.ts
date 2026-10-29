@@ -1,4 +1,5 @@
 // biome-ignore-all lint/style/noNonNullAssertion: Indexed entries are guarded by schema or test setup.
+import { isAbsolute, normalize } from "node:path";
 import { add, compare, div, mul, printRational, type Rational, rational, sub } from "../rational.ts";
 import type { ProjectIssue } from "./io.ts";
 import { projectSubtitles } from "./projection.ts";
@@ -61,6 +62,22 @@ export function validateProjectSemantics(project: Project, parseIssues: ProjectI
     if (item.video?.vfr) report("W_VFR", "warning", "Variable frame rate media", item.id);
   }
   for (const item of project.subtitle_styles) addId(item.id);
+  const overlayPaths = new Set<string>();
+  for (const overlay of project.subtitle_overlays ?? []) {
+    addId(overlay.id);
+    const timeline = project.timelines.find((item) => item.id === overlay.timeline_id);
+    if (
+      !timeline ||
+      !timeline.tracks.some((track) => track.id === overlay.subtitle_track_id && track.kind === "subtitle")
+    )
+      report("E_REF", "error", "Overlay references missing timeline or subtitle track", overlay.id);
+    const path = normalize(overlay.output_path);
+    if (!isAbsolute(path) || !path.endsWith(".mov") || overlayPaths.has(path))
+      report("E_VALIDATION", "error", "Invalid or duplicate overlay output path", overlay.id);
+    overlayPaths.add(path);
+    if (overlay.tail && (compare(overlay.tail, zero) < 0 || compare(overlay.tail, rational(600n)) > 0))
+      report("E_VALIDATION", "error", "Overlay tail must be between 0 and 600 seconds", overlay.id);
+  }
 
   for (const timeline of project.timelines) {
     addId(timeline.id);

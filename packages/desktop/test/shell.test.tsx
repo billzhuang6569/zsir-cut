@@ -195,6 +195,9 @@ it("opens the project through inspect and receives UI commands", async () => {
         .reduce((n: number, t: { clips: unknown[] }) => n + t.clips.length, 0),
     );
     expect(container.querySelectorAll(".zc-clip-subtitle")).toHaveLength(cues.length);
+    expect(container.querySelector<HTMLElement>(".zc-caption")?.style.fontFamily).toContain(
+      '"Hiragino Sans GB", "Heiti SC", "Heiti TC", "Songti SC", sans-serif',
+    );
     expect(container.querySelector<HTMLElement>(".zc-caption")?.style.getPropertyValue("--cue-size")).toBe(
       String(fixture.subtitle_styles[0].font_size),
     );

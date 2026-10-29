@@ -79,7 +79,7 @@ export async function buildProject(input: CreateProjectRequest, probe: Probe): P
     });
   return {
     schema: "zsir-cut/timeline",
-    schema_version: "0.2",
+    schema_version: "0.3",
     ...(input.subtitles ? { recognition: { language: input.subtitles.language } } : {}),
     id: newId("prj_"),
     name: input.name,

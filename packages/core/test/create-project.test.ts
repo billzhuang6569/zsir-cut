@@ -92,7 +92,7 @@ describe("create_project", () => {
     const created = await read();
     const timeline = created.timelines[0];
     expect(created).toMatchObject({
-      schema_version: "0.2",
+      schema_version: "0.3",
       recognition: { language: "zh-Hans" },
       name: "新工程",
       media: [],

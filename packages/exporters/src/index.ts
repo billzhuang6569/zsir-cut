@@ -1056,3 +1056,4 @@ const exporter: Exporter & { validationNotes?: string } = {
 export default exporter;
 export { otioExporter, xmemlExporter };
 export type { CutRow, Exporter, LossItem, ProfileId } from "../../core/dist/index.js";
+export { renderSubtitle } from "./subtitle-render.ts";
