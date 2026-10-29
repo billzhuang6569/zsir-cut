@@ -72,7 +72,7 @@ function Film({
     </span>
   );
 }
-function Wave({
+export function Wave({
   clip,
   width,
   config,
@@ -80,7 +80,7 @@ function Wave({
 }: {
   clip: ClipView;
   width: number;
-  scale: number;
+  scale: number | ReturnType<typeof rational>;
   config: Config | undefined;
 }) {
   const [peaks, setPeaks] = useState<number[]>([]);
@@ -100,7 +100,10 @@ function Wave({
     <svg className="zc-wave" width={width} height={48} viewBox={`0 0 ${width} 48`} aria-hidden="true">
       {Array.from({ length: Math.max(1, Math.floor(width / 3)) }, (_, i) => {
         const at = printRational(
-          add(parseRational(clip.timeline_in.t, true), div(rational(BigInt(i * 3)), rational(BigInt(scale)))),
+          add(
+            parseRational(clip.timeline_in.t, true),
+            div(rational(BigInt(i * 3)), typeof scale === "number" ? rational(BigInt(scale)) : scale),
+          ),
           true,
         );
         const index = Number(floor(mul(sourceAt(clip, at), rational(100n))));

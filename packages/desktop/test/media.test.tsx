@@ -65,9 +65,17 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
-async function mount(nativeMode = false, preview = false) {
+const config = { port: 1234, token: "test" };
+const palette = Array.from({ length: 9 }, (_, i) => `#${String(i).repeat(6)}`);
+async function mount(nativeMode = false, preview = false, view = project, withConfig = false) {
   native.enabled = nativeMode;
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ["#000000"] }));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => ({
+      ok: true,
+      json: async () => (url.includes("/peaks?") ? [0.25, 0.75, 1] : palette),
+    })),
+  );
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
   const call = vi.fn(async (_verb: string, _request: Record<string, unknown>): Promise<unknown> => ({}));
   let state: UiState = { ...initialState(), panel: "media", project: "/工程.zcut.json", playhead: { at: "4s" } };
@@ -76,7 +84,7 @@ async function mount(nativeMode = false, preview = false) {
     const [ui, update] = useState(state);
     state = ui;
     change = update;
-    const panel = useMediaPanel({ project, state: ui, update, call });
+    const panel = useMediaPanel({ project: view, state: ui, update, call, config: withConfig ? config : undefined });
     const source = preview && ui.preview === "media" && panel.selected ? sourceProject(project, panel.selected) : null;
     return (
       <>
@@ -181,6 +189,7 @@ it("sends every organizing field and browser import paths only at submission", a
       ["添加文件夹", "项目/精选", "folders", ["项目/原始", "项目/精选"]],
     ] as const) {
       const count = h.call.mock.calls.length;
+      if (field === "tags" || field === "folders") await h.click(label);
       const input = await h.setInput(label, value);
       expect(h.call).toHaveBeenCalledTimes(count);
       await act(async () => {
@@ -211,6 +220,7 @@ it("sends every organizing field and browser import paths only at submission", a
       "edit",
       expect.objectContaining({ ops: [{ op: "update_media", media_id: media.id, folders: [] }] }),
     );
+    await h.click("导入素材");
     const input = await h.setInput("导入文件路径（逗号分隔）", "/素材/一.mov,/素材/二.wav");
     await act(async () => {
       input.blur();
@@ -362,6 +372,7 @@ it("shows accepted import progress, prevents duplicate writes, and reports job f
             finish = resolve;
           }),
     );
+    await h.click("导入素材");
     const input = await h.setInput("导入文件路径（逗号分隔）", "/长素材.mov");
     await act(async () => {
       input.blur();
@@ -373,6 +384,83 @@ it("shows accepted import progress, prevents duplicate writes, and reports job f
     });
     expect(h.container.querySelector('[role="alert"]')?.textContent).toContain("导入失败");
     expect(h.container.textContent).not.toContain("正在处理");
+  } finally {
+    await h.close();
+  }
+});
+
+it("shows one scope count, placeholder fields, and collapsed add/import controls", async () => {
+  const h = await mount();
+  try {
+    expect(h.container.querySelector('option[value="all"]')?.textContent).toBe("全部");
+    expect(h.container.querySelector('[aria-label="筛选数量"]')?.textContent).toBe("2");
+    expect(h.container.querySelector('input[aria-label="导入文件路径（逗号分隔）"]')).toBeNull();
+    await h.select();
+    expect(h.container.querySelector('input[placeholder="添加注释"]')).not.toBeNull();
+    expect(h.container.querySelector('input[placeholder="http://"]')).not.toBeNull();
+    expect(h.container.querySelector('input[aria-label="添加标签"]')).toBeNull();
+    expect(h.container.querySelector('input[aria-label="添加文件夹"]')).toBeNull();
+    expect([...h.container.querySelectorAll(".zc-media-group h4")].map((n) => n.textContent)).toEqual([
+      "标签",
+      "文件夹",
+      "基本信息",
+    ]);
+    expect(h.container.querySelectorAll(".zc-stars button")).toHaveLength(5);
+    await h.click("添加标签");
+    expect(h.container.querySelector('input[placeholder="添加标签"]')).not.toBeNull();
+  } finally {
+    await h.close();
+  }
+});
+it("renders nine swatches and copies the selected color, reporting clipboard failure", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal("navigator", { clipboard: { writeText } });
+  const h = await mount(false, false, project, true);
+  try {
+    await h.select();
+    expect(h.container.querySelectorAll(".zc-palette button")).toHaveLength(9);
+    expect(h.container.querySelector(".zc-palette button")?.getAttribute("title")).toBe(palette[0]);
+    await h.click(`复制色值 ${palette[0]}`);
+    expect(writeText).toHaveBeenCalledWith(palette[0]);
+    writeText.mockRejectedValueOnce(new Error("denied"));
+    await h.click(`复制色值 ${palette[1]}`);
+    expect(h.container.querySelector('[role="alert"]')?.textContent).toBe("无法复制色值");
+  } finally {
+    await h.close();
+  }
+});
+it("formats card and list durations exactly at minute/hour boundaries", async () => {
+  const durations = ["0s", "1799/30s", "60s", "3599999/1000s", "3600s", "3661s"];
+  const view = { ...project, media: durations.map((duration, i) => ({ ...media, id: `duration_${i}`, duration })) };
+  const h = await mount(false, false, view);
+  try {
+    const expected = ["0:00", "0:59", "1:00", "59:59", "1:00:00", "1:01:01"];
+    expect([...h.container.querySelectorAll(".zc-media-duration")].map((n) => n.textContent)).toEqual(expected);
+    expect(h.container.querySelector(".zc-media-caption")?.textContent).toBe("镜头.mov · 原注释");
+    await h.click("列表");
+    const rows = [...h.container.querySelectorAll(".zc-media-card")];
+    expect(rows.map((n) => n.children[2]?.textContent)).toEqual(expected);
+    expect(rows[0]?.children).toHaveLength(6);
+  } finally {
+    await h.close();
+  }
+});
+it("renders cached peaks for audio cards and a single image thumbnail", async () => {
+  const view = {
+    ...project,
+    media: [
+      { ...media, id: "audio", kind: "audio", duration: "1001/30s" },
+      { ...media, id: "image", kind: "image" },
+    ],
+  };
+  const h = await mount(false, false, view, true);
+  try {
+    const cards = h.container.querySelectorAll(".zc-media-card");
+    expect(cards[0]?.querySelector(".zc-wave rect")?.getAttribute("height")).toBe("6.5");
+    expect(cards[0]?.querySelector(".zc-media-used .zc-icon path")?.getAttribute("d")).toContain("M2 6");
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/peaks?token=test&media_id=audio"), expect.anything());
+    expect(cards[1]?.querySelectorAll("img")).toHaveLength(1);
+    expect(cards[1]?.querySelector("img")?.getAttribute("src")).toContain("/thumb?token=test&media_id=image&at=0s");
   } finally {
     await h.close();
   }
