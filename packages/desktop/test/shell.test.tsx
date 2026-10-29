@@ -396,3 +396,35 @@ it("shows Chinese open errors and preserves the kernel code in the tooltip", asy
     vi.unstubAllGlobals();
   }
 });
+
+it("keeps function tabs and AI headers outside the scrolling message area", async () => {
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const style = document.createElement("style");
+  style.textContent = ["shell.css", "ai.css"]
+    .map((name) => readFileSync(new NodeURL(`../src/${name}`, import.meta.url), "utf8"))
+    .join("\n");
+  document.head.append(style);
+  try {
+    await act(() => root.render(<App />));
+    const functions = container.querySelector<HTMLElement>(".zc-functions");
+    const panel = container.querySelector<HTMLElement>(".zc-function-panel");
+    const body = container.querySelector<HTMLElement>(".zc-ai-body");
+    const chat = container.querySelector<HTMLElement>(".zc-ai-chat");
+    if (!functions || !panel || !body || !chat) throw new Error("Missing AI layout");
+    expect(getComputedStyle(functions).overflow).toBe("hidden");
+    for (const node of [functions, panel, body, chat]) {
+      expect(getComputedStyle(node).display).toBe("flex");
+      expect(getComputedStyle(node).flexDirection).toBe("column");
+      expect(getComputedStyle(node).minHeight).toBe("0");
+    }
+    expect(functions.firstElementChild?.getAttribute("role")).toBe("tablist");
+    expect(panel.firstElementChild?.tagName).toBe("H2");
+    expect(getComputedStyle(panel.firstElementChild as HTMLElement).flexShrink).toBe("0");
+  } finally {
+    await act(() => root.unmount());
+    style.remove();
+    container.remove();
+  }
+});

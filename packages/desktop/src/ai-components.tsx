@@ -116,7 +116,10 @@ export function DecisionCard({
             <span className="zc-q-key" aria-hidden="true">
               {"ABCDEFGHIJ"[i]}
             </span>
-            <span className="zc-q-label">{option.label}</span>
+            <span className="zc-q-label">
+              {option.label}
+              {option.note && <span className="zc-q-note">{option.note}</span>}
+            </span>
             {option.recommended && (
               <span className="zc-q-rec" role="img" aria-label="AI 推荐">
                 <Icon name="spark" size={12} />

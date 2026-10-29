@@ -319,6 +319,7 @@
 }
 
 .zc-ai-chat {
+  flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -326,6 +327,7 @@
   min-height: 0;
 }
 .zc-chat-actions {
+  flex-shrink: 0;
   display: flex;
   gap: var(--space-4);
   align-items: center;
@@ -340,6 +342,8 @@
   padding: var(--space-2);
 }
 .zc-chat-messages {
+  flex: 1;
+  min-height: 0;
   min-width: 0;
   overflow: auto;
   display: flex;
@@ -361,6 +365,7 @@
   padding: 0 var(--space-2);
 }
 .zc-chat-input {
+  flex-shrink: 0;
   padding: var(--space-4);
   border: 1px solid var(--line);
   border-radius: var(--radius-xl);
@@ -426,4 +431,78 @@
 }
 .zc-step.is-live > .zc-icon {
   color: var(--attention);
+}
+
+.zc-q-note {
+  display: block;
+  color: var(--text-4);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.zc-draft-counts,
+.zc-draft-counts > span {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.zc-draft-counts {
+  gap: var(--space-6);
+  margin-block: var(--space-5);
+  color: var(--text-3);
+}
+.zc-chat-history {
+  flex-shrink: 0;
+  max-height: 30%;
+  overflow: auto;
+}
+.zc-chat-history-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-4);
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  text-align: left;
+}
+.zc-chat-history-row:hover,
+.zc-chat-history-row[aria-current="true"] {
+  background: var(--raised);
+  color: var(--text);
+}
+.zc-chat-history-row > svg,
+.zc-chat-history-row > time {
+  flex-shrink: 0;
+}
+.zc-chat-history-title,
+.zc-session-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.zc-chat-history-title {
+  flex: 1;
+}
+.zc-chat-history-row > time {
+  color: var(--text-4);
+  font-size: 12px;
+}
+.zc-session-tabs {
+  flex-wrap: wrap;
+}
+.zc-session-tabs > .zc-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: 100%;
+}
+.zc-session-count {
+  flex-shrink: 0;
+  color: var(--text-4);
+  font-size: 12px;
 }

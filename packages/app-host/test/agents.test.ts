@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -113,9 +113,11 @@ describe("local agent conversations with fake executables", () => {
         token: "unused",
         emit: () => {},
       });
-      expect(await reopened.list()).toEqual([{ id: chat.id, agent, title: "做粗剪" }]);
+      expect(await reopened.list()).toEqual([{ id: chat.id, agent, title: "做粗剪", updated_at: expect.any(String) }]);
       const details = JSON.parse(await readFile(capture, "utf8"));
-      expect(details.input).toContain("请使用用户使用的语言回答；未明确语言时默认中文");
+      expect(details.input).toContain("所有输出都必须使用用户使用的语言");
+      expect(details.input).toContain("包括调用工具前后的说明、过渡句、进度说明和最终回复");
+      expect(details.input).toContain("用户用中文时全部用中文");
       expect(details.cwd).toBe(await realpath(directory));
       if (agent === "claude") {
         expect(details.mode).toBe(0o600);
@@ -209,4 +211,28 @@ it("preserves explicit failed tool results from both agents", () => {
     );
     expect(events).toContainEqual(expect.objectContaining({ type: "tool_end", id: "failed", failed: true }));
   }
+});
+
+it("orders saved conversations by modification time across host restarts", async () => {
+  const { directory, manager, events } = await fixture("claude");
+  const first = await manager.send("claude", "第一个");
+  await vi.waitFor(() => expect(events.at(-1)?.type).toBe("end"));
+  events.length = 0;
+  const second = await manager.send("claude", "第二个");
+  await vi.waitFor(() => expect(events.at(-1)?.type).toBe("end"));
+  const root = join(directory, ".zcut", "prj_test", "chats");
+  await utimes(join(root, `${second.id}.jsonl`), new Date("2020-01-01"), new Date("2020-01-01"));
+  await utimes(join(root, `${first.id}.jsonl`), new Date("2021-01-01"), new Date("2021-01-01"));
+  const reopened = new Agents({
+    project: join(directory, "project.zcut.json"),
+    projectId: "prj_test",
+    url: "unused",
+    token: "unused",
+    emit: () => {},
+  });
+  expect((await reopened.list()).map((chat) => [chat.id, chat.updated_at])).toEqual([
+    [first.id, "2021-01-01T00:00:00.000Z"],
+    [second.id, "2020-01-01T00:00:00.000Z"],
+  ]);
+  expect((await reopened.history(first.id)).events).toContainEqual({ type: "text", text: "好" });
 });

@@ -30,14 +30,16 @@ function Harness({
   notices = [],
   revision = 0,
   project = null,
+  connectionEpoch = 0,
 }: {
   call: (verb: string, request: Record<string, unknown>) => Promise<unknown>;
   path: string;
   notices?: AiNotice[];
   revision?: number;
   project?: ProjectView | null;
+  connectionEpoch?: number;
 }) {
-  const ai = useAiPanel({ call, path, project, notices, revision });
+  const ai = useAiPanel({ call, path, project, notices, revision, connectionEpoch });
   return (
     <>
       <div>{ai.chat}</div>
@@ -84,6 +86,7 @@ describe("AI panel", () => {
     const call = vi.fn(async (verb: string, request: Record<string, unknown>): Promise<unknown> => {
       if (verb === "chat_agents") return [{ agent: "claude", available: true, version: "fake" }];
       if (verb === "chat_send") return { id: "chat_test" };
+      if (verb === "chat_list") return [];
       if (verb === "ai_state")
         return {
           sessions: [
@@ -168,7 +171,10 @@ describe("AI panel", () => {
         ];
       if (verb === "ai_state") return { sessions: [session], batches: [{ state: "open", count: 4, applied: [1] }] };
       if (verb === "chat_send") return { id: "chat_test" };
-      if (verb === "chat_list") return [{ id: "chat_saved", agent: "codex", title: "过去的对话" }];
+      if (verb === "chat_list")
+        return requestLog.filter((entry) => entry.verb === "chat_list").length === 1
+          ? []
+          : [{ id: "chat_saved", agent: "codex", title: "过去的对话", updated_at: new Date().toISOString() }];
       if (verb === "chat_history")
         return { events: [{ type: "user", text: "历史问题" }, { type: "text", text: "历史回复" }, { type: "end" }] };
       return {};
@@ -183,7 +189,10 @@ describe("AI panel", () => {
     try {
       await act(async () => render());
       expect(container.textContent).toContain("AI 正在做第 2 / 4 步");
-      expect(container.textContent).toContain("1 个修订 · 1 处片段 · 1 处字幕改动");
+      expect(
+        [...container.querySelectorAll(".zc-draft-counts > span")].map((node) => node.getAttribute("aria-label")),
+      ).toEqual(["1 修订", "1 片段", "1 字幕改动"]);
+      expect(button(container, "批准").querySelector("svg")).not.toBeNull();
       await act(() => button(container, "批准").click());
       expect(container.textContent).toContain("还有 2 件决定未答");
       expect(requestLog.some((entry) => entry.verb === "session_approve")).toBe(false);
@@ -451,6 +460,222 @@ it("groups consecutive successful and mixed tool calls while preserving order an
     await act(async () => render());
     expect(container.querySelector(".zc-step.is-failed.is-live")).toBeNull();
     expect(container.querySelector(".zc-step.is-failed")?.textContent).toContain("失败 2 次");
+  } finally {
+    await act(() => root.unmount());
+  }
+});
+
+it("switches named session tabs, shows option notes and hides empty draft counts", async () => {
+  let multiple = true;
+  const sessions = [
+    {
+      session_id: "ses_first",
+      label: "精简节奏",
+      intent: "不用这个 intent",
+      state: "in_review",
+      draft_revision: "rev_a",
+      pending_count: 2,
+      revision_count: 3,
+      changes: [{ entity: "cue" }],
+      decisions: [
+        {
+          id: "dec_a",
+          seq: 1,
+          question: "第一件？",
+          state: "pending",
+          options: [
+            { id: "a", label: "短版", note: "适合短视频平台", recommended: true },
+            { id: "b", label: "长版" },
+          ],
+        },
+      ],
+    },
+    {
+      session_id: "ses_second",
+      intent: "这是没有标签的很长很长的会话意图需要截短显示",
+      state: "open",
+      draft_revision: "rev_b",
+      pending_count: 1,
+      revision_count: 0,
+      changes: [],
+      decisions: [
+        { id: "dec_b", seq: 1, question: "第二件？", state: "pending", options: [{ id: "a", label: "保留" }] },
+      ],
+    },
+  ];
+  const call = vi.fn(async (verb: string) => {
+    if (verb === "chat_agents") return [{ agent: "claude", available: true }];
+    if (verb === "chat_list") return [];
+    return { sessions: multiple ? sessions : sessions.slice(0, 1), batches: [] };
+  });
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(<Harness call={call} path="/project" />));
+    const tabs = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+    expect(tabs.map((node) => node.textContent)).toEqual(["精简节奏2", `${sessions[1]?.intent?.slice(0, 20)}…1`]);
+    expect(container.querySelector('select[aria-label="编辑会话"]')).toBeNull();
+    expect(container.textContent).not.toMatch(/ses_first|ses_second/);
+    await act(() => tabs[0]?.click());
+    expect(tabs[0]?.getAttribute("aria-selected")).toBe("true");
+    expect(container.querySelector(".zc-q-question")?.textContent).toBe("第一件？");
+    expect(container.querySelectorAll(".zc-q-note")).toHaveLength(1);
+    expect(container.querySelector(".zc-q-note")?.textContent).toBe("适合短视频平台");
+    expect(container.querySelector('[aria-label="AI 推荐"] svg')).not.toBeNull();
+    expect(
+      [...container.querySelectorAll(".zc-draft-counts > span")].map((node) => [
+        node.textContent,
+        node.getAttribute("aria-label"),
+      ]),
+    ).toEqual([
+      ["3", "3 修订"],
+      ["1", "1 字幕改动"],
+    ]);
+    expect(container.querySelectorAll(".zc-draft-counts svg")).toHaveLength(2);
+    expect(button(container, "批准").classList.contains("zc-btn-approve")).toBe(true);
+    await act(() => tabs[1]?.click());
+    expect(container.querySelector(".zc-q-question")?.textContent).toBe("第二件？");
+    multiple = false;
+    await act(async () => root.render(<Harness call={call} path="/project" revision={1} />));
+    expect(container.querySelector('[aria-label="编辑会话"]')).toBeNull();
+  } finally {
+    await act(() => root.unmount());
+  }
+});
+
+it("restores complete recent history, scrolls down, highlights rows and reloads after reconnect", async () => {
+  const now = Date.now();
+  const title = "历史对话的很长标题".repeat(12);
+  const chats = [
+    { id: "chat_recent", agent: "codex", title, updated_at: new Date(now - 180000).toISOString() },
+    { id: "chat_older", agent: "claude", title: "之前的对话", updated_at: new Date(now - 7200000).toISOString() },
+  ];
+  const call = vi.fn(async (verb: string, request: Record<string, unknown>) => {
+    if (verb === "chat_agents")
+      return [
+        { agent: "claude", available: true },
+        { agent: "codex", available: true },
+      ];
+    if (verb === "chat_list") return chats;
+    if (verb === "chat_history")
+      return {
+        events: [
+          { type: "user", text: `${request.id} 问题` },
+          { type: "text", text: "之前的完整回复" },
+          { type: "tool_start", id: "tool", name: "zcut_inspect", input: { view: "brief" } },
+          { type: "tool_end", id: "tool", input: { ok: true } },
+          { type: "text", text: "后续回复" },
+          { type: "end" },
+        ],
+      };
+    return { sessions: [], batches: [] };
+  });
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const style = document.createElement("style");
+  style.textContent = await readFile("packages/desktop/src/ai.css", "utf8");
+  document.head.append(style);
+  let reopened: ReturnType<typeof createRoot> | undefined;
+  const height = vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(900);
+  try {
+    await act(async () => root.render(<Harness call={call} path="/project" />));
+    expect(call).toHaveBeenCalledWith("chat_history", { id: "chat_recent" });
+    expect(container.textContent).toContain("chat_recent 问题");
+    expect(container.textContent).toContain("之前的完整回复");
+    expect(container.textContent).toContain("后续回复");
+    expect(container.querySelectorAll(".zc-step")).toHaveLength(1);
+    expect(container.querySelector<HTMLSelectElement>('[aria-label="Agent"]')?.value).toBe("codex");
+    expect(container.querySelector<HTMLElement>(".zc-chat-messages")?.scrollTop).toBe(900);
+    const messagesStyle = getComputedStyle(container.querySelector(".zc-chat-messages") as HTMLElement);
+    expect(messagesStyle.overflow).toBe("auto");
+    expect(messagesStyle.minHeight).toBe("0");
+    expect(messagesStyle.flexGrow).toBe("1");
+    expect(getComputedStyle(container.querySelector(".zc-chat-input") as HTMLElement).flexShrink).toBe("0");
+
+    await act(async () => button(container, "历史对话").click());
+    const history = container.querySelector('section[aria-label="历史对话"]');
+    expect(history?.querySelector("ul, li")).toBeNull();
+    expect(history?.querySelectorAll(".zc-chat-history-row > svg")).toHaveLength(2);
+    expect(history?.querySelector('[aria-current="true"] .zc-chat-history-title')?.textContent).toBe(title);
+    expect(history?.querySelector("time")?.textContent).toBe("3 分钟前");
+    const titleStyle = getComputedStyle(history?.querySelector(".zc-chat-history-title") as HTMLElement);
+    expect(titleStyle.whiteSpace).toBe("nowrap");
+    expect(titleStyle.textOverflow).toBe("ellipsis");
+    expect(titleStyle.overflow).toBe("hidden");
+    await act(async () => button(container, "之前的对话").click());
+    expect(container.textContent).toContain("chat_older 问题");
+    await act(async () => root.render(<Harness call={call} path="/project" connectionEpoch={1} />));
+    expect(container.textContent).toContain("chat_recent 问题");
+    expect(call.mock.calls.filter(([verb]) => verb === "chat_list")).toHaveLength(3);
+    await act(() => root.unmount());
+    reopened = createRoot(container);
+    await act(async () => reopened?.render(<Harness call={call} path="/project" />));
+    expect(container.textContent).toContain("之前的完整回复");
+  } finally {
+    height.mockRestore();
+    style.remove();
+    await act(() => (reopened ?? root).unmount());
+    container.remove();
+  }
+});
+
+it("merges live notices with restored history without duplicating streamed events", async () => {
+  const first = { type: "text", text: "已有内容" } as const;
+  const live = { type: "text", text: "新的内容" } as const;
+  let resolveHistory: ((value: unknown) => void) | undefined;
+  const call = vi.fn(async (verb: string) => {
+    if (verb === "chat_agents") return [{ agent: "claude", available: true }];
+    if (verb === "chat_list") return [{ id: "chat_saved", agent: "claude", title: "上次" }];
+    if (verb === "chat_history")
+      return new Promise((resolve) => {
+        resolveHistory = resolve;
+      });
+    return { sessions: [], batches: [] };
+  });
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(<Harness call={call} path="/project" />));
+    await act(async () =>
+      root.render(
+        <Harness
+          call={call}
+          path="/project"
+          notices={[
+            { chat: "chat_saved", event: first },
+            { chat: "chat_saved", event: live },
+          ]}
+        />,
+      ),
+    );
+    await act(async () => resolveHistory?.({ events: [{ type: "user", text: "之前的问题" }, first] }));
+    expect(container.querySelector(".zc-chat-user")?.textContent).toBe("之前的问题");
+    expect(container.querySelector(".zc-markdown")?.textContent).toBe("已有内容新的内容");
+  } finally {
+    await act(() => root.unmount());
+  }
+});
+
+it("does not replace a new conversation with a delayed history response", async () => {
+  let resolveHistory: ((value: unknown) => void) | undefined;
+  const call = vi.fn(async (verb: string) => {
+    if (verb === "chat_agents") return [{ agent: "claude", available: true }];
+    if (verb === "chat_list") return [{ id: "chat_saved", agent: "claude", title: "上次" }];
+    if (verb === "chat_history")
+      return new Promise((resolve) => {
+        resolveHistory = resolve;
+      });
+    return { sessions: [], batches: [] };
+  });
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(<Harness call={call} path="/project" />));
+    await act(() => button(container, "新对话").click());
+    await act(async () => resolveHistory?.({ events: [{ type: "text", text: "旧回复" }] }));
+    expect(container.textContent).not.toContain("旧回复");
+    expect(container.querySelector('[role="log"]')?.getAttribute("data-chat")).toBeNull();
   } finally {
     await act(() => root.unmount());
   }

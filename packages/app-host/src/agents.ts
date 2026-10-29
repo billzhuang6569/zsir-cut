@@ -1,6 +1,6 @@
 import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { appendFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
@@ -71,7 +71,7 @@ export class Agents {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
       throw error;
     }
-    return Promise.all(
+    const chats = await Promise.all(
       names
         .filter((name) => /^chat_[a-zA-Z0-9_-]+\.jsonl$/.test(name))
         .sort()
@@ -80,10 +80,12 @@ export class Agents {
           return {
             id: chat.id,
             agent: chat.agent,
+            updated_at: (await stat(this.path(chat.id))).mtime.toISOString(),
             title: chat.events.find((e) => e.type === "user")?.text?.slice(0, 80) ?? "新对话",
           };
         }),
     );
+    return chats.sort((a, b) => b.updated_at.localeCompare(a.updated_at) || a.id.localeCompare(b.id));
   }
   async send(agent: AgentKind, text: string, chatId?: string) {
     if (this.busy) throw new Error("Agent 正在回复");
@@ -116,7 +118,7 @@ export class Agents {
         }),
         { mode: 0o600 },
       );
-      const desktopInstructions = `请使用用户使用的语言回答；未明确语言时默认中文。桌面模式：只通过 mcp__zsir-cut__* 工具操作工程，不使用 CLI、shell 或文件写入。当前工程：${this.options.project}。写入 author.kind=agent，edit 必须带 label；使用 manual 编辑会话，交出草稿用 session_review，不能自行批准。`;
+      const desktopInstructions = `所有输出都必须使用用户使用的语言，包括调用工具前后的说明、过渡句、进度说明和最终回复；用户用中文时全部用中文，不夹用英文过渡句；未明确语言时默认中文。桌面模式：只通过 mcp__zsir-cut__* 工具操作工程，不使用 CLI、shell 或文件写入。当前工程：${this.options.project}。写入 author.kind=agent，edit 必须带 label；使用 manual 编辑会话，交出草稿用 session_review，不能自行批准。`;
       const instructions = `${await readFile(skill, "utf8")}\n${desktopInstructions}`;
       let ended = false;
       const emit = (event: ChatEvent) => {

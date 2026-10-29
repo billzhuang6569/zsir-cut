@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentKind, ChatEvent } from "../../app-host/src/agent-events.js";
 import { Button, type Decision, DecisionCard, Markdown, StepRow, toolVerb } from "./ai-components.js";
-import { IconButton } from "./components.js";
+import { Icon, IconButton } from "./components.js";
 import type { ProjectView } from "./connection.js";
 import "./ai.css";
 
@@ -34,11 +34,27 @@ export interface AiNotice {
 interface Session {
   session_id: string;
   state: string;
+  label?: string;
+  intent?: string;
   draft_revision: string;
   decisions: Decision[];
   pending_count: number;
   revision_count: number;
   changes: { entity: string }[];
+}
+interface ChatSummary {
+  id: string;
+  agent: AgentKind;
+  title: string;
+  updated_at: string;
+}
+function relativeTime(value: string) {
+  const seconds = Math.max(0, Math.floor((Date.now() - Date.parse(value)) / 1000));
+  if (!Number.isFinite(seconds)) return "";
+  if (seconds < 60) return "刚刚";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} 分钟前`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} 小时前`;
+  return `${Math.floor(seconds / 86400)} 天前`;
 }
 interface AiState {
   sessions: Session[];
@@ -50,12 +66,14 @@ export function useAiPanel({
   project,
   notices,
   revision,
+  connectionEpoch = 0,
 }: {
   call: Call;
   path: string | null;
   project: ProjectView | null;
   notices: AiNotice[];
   revision: number;
+  connectionEpoch?: number;
 }) {
   const [agents, setAgents] = useState<{ agent: AgentKind; available: boolean; version: string | null }[]>([]);
   const [agent, setAgent] = useState<AgentKind>("claude");
@@ -65,7 +83,10 @@ export function useAiPanel({
   const [generating, setGenerating] = useState(false);
   const [input, setInput] = useState("");
   const [error, setError] = useState("");
-  const [history, setHistory] = useState<{ id: string; agent: AgentKind; title: string }[] | null>(null);
+  const [history, setHistory] = useState<ChatSummary[] | null>(null);
+  const messageList = useRef<HTMLDivElement>(null);
+  const chatSelection = useRef(0);
+  const restoring = useRef<{ selection: number; notices: AiNotice[] }>();
   const [ai, setAi] = useState<AiState>({ sessions: [], batches: [] });
   const [sessionId, setSessionId] = useState("");
   const [saving, setSaving] = useState(false);
@@ -86,7 +107,7 @@ export function useAiPanel({
         if (!Array.isArray(detected)) return;
         setAgents(detected);
         const first = detected.find((item) => item.available);
-        if (first) setAgent(first.agent);
+        if (first && !currentChat.current) setAgent(first.agent);
       })
       .catch((e: Error) => setError(e.message));
     void refresh().catch((e: Error) => setError(e.message));
@@ -94,6 +115,47 @@ export function useAiPanel({
       disposed = true;
     };
   }, [path, call, refresh]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: A new host connection must restore persisted history.
+  useEffect(() => {
+    if (!path) return;
+    let disposed = false;
+    const selection = ++chatSelection.current;
+    const recovery = { selection, notices: [] as AiNotice[] };
+    restoring.current = recovery;
+    currentChat.current = undefined;
+    setChatId(undefined);
+    setEvents([]);
+    void (async () => {
+      const chats = (await call("chat_list", {})) as ChatSummary[];
+      const latest = Array.isArray(chats) ? chats[0] : undefined;
+      if (!latest || disposed || selection !== chatSelection.current) return;
+      const saved = (await call("chat_history", { id: latest.id })) as { events: ChatEvent[] };
+      if (disposed || selection !== chatSelection.current) return;
+      if (currentChat.current && currentChat.current !== latest.id) return;
+      const incoming = recovery.notices.filter((notice) => notice.chat === latest.id).map((notice) => notice.event);
+      let overlap = Math.min(saved.events.length, incoming.length);
+      while (overlap && JSON.stringify(saved.events.slice(-overlap)) !== JSON.stringify(incoming.slice(0, overlap)))
+        overlap--;
+      currentChat.current = latest.id;
+      setChatId(latest.id);
+      setAgent(latest.agent);
+      setEvents([...saved.events, ...incoming.slice(overlap)]);
+    })()
+      .catch((e: Error) => {
+        if (!disposed) setError(e.message);
+      })
+      .finally(() => {
+        if (restoring.current === recovery) restoring.current = undefined;
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [path, call, connectionEpoch]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Scroll after restored or streamed messages render.
+  useEffect(() => {
+    const list = messageList.current;
+    if (list) list.scrollTop = list.scrollHeight;
+  }, [events, agents]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: Host notifications invalidate the session view.
   useEffect(() => {
     if (!path) return;
@@ -110,6 +172,8 @@ export function useAiPanel({
   useEffect(() => {
     for (const notice of notices.slice(consumed.current)) {
       if (!currentChat.current || currentChat.current === notice.chat) {
+        if (restoring.current?.selection === chatSelection.current) restoring.current.notices.push(notice);
+        else chatSelection.current++;
         currentChat.current = notice.chat;
         setChatId(notice.chat);
         setEvents((old) => [...old, notice.event]);
@@ -128,6 +192,7 @@ export function useAiPanel({
       setError("未检测到所选 Agent，决定回答已保存。");
       return;
     }
+    chatSelection.current++;
     setError("");
     setGenerating(true);
     setInput("");
@@ -289,6 +354,7 @@ export function useAiPanel({
               label="新对话"
               disabled={generating}
               onClick={() => {
+                chatSelection.current++;
                 currentChat.current = undefined;
                 setChatId(undefined);
                 setEvents([]);
@@ -307,30 +373,45 @@ export function useAiPanel({
             />
           </div>
           {history && (
-            <ul aria-label="历史对话">
+            <section className="zc-chat-history" aria-label="历史对话">
               {history.map((item) => (
-                <li key={item.id}>
-                  <Button
-                    onClick={() => {
-                      void call("chat_history", { id: item.id })
-                        .then((value) => {
-                          const saved = value as { events: ChatEvent[] };
-                          currentChat.current = item.id;
-                          setChatId(item.id);
-                          setAgent(item.agent);
-                          setEvents(saved.events);
-                          setHistory(null);
-                        })
-                        .catch((e: Error) => setError(e.message));
-                    }}
-                  >
+                <button
+                  type="button"
+                  className="zc-chat-history-row"
+                  aria-current={chatId === item.id ? "true" : undefined}
+                  key={item.id}
+                  onClick={() => {
+                    const selection = ++chatSelection.current;
+                    void call("chat_history", { id: item.id })
+                      .then((value) => {
+                        if (selection !== chatSelection.current) return;
+                        const saved = value as { events: ChatEvent[] };
+                        currentChat.current = item.id;
+                        setChatId(item.id);
+                        setAgent(item.agent);
+                        setEvents(saved.events);
+                        setHistory(null);
+                      })
+                      .catch((e: Error) => setError(e.message));
+                  }}
+                >
+                  <Icon name="ask" />
+                  <span className="zc-chat-history-title" title={item.title}>
                     {item.title}
-                  </Button>
-                </li>
+                  </span>
+                  <time dateTime={item.updated_at}>{relativeTime(item.updated_at)}</time>
+                </button>
               ))}
-            </ul>
+            </section>
           )}
-          <div className="zc-chat-messages" role="log" aria-label="对话" aria-live="polite" data-chat={chatId}>
+          <div
+            ref={messageList}
+            className="zc-chat-messages"
+            role="log"
+            aria-label="对话"
+            aria-live="polite"
+            data-chat={chatId}
+          >
             {messages.map((message) => (
               <div className={`zc-chat-${message.role}`} key={message.id}>
                 {message.role === "user" ? (
@@ -378,23 +459,43 @@ export function useAiPanel({
                 return (
                   <section className="zc-draft" aria-label="AI 草稿" key={item.session_id}>
                     <strong>草稿</strong>
-                    <p>
-                      {item.revision_count} 个修订 · {changes.filter((change) => change.entity === "clip").length}{" "}
-                      处片段 ·{" "}
-                      {
-                        changes.filter((change) =>
-                          ["cue", "transcript", "run", "token", "override", "free_cue", "style"].includes(
-                            change.entity,
-                          ),
-                        ).length
-                      }{" "}
-                      处字幕改动
-                    </p>
+                    <div className="zc-draft-counts">
+                      {[
+                        { icon: "list", label: "修订", count: item.revision_count },
+                        {
+                          icon: "clip",
+                          label: "片段",
+                          count: changes.filter((change) => change.entity === "clip").length,
+                        },
+                        {
+                          icon: "subtitle",
+                          label: "字幕改动",
+                          count: changes.filter((change) =>
+                            ["cue", "transcript", "run", "token", "override", "free_cue", "style"].includes(
+                              change.entity,
+                            ),
+                          ).length,
+                        },
+                      ]
+                        .filter((entry) => entry.count > 0)
+                        .map((entry) => (
+                          <span
+                            role="img"
+                            key={entry.label}
+                            aria-label={`${entry.count} ${entry.label}`}
+                            title={entry.label}
+                          >
+                            <Icon name={entry.icon} />
+                            {entry.count}
+                          </span>
+                        ))}
+                    </div>
                     {confirmApprove === item.session_id && (
                       <p role="alert">还有 {item.pending_count} 件决定未答，仍要批准吗？</p>
                     )}
                     <Button
                       variant="approve"
+                      icon="check"
                       disabled={saving || generating}
                       onClick={() => {
                         void approve(item);
@@ -440,6 +541,7 @@ export function useAiPanel({
                 value={agent}
                 onChange={(e) => {
                   setAgent(e.target.value as AgentKind);
+                  chatSelection.current++;
                   currentChat.current = undefined;
                   setChatId(undefined);
                   setEvents([]);
@@ -476,21 +578,31 @@ export function useAiPanel({
         </output>
       )}
       {ai.sessions.length > 1 && (
-        <select
-          aria-label="编辑会话"
-          value={session?.session_id}
-          disabled={saving}
-          onChange={(e) => {
-            setSessionId(e.target.value);
-            answers.current = [];
-          }}
-        >
-          {ai.sessions.map((item) => (
-            <option key={item.session_id} value={item.session_id}>
-              {item.session_id}
-            </option>
-          ))}
-        </select>
+        <div className="zc-tabs zc-session-tabs" role="tablist" aria-label="编辑会话">
+          {ai.sessions.map((item) => {
+            const title = item.label?.trim() || item.intent?.trim() || "编辑会话";
+            return (
+              <button
+                key={item.session_id}
+                type="button"
+                role="tab"
+                className="zc-tab"
+                aria-selected={session?.session_id === item.session_id}
+                disabled={saving}
+                title={title}
+                onClick={() => {
+                  setSessionId(item.session_id);
+                  answers.current = [];
+                }}
+              >
+                <span className="zc-session-title">{title.length > 20 ? `${title.slice(0, 20)}…` : title}</span>
+                <span role="img" className="zc-session-count" aria-label={`${item.pending_count} 件未答`}>
+                  {item.pending_count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       )}
       {decision ? (
         <DecisionCard

@@ -18,12 +18,13 @@ export function App({ config }: { config?: { port: number; token: string } }) {
   projectRef.current = project;
   const [notices, setNotices] = useState<AiNotice[]>([]);
   const [aiRevision, setAiRevision] = useState(0);
+  const [connectionEpoch, setConnectionEpoch] = useState(0);
   const call = useCallback(
     (verb: string, request: Record<string, unknown>) =>
       connection.current?.call(verb, request) ?? Promise.reject(new Error("宿主未连接")),
     [],
   );
-  const ai = useAiPanel({ call, path: state.project, project, notices, revision: aiRevision });
+  const ai = useAiPanel({ call, path: state.project, project, notices, revision: aiRevision, connectionEpoch });
   const dragging = useRef(false);
   const [errorDetail, setErrorDetail] = useState<string | undefined>();
   const [error, setError] = useState<string | null>(null);
@@ -33,6 +34,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
   }, []);
   useEffect(() => {
     if (!config) return;
+    let firstProject = true;
     const host = connectHost(config, {
       ui: async (verb, request) => {
         while (dragging.current && verb !== "ui_state") await new Promise((resolve) => setTimeout(resolve, 16));
@@ -44,6 +46,10 @@ export function App({ config }: { config?: { port: number; token: string } }) {
         return next;
       },
       project: (path, view) => {
+        if (firstProject) {
+          firstProject = false;
+          setConnectionEpoch((value) => value + 1);
+        }
         update({ ...current.current, project: path });
         setProject(view);
         setError(null);
@@ -94,10 +100,12 @@ export function App({ config }: { config?: { port: number; token: string } }) {
           id={`${uniqueId}-function-panel`}
           role="tabpanel"
           aria-labelledby={`${uniqueId}-tab-${state.panel}`}
-          className="zc-pad"
+          className="zc-pad zc-function-panel"
         >
           <h2>{labels[state.panel]}</h2>
-          <div hidden={state.panel !== "ai"}>{ai.chat}</div>
+          <div className="zc-ai-body" hidden={state.panel !== "ai"}>
+            {ai.chat}
+          </div>
         </div>
       </section>
       <section aria-label="参数区" className="zc-parameters zc-pad" data-panel={state.panel}>
