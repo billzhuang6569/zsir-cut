@@ -83,7 +83,7 @@
 
 ## 第 3 步：设计，再前端
 
-产品设计、界面布局和路线图见 [docs/product.md](product.md)。顺序：产品设计与界面设计稿定稿（Bill 验收）→ `design.md` → 规格修订（补齐界面需要的动词和数据）→ Codex 用 Tauri + TS 按面板实现，调用同一内核，不另起一套逻辑。
+产品设计、界面布局和路线图见 [docs/product.md](product.md)。任务拆分见 [docs/tasks/step-3.md](tasks/step-3.md)。顺序：产品设计与界面设计稿定稿（Bill 验收）→ `design.md` → 规格修订（补齐界面需要的动词和数据）→ Codex 用 Tauri + TS 按面板实现，调用同一内核，不另起一套逻辑。
 
 ## 第 4 步：稳定化
 

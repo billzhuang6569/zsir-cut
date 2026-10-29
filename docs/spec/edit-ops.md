@@ -79,11 +79,15 @@
 
 参数：`clip_id`，以及要改的字段：`label`、`enabled`、`gain_db`、`source_channels`、`transform`、`time_map`、`sync_broken`。给 `null` 表示删除该可选字段。新的 `time_map` 末点必须等于当前时长，要改时长请先 `trim`。
 
+### 素材整理
+
+- `update_media`：`media_id`，加上要改的 `organize` 字段（`tags`、`folders`、`rating`、`note`、`link`），整字段替换。只改整理信息，不碰路径、指纹和规格；那些只能由 `import_media` 写。不改时间线，不产生片段变化。
+
 ### 转场、标记、轨道
 
 - `add_transition`：`id`、`from_clip`、`to_clip`、`duration`、`alignment`。`remove_transition`：`transition_id`。
-- `add_marker`：`id`、`at`、`duration`、`kind`、`text`。`update_marker`：`marker_id` 加要改的字段。`remove_marker`：`marker_id`。
-- `add_track`：`id`、`kind`（`video` 或 `audio`）、`name`、`index`（插入位置，默认末尾）。`remove_track`：`track_id`，轨道必须是空的，并且不是任何字幕轨的承载轨。
+- `add_marker`：`id`、`at`、`duration`、`kind`、`text`、`level`（可选，只用于 `chapter`，取 1 或 2）。`update_marker`：`marker_id` 加要改的字段。`remove_marker`：`marker_id`。
+- `add_track`：`id`、`kind`（`video` 或 `audio`）、`name`（可选，没给时按 `timeline-schema.md` 4.4 自动命名）、`index`（插入位置，默认末尾）。`rename_track`：`track_id`、`name`。它属于被改名轨道所在的域：视频、音频轨是剪辑域，字幕轨是字幕域。`remove_track`：`track_id`，轨道必须是空的，并且不是任何字幕轨的承载轨。
 
 ## 3. 字幕域
 
@@ -100,6 +104,20 @@
 3. 新字词的 `state` 为 `edited`。对齐时间先按显示宽度在原区间内等比分配，并新建一条 `kind` 为 `align`、引擎名为 `interpolate` 的识别运行作为来源，`conf` 不写。之后由 `transcribe` 或 worker 的 `align` 重新对齐。
 4. 原字幕条的首尾字词如果被替换，改为指向对应的新字词。
 
+### `replace_text`
+
+查找替换。参数：`find`（非空）、`replace`（可以为空串）、`transcript_ids`（可选，默认全部）、`cue_ids`（可选，只在这些字幕条里找）、`match_case`（默认 false，只影响拉丁字母）、`force`。
+
+1. 在每条字幕条的显示文字里找 `find`。显示文字是该条可见字词的 `text` 按顺序拼接，空格按字词原样保留。同一条里多处匹配从左到右依次处理，不重叠。
+2. 每处匹配换算成「首字词、末字词、首字词里匹配前的部分、末字词里匹配后的部分」，然后按 `edit_text` 的规则执行：把首字词到末字词替换成「前缀 + `replace` + 后缀」。`heard`、对齐时间、字幕条首尾的处理全部沿用 `edit_text`。
+3. 匹配跨过隐藏字词时，隐藏字词一起被替换，原来听到的内容照样存进 `heard`。
+4. 匹配碰到锁定保护的字词或字幕条时跳过这一处，不中断其他处，`warnings` 加 `W_REPLACE_SKIPPED_LOCKED` 并列出跳过的字幕条。带 `force` 时按锁定保护的规则处理。
+5. 一处都没找到时返回 `no_op`。
+
+### `set_recognition`
+
+参数：`recognition` 对象的任意字段，见 `timeline-schema.md` 4.1，按字段替换。`terms` 写入前去掉首尾空白、去掉空串、去重。只改设置，不重新识别；要按新设置识别，再调用 `transcribe`。
+
 ### 其余字幕操作
 
 | 操作 | 参数 | 做什么 |
@@ -113,7 +131,7 @@
 | `set_override` / `remove_override` | `track_id`、`occurrence_id`、`cue_id`，以及 `hidden`、`text`、`style_id` | 序列层面的例外 |
 | `add_free_cue` / `remove_free_cue` | `track_id`、`id`、`timeline_start`、`duration`、`text`、`style_id` | 独立字幕条 |
 | `add_style` / `update_style` | 样式字段 | 新增或修改样式，修改时 `version` 加一 |
-| `add_subtitle_track` | `id`、`name`、`language`、`carrier_tracks`、`default_style_id` | 新建字幕轨。删除用剪辑域的 `remove_track`，但字幕轨不要求为空 |
+| `add_subtitle_track` | `id`、`name`（可选，没给时自动命名为「字幕 A」「字幕 B」……）、`language`、`carrier_tracks`、`default_style_id` | 新建字幕轨。删除用剪辑域的 `remove_track`，但字幕轨不要求为空 |
 
 ## 4. 验收例子
 

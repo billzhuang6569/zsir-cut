@@ -191,15 +191,15 @@
 
 ```text
 .zcut/<project_id>/sessions/<session_id>/
-├─ session.json        会话元数据：状态、approval、intent、作者、base_revision、创建与更新时间
+├─ session.json        会话元数据：状态、approval、intent、作者、base_revision、创建与更新时间、决定（7.6）
 ├─ draft.zcut.json     草稿工程，格式与主工程相同
 └─ .zcut/…             草稿自己的锁、日志、幂等记录，规则同第 5、6 节
 ```
 
 | 状态 | 可以做的 | 进入下一个状态 |
 |---|---|---|
-| `open` | `edit`、`undo`、`redo`、`session_review`、`session_reject` | `session_review` → `in_review` |
-| `in_review` | `session_approve`、`session_reject`；也可以继续 `edit`，会话回到 `open` | 批准 → `approved`；拒绝 → `rejected` |
+| `open` | `edit`、`undo`、`redo`、`session_ask`、`session_answer`、`session_review`、`session_reject` | `session_review` → `in_review` |
+| `in_review` | `session_approve`、`session_reject`、`session_answer`；也可以继续 `edit` 或 `session_ask`，会话回到 `open` | 批准 → `approved`；拒绝 → `rejected` |
 | `approved`、`rejected` | 只读 | 终态 |
 
 在不允许的状态下调用动词，返回 `rejected`、`E_SESSION_STATE`。
@@ -212,14 +212,16 @@
 - `timeline_changes` 和 `subtitle_changes`：从会话基础到草稿当前状态的实体级差异，分开列出。剪辑域包括媒体、时间线、轨道、片段、转场、标记；字幕域包括母稿、识别运行、字词、字幕条、覆盖值、独立字幕条、样式，以及字幕轨。
 - `ops`：草稿日志里全部写入的操作原文，按顺序。
 - `verification`：对草稿做 L1 校验的结果。
+- `decisions`：会话里全部决定（7.6），以及 `pending_count`。
 - `preview_job`：对草稿当前修订自动启动的 `render_preview` 任务 ID，输出到 `.zcut/<project_id>/sessions/<session_id>/preview/`。审阅的人可以直接看这段预览。
 
 ### 7.4 批准与合并
 
 1. 主工程当前修订等于会话的 `base_revision`：把草稿当前内容作为一个新修订写入主工程，日志条目的 `verb` 为 `session_approve`，`ops` 是草稿的全部操作，`changes` 是会话基础到草稿的实体差异。
 2. 主工程已经前进：把草稿日志里的写入按顺序重放到主工程当前内容上（会话内被撤销的不重放），每个操作都按当时的请求参数执行。全部成功，就把结果作为一个新修订写入。任何一个失败，或结果 L1 校验有错误，返回 `conflict`，`result` 列出失败的操作和原因；会话保持 `in_review`，主工程不变，Agent 可以继续编辑草稿后再提交审阅。
-3. 批准后的修订是一步撤销，撤销它就撤销整个会话。草稿相对主工程没有净改动时，批准不产生修订，返回 `no_op`，会话照常变为 `approved`。
-4. 带 `force` 的字幕域操作只在 `approval` 为 `manual` 的会话里有效，规则见第 8 节。
+3. 还有 `pending` 的决定时照常批准，`warnings` 加 `W_DECISIONS_PENDING` 并写出件数；界面在批准前提示。没回答的决定随会话一起变为只读。
+4. 批准后的修订是一步撤销，撤销它就撤销整个会话。草稿相对主工程没有净改动时，批准不产生修订，返回 `no_op`，会话照常变为 `approved`。
+5. 带 `force` 的字幕域操作只在 `approval` 为 `manual` 的会话里有效，规则见第 8 节。
 
 不进会话的写动词：`create_project`、`import_media`、`transcribe`、`export`、`record_handoff_check`。带 `session_id` 调用它们返回 `rejected`、`E_SESSION_STATE`。
 
@@ -230,6 +232,33 @@
 ### 7.5 修订对比 `diff`
 
 参数 `from`、`to`（修订 ID，`to` 默认当前修订）。结果是两个修订之间的实体级差异，格式与日志的 `changes` 相同。计算方法：从当前工程出发，按日志倒序把每个修订的 `before` 快照还原回去，得到任意历史修订的内容，再比较。`recovered` 修订没有快照，跨越它的对比返回 `rejected`、`E_UNSUPPORTED`。
+
+### 7.6 决定
+
+决定是 Agent 交给人拍板的事（ADR-0014）。它挂在编辑会话上，存在 `session.json` 的 `decisions[]` 里，不进工程文件，也不产生工程修订；会话的日志记录每次写入。换一个 Agent 或换一台电脑，打开同一个工程目录就能读到。
+
+一条决定的字段：
+
+| 字段 | 说明 |
+|---|---|
+| `id` | `dec_` 开头，会话内唯一 |
+| `seq` | 会话内从 1 起的序号，界面按它排列 |
+| `tag` | 一个短词，例如「跳剪」「时长」，可选 |
+| `question` | 问题，一句话 |
+| `options[]` | 1 到 9 个选项，每项 `id`（会话内唯一）、`label`、`note`（可选，一句说明）、`recommended`（布尔，最多一项为 true，排在第一个） |
+| `allow_other` | 是否允许自由回答，默认 true |
+| `refs[]` | 关联的对象，可选：`{"kind": "time", "at": 序列时间}`，或 `{"kind": "entity", "id": 片段、标记、字幕条等的 ID}` |
+| `state` | `pending`、`answered`、`skipped` |
+| `answer` | 回答后才有：`option_id` 或 `text`（二选一）、`author`、`at`（UTC 时间） |
+| `created_by` | 写入它的作者 |
+
+规则：
+
+1. **写入**：`session_ask`，参数 `session_id`、`decisions`（数组，每项给 `tag`、`question`、`options`、`allow_other`、`refs`，`id` 可以由调用方指定），加上写请求的公共字段；`base_revision` 是草稿的当前修订，只用来防止对着过时的草稿提问，不会改变它。返回新建的决定 ID。只在 `open` 和 `in_review` 状态可用；在 `in_review` 时写入，会话回到 `open`。
+2. **回答**：`session_answer`，参数 `session_id`、`decision_id`，加上 `option_id`、`text`、`skip: true` 三者之一，以及写请求的公共字段。`allow_other` 为 false 时不能用 `text`。已回答或已跳过的决定可以改答，旧回答记进会话日志。界面点选和 Agent 调用走同一个动词，效果相同。
+3. 回答本身不改剪辑。界面在回答后同时往对话里发一条消息，Agent 读到后再去 `edit`。Agent 也可以用 `inspect` 的 `session` 视图自己轮询。
+4. 引用的实体被删掉后，决定照常保留，`refs` 里那一项在读视图里标 `missing: true`。
+5. 一个会话最多 50 条决定，超过返回 `E_VALIDATION`。
 
 ## 8. 授权边界
 
@@ -250,6 +279,7 @@
 | `undo` / `redo` | 写 | 见第 6 节 |
 | `transcribe` | 写，长任务 | 跑识别和对齐，写入母稿第 1、3 层，并生成初始的第 2、4 层 |
 | `session_begin` / `session_review` / `session_approve` / `session_reject` | 会话 | 见第 7 节 |
+| `session_ask` / `session_answer` | 会话 | 写入、回答决定，见 7.6 |
 | `render_preview` | 长任务 | 渲染整条时间线的代理预览，不改工程。参数：`timeline_id`（必填）、`output`（输出文件夹，必填）。一期只渲染整条时间线，不渲染转场混合和画面变换 |
 | `view_timeline` | 长任务 | 在每个剪点出胶片条 PNG 和波形，供 Agent 视觉自检。参数：`timeline_id`（必填）、`output`（输出文件夹，必填） |
 | `export` | 长任务 | 按交接 profile 生成交接包，见 `handoff-profile.md`。带 `dry_run` 时只返回损失报告；报告有 `error` 级记录时，除非带 `accept_losses: true`，否则返回 `rejected` |
@@ -257,7 +287,7 @@
 | `record_handoff_check` | 写交接包 | 把 `host_import` 或 `host_render_comparison` 的检查结果写进交接包的 `manifest.json`，不改工程。参数：`package`（交接包目录）、`check`（两者之一）、`status`、`host_version`、`by`、`notes`、`items`（逐项的 `check`、`status`、`notes`）。不需要 `base_revision`，不写工程日志；同一项检查再次记录时整体覆盖，所以天然幂等 |
 | `job_status` | 读 | 查长任务进度与结果 |
 
-共 19 个。新增动词要先改本文。
+共 21 个。新增动词要先改本文。另有只在桌面版运行时存在的界面动词，见 9.6，不计入这 21 个。
 
 ### 9.1 给 Agent 的读视图
 
@@ -271,6 +301,7 @@
 | `timeline` | 一条时间线的完整剪辑表。可选 `timeline_id`，可选 `range`（`start`、`duration`）只列与它相交的内容 |
 | `entity` | 按 `id` 返回一个实体的原始 JSON，以及它的上级 ID |
 | `history` | 日志条目，按修订序号倒序，可选 `limit`（默认 20，最大 200）和 `before`（从这个修订之前开始） |
+| `session` | 必须带 `session_id`：会话的状态、`approval`、`intent`、`base_revision`、草稿当前修订，和全部决定 |
 
 **`brief` 的字段：**
 
@@ -279,7 +310,8 @@
 - `timelines`：每条时间线的 ID、名称、帧率、是否丢帧、起始时码、总长；每条轨道的 ID、类型、名称、启用状态、片段数；`review` 类标记最多 50 条。
 - `transcripts`：每份母稿的 ID、素材 ID、语言、字词数、字幕条数、各状态的字词数，以及字词覆盖的源时间范围。
 - `recent_revisions`：最近 5 个日志条目的序号、修订 ID、作者、动词、时间、操作个数。
-- `sessions`：未结束的编辑会话的 ID、状态、approval、intent。
+- `sessions`：未结束的编辑会话的 ID、状态、approval、intent，以及 `pending` 决定的个数。
+- `recognition`：工程的字幕识别设置，`reference_text` 只给前 200 个字和总字数。
 - `issues`：L1 校验的问题编号和个数，不列明细。
 
 **`timeline` 视图的片段字段**：`id`、`occurrence_id`、`media_id`、`label`、`enabled`、序列入点和出点、源入点和出点、`speed`（无时间映射为 `"1"`，有时为 `"map"`，并附关键点）、`gain_db`。另列转场和标记。
@@ -360,7 +392,7 @@
 | `name` | 是 | 工程名 |
 | `timeline` | 是 | `name`（默认「主时间线」）、`edit_rate`、`drop_frame`（默认 false）、`start_timecode`（默认 `00:00:00:00`，丢帧时 `00:00:00;00`）、`width`、`height`、`audio_tracks`（音频轨数，默认 2，1 到 8） |
 | `match_media` | 否 | 一个素材文件路径。给了它时，`timeline` 里没写的 `edit_rate`、`width`、`height` 从这个素材取：帧率取 9.2 节的 `video.rate`，不在 `timeline-schema.md` 4.3 节的表里时取表里最接近的一个（差值相同取较大的）；`drop_frame` 仍默认 false。素材不是视频返回 `E_VALIDATION`。只探测，不导入 |
-| `subtitles` | 否 | `language`、`name`（默认「字幕」）。给了时同时建一个默认字幕样式和一条字幕轨，承载轨是 A1 |
+| `subtitles` | 否 | `language`、`name`（默认「字幕 A」）。给了时同时建一个默认字幕样式和一条字幕轨，承载轨是 A1 |
 | `idempotency_key`、`author` | 是 | 同写请求。不需要 `base_revision` |
 
 `timeline` 和 `match_media` 合起来仍缺 `edit_rate`、`width` 或 `height` 时返回 `E_VALIDATION`。
@@ -368,7 +400,7 @@
 新工程的内容：
 
 - `id` 为新的 `prj_` ID，`media`、`transcripts` 为空。
-- 一条时间线，ID 为新的 `tl_` ID。轨道依次是 `trk_v1`（V1）、`trk_a1`（A1）、`trk_a2`（A2）……；给了 `subtitles` 时再加字幕轨 `trk_sub1`，`language` 照抄，`carrier_tracks` 为 `["trk_a1"]`，默认样式 `sty_default`。
+- 一条时间线，ID 为新的 `tl_` ID。轨道依次是 `trk_v1`（名「视频 A」）、`trk_a1`（「声音 A」）、`trk_a2`（「声音 B」）……；给了 `subtitles` 时再加字幕轨 `trk_sub1`（`name` 没给时为「字幕 A」），`language` 照抄，`carrier_tracks` 为 `["trk_a1"]`，默认样式 `sty_default`。给了 `subtitles` 时，工程的 `recognition.language` 也设为同一种语言。
 - `sty_default`：`name` 为「默认」，`version` 1，`font_family` 为 `PingFang SC`，`font_size` 为 `0.05`（时间线高度的比例），`color` 为 `#FFFFFF`，`outline` 为黑色 `#000000`、宽 `0.06`（字号的比例），`position` 为 `bottom`、`margin_v` 为 `0.08`。
 - 修订 `seq` 为 1，`parent` 为 null。日志写第一条，动词 `create_project`，`changes` 列出新建的工程、时间线、轨道和样式。
 
@@ -377,6 +409,25 @@
 `result` 含 `project_id`、`timeline_id`、`revision`（`seq` 和 `id`），给了 `subtitles` 时另含 `subtitle_track_id`。`receipt.before` 为 null，`receipt.after` 为第一个修订的 ID。
 
 新建这一步不能撤销：对第一个修订 `undo` 返回 `rejected`、`E_UNSUPPORTED`。不想要这个工程，直接删掉文件和旁边的 `.zcut/` 目录。
+
+### 9.5 直接导出
+
+`export` 的 `profile` 除了交接 profile，还可以取直接导出的 profile：`direct-srt`、`direct-audio-wav`。它们不生成交接包，只往 `output` 里写文件，规则见 `handoff-profile.md` 第 8 节。成片 profile 放二期（ADR-0015）。
+
+### 9.6 界面动词（桌面版）
+
+桌面版运行时，额外提供一组只改界面、不改工程的 MCP 工具，让 Agent 能把东西指给用户看。它们由桌面版的进程提供，不在内核里，也没有 CLI 命令；桌面版没开时调用返回 `failed`、`E_APP_NOT_RUNNING`，`retryable` 为 true。
+
+| 动词 | 参数 | 作用 |
+|---|---|---|
+| `ui_state` | 无 | 读当前界面：打开的工程、当前标签（`ai`、`media`、`chapters`、`subtitles`）、参数区子标签、播放头位置、选中对象、是否在播放 |
+| `ui_show_panel` | `panel`，可选 `sub` | 切换功能区标签，例如 `subtitles` 加 `sub: "style"` |
+| `ui_seek` | `at`（序列时间）或 `id`（片段、标记、字幕条、章节） | 把播放头移到那里并滚动到可见 |
+| `ui_select` | `ids` | 选中这些对象，空数组表示取消选中 |
+| `ui_play` | `range`（可选）、`loop`（可选） | 播放一段；不带 `range` 从播放头开始 |
+| `ui_pause` | 无 | 暂停 |
+
+这些动词不写日志、不需要 `base_revision` 和幂等键，返回结果信封，`status` 为 `no_op`。用户正在操作时（例如正在拖动），`ui_seek`、`ui_select` 等用户松手后再执行。
 
 ## 10. `edit` 的操作
 
@@ -395,7 +446,8 @@
 | `set_clip` | `clip_id`、`gain_db`、`enabled`、`transform`、`time_map`、`label`、`sync_broken` | 改片段属性 |
 | `add_transition` / `remove_transition` | | |
 | `add_marker` / `update_marker` / `remove_marker` | | |
-| `add_track` / `remove_track` | | 只能删空轨道 |
+| `add_track` / `remove_track` / `rename_track` | | 只能删空轨道；没给名字时自动命名 |
+| `update_media` | `media_id`、`organize` 字段 | 改素材的标签、文件夹、评分、注释、链接 |
 
 **字幕域**
 
@@ -409,6 +461,8 @@
 | `set_override` / `remove_override` | `track_id`、`occurrence_id`、`cue_id` | 序列层面的例外 |
 | `add_free_cue` / `remove_free_cue` | | |
 | `add_style` / `update_style` | | 样式改动时 `version` 加一 |
+| `replace_text` | `find`、`replace`、`transcript_ids`、`cue_ids`、`match_case` | 查找替换，每处按 `edit_text` 执行 |
+| `set_recognition` | `recognition` 的字段 | 改字幕识别设置，不重新识别 |
 
 每个操作的精确语义见 `docs/spec/edit-ops.md`。完整参数 schema 在第 1 步由实现按那份文档补进 `schema/command.schema.json`，有出入先改规格。
 
@@ -427,6 +481,9 @@
 | `E_UNSUPPORTED` | `rejected` | 请求了一期不支持的能力 |
 | `E_IO` | `failed` | 读写文件失败，`retryable` 说明能否重试 |
 | `E_INTERNAL` | `failed` | 内核错误 |
+| `E_APP_NOT_RUNNING` | `failed` | 调用了界面动词（9.6），但桌面版没在运行；`retryable` 为 true |
+
+警告码（写在结果信封的 `warnings` 里，不改变 `status`）：本文新增的有 `W_DECISIONS_PENDING`（批准时还有没回答的决定，7.4）、`W_REPLACE_SKIPPED_LOCKED`（查找替换跳过了锁定的字幕条，见 `edit-ops.md`）、`W_FILLERS_HIDDEN`（识别后自动隐藏了水词，附个数，见 `asr-worker.md` 第 6 节）。校验类警告见 `timeline-schema.md` 第 8 节。
 
 ## 12. 一期不做
 
