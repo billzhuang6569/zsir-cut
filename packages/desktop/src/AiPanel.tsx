@@ -117,6 +117,16 @@ export function useAiPanel({
   }, [path, call, refresh]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: A new host connection must restore persisted history.
   useEffect(() => {
+    setGenerating(false);
+    setInput("");
+    setError("");
+    setHistory(null);
+    setAi({ sessions: [], batches: [] });
+    setSessionId("");
+    setEvents([]);
+    currentChat.current = undefined;
+    setChatId(undefined);
+    consumed.current = 0;
     if (!path) return;
     let disposed = false;
     const selection = ++chatSelection.current;
@@ -624,6 +634,7 @@ export function useAiPanel({
   );
   return {
     chat,
+    generating,
     parameters,
     send,
     setInput,

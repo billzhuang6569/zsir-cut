@@ -1,0 +1,73 @@
+.zc-start {
+  position: absolute;
+  inset: var(--menubar-h) 0 0;
+  align-items: center;
+  overflow: auto;
+  background: var(--bg);
+}
+.zc-start h1 {
+  margin-top: var(--space-12);
+}
+.zc-entry-actions {
+  display: flex;
+  gap: var(--space-6);
+}
+.zc-entry-recents {
+  padding: 0;
+  list-style: none;
+  width: 100%;
+  max-width: 600px;
+}
+.zc-entry-recents li {
+  display: flex;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+.zc-entry-recents li > .zc-btn {
+  flex: 1;
+  justify-content: flex-start;
+  text-align: left;
+}
+.zc-entry-recents small {
+  display: block;
+  color: var(--text-4);
+}
+.zc-entry-recents .is-missing {
+  opacity: 0.5;
+}
+.zc-entry-menu {
+  position: absolute;
+  top: var(--menubar-h);
+  left: var(--space-8);
+  z-index: 20;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  max-height: 80vh;
+  overflow: auto;
+}
+.zc-entry-form {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  width: min(520px, 90vw);
+  max-height: 90vh;
+  overflow: auto;
+}
+.zc-entry-form label,
+.zc-start label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.zc-shell:has(.zc-start) {
+  grid-template-rows: var(--menubar-h) minmax(0, 1fr);
+}
+.zc-entry-cover {
+  width: 64px;
+  height: 36px;
+  object-fit: cover;
+  background: var(--raised);
+}
+.zc-entry-backdrop {
+  display: grid;
+  place-items: center;
+}

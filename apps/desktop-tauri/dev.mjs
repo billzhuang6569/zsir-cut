@@ -8,7 +8,7 @@ if (args.length > 1) {
 }
 const env = {
   ...process.env,
-  ZCUT_PROJECT: resolve(args[0] || process.env.ZCUT_PROJECT || "examples/interview.zcut.json"),
+  ZCUT_PROJECT: args[0] || process.env.ZCUT_PROJECT ? resolve(args[0] || process.env.ZCUT_PROJECT) : "",
 };
 for (const args of [["typecheck"], ["--filter", "@zsir-cut/desktop-tauri", "dev"]]) {
   const result = spawnSync("pnpm", args, { env, stdio: "inherit" });

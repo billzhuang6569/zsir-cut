@@ -21,23 +21,17 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("desktop shell", () => {
-  it("renders six regions and switches the paired subtitle parameter panel", async () => {
+  it("renders the start page and hides the timeline without a project", async () => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     const container = document.createElement("div");
     document.body.append(container);
     const root = createRoot(container);
     try {
       await act(() => root.render(<App />));
-      expect(container.querySelector('[id$="-tab-ai"]')?.textContent).toBe("AI");
-      expect(container.querySelector('[role="tabpanel"] h2')?.textContent).toBe("AI");
-      for (const name of ["菜单栏", "功能区", "预览", "参数区", "工具栏", "时间线"]) {
-        expect(container.querySelector(`[aria-label="${name}"]`)).not.toBeNull();
-      }
-      const subtitles = container.querySelector<HTMLButtonElement>('[id$="-tab-subtitles"]');
-      if (!subtitles) throw new Error("Missing subtitle tab");
-      await act(() => subtitles.click());
-      expect(container.querySelector('[aria-label="参数区"]')?.getAttribute("data-panel")).toBe("subtitles");
-      expect(container.querySelector('[aria-label="参数区"] h2')?.textContent).toBe("字幕");
+      expect(container.querySelector('[aria-label="开始页"]')).not.toBeNull();
+      expect(container.querySelector('[aria-label="时间线"]')).toBeNull();
+      expect(container.textContent).toContain("新建工程");
+      expect(container.textContent).toContain("打开工程");
     } finally {
       await act(() => root.unmount());
       container.remove();
@@ -179,6 +173,29 @@ it("opens the project through inspect and receives UI commands", async () => {
     expect([...container.querySelectorAll(".zc-track .zc-track-name")].map((node) => node.textContent)).toEqual(
       fixture.timelines[0].tracks.map((track: { name: string }) => track.name),
     );
+    const style = document.createElement("style");
+    style.textContent = ["shell.css", "ai.css"]
+      .map((name) => readFileSync(new NodeURL(`../src/${name}`, import.meta.url), "utf8"))
+      .join("\n");
+    document.head.append(style);
+    try {
+      const functions = container.querySelector<HTMLElement>(".zc-functions");
+      const panel = container.querySelector<HTMLElement>(".zc-function-panel");
+      const body = container.querySelector<HTMLElement>(".zc-ai-body");
+      const chat = container.querySelector<HTMLElement>(".zc-ai-chat");
+      if (!functions || !panel || !body || !chat) throw new Error("Missing AI layout");
+      expect(getComputedStyle(functions).overflow).toBe("hidden");
+      for (const node of [functions, panel, body, chat]) {
+        expect(getComputedStyle(node).display).toBe("flex");
+        expect(getComputedStyle(node).flexDirection).toBe("column");
+        expect(getComputedStyle(node).minHeight).toBe("0");
+      }
+      expect(functions.firstElementChild?.getAttribute("role")).toBe("tablist");
+      expect(panel.firstElementChild?.tagName).toBe("H2");
+      expect(getComputedStyle(panel.firstElementChild as HTMLElement).flexShrink).toBe("0");
+    } finally {
+      style.remove();
+    }
     await act(async () => {
       socket?.receive({
         type: "ui_request",
@@ -189,6 +206,8 @@ it("opens the project through inspect and receives UI commands", async () => {
       socket?.receive({ type: "ui_request", id: "seek", verb: "ui_seek", request: { at: "2s" } });
       socket?.receive({ type: "ui_request", id: "state", verb: "ui_state", request: {} });
     });
+    for (const name of ["菜单栏", "功能区", "预览", "参数区", "工具栏", "时间线"])
+      expect(container.querySelector(`[aria-label="${name}"]`)).not.toBeNull();
     expect(container.querySelector('[aria-label="参数区"] h3')?.textContent).toBe("预设");
     expect(container.querySelectorAll(".zc-clip-video")).toHaveLength(
       fixture.timelines[0].tracks
@@ -393,37 +412,5 @@ it("shows Chinese open errors and preserves the kernel code in the tooltip", asy
   } finally {
     disconnect();
     vi.unstubAllGlobals();
-  }
-});
-
-it("keeps function tabs and AI headers outside the scrolling message area", async () => {
-  const container = document.createElement("div");
-  document.body.append(container);
-  const root = createRoot(container);
-  const style = document.createElement("style");
-  style.textContent = ["shell.css", "ai.css"]
-    .map((name) => readFileSync(new NodeURL(`../src/${name}`, import.meta.url), "utf8"))
-    .join("\n");
-  document.head.append(style);
-  try {
-    await act(() => root.render(<App />));
-    const functions = container.querySelector<HTMLElement>(".zc-functions");
-    const panel = container.querySelector<HTMLElement>(".zc-function-panel");
-    const body = container.querySelector<HTMLElement>(".zc-ai-body");
-    const chat = container.querySelector<HTMLElement>(".zc-ai-chat");
-    if (!functions || !panel || !body || !chat) throw new Error("Missing AI layout");
-    expect(getComputedStyle(functions).overflow).toBe("hidden");
-    for (const node of [functions, panel, body, chat]) {
-      expect(getComputedStyle(node).display).toBe("flex");
-      expect(getComputedStyle(node).flexDirection).toBe("column");
-      expect(getComputedStyle(node).minHeight).toBe("0");
-    }
-    expect(functions.firstElementChild?.getAttribute("role")).toBe("tablist");
-    expect(panel.firstElementChild?.tagName).toBe("H2");
-    expect(getComputedStyle(panel.firstElementChild as HTMLElement).flexShrink).toBe("0");
-  } finally {
-    await act(() => root.unmount());
-    style.remove();
-    container.remove();
   }
 });

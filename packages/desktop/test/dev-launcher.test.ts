@@ -14,7 +14,7 @@ it("passes the chosen absolute project to both startup commands", () => {
   );
   try {
     for (const [args, project, expected] of [
-      [[], "", "examples/interview.zcut.json"],
+      [[], "", ""],
       [[], "fixtures/env project.zcut.json", "fixtures/env project.zcut.json"],
       [["--", "fixtures/参数 工程.zcut.json"], "ignored", "fixtures/参数 工程.zcut.json"],
     ] as const) {
@@ -29,8 +29,8 @@ it("passes the chosen absolute project to both startup commands", () => {
         .split("\n")
         .map((line) => JSON.parse(line));
       expect(calls).toEqual([
-        { args: ["typecheck"], project: resolve(expected) },
-        { args: ["--filter", "@zsir-cut/desktop-tauri", "dev"], project: resolve(expected) },
+        { args: ["typecheck"], project: expected ? resolve(expected) : "" },
+        { args: ["--filter", "@zsir-cut/desktop-tauri", "dev"], project: expected ? resolve(expected) : "" },
       ]);
     }
   } finally {
