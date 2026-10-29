@@ -3,6 +3,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { projectSubtitles } from "./project/projection.ts";
 import { validateProjectSemantics } from "./project/semantics.ts";
+import type { Session } from "./project/session.ts";
 import { openProject } from "./project/store.ts";
 import { displayRanges } from "./project/subtitle-rules.ts";
 import { clipTimeMap } from "./project/time-map.ts";
@@ -85,6 +86,27 @@ function entity(project: Project, id: string): Record<string, unknown> | undefin
   return undefined;
 }
 
+export function decisionSummary(project: Project, session: Pick<Session, "decisions">) {
+  const decisions = (session.decisions ?? []).map((decision) => ({
+    ...decision,
+    ...(decision.refs
+      ? {
+          refs: decision.refs.map((ref) =>
+            ref.kind === "entity"
+              ? { ...ref, ...(!entity(project, ref.id) ? { missing: true } : {}) }
+              : {
+                  ...ref,
+                  at: project.timelines[0]
+                    ? sequenceTime(parseRational(ref.at, true), project.timelines[0])
+                    : { t: ref.at },
+                },
+          ),
+        }
+      : {}),
+  }));
+  return { decisions, pending_count: decisions.filter((decision) => decision.state === "pending").length };
+}
+
 async function sessions(projectPath: string, project: Project): Promise<Record<string, unknown>[]> {
   const root = join(dirname(resolve(projectPath)), ".zcut", project.id, "sessions");
   let names: string[];
@@ -96,9 +118,15 @@ async function sessions(projectPath: string, project: Project): Promise<Record<s
   }
   const active: Record<string, unknown>[] = [];
   for (const name of names.sort()) {
-    const item = JSON.parse(await readFile(join(root, name, "session.json"), "utf8")) as Record<string, unknown>;
+    const item = JSON.parse(await readFile(join(root, name, "session.json"), "utf8")) as Session;
     if (item.state === "open" || item.state === "in_review")
-      active.push({ id: item.session_id, state: item.state, approval: item.approval, intent: item.intent });
+      active.push({
+        id: item.session_id,
+        state: item.state,
+        approval: item.approval,
+        intent: item.intent,
+        pending_count: (item.decisions ?? []).filter((decision) => decision.state === "pending").length,
+      });
   }
   return active;
 }
@@ -109,6 +137,18 @@ export async function inspect(
   input: Input,
   mainProjectPath = projectPath,
 ): Promise<Record<string, unknown>> {
+  if (input.view === "session") {
+    const session = JSON.parse(await readFile(join(dirname(projectPath), "session.json"), "utf8")) as Session;
+    return {
+      session_id: session.session_id,
+      state: session.state,
+      approval: session.approval,
+      intent: session.intent,
+      base_revision: session.base_revision,
+      draft_revision: project.revision.id,
+      ...decisionSummary(project, session),
+    };
+  }
   if (input.view === "entity") {
     const raw = JSON.parse(await readFile(projectPath, "utf8")) as Project;
     const found = entity(raw, input.id as string);

@@ -18,6 +18,7 @@ const prefixes = new Set([
   "rev_",
   "req_",
   "ses_",
+  "dec_",
   "job_",
   "exp_",
 ]);

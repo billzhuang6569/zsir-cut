@@ -104,6 +104,61 @@ describe("CLI and MCP", () => {
     }
   }, 30000);
 
+  it("shares decision writes, retries, validation and persisted session reads", async () => {
+    const server = createServer();
+    const client = new Client({ name: "decision-test", version: "1" });
+    const [left, right] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(left), client.connect(right)]);
+    try {
+      const base = { base_revision: "rev_fixture_1", author };
+      const begun = invokeCli("session_begin", {
+        ...base,
+        idempotency_key: "begin",
+        approval: "manual",
+        intent: "Decide",
+      });
+      const session_id = (begun.envelope.result as { session_id: string }).session_id;
+      const cases: [string, Record<string, unknown>][] = [
+        [
+          "session_ask",
+          {
+            idempotency_key: "ask",
+            decisions: [
+              {
+                id: "dec_1",
+                question: "Keep?",
+                options: [{ id: "keep", label: "Keep", recommended: true }],
+                allow_other: false,
+              },
+            ],
+          },
+        ],
+        ["session_answer", { idempotency_key: "answer", decision_id: "dec_1", option_id: "keep" }],
+        ["session_answer", { idempotency_key: "skip", decision_id: "dec_1", skip: true }],
+        ["session_answer", { idempotency_key: "invalid", decision_id: "dec_1", text: "Other" }],
+      ];
+      for (const [verb, fields] of cases) {
+        const input = { ...base, session_id, ...fields };
+        const first = invokeCli(verb, input).envelope;
+        const second = (await client.callTool({ name: `zcut_${verb}`, arguments: { project, ...input } }))
+          .structuredContent as Record<string, unknown>;
+        expect(validateEnvelope(first).valid).toBe(true);
+        expect(validateEnvelope(second).valid).toBe(true);
+        expect(withoutRequestId(first)).toEqual(withoutRequestId(second));
+        expect(first.ok).toBe(fields.idempotency_key !== "invalid");
+      }
+      const input = { session_id, view: "session" };
+      const reopened = invokeCli("inspect", input).envelope;
+      const mcp = (await client.callTool({ name: "zcut_inspect", arguments: { project, ...input } }))
+        .structuredContent as Record<string, unknown>;
+      expect(withoutRequestId(reopened)).toEqual(withoutRequestId(mcp));
+      expect(reopened.result).toMatchObject({ pending_count: 0, decisions: [{ id: "dec_1", state: "skipped" }] });
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
   it.each([
     ["src", "missing"],
     ["src", "stale"],
@@ -152,7 +207,7 @@ describe("CLI and MCP", () => {
     }
   });
 
-  it("registers all 19 protocol verbs and returns equivalent envelopes", async () => {
+  it("registers all 21 protocol verbs and returns equivalent envelopes", async () => {
     const server = createServer();
     const client = new Client({ name: "test", version: "1" });
     const [left, right] = InMemoryTransport.createLinkedPair();

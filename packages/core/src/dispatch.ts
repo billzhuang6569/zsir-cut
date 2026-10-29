@@ -57,6 +57,8 @@ export const VERBS = [
   "session_review",
   "session_approve",
   "session_reject",
+  "session_ask",
+  "session_answer",
   "render_preview",
   "view_timeline",
   "export",
@@ -67,7 +69,7 @@ export type Verb = (typeof VERBS)[number];
 
 export type Envelope = Omit<WriteEnvelope, "verb" | "verification" | "status"> & {
   verb: Verb;
-  status: WriteEnvelope["status"] | "accepted";
+  status: WriteEnvelope["status"] | "accepted" | "drafted";
   verification: { level: "none" | "L0" | "L1" | "L2"; passed: boolean; issues: ValidationIssue[] };
 };
 
@@ -280,6 +282,8 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
       "session_review",
       "session_approve",
       "session_reject",
+      "session_ask",
+      "session_answer",
       "inspect",
       "read_transcript",
       "validate",

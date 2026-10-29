@@ -1,6 +1,8 @@
+import { spawnSync } from "node:child_process";
 import { copyFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   diffProjectEntities,
@@ -345,6 +347,161 @@ describe("sessions and diff", () => {
     const next = await send("edit", { ops: [label("clp_v3", "later")] }, "rev_recovered_test");
     expect(next.status).toBe("applied");
     expect((await send("diff", { from: first.revision.id })).error?.code).toBe("E_UNSUPPORTED");
+  });
+});
+
+describe("decisions", () => {
+  const question = (n: number, allow_other = true) => ({
+    id: `dec_${n}`,
+    question: `Question ${n}`,
+    options: [{ id: `option_${n}`, label: "Keep", recommended: true }],
+    allow_other,
+  });
+  const view = (session_id: string) => dispatch("inspect", { project, session_id, view: "session" });
+
+  it("persists three decisions, answers/skips/re-answers, reviews and approves with pending", async () => {
+    const session_id = await begin();
+    const bytes = await readFile(project, "utf8");
+    const asked = await send("session_ask", { session_id, decisions: [question(1), question(2), question(3, false)] });
+    expect(asked.result?.decision_ids).toEqual(["dec_1", "dec_2", "dec_3"]);
+    await send("session_answer", { session_id, decision_id: "dec_1", option_id: "option_1" });
+    await send("session_answer", { session_id, decision_id: "dec_2", skip: true });
+    expect((await send("session_answer", { session_id, decision_id: "dec_3", text: "Other" })).error?.code).toBe(
+      "E_VALIDATION",
+    );
+    await send("session_answer", { session_id, decision_id: "dec_1", text: "New answer" });
+    const read = await view(session_id);
+    expect(read.result).toMatchObject({ pending_count: 1, draft_revision: "rev_fixture_1" });
+    const review = await send("session_review", { session_id });
+    expect(review.result?.decisions).toEqual(read.result?.decisions);
+    expect(review.result?.pending_count).toBe(1);
+    const brief = await dispatch("inspect", { project, view: "brief" });
+    expect(brief.result?.sessions).toEqual([expect.objectContaining({ id: session_id, pending_count: 1 })]);
+    const path = join(directory, ".zcut", (await load()).id, "sessions", session_id);
+    const stored = JSON.parse(await readFile(join(path, "session.json"), "utf8"));
+    expect(stored.log.at(-1).before[0].answer).toMatchObject({ option_id: "option_1", author });
+    expect(stored.log.at(-1).after[0].answer.text).toBe("New answer");
+    const cli = fileURLToPath(new URL("../../cli/src/index.ts", import.meta.url));
+    const reopened = spawnSync(process.execPath, [cli, "inspect", project], {
+      input: JSON.stringify({ view: "session", session_id }),
+      encoding: "utf8",
+    });
+    expect(reopened.status).toBe(0);
+    expect(JSON.parse(reopened.stdout).result.decisions).toEqual(read.result?.decisions);
+    const approval = { session_id, idempotency_key: "approve-decisions" };
+    const approved = await send("session_approve", approval);
+    expect(await send("session_approve", approval)).toEqual({
+      ...approved,
+      receipt: { ...approved.receipt, replayed: true },
+    });
+    expect(approved.status).toBe("no_op");
+    expect(approved).not.toHaveProperty("warnings");
+    expect(approved.result?.warnings).toEqual([expect.objectContaining({ code: "W_DECISIONS_PENDING", count: 1 })]);
+    expect(await readFile(project, "utf8")).toBe(bytes);
+    expect((await view(session_id)).result?.state).toBe("approved");
+    for (const [verb, data] of [
+      ["session_ask", { decisions: [question(4)] }],
+      ["session_answer", { decision_id: "dec_1", skip: true }],
+    ] as const)
+      expect((await send(verb, { session_id, ...data })).error?.code).toBe("E_SESSION_STATE");
+  });
+
+  it("enforces option bounds, recommendation order, unique IDs and exclusive answers", async () => {
+    const session_id = await begin();
+    const base = { project, session_id, base_revision: "rev_fixture_1", author, idempotency_key: "invalid" };
+    for (const options of [
+      [],
+      Array.from({ length: 10 }, (_, i) => ({ id: `o${i}`, label: "Option" })),
+      [
+        { id: "a", label: "A" },
+        { id: "b", label: "B", recommended: true },
+      ],
+      [
+        { id: "a", label: "A", recommended: true },
+        { id: "b", label: "B", recommended: true },
+      ],
+      [
+        { id: "a", label: "A" },
+        { id: "a", label: "A" },
+      ],
+    ]) {
+      expect((await dispatch("session_ask", { ...base, decisions: [{ ...question(1), options }] })).error?.code).toBe(
+        "E_VALIDATION",
+      );
+    }
+    await send("session_ask", { session_id, decisions: [question(1)] });
+    for (const decision of [question(1), { ...question(1), id: "dec_2" }])
+      expect((await send("session_ask", { session_id, decisions: [decision] })).error?.code).toBe("E_VALIDATION");
+    for (const fields of [{}, { text: "Other", skip: true }, { option_id: "option_1", text: "Other" }, { skip: false }])
+      expect((await dispatch("session_answer", { ...base, decision_id: "dec_1", ...fields })).error?.code).toBe(
+        "E_VALIDATION",
+      );
+    expect((await send("session_answer", { session_id, decision_id: "dec_missing", skip: true })).error?.code).toBe(
+      "E_NOT_FOUND",
+    );
+    expect((await send("session_answer", { session_id, decision_id: "dec_1", option_id: "missing" })).error?.code).toBe(
+      "E_NOT_FOUND",
+    );
+    expect((await dispatch("inspect", { project, view: "session" })).error?.code).toBe("E_VALIDATION");
+    expect((await view(session_id)).result?.pending_count).toBe(1);
+  });
+
+  it("limits sessions to 50 entries, keeps batches atomic and supports generated IDs/defaults", async () => {
+    const session_id = await begin();
+    const { id: _, allow_other: __, ...generated } = question(0);
+    const asked = await send("session_ask", { session_id, decisions: [generated] });
+    expect((asked.result?.decision_ids as string[])[0]).toMatch(/^dec_/);
+    await send("session_ask", { session_id, decisions: Array.from({ length: 49 }, (_, i) => question(i + 1)) });
+    expect((await send("session_ask", { session_id, decisions: [question(50)] })).error?.code).toBe("E_VALIDATION");
+    const decisions = (await view(session_id)).result?.decisions as { seq: number; allow_other: boolean }[];
+    expect(decisions.map((decision) => decision.seq)).toEqual(Array.from({ length: 50 }, (_, i) => i + 1));
+    expect(decisions[0]?.allow_other).toBe(true);
+  });
+
+  it("checks revisions, dry run, retries, review transitions and missing refs", async () => {
+    const session_id = await begin();
+    const request = {
+      project,
+      session_id,
+      base_revision: "rev_fixture_1",
+      author,
+      idempotency_key: "ask",
+      decisions: [
+        {
+          ...question(1),
+          refs: [
+            { kind: "entity", id: "clp_v1" },
+            { kind: "time", at: "1s" },
+          ],
+        },
+      ],
+    };
+    expect((await dispatch("session_ask", { ...request, dry_run: true })).status).toBe("dry_run");
+    expect((await view(session_id)).result?.pending_count).toBe(0);
+    const asked = await dispatch("session_ask", request);
+    expect(await dispatch("session_ask", request)).toEqual(asked);
+    expect((await dispatch("session_ask", { ...request, decisions: [question(2)] })).error?.code).toBe(
+      "E_IDEMPOTENCY_MISMATCH",
+    );
+    const edit = await send("edit", { session_id, ops: [{ op: "remove", clip_ids: ["clp_v1"] }] });
+    const revision = edit.receipt?.after ?? "";
+    expect((await send("session_answer", { session_id, decision_id: "dec_1", skip: true })).status).toBe("conflict");
+    const read = await view(session_id);
+    expect((read.result?.decisions as { refs: unknown[] }[])[0]?.refs).toEqual([
+      { kind: "entity", id: "clp_v1", missing: true },
+      { kind: "time", at: { t: "1s", tc: "01:00:01:00" } },
+    ]);
+    await send("session_review", { session_id }, revision);
+    await send("session_answer", { session_id, decision_id: "dec_1", skip: true }, revision);
+    expect((await view(session_id)).result?.state).toBe("in_review");
+    await send("session_answer", { session_id, decision_id: "dec_1", option_id: "option_1" }, revision);
+    await send("session_ask", { session_id, decisions: [question(2)] }, revision);
+    expect((await view(session_id)).result?.state).toBe("open");
+    await send("session_review", { session_id }, revision);
+    const approved = await send("session_approve", { session_id });
+    expect(approved.status).toBe("applied");
+    expect(approved).not.toHaveProperty("warnings");
+    expect(approved.result?.warnings).toEqual([expect.objectContaining({ code: "W_DECISIONS_PENDING", count: 1 })]);
   });
 });
 
