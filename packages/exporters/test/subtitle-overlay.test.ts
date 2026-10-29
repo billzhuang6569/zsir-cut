@@ -38,8 +38,8 @@ async function decode(file = overlay().output_path) {
   );
   return stdout;
 }
-const frameSize = 320 * 180 * 4;
-const frame = (data: Buffer, index: number) => data.subarray(index * frameSize, (index + 1) * frameSize);
+const frameSize = () => timeline().format.width * timeline().format.height * 4;
+const frame = (data: Buffer, index: number) => data.subarray(index * frameSize(), (index + 1) * frameSize());
 const alphas = (data: Buffer) => [...data].filter((_, i) => i % 4 === 3);
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "zcut-overlay 中文 100% ' -"));
@@ -93,17 +93,25 @@ it("shares wrapping, explicit breaks, overflow, positioning and box geometry on 
 });
 
 it.each([
-  { rate: q(25n), df: false, tc: "01:00:00:00", frames: 30 },
-  { rate: q(30000n, 1001n), df: true, tc: "01:00:00;00", frames: 36 },
+  { rate: q(25n), df: false, tc: "01:00:00:00", frames: 7 },
+  { rate: q(30000n, 1001n), df: true, tc: "01:00:00;00", frames: 9 },
 ])(
   "encodes metadata, transparent gaps, and deterministic decoded frames at $tc",
   async ({ rate, df, tc, frames }) => {
     timeline().edit_rate = rate;
     timeline().drop_frame = df;
     timeline().start_timecode = tc;
+    // Two multi-frame cues plus leading, middle and trailing gaps; DF still rounds fractional boundaries.
+    timeline().format = { width: 64, height: 36 };
+    overlay().tail = q(1n, 25n);
+    const subtitles = timeline().tracks[1]!;
+    if (subtitles.kind !== "subtitle") throw new Error("Missing subtitle track");
+    subtitles.free_cues[0]!.timeline_start = q(1n, 25n);
+    subtitles.free_cues[1]!.timeline_start = q(4n, 25n);
+    for (const cue of subtitles.free_cues) cue.duration = q(2n, 25n);
     // Keep the synthetic clip on the target frame grid.
     const videoTrack = timeline().tracks[0]!;
-    if (videoTrack.kind !== "subtitle") videoTrack.clips[0]!.duration = q(df ? 1001n : 1n, df ? 1000n : 1n);
+    if (videoTrack.kind !== "subtitle") videoTrack.clips[0]!.duration = df ? q(7007n, 30000n) : q(6n, 25n);
     await save();
     const result = await renderSubtitleOverlay(project, overlay(), path);
     expect(result.frame_count).toBe(frames);
@@ -127,8 +135,8 @@ it.each([
     expect(video).toMatchObject({
       codec_name: "prores",
       profile: "4444",
-      width: 320,
-      height: 180,
+      width: 64,
+      height: 36,
       r_frame_rate: df ? "30000/1001" : "25/1",
       nb_read_frames: String(frames),
       pix_fmt: "yuva444p12le",
@@ -136,20 +144,21 @@ it.each([
     expect(video.tags.timecode).toBe(tc);
     expect(streams.some((s: { codec_type: string }) => s.codec_type === "audio")).toBe(false);
     const first = await decode();
-    expect(first.length).toBe(frames * frameSize);
+    expect(first.length).toBe(frames * frameSize());
     for (let i = 0; i < frames; i++) {
-      const active = df ? (i >= 6 && i < 12) || (i >= 18 && i < 24) : (i >= 5 && i < 10) || (i >= 15 && i < 20);
+      const active = df ? (i >= 1 && i < 4) || (i >= 5 && i < 7) : (i >= 1 && i < 3) || (i >= 4 && i < 6);
       expect(
         alphas(frame(first, i)).some((a) => a > 0),
         `alpha at frame ${i}`,
       ).toBe(active);
     }
     expect(alphas(frame(first, 0)).every((a) => a === 0)).toBe(true);
-    expect(alphas(frame(first, df ? 15 : 12)).every((a) => a === 0)).toBe(true);
-    expect(alphas(frame(first, df ? 9 : 7)).some((a) => a > 0)).toBe(true);
-    expect(alphas(frame(first, df ? 21 : 17)).some((a) => a > 0)).toBe(true);
+    expect(alphas(frame(first, df ? 4 : 3)).every((a) => a === 0)).toBe(true);
+    expect(alphas(frame(first, 2)).some((a) => a > 0)).toBe(true);
+    expect(alphas(frame(first, df ? 6 : 5)).some((a) => a > 0)).toBe(true);
     await renderSubtitleOverlay(project, overlay(), path);
-    expect(await decode()).toEqual(first);
+    // Native byte equality checks every decoded pixel without a deep object walk over the Buffer.
+    expect((await decode()).equals(first)).toBe(true);
   },
   30000,
 );
