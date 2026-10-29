@@ -20,6 +20,7 @@
 | [0014](0014-chat-panel-and-decisions.md) | 桌面版内置对话面板驱动本机 Agent；「决定」写进工程 | 已采纳 |
 | [0015](0015-direct-export-scope.md) | 直接导出：一期只做 SRT 和音频，成片放二期 | 已采纳 |
 | [0016](0016-desktop-architecture.md) | 桌面版架构：Tauri 窗口 + Node 宿主进程 | 已采纳 |
+| [0017](0017-steps-and-subtitle-overlay.md) | 步骤管理器与字幕叠层进一期 | 已采纳 |
 
 模板：
 
