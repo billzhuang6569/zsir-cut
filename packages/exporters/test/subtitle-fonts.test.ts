@@ -32,14 +32,13 @@ it("registers a discovered PingFang collection when available", (context) => {
   expect(checkSubtitleFont("在物美很多商场都有", { font_family: "PingFang SC" })).toEqual({ found: true, missing: [] });
 });
 
-it.each(["PingFang SC", "Missing Zcut Chinese Font"])(
-  "renders every Chinese character without .notdef using %s",
-  (family, context) => {
+for (const family of ["PingFang SC", "Missing Zcut Chinese Font"]) {
+  it(`renders every Chinese character without .notdef using ${family}`, ({ skip }) => {
     const text = "在物美很多商场都有";
     const style = { font_family: family, font_size: 0.2, color: "#ffffff" };
     const checked = checkSubtitleFont(text, style);
     if (!SUBTITLE_FALLBACK_FONTS.some((font) => GlobalFonts.has(font))) {
-      context.skip("No Chinese font from the subtitle fallback chain is installed in this CI environment.");
+      skip("No Chinese font from the subtitle fallback chain is installed in this environment.");
       return;
     }
     expect(checked.missing).toEqual([]);
@@ -59,8 +58,8 @@ it.each(["PingFang SC", "Missing Zcut Chinese Font"])(
         `${char} must have ink`,
       ).toBe(true);
     }
-  },
-);
+  });
+}
 
 it("reports truly missing characters and shares the ordered CSS/Canvas chain", () => {
   expect(checkSubtitleFont("A\n \u{10ffff}\u{10ffff}", { font_family: "sans-serif" }).missing).toEqual(["\u{10ffff}"]);
