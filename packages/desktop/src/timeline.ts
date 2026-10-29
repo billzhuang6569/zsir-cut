@@ -74,7 +74,7 @@ export interface MediaView {
   start_timecode?: string;
   reel?: string;
   video?: { rate: string; width: number; height: number };
-  audio?: { sample_rate: number; channels: number };
+  audio?: { sample_rate: string; channels: number };
   organize?: { note?: string; link?: string; tags?: string[]; folders?: string[]; rating?: number };
 }
 export interface PreviewData {

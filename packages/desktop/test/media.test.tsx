@@ -37,7 +37,7 @@ const media = {
   duration: "10s",
   start_timecode: "01:00:00:00",
   video: { width: 1920, height: 1080, rate: "25" },
-  audio: { sample_rate: 48000, channels: 2 },
+  audio: { sample_rate: "48000", channels: 2 },
   organize: { note: "原注释", tags: ["采访"], folders: ["项目/原始"], rating: 3 },
   uses: 2,
 };

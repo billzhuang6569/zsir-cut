@@ -281,8 +281,18 @@ export async function startHost(
       }
     });
     client.on("message", async (raw) => {
+      const message = (() => {
+        try {
+          return JSON.parse(raw.toString());
+        } catch {
+          return null;
+        }
+      })();
+      if (!message || typeof message !== "object" || Array.isArray(message)) {
+        client.close(1008, "Invalid message");
+        return;
+      }
       try {
-        const message = JSON.parse(raw.toString());
         if (message.type === "ui_ready") {
           if (ui && ui !== client) {
             client.close(1008, "UI already connected");
@@ -352,7 +362,9 @@ export async function startHost(
                           pixel_aspect: item.video.pixel_aspect ? printRational(item.video.pixel_aspect) : undefined,
                         }
                       : undefined,
-                    audio: item.audio,
+                    audio: item.audio
+                      ? { ...item.audio, sample_rate: printRational(item.audio.sample_rate) }
+                      : undefined,
                     organize: item.organize,
                   })),
                   cues,
@@ -401,14 +413,16 @@ export async function startHost(
           }
           return;
         }
-        if (typeof message.id !== "string" || !VERBS.includes(message.verb)) {
+        if (typeof message.id !== "string" || typeof message.verb !== "string") {
           client.close(1008, "Invalid message");
           return;
         }
+        if (!VERBS.includes(message.verb)) throw new Error(`Unknown request: ${message.verb}`);
         const envelope = await kernel(message.verb as Verb, message.request);
         if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify({ id: message.id, envelope }));
-      } catch {
-        client.close(1008, "Invalid message");
+      } catch (error) {
+        if (typeof message.id === "string" && client.readyState === WebSocket.OPEN)
+          client.send(JSON.stringify({ id: message.id, envelope: { ok: false, error: { message: String(error) } } }));
       }
     });
   });
