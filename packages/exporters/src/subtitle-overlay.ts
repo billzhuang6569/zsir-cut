@@ -3,8 +3,9 @@ import { execFile } from "node:child_process";
 import { mkdtemp, open, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { createCanvas, GlobalFonts, loadImage } from "@napi-rs/canvas";
+import { createCanvas, loadImage } from "@napi-rs/canvas";
 import type { Project, SubtitleOverlay } from "../../core/dist/index.js";
+import { checkSubtitleFont } from "./subtitle-fonts.ts";
 import { renderSubtitle } from "./subtitle-render.ts";
 
 const {
@@ -76,10 +77,20 @@ export async function renderSubtitleOverlay(project: Project, overlay: SubtitleO
       const key = JSON.stringify([text, style]);
       let file = images.get(key);
       if (!file) {
-        if (!GlobalFonts.has(style.font_family) && !warnings.some((w) => w.font_family === style.font_family))
-          warnings.push({ code: "W_FONT_FALLBACK", font_family: style.font_family });
+        const { found, missing } = checkSubtitleFont(text, style);
+        if (!found || missing.length) {
+          let warning = warnings.find((w) => w.code === "W_FONT_FALLBACK" && w.font_family === style.font_family);
+          if (!warning) {
+            warning = { code: "W_FONT_FALLBACK", font_family: style.font_family };
+            warnings.push(warning);
+          }
+          if (missing.length)
+            warning.missing_glyphs = [...new Set([...((warning.missing_glyphs as string[]) ?? []), ...missing])];
+        }
+        // Preserve project text; leave unsupported characters blank instead of drawing tofu.
+        const drawable = [...text].map((char) => (missing.includes(char) ? " " : char)).join("");
         const canvas = createCanvas(width, height);
-        const rendered = renderSubtitle(canvas.getContext("2d"), text, style, width, height);
+        const rendered = renderSubtitle(canvas.getContext("2d"), drawable, style, width, height);
         warnings.push(...rendered.warnings.map((warning) => ({ ...warning, cue_id: item.cue.cue_id })));
         file = join(directory, `cue-${images.size}.png`);
         await writeFile(file, await canvas.encode("png"));

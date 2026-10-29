@@ -1,6 +1,8 @@
 // biome-ignore-all lint/suspicious/noArrayIndexKey: Film cells, waveform bars and ruler ticks are fixed geometric slots.
+
 import { useEffect, useRef, useState } from "react";
 import type { UiState } from "../../app-host/src/ui.js";
+import { subtitleFontFamily } from "../../exporters/src/subtitle-render.ts";
 import { Clip, Icon, IconButton } from "./components.js";
 import type { ProjectView } from "./connection.js";
 import { useReverseAudio } from "./reverse-audio.js";
@@ -413,7 +415,7 @@ export function TimelinePreview({
                         className="zc-caption"
                         style={{
                           gridRow: active.length - index,
-                          fontFamily: style?.font_family,
+                          fontFamily: subtitleFontFamily(style?.font_family),
                           ...{ "--cue-size": style?.font_size },
                           fontWeight: style?.font_weight,
                           color: style?.color,

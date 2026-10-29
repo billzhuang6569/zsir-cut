@@ -29,11 +29,23 @@ export type SubtitleCanvas = Pick<
   | "strokeStyle"
 >;
 
+export const SUBTITLE_FALLBACK_FONTS = [
+  "PingFang SC",
+  "Hiragino Sans GB",
+  "Heiti SC",
+  "Heiti TC",
+  "Songti SC",
+] as const;
+
+export function subtitleFontFamily(family = "PingFang SC") {
+  return `${[...new Set([family, ...SUBTITLE_FALLBACK_FONTS])].map((name) => JSON.stringify(name)).join(", ")}, sans-serif`;
+}
+
 export function renderSubtitle(ctx: SubtitleCanvas, text: string, style: RenderStyle, width: number, height: number) {
   ctx.save();
   try {
     const size = height * style.font_size;
-    ctx.font = `${style.font_weight ?? 400} ${size}px ${JSON.stringify(style.font_family)}`;
+    ctx.font = `${style.font_weight ?? 400} ${size}px ${subtitleFontFamily(style.font_family)}`;
     ctx.textAlign = "center";
     ctx.textBaseline = "alphabetic";
     ctx.lineJoin = "round";

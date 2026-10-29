@@ -4,10 +4,11 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { createCanvas } from "@napi-rs/canvas";
+import { createCanvas, GlobalFonts } from "@napi-rs/canvas";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { dispatch, parseProject, rational as q, serializeProject, validateEnvelope } from "../../core/src/index.ts";
 import type { Project } from "../../core/src/project/types.ts";
+import { checkSubtitleFont } from "../src/subtitle-fonts.ts";
 import { renderSubtitleOverlay } from "../src/subtitle-overlay.ts";
 import { renderSubtitle } from "../src/subtitle-render.ts";
 
@@ -107,7 +108,11 @@ it.each([
     const result = await renderSubtitleOverlay(project, overlay(), path);
     expect(result.frame_count).toBe(frames);
     expect(result.subtitle_count).toBe(2);
-    expect(result.warnings).toContainEqual({ code: "W_FONT_FALLBACK", font_family: "Missing Zcut Test Font" });
+    expect(result.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "W_FONT_FALLBACK", font_family: "Missing Zcut Test Font" }),
+      ]),
+    );
     const { stdout } = await run("ffprobe", [
       "-v",
       "error",
@@ -241,4 +246,45 @@ it("renders disabled subtitle tracks as transparent video and refuses source-med
   const old = await readFile(overlay().output_path);
   await expect(renderSubtitleOverlay(project, overlay(), path)).rejects.toThrow("overwrite source media");
   expect(await readFile(overlay().output_path)).toEqual(old);
+}, 30000);
+
+it("exports the Chinese regression without a false font warning when the family is available", async (context) => {
+  const parsed = parseProject(
+    await readFile(
+      new URL("../../../fixtures/regressions/subtitle-overlay-chinese-glyphs.zcut.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  if (!parsed.ok) throw new Error("Bad Chinese fixture");
+  project.subtitle_styles = parsed.project.subtitle_styles;
+  const subtitles = timeline().tracks[1]!;
+  const source = parsed.project.timelines[0]!.tracks[1]!;
+  if (subtitles.kind !== "subtitle" || source.kind !== "subtitle") throw new Error("Missing subtitle track");
+  subtitles.free_cues = source.free_cues;
+  const checked = checkSubtitleFont("在物美很多商场都有", project.subtitle_styles[0]!);
+  if (checked.missing.length) {
+    context.skip("No font in the installed Chinese fallback chain covers the regression text.");
+    return;
+  }
+  const result = await renderSubtitleOverlay(project, overlay(), path);
+  expect(result.warnings.filter((warning) => warning.code === "W_FONT_FALLBACK")).toEqual(
+    checked.found ? [] : [{ code: "W_FONT_FALLBACK", font_family: "PingFang SC" }],
+  );
+  expect(alphas(frame(await decode(), 7)).some((alpha) => alpha > 0)).toBe(true);
+}, 30000);
+
+it("merges missing glyphs into the existing font warning even for a registered family", async () => {
+  project.subtitle_styles[0]!.font_family = GlobalFonts.families[0]!.family;
+  const subtitles = timeline().tracks[1]!;
+  if (subtitles.kind !== "subtitle") throw new Error("Missing subtitle track");
+  subtitles.free_cues[0]!.text = "A\u{10ffff}";
+  subtitles.free_cues[1]!.text = "B\u{10fffe}\u{10ffff}";
+  const result = await renderSubtitleOverlay(project, overlay(), path);
+  expect(result.warnings.filter((warning) => warning.code === "W_FONT_FALLBACK")).toEqual([
+    {
+      code: "W_FONT_FALLBACK",
+      font_family: project.subtitle_styles[0]!.font_family,
+      missing_glyphs: ["\u{10ffff}", "\u{10fffe}"],
+    },
+  ]);
 }, 30000);
