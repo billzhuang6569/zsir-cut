@@ -6,6 +6,8 @@ export interface ProjectView extends TimelineView, PreviewData {
   name: string;
   revision: { id: string; seq: number };
 }
+export const DESKTOP_AUTHOR = { kind: "human", name: "桌面用户" } as const;
+
 interface ResultEnvelope {
   ok: boolean;
   result: unknown;
@@ -15,7 +17,7 @@ export function connectHost(
   config: { port: number; token: string },
   handlers: {
     ui: (verb: UiVerb, request: Record<string, unknown>) => UiState | Promise<UiState>;
-    project: (path: string, view: ProjectView) => void;
+    project: (path: string | null, view: ProjectView | null) => void;
     chat?: (notice: import("./AiPanel.js").AiNotice) => void;
     aiChanged?: () => void;
     icon: (value: string | null) => void;
@@ -25,9 +27,14 @@ export function connectHost(
   const socket = new WebSocket(`ws://127.0.0.1:${config.port}/?token=${encodeURIComponent(config.token)}`);
   let sequence = 0;
   let project: string | null = null;
+  let generation = 0;
   const pending = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
   const call = (verb: string, request: Record<string, unknown>) =>
     new Promise<unknown>((resolve, reject) => {
+      if (socket.readyState === 0) {
+        reject(new Error("宿主正在连接"));
+        return;
+      }
       const id = String(++sequence);
       pending.set(id, { resolve, reject });
       socket.send(
@@ -41,11 +48,15 @@ export function connectHost(
   async function refresh() {
     if (!project) return;
     const path = project;
+    const epoch = generation;
     const brief = (await call("inspect", { project: path, view: "brief" })) as {
       project: Pick<ProjectView, "name" | "revision">;
     };
+    if (epoch !== generation) return;
     const timeline = (await call("inspect", { project: path, view: "timeline" })) as TimelineView;
+    if (epoch !== generation) return;
     const preview = (await call("preview_data", {})) as PreviewData;
+    if (epoch !== generation) return;
     handlers.project(path, { ...timeline, ...preview, name: brief.project.name, revision: brief.project.revision });
   }
   socket.onopen = () => socket.send(JSON.stringify({ type: "ui_ready" }));
@@ -53,8 +64,10 @@ export function connectHost(
   socket.onmessage = (event) => {
     const message = JSON.parse(event.data);
     if (message.type === "bootstrap") {
+      generation++;
       project = message.project;
       handlers.icon(message.fcpIcon);
+      handlers.project(project, null);
       void refresh().catch((error: Error) =>
         handlers.error(`工程文件打不开：${error.message}`, String(error.cause ?? error.message)),
       );
@@ -83,11 +96,15 @@ export function connectHost(
           new Error(
             !envelope.error?.code
               ? (envelope.error?.message ?? "请求失败")
-              : envelope.error?.code === "E_VALIDATION"
+              : envelope.error?.message === "Project file is invalid"
                 ? "工程文件无效"
-                : envelope.error?.code === "E_NOT_FOUND"
-                  ? "找不到工程文件"
-                  : "请求失败，请检查工程后重试",
+                : envelope.error?.code === "E_VALIDATION"
+                  ? envelope.error.message.includes("/author") && envelope.error.message.includes("name")
+                    ? "操作发起人的姓名缺失，无法继续，请重试"
+                    : `请求参数未通过校验：${envelope.error.message}`
+                  : envelope.error?.code === "E_NOT_FOUND"
+                    ? "找不到工程文件"
+                    : `请求失败：${envelope.error?.message ?? "请重试"}`,
             { cause: `${envelope.error?.code ?? ""} ${envelope.error?.message ?? ""}`.trim() },
           ),
         );

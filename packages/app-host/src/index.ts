@@ -17,7 +17,8 @@ import { z } from "zod";
 import type { DispatchOptions, Envelope, Verb } from "../../core/dist/index.js";
 import { Agents } from "./agents.js";
 import { exportPreferences } from "./export-preferences.js";
-import { mediaChannel } from "./media.js";
+import { mediaChannel, runFfmpeg } from "./media.js";
+import { RecentProjects } from "./recent.js";
 import { PANELS, UI_VERBS, type UiEnvelope, type UiVerb } from "./ui.js";
 
 const {
@@ -218,20 +219,76 @@ export async function readFcpIcon(): Promise<string | null> {
 }
 
 export async function startHost(
-  options: { project?: string; port?: number; token?: string; dispatchOptions?: DispatchOptions } = {},
+  options: {
+    project?: string;
+    port?: number;
+    token?: string;
+    dispatchOptions?: DispatchOptions;
+    appDataDir?: string;
+  } = {},
 ) {
   const token = options.token ?? randomBytes(32).toString("hex");
   if (!token) throw new Error("Token must not be empty");
-  const load = async () => {
-    if (!options.project) throw new Error("No project");
-    const parsed = parseProject(await readFile(options.project, "utf8"));
-    if (!parsed.ok) throw new Error("Invalid project");
+  const recent = new RecentProjects(options.appDataDir);
+  const loadPath = async (path: string) => {
+    let text: string;
+    try {
+      text = await readFile(path, "utf8");
+    } catch {
+      throw new Error("找不到或无法读取工程文件");
+    }
+    const parsed = parseProject(text);
+    if (!parsed.ok) throw new Error("工程文件无效，可能已损坏或版本不兼容");
     return parsed.project;
   };
+  const load = async () => {
+    if (!options.project) throw new Error("No project");
+    return loadPath(options.project);
+  };
   const initialProject = options.project ? await load() : undefined;
-  const serve = mediaChannel(options.project, token, load);
+  let serve = mediaChannel(options.project, token, load);
+  let entryQueue = Promise.resolve();
+  let projectEpoch = 0;
   const httpServers = new Set<Server>();
   const http = createHttpServer((request, response) => {
+    const url = new URL(request.url ?? "/", "http://127.0.0.1");
+    if (url.pathname === "/recent-thumb") {
+      void (async () => {
+        if (url.searchParams.get("token") !== token) {
+          response.writeHead(401).end();
+          return;
+        }
+        const row = (await recent.list()).find((row) => row.path === url.searchParams.get("path") && row.exists);
+        if (!row) {
+          response.writeHead(404).end();
+          return;
+        }
+        const project = await loadPath(row.path);
+        const video = project.media.find((item) => item.kind === "video");
+        if (!video) {
+          response.writeHead(404).end();
+          return;
+        }
+        const image = await runFfmpeg([
+          "-i",
+          resolve(dirname(row.path), video.path),
+          "-frames:v",
+          "1",
+          "-vf",
+          "scale=160:-1",
+          "-f",
+          "image2pipe",
+          "-vcodec",
+          "mjpeg",
+          "pipe:1",
+        ]);
+        response.writeHead(200, { "Content-Type": "image/jpeg" }).end(image);
+      })().catch(() => {
+        if (!response.headersSent) response.writeHead(404);
+        response.end();
+      });
+      return;
+    }
     if (new URL(request.url ?? "/", "http://127.0.0.1").pathname !== "/mcp") {
       void serve(request, response);
       return;
@@ -274,7 +331,9 @@ export async function startHost(
     if (ui?.readyState === WebSocket.OPEN) ui.send(JSON.stringify({ type }));
   };
   const kernel = async (verb: Verb, input: unknown) => {
+    const epoch = projectEpoch;
     const envelope = await dispatch(verb, input, options.dispatchOptions);
+    if (epoch !== projectEpoch || verb === "create_project") return envelope;
     const job = verb === "job_status" ? (envelope.result as { envelope?: { receipt?: unknown } } | null) : null;
     if (envelope.receipt || job?.envelope?.receipt) notify("project_changed");
     const request = input as { batch?: { id?: string } };
@@ -351,6 +410,25 @@ export async function startHost(
           );
           return;
         }
+        if (
+          typeof message.id === "string" &&
+          ["project_open", "recent_projects", "recent_remove"].includes(message.verb)
+        ) {
+          if (client !== ui) throw new Error("界面未连接");
+          const request = message.request ?? {};
+          const operation = entryQueue.then(async () => {
+            if (message.verb === "project_open") {
+              if (request.path !== null && (typeof request.path !== "string" || !request.path.endsWith(".zcut.json")))
+                throw new Error("请选择 .zcut.json 工程文件");
+              await bind(request.path);
+            }
+            if (message.verb === "recent_remove") await recent.remove(request.path);
+            client.send(JSON.stringify({ id: message.id, envelope: { ok: true, result: await recent.list() } }));
+          });
+          entryQueue = operation.catch(() => {});
+          await operation;
+          return;
+        }
         if (message.type === "ui_result" && client === ui) {
           const item = pending.get(message.id);
           if (item) {
@@ -366,13 +444,14 @@ export async function startHost(
           return;
         }
         if (message.type === "preview_data" && typeof message.id === "string") {
-          if (!options.project) throw new Error("No project");
+          const projectPath = options.project;
+          if (!projectPath) throw new Error("No project");
           const project =
             typeof message.at_revision === "string"
-              ? await openProject({ projectPath: options.project }).snapshotAt(message.at_revision)
-              : await load();
+              ? await openProject({ projectPath }).snapshotAt(message.at_revision)
+              : await loadPath(projectPath);
           const timeline = project.timelines[0];
-          const journal = options.project ? await openProject({ projectPath: options.project }).journal() : [];
+          const journal = await openProject({ projectPath }).journal();
           const lastRecognition = journal.findLast((entry) => entry.verb === "transcribe");
           const cues = timeline
             ? projectSubtitles(project, timeline.id).cues.map((cue) => ({
@@ -403,9 +482,7 @@ export async function startHost(
               envelope: {
                 ok: true,
                 result: {
-                  historyBatches: await readHistoryBatches(
-                    join(dirname(resolve(options.project)), ".zcut", project.id),
-                  ),
+                  historyBatches: await readHistoryBatches(join(dirname(resolve(projectPath)), ".zcut", project.id)),
                   media: project.media.map((item) => ({
                     uses: new Set(
                       timeline?.tracks.flatMap((track) =>
@@ -417,7 +494,7 @@ export async function startHost(
                     id: item.id,
                     name: item.path.split("/").at(-1),
                     kind: item.kind,
-                    path: resolve(dirname(options.project ?? "."), item.path),
+                    path: resolve(dirname(projectPath), item.path),
                     duration: printRational(item.duration, true),
                     start_timecode: item.start_timecode,
                     reel: item.reel,
@@ -527,19 +604,33 @@ export async function startHost(
   await once(http, "listening");
   const address = http.address();
   if (!address || typeof address === "string") throw new Error("No host port");
-  if (options.project && initialProject) {
-    agents = new Agents({
-      project: resolve(options.project),
-      projectId: initialProject.id,
-      url: `http://127.0.0.1:${address.port}/mcp`,
-      token,
-      emit: (chat, event) => {
-        if (ui?.readyState === WebSocket.OPEN) ui.send(JSON.stringify({ type: "chat_event", chat, event }));
-        if (event.type === "end") notify("ai_changed");
-      },
-    });
-  }
-  const mcp = createMcpServer(callUi, kernel);
+  const bind = async (path: string | null) => {
+    const next = path ? await loadPath(path) : undefined;
+    if (path && next) await recent.add(path, next.name);
+    await agents?.stop();
+    agents = undefined;
+    projectEpoch++;
+    batches.clear();
+    disconnected();
+    if (path) options.project = resolve(path);
+    else delete options.project;
+    serve = mediaChannel(path ?? undefined, token, path ? () => loadPath(path) : load);
+    if (options.project && next)
+      agents = new Agents({
+        project: options.project,
+        projectId: next.id,
+        url: `http://127.0.0.1:${address.port}/mcp`,
+        token,
+        emit: (chat, event) => {
+          if (ui?.readyState === WebSocket.OPEN) ui.send(JSON.stringify({ type: "chat_event", chat, event }));
+          if (event.type === "end") notify("ai_changed");
+        },
+      });
+    if (ui?.readyState === WebSocket.OPEN)
+      ui.send(JSON.stringify({ type: "bootstrap", project: options.project ?? null, fcpIcon: await readFcpIcon() }));
+  };
+  if (options.project && initialProject) await bind(options.project);
+  const mcp = createMcpServer(callUi, agentKernel);
   return {
     port: address.port,
     token,

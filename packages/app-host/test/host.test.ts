@@ -6,23 +6,28 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import type { Envelope } from "../../core/src/index.ts";
 import { dispatch, VERBS } from "../../core/src/index.ts";
 import { createMcpServer, readAiState, readHistoryBatches, startHost } from "../src/index.js";
 import { UI_VERBS } from "../src/ui.js";
 
+let appDataDir: string;
+beforeEach(async () => {
+  appDataDir = await mkdtemp(join(tmpdir(), "zcut-recent-test-"));
+});
 let host: Awaited<ReturnType<typeof startHost>> | undefined;
 afterEach(async () => {
   await host?.close();
   host = undefined;
+  await rm(appDataDir, { recursive: true, force: true });
 });
 const project = fileURLToPath(new URL("../../../examples/interview.zcut.json", import.meta.url));
 const cli = fileURLToPath(new URL("../../cli/src/index.ts", import.meta.url));
 const comparable = (envelope: Record<string, unknown>) => ({ ...envelope, request_id: "ignored" });
 async function connect() {
-  host = await startHost({ project });
+  host = await startHost({ project, appDataDir });
   const socket = new WebSocket(`ws://127.0.0.1:${host.port}/?token=${host.token}`);
   await once(socket, "open");
   return socket;
@@ -41,7 +46,7 @@ describe("desktop host", () => {
     const project = join(directory, "project.zcut.json");
     const fixture = new URL("../../../fixtures/regressions/preview-media-rational.zcut.json", import.meta.url);
     await copyFile(fixture, project);
-    host = await startHost({ project });
+    host = await startHost({ project, appDataDir });
     const socket = new WebSocket(`ws://127.0.0.1:${host.port}/?token=${host.token}`);
     try {
       await once(socket, "open");
@@ -133,7 +138,7 @@ describe("desktop host", () => {
       );
       await writeFile(project, "{}");
       expect(await send({ id: "failed-preview", type: "preview_data" })).toMatchObject({
-        envelope: { ok: false, error: { message: expect.stringContaining("Invalid project") } },
+        envelope: { ok: false, error: { message: expect.stringContaining("工程文件无效，可能已损坏或版本不兼容") } },
       });
       await copyFile(fixture, project);
       expect(await send({ id: "unknown", verb: "unknown", request: {} })).toMatchObject({
@@ -183,7 +188,7 @@ describe("desktop host", () => {
   }, 15000);
 
   it("rejects missing and wrong tokens before upgrading", async () => {
-    host = await startHost();
+    host = await startHost({ appDataDir });
     for (const query of ["", "?token=wrong"]) {
       const socket = new WebSocket(`ws://127.0.0.1:${host.port}/${query}`);
       const error = await new Promise<Error>((resolve) => socket.once("error", resolve));
@@ -322,7 +327,7 @@ it("serves valid MCP schemas and no-UI failures without a network listener", asy
 
 it("authenticates Streamable HTTP, lists 29 tools and calls inspect using the SDK", async () => {
   const { StreamableHTTPClientTransport } = await import("@modelcontextprotocol/sdk/client/streamableHttp.js");
-  host = await startHost({ project });
+  host = await startHost({ project, appDataDir });
   const url = new URL(`http://127.0.0.1:${host.port}/mcp`);
   for (const headers of [{}, { Authorization: "Bearer wrong" }]) {
     expect((await fetch(url, { method: "POST", headers })).status).toBe(401);
@@ -395,5 +400,46 @@ it("discovers only open main-project batches, including batches with no journal 
     expect(await readHistoryBatches(root)).toEqual(["bat_queued"]);
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("rebinds MCP and bootstrap, stops the old Agent and preserves binding on invalid open", async () => {
+  const { Agents } = await import("../src/agents.js");
+  const stop = vi.spyOn(Agents.prototype, "stop");
+  const next = join(appDataDir, "next.zcut.json");
+  const source = JSON.parse(await readFile(project, "utf8"));
+  source.name = "新工程";
+  await writeFile(next, JSON.stringify(source));
+  host = await startHost({ project, appDataDir });
+  const socket = new WebSocket(`ws://127.0.0.1:${host.port}/?token=${host.token}`);
+  const messages: { type?: string; id?: string; project?: string | null; envelope?: { ok: boolean } }[] = [];
+  socket.on("message", (raw) => messages.push(JSON.parse(raw.toString())));
+  await once(socket, "open");
+  const client = await mcpClient();
+  try {
+    socket.send(JSON.stringify({ type: "ui_ready" }));
+    await vi.waitFor(() => expect(messages.some((row) => row.type === "bootstrap")).toBe(true));
+    socket.send(JSON.stringify({ id: "switch", verb: "project_open", request: { path: next } }));
+    await vi.waitFor(() => expect(messages.find((row) => row.id === "switch")?.envelope?.ok).toBe(true));
+    expect(stop).toHaveBeenCalled();
+    expect(messages.filter((row) => row.type === "bootstrap").at(-1)?.project).toBe(next);
+    const result = await client.callTool({ name: "zcut_inspect", arguments: { project: next, view: "brief" } });
+    expect(result.structuredContent).toMatchObject({ ok: true, result: { project: { name: "新工程" } } });
+    await expect(client.callTool({ name: "zcut_inspect", arguments: { project, view: "brief" } })).rejects.toThrow();
+    socket.send(
+      JSON.stringify({ id: "bad", verb: "project_open", request: { path: join(appDataDir, "missing.zcut.json") } }),
+    );
+    await vi.waitFor(() => expect(messages.find((row) => row.id === "bad")?.envelope?.ok).toBe(false));
+    expect(messages.filter((row) => row.type === "bootstrap").at(-1)?.project).toBe(next);
+    socket.send(JSON.stringify({ id: "close", verb: "project_open", request: { path: null } }));
+    await vi.waitFor(() => expect(messages.find((row) => row.id === "close")?.envelope?.ok).toBe(true));
+    expect(messages.filter((row) => row.type === "bootstrap").at(-1)?.project).toBeNull();
+    await expect(
+      client.callTool({ name: "zcut_inspect", arguments: { project: next, view: "brief" } }),
+    ).rejects.toThrow();
+  } finally {
+    stop.mockRestore();
+    socket.terminate();
+    await client.close();
   }
 });

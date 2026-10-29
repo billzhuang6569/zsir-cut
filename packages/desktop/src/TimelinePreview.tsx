@@ -3,7 +3,7 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { UiState } from "../../app-host/src/ui.js";
 import { Clip, Icon, IconButton } from "./components.js";
-import type { ProjectView } from "./connection.js";
+import { DESKTOP_AUTHOR, type ProjectView } from "./connection.js";
 import { useReverseAudio } from "./reverse-audio.js";
 import { SubtitleCanvas } from "./SubtitleCanvas.js";
 import {
@@ -285,7 +285,7 @@ export function TimelinePreview({
         project: state.project,
         base_revision: project.revision.id,
         idempotency_key: crypto.randomUUID(),
-        author: { kind: "human", name: "桌面用户" },
+        author: DESKTOP_AUTHOR,
         label,
         ...(ops ? { timeline_id: project.id, ops } : {}),
       });

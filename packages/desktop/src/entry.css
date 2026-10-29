@@ -1,0 +1,250 @@
+.zc-start {
+  position: absolute;
+  inset: var(--menubar-h) 0 0;
+  overflow: auto;
+  background: var(--bg);
+  padding: max(var(--space-8), 12vh) var(--space-8) var(--space-8);
+}
+.zc-start-content {
+  width: min(560px, 100%);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+.zc-entry-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-6);
+  margin-bottom: var(--space-6);
+}
+.zc-entry-brand > span {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+}
+.zc-entry-brand h1 {
+  margin: 0;
+  font-size: var(--heading-size);
+  font-weight: var(--heading-weight);
+}
+.zc-entry-actions {
+  display: flex;
+  gap: var(--space-6);
+}
+.zc-entry-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-5);
+  padding: var(--space-8);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-xl);
+  color: var(--text-3);
+}
+.zc-entry-drop p {
+  margin: 0;
+}
+.zc-entry-drop.is-dragging {
+  border-color: var(--text);
+  background: var(--raised);
+  color: var(--text);
+}
+.zc-entry-paths {
+  width: 100%;
+  margin-top: var(--space-4);
+}
+.zc-entry-recent-section h2 {
+  color: var(--text-4);
+  font-size: var(--body-size);
+  font-weight: var(--heading-weight);
+}
+.zc-entry-recents {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-6);
+  padding: 0;
+  margin: var(--space-5) 0 0;
+  list-style: none;
+}
+.zc-entry-recents li {
+  position: relative;
+  min-width: 0;
+}
+.zc-entry-recents li > .zc-btn {
+  width: 100%;
+  height: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  text-align: left;
+}
+.zc-entry-recents li > .zc-btn:hover {
+  background: var(--panel-2);
+  border-color: var(--text);
+}
+.zc-start-content > .zc-entry-actions > .zc-btn {
+  flex: 1;
+  height: 112px;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-6);
+  border-radius: var(--radius-xl);
+  border-color: var(--line);
+  background: var(--panel);
+}
+.zc-start-content > .zc-entry-actions > .zc-btn:hover {
+  background: var(--panel-2);
+  border-color: var(--text);
+}
+.zc-start-content > .zc-entry-actions .zc-icon {
+  width: 28px;
+  height: 28px;
+}
+.zc-entry-cover {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: var(--raised);
+  color: var(--text-4);
+}
+.zc-entry-cover img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.zc-entry-caption {
+  padding: var(--space-5);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.zc-entry-recents small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: var(--space-2);
+  color: var(--text-4);
+}
+.zc-entry-recents .is-missing > .zc-btn {
+  opacity: 0.5;
+}
+.zc-entry-recents .zc-ibtn {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  background: var(--panel);
+}
+.zc-entry-menu {
+  position: absolute;
+  top: var(--menubar-h);
+  left: var(--space-8);
+  z-index: 20;
+  width: min(400px, calc(100vw - var(--space-8) * 2));
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  max-height: 80vh;
+  overflow: auto;
+}
+.zc-entry-form {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  width: min(520px, 90vw);
+  max-height: 90vh;
+  overflow: auto;
+}
+.zc-entry-form label,
+.zc-entry-paths {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  color: var(--text-3);
+}
+.zc-entry-form .zc-input,
+.zc-entry-paths .zc-input {
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--input-h);
+  padding: 0 var(--space-5);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background-color: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+.zc-entry-paths .zc-textarea {
+  height: auto;
+  min-height: calc(var(--input-h) * 2);
+  padding: var(--space-5);
+  resize: vertical;
+}
+.zc-entry-select {
+  appearance: none;
+}
+.zc-entry-form label:has(select) {
+  position: relative;
+}
+.zc-entry-form label:has(select)::after {
+  content: "";
+  position: absolute;
+  right: var(--space-6);
+  bottom: calc(var(--input-h) / 2 - 2px);
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid var(--text-4);
+  border-bottom: 1.5px solid var(--text-4);
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+.zc-entry-form .zc-entry-select {
+  padding-right: var(--space-12);
+}
+.zc-entry-form .zc-entry-actions {
+  justify-content: flex-end;
+  margin-top: var(--space-4);
+}
+.zc-entry-form .zc-input::placeholder,
+.zc-entry-paths .zc-input::placeholder {
+  color: var(--text-4);
+}
+.zc-entry-form .zc-input:focus,
+.zc-entry-paths .zc-input:focus {
+  outline: none;
+  border-color: var(--text);
+}
+.zc-entry-menu button:focus-visible,
+.zc-start button:focus-visible,
+.zc-entry-form button:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+.zc-start pre,
+.zc-entry-form pre,
+.zc-entry-menu pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.zc-shell:has(.zc-start) {
+  grid-template-rows: var(--menubar-h) minmax(0, 1fr);
+}
+.zc-entry-backdrop {
+  display: grid;
+  place-items: center;
+}

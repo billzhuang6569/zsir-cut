@@ -7,6 +7,7 @@ import { ExportPanel } from "./ExportPanel.js";
 import { useHistoryPanel } from "./HistoryPanel.js";
 import { useMediaPanel } from "./MediaPanel.js";
 import { sourceProject } from "./media.js";
+import { ProjectEntry } from "./ProjectEntry.js";
 import { useSubtitlePanel } from "./SubtitlePanel.js";
 import { applyUi, initialState } from "./state.js";
 import { TimelinePreview } from "./TimelinePreview.js";
@@ -76,11 +77,12 @@ export function App({ config }: { config?: { port: number; token: string } }) {
         return next;
       },
       project: (path, view) => {
-        if (firstProject) {
+        if (firstProject || path !== current.current.project) {
+          setNotices([]);
           firstProject = false;
           setConnectionEpoch((value) => value + 1);
         }
-        update({ ...current.current, project: path });
+        update({ ...(path === current.current.project ? current.current : initialState()), project: path });
         setProject(view);
         setError(null);
       },
@@ -137,7 +139,17 @@ export function App({ config }: { config?: { port: number; token: string } }) {
     <main className="zc-shell">
       <section aria-label="菜单栏" className="zc-menubar">
         <strong>庄Sir剪辑助手</strong>
-        <span>{project?.name ?? "未打开工程"}</span>
+        <ProjectEntry
+          aiBusy={ai.generating}
+          connectionEpoch={connectionEpoch}
+          config={config}
+          project={project}
+          call={rawCall}
+          error={error}
+          changed={(media) => {
+            if (media) update({ ...current.current, panel: "media" });
+          }}
+        />
         {project && <span className="zc-muted">r{project.revision.seq}</span>}
         <span className="zc-grow" />
         <button
@@ -149,88 +161,92 @@ export function App({ config }: { config?: { port: number; token: string } }) {
           导出
         </button>
       </section>
-      <section aria-label="功能区" className="zc-functions">
-        <div className="zc-tabs" role="tablist" aria-label="功能">
-          {PANELS.map((panel) => (
-            <button
-              key={panel}
-              id={`${uniqueId}-tab-${panel}`}
-              type="button"
-              role="tab"
-              aria-selected={state.panel === panel}
-              aria-controls={`${uniqueId}-function-panel`}
-              className="zc-tab"
-              onClick={() => update(applyUi(current.current, "ui_show_panel", { panel }))}
+      {project && (
+        <>
+          <section aria-label="功能区" className="zc-functions">
+            <div className="zc-tabs" role="tablist" aria-label="功能">
+              {PANELS.map((panel) => (
+                <button
+                  key={panel}
+                  id={`${uniqueId}-tab-${panel}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={state.panel === panel}
+                  aria-controls={`${uniqueId}-function-panel`}
+                  className="zc-tab"
+                  onClick={() => update(applyUi(current.current, "ui_show_panel", { panel }))}
+                >
+                  {labels[panel]}
+                </button>
+              ))}
+            </div>
+            <div
+              id={`${uniqueId}-function-panel`}
+              role="tabpanel"
+              aria-labelledby={`${uniqueId}-tab-${state.panel}`}
+              className="zc-pad zc-function-panel"
+              ref={(node) => {
+                node?.toggleAttribute("inert", history.viewing);
+              }}
             >
-              {labels[panel]}
-            </button>
-          ))}
-        </div>
-        <div
-          id={`${uniqueId}-function-panel`}
-          role="tabpanel"
-          aria-labelledby={`${uniqueId}-tab-${state.panel}`}
-          className="zc-pad zc-function-panel"
-          ref={(node) => {
-            node?.toggleAttribute("inert", history.viewing);
-          }}
-        >
-          <h2>{labels[state.panel]}</h2>
-          {state.panel === "media" && media.library}
-          {state.panel === "chapters" && chapters.controls}
-          {state.panel === "subtitles" && subtitles.controls}
-          <div className="zc-ai-body" hidden={state.panel !== "ai"}>
-            {ai.chat}
-          </div>
-        </div>
-      </section>
-      <section
-        aria-label="参数区"
-        className="zc-parameters zc-pad"
-        data-panel={state.history?.open ? "history" : state.panel}
-      >
-        {state.history?.open ? (
-          history.panel
-        ) : (
-          <>
-            <h2>{parameters[state.panel]}</h2>
-            {state.panel === "ai" && ai.parameters}
-            {state.panel === "media" && media.parameters}
-            {state.panel === "chapters" && chapters.outline}
-            {state.panel === "subtitles" && subtitles.parameters}
-          </>
-        )}
-      </section>
-      {source && state.media && (
-        <TimelinePreview
-          viewerOnly
-          project={source}
-          state={{ ...state, playhead: { at: state.media.at }, range: null, loop: false }}
-          update={updateSource}
-          config={config}
-          error={null}
-          dragging={dragging}
-          call={call}
-        />
+              <h2>{labels[state.panel]}</h2>
+              {state.panel === "media" && media.library}
+              {state.panel === "chapters" && chapters.controls}
+              {state.panel === "subtitles" && subtitles.controls}
+              <div className="zc-ai-body" hidden={state.panel !== "ai"}>
+                {ai.chat}
+              </div>
+            </div>
+          </section>
+          <section
+            aria-label="参数区"
+            className="zc-parameters zc-pad"
+            data-panel={state.history?.open ? "history" : state.panel}
+          >
+            {state.history?.open ? (
+              history.panel
+            ) : (
+              <>
+                <h2>{parameters[state.panel]}</h2>
+                {state.panel === "ai" && ai.parameters}
+                {state.panel === "media" && media.parameters}
+                {state.panel === "chapters" && chapters.outline}
+                {state.panel === "subtitles" && subtitles.parameters}
+              </>
+            )}
+          </section>
+          {source && state.media && (
+            <TimelinePreview
+              viewerOnly
+              project={source}
+              state={{ ...state, playhead: { at: state.media.at }, range: null, loop: false }}
+              update={updateSource}
+              config={config}
+              error={null}
+              dragging={dragging}
+              call={call}
+            />
+          )}
+          <TimelinePreview
+            hideViewer={Boolean(source)}
+            onMediaDrop={(id, at, track) => {
+              const item = project?.media.find((m) => m.id === id);
+              if (item && !history.viewing) media.place(item, at, track);
+            }}
+            project={history.view}
+            historyBanner={history.banner}
+            onHistory={history.toggle}
+            readOnly={history.viewing}
+            state={state}
+            update={update}
+            config={config}
+            error={error}
+            errorDetail={errorDetail}
+            dragging={dragging}
+            call={call}
+          />
+        </>
       )}
-      <TimelinePreview
-        hideViewer={Boolean(source)}
-        onMediaDrop={(id, at, track) => {
-          const item = project?.media.find((m) => m.id === id);
-          if (item && !history.viewing) media.place(item, at, track);
-        }}
-        project={history.view}
-        historyBanner={history.banner}
-        onHistory={history.toggle}
-        readOnly={history.viewing}
-        state={state}
-        update={update}
-        config={config}
-        error={error}
-        errorDetail={errorDetail}
-        dragging={dragging}
-        call={call}
-      />
       {project && (
         <ExportPanel project={project} state={state} update={update} call={call} config={config} fcpIcon={fcpIcon} />
       )}

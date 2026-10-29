@@ -24,14 +24,14 @@ fn main() {
         .plugin(tauri_plugin_opener::Builder::new().build())
         .setup(|app| {
             let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
-            let project = std::env::var_os("ZCUT_PROJECT")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|| root.join("examples/interview.zcut.json"));
-            let child = Command::new("node")
-                .current_dir(&root)
+            let mut command = Command::new("node");
+            command.current_dir(&root)
                 .arg(root.join("packages/app-host/dist/index.js"))
-                .args(["--desktop", "--project"])
-                .arg(&project)
+                .arg("--desktop");
+            if let Some(project) = std::env::var_os("ZCUT_PROJECT").filter(|value| !value.is_empty()) {
+                command.arg("--project").arg(project);
+            }
+            let child = command
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::inherit())

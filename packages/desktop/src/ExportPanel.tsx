@@ -6,6 +6,7 @@ import type { UiState } from "../../app-host/src/ui.js";
 import { Button } from "./ai-components.js";
 import { Icon, IconButton } from "./components.js";
 import type { ProjectView } from "./connection.js";
+import { DESKTOP_AUTHOR } from "./connection.js";
 import { SubtitleCanvas } from "./SubtitleCanvas.js";
 import { mediaUrl } from "./TimelinePreview.js";
 import {
@@ -113,7 +114,7 @@ export function ExportPanel({
       timeline_id: latest.current.project.id,
       base_revision: latest.current.project.revision.id,
       idempotency_key: crypto.randomUUID(),
-      author: { kind: "human", name: "桌面用户" },
+      author: DESKTOP_AUTHOR,
     }),
     [],
   );
