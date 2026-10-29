@@ -39,6 +39,22 @@ export interface Proxy {
   fingerprint: Fingerprint;
 }
 
+export interface MediaOrganize {
+  tags?: string[];
+  folders?: string[];
+  rating?: number;
+  note?: string;
+  link?: string;
+}
+
+export interface Recognition {
+  language?: string;
+  reference_text?: string;
+  terms?: string[];
+  remove_fillers?: boolean;
+  filler_words?: string[];
+}
+
 export interface Media {
   id: string;
   kind: "video" | "audio" | "image";
@@ -53,6 +69,7 @@ export interface Media {
   video?: MediaVideo;
   audio?: MediaAudio;
   proxy?: Proxy;
+  organize?: MediaOrganize;
   ext?: Extension;
 }
 
@@ -150,6 +167,7 @@ export interface Marker {
   at: Rational;
   duration: Rational;
   kind: "note" | "todo" | "chapter" | "review";
+  level?: 1 | 2;
   text: string;
   ext?: Extension;
 }
@@ -291,10 +309,11 @@ export interface SubtitleStyle {
 
 export interface Project {
   schema: "zsir-cut/timeline";
-  schema_version: "0.1";
+  schema_version: "0.2";
   id: string;
   name: string;
   revision: Revision;
+  recognition?: Recognition;
   media: Media[];
   timelines: Timeline[];
   transcripts: Transcript[];

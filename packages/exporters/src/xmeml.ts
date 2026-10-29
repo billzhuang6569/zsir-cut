@@ -506,6 +506,19 @@ export const xmemlExporter: Exporter & { validationNotes?: string } = {
   },
   losses(project, timeline) {
     const items: LossItem[] = [];
+    for (const marker of timeline.markers)
+      if (marker.kind === "chapter" && marker.level !== undefined)
+        items.push(
+          loss(
+            marker.id,
+            "marker",
+            "marker_level",
+            "approximated",
+            "warning",
+            "R_FORMAT_NO_FIELD",
+            "目标格式的章节标记不区分层级",
+          ),
+        );
     const cuts = new Map<string, CutRow[]>();
     for (const row of cuttingList(project, timeline, "premiere-25-xmeml-5"))
       cuts.set(row.clip_id, [...(cuts.get(row.clip_id) ?? []), row]);

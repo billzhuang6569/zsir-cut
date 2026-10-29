@@ -1,0 +1,283 @@
+{
+  "OTIO_SCHEMA": "Timeline.1",
+  "metadata": {
+    "zsir": {
+      "project_id": "prj_minimal",
+      "revision": "rev_example_1",
+      "export_id": "prj_minimal:rev_example_1:tl_main"
+    }
+  },
+  "name": "主时间线",
+  "global_start_time": {
+    "OTIO_SCHEMA": "RationalTime.1",
+    "rate": 25,
+    "value": 0
+  },
+  "tracks": {
+    "OTIO_SCHEMA": "Stack.1",
+    "metadata": {
+      "zsir": {
+        "timeline_id": "tl_main"
+      }
+    },
+    "name": "tracks",
+    "source_range": null,
+    "effects": [],
+    "markers": [
+      {
+        "OTIO_SCHEMA": "Marker.2",
+        "metadata": {
+          "zsir": {
+            "kind": "chapter",
+            "marker_id": "mrk_parent"
+          }
+        },
+        "name": "一级",
+        "color": "RED",
+        "marked_range": {
+          "OTIO_SCHEMA": "TimeRange.1",
+          "duration": {
+            "OTIO_SCHEMA": "RationalTime.1",
+            "rate": 25,
+            "value": 0
+          },
+          "start_time": {
+            "OTIO_SCHEMA": "RationalTime.1",
+            "rate": 25,
+            "value": 0
+          }
+        },
+        "comment": ""
+      },
+      {
+        "OTIO_SCHEMA": "Marker.2",
+        "metadata": {
+          "zsir": {
+            "kind": "chapter",
+            "marker_id": "mrk_child"
+          }
+        },
+        "name": "二级",
+        "color": "RED",
+        "marked_range": {
+          "OTIO_SCHEMA": "TimeRange.1",
+          "duration": {
+            "OTIO_SCHEMA": "RationalTime.1",
+            "rate": 25,
+            "value": 0
+          },
+          "start_time": {
+            "OTIO_SCHEMA": "RationalTime.1",
+            "rate": 25,
+            "value": 25
+          }
+        },
+        "comment": ""
+      },
+      {
+        "OTIO_SCHEMA": "Marker.2",
+        "metadata": {
+          "zsir": {
+            "kind": "chapter",
+            "marker_id": "mrk_default"
+          }
+        },
+        "name": "默认",
+        "color": "RED",
+        "marked_range": {
+          "OTIO_SCHEMA": "TimeRange.1",
+          "duration": {
+            "OTIO_SCHEMA": "RationalTime.1",
+            "rate": 25,
+            "value": 0
+          },
+          "start_time": {
+            "OTIO_SCHEMA": "RationalTime.1",
+            "rate": 25,
+            "value": 50
+          }
+        },
+        "comment": ""
+      },
+      {
+        "OTIO_SCHEMA": "Marker.2",
+        "metadata": {
+          "zsir": {
+            "kind": "note",
+            "marker_id": "mrk_note"
+          }
+        },
+        "name": "备注",
+        "color": "RED",
+        "marked_range": {
+          "OTIO_SCHEMA": "TimeRange.1",
+          "duration": {
+            "OTIO_SCHEMA": "RationalTime.1",
+            "rate": 25,
+            "value": 0
+          },
+          "start_time": {
+            "OTIO_SCHEMA": "RationalTime.1",
+            "rate": 25,
+            "value": 75
+          }
+        },
+        "comment": ""
+      }
+    ],
+    "enabled": true,
+    "color": null,
+    "children": [
+      {
+        "OTIO_SCHEMA": "Track.1",
+        "metadata": {
+          "zsir": {
+            "track_id": "trk_v1"
+          }
+        },
+        "name": "V1",
+        "source_range": null,
+        "effects": [],
+        "markers": [],
+        "enabled": true,
+        "color": null,
+        "children": [
+          {
+            "OTIO_SCHEMA": "Clip.2",
+            "metadata": {
+              "zsir": {
+                "clip_id": "clp_v1",
+                "occurrence_id": "occ_1",
+                "media_id": "med_a"
+              }
+            },
+            "name": "A001.mov",
+            "source_range": {
+              "OTIO_SCHEMA": "TimeRange.1",
+              "start_time": {
+                "OTIO_SCHEMA": "RationalTime.1",
+                "rate": 25,
+                "value": 900100
+              },
+              "duration": {
+                "OTIO_SCHEMA": "RationalTime.1",
+                "rate": 25,
+                "value": 250
+              }
+            },
+            "effects": [],
+            "markers": [],
+            "enabled": true,
+            "color": null,
+            "media_references": {
+              "DEFAULT_MEDIA": {
+                "OTIO_SCHEMA": "ExternalReference.1",
+                "metadata": {
+                  "zsir": {
+                    "media_id": "med_a",
+                    "source_origin": 900000
+                  }
+                },
+                "name": "A001.mov",
+                "available_range": {
+                  "OTIO_SCHEMA": "TimeRange.1",
+                  "duration": {
+                    "OTIO_SCHEMA": "RationalTime.1",
+                    "rate": 25,
+                    "value": 1500
+                  },
+                  "start_time": {
+                    "OTIO_SCHEMA": "RationalTime.1",
+                    "rate": 25,
+                    "value": 900000
+                  }
+                },
+                "available_image_bounds": null,
+                "target_url": "/__MEDIA_ROOT__/med_a.mov"
+              }
+            },
+            "active_media_reference_key": "DEFAULT_MEDIA"
+          }
+        ],
+        "kind": "Video"
+      },
+      {
+        "OTIO_SCHEMA": "Track.1",
+        "metadata": {
+          "zsir": {
+            "track_id": "trk_a1"
+          }
+        },
+        "name": "A1",
+        "source_range": null,
+        "effects": [],
+        "markers": [],
+        "enabled": true,
+        "color": null,
+        "children": [
+          {
+            "OTIO_SCHEMA": "Clip.2",
+            "metadata": {
+              "zsir": {
+                "clip_id": "clp_a1",
+                "occurrence_id": "occ_1",
+                "media_id": "med_a",
+                "source_channels": [
+                  0,
+                  1
+                ]
+              }
+            },
+            "name": "A001.mov",
+            "source_range": {
+              "OTIO_SCHEMA": "TimeRange.1",
+              "start_time": {
+                "OTIO_SCHEMA": "RationalTime.1",
+                "rate": 25,
+                "value": 900100
+              },
+              "duration": {
+                "OTIO_SCHEMA": "RationalTime.1",
+                "rate": 25,
+                "value": 250
+              }
+            },
+            "effects": [],
+            "markers": [],
+            "enabled": true,
+            "color": null,
+            "media_references": {
+              "DEFAULT_MEDIA": {
+                "OTIO_SCHEMA": "ExternalReference.1",
+                "metadata": {
+                  "zsir": {
+                    "media_id": "med_a",
+                    "source_origin": 900000
+                  }
+                },
+                "name": "A001.mov",
+                "available_range": {
+                  "OTIO_SCHEMA": "TimeRange.1",
+                  "duration": {
+                    "OTIO_SCHEMA": "RationalTime.1",
+                    "rate": 25,
+                    "value": 1500
+                  },
+                  "start_time": {
+                    "OTIO_SCHEMA": "RationalTime.1",
+                    "rate": 25,
+                    "value": 900000
+                  }
+                },
+                "available_image_bounds": null,
+                "target_url": "/__MEDIA_ROOT__/med_a.mov"
+              }
+            },
+            "active_media_reference_key": "DEFAULT_MEDIA"
+          }
+        ],
+        "kind": "Audio"
+      }
+    ]
+  }
+}

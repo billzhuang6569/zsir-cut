@@ -1,6 +1,6 @@
 {
   "schema": "zsir-cut/timeline",
-  "schema_version": "0.1",
+  "schema_version": "0.2",
   "id": "prj_hidden",
   "name": "隐藏字词不断开字幕",
   "revision": {

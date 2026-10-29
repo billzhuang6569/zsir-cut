@@ -21,7 +21,7 @@
       "const": "zsir-cut/timeline"
     },
     "schema_version": {
-      "const": "0.1"
+      "const": "0.2"
     },
     "id": {
       "$ref": "#/$defs/id_prj"
@@ -59,6 +59,9 @@
     },
     "ext": {
       "$ref": "#/$defs/ext"
+    },
+    "recognition": {
+      "$ref": "#/$defs/recognition"
     }
   },
   "$defs": {
@@ -380,6 +383,9 @@
         },
         "ext": {
           "$ref": "#/$defs/ext"
+        },
+        "organize": {
+          "$ref": "#/$defs/organize"
         }
       },
       "allOf": [
@@ -866,6 +872,13 @@
         },
         "ext": {
           "$ref": "#/$defs/ext"
+        },
+        "level": {
+          "type": "integer",
+          "enum": [
+            1,
+            2
+          ]
         }
       }
     },
@@ -1289,6 +1302,64 @@
         },
         "ext": {
           "$ref": "#/$defs/ext"
+        }
+      }
+    },
+    "recognition": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "language": {
+          "type": "string"
+        },
+        "reference_text": {
+          "type": "string"
+        },
+        "terms": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "remove_fillers": {
+          "type": "boolean"
+        },
+        "filler_words": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "organize": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "folders": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "rating": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "note": {
+          "type": "string"
+        },
+        "link": {
+          "type": "string"
         }
       }
     }

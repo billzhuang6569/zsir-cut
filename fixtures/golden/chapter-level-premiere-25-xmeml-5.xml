@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xmeml version="5">
+  <sequence id="tl_main">
+    <name>主时间线</name>
+    <duration>250</duration>
+    <rate>
+      <timebase>25</timebase>
+      <ntsc>FALSE</ntsc>
+    </rate>
+    <timecode>
+      <rate>
+        <timebase>25</timebase>
+        <ntsc>FALSE</ntsc>
+      </rate>
+      <string>00:00:00:00</string>
+      <frame>0</frame>
+      <displayformat>NDF</displayformat>
+    </timecode>
+    <media>
+      <video>
+        <format>
+          <samplecharacteristics>
+            <rate>
+              <timebase>25</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <width>1920</width>
+            <height>1080</height>
+          </samplecharacteristics>
+        </format>
+        <track id="trk_v1">
+          <clipitem id="clp_v1">
+            <name>A001.mov</name>
+            <enabled>TRUE</enabled>
+            <duration>250</duration>
+            <rate>
+              <timebase>25</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>0</start>
+            <end>250</end>
+            <in>100</in>
+            <out>350</out>
+            <file id="med_a">
+              <name>A001.mov</name>
+              <pathurl>file://localhost/__MEDIA_ROOT__/med_a.mov</pathurl>
+              <rate>
+                <timebase>25</timebase>
+                <ntsc>FALSE</ntsc>
+              </rate>
+              <duration>1500</duration>
+              <timecode>
+                <rate>
+                  <timebase>25</timebase>
+                  <ntsc>FALSE</ntsc>
+                </rate>
+                <string>10:00:00:00</string>
+                <frame>900000</frame>
+                <displayformat>NDF</displayformat>
+              </timecode>
+              <media>
+                <video>
+                  <samplecharacteristics>
+                    <rate>
+                      <timebase>25</timebase>
+                      <ntsc>FALSE</ntsc>
+                    </rate>
+                    <width>1920</width>
+                    <height>1080</height>
+                  </samplecharacteristics>
+                </video>
+                <audio>
+                  <samplecharacteristics>
+                    <depth>16</depth>
+                    <samplerate>48000</samplerate>
+                  </samplecharacteristics>
+                  <channelcount>2</channelcount>
+                </audio>
+              </media>
+            </file>
+            <logginginfo>
+              <lognote>zsir-cut clip=clp_v1 occ=occ_1 media=med_a speed=1</lognote>
+            </logginginfo>
+            <link>
+              <linkclipref>clp_v1</linkclipref>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+              <clipindex>1</clipindex>
+            </link>
+            <link>
+              <linkclipref>clp_a1</linkclipref>
+              <mediatype>audio</mediatype>
+              <trackindex>1</trackindex>
+              <clipindex>1</clipindex>
+            </link>
+          </clipitem>
+          <enabled>TRUE</enabled>
+        </track>
+      </video>
+      <audio>
+        <format>
+          <samplecharacteristics>
+            <depth>16</depth>
+            <samplerate>48000</samplerate>
+          </samplecharacteristics>
+        </format>
+        <track id="trk_a1">
+          <clipitem id="clp_a1">
+            <name>A001.mov</name>
+            <enabled>TRUE</enabled>
+            <duration>250</duration>
+            <rate>
+              <timebase>25</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>0</start>
+            <end>250</end>
+            <in>100</in>
+            <out>350</out>
+            <file id="med_a"/>
+            <logginginfo>
+              <lognote>zsir-cut clip=clp_a1 occ=occ_1 media=med_a speed=1</lognote>
+            </logginginfo>
+            <link>
+              <linkclipref>clp_v1</linkclipref>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+              <clipindex>1</clipindex>
+            </link>
+            <link>
+              <linkclipref>clp_a1</linkclipref>
+              <mediatype>audio</mediatype>
+              <trackindex>1</trackindex>
+              <clipindex>1</clipindex>
+            </link>
+          </clipitem>
+          <enabled>TRUE</enabled>
+        </track>
+      </audio>
+    </media>
+    <marker id="mrk_parent">
+      <name>chapter</name>
+      <comment>一级</comment>
+      <in>0</in>
+      <out>0</out>
+    </marker>
+    <marker id="mrk_child">
+      <name>chapter</name>
+      <comment>二级</comment>
+      <in>25</in>
+      <out>25</out>
+    </marker>
+    <marker id="mrk_default">
+      <name>chapter</name>
+      <comment>默认</comment>
+      <in>50</in>
+      <out>50</out>
+    </marker>
+    <marker id="mrk_note">
+      <name>note</name>
+      <comment>备注</comment>
+      <in>75</in>
+      <out>75</out>
+    </marker>
+  </sequence>
+</xmeml>

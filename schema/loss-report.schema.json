@@ -42,7 +42,7 @@
     "feature": {
       "enum": [
         "clip_cut", "timecode", "av_sync", "clip_enabled", "gain", "transform", "cross_dissolve",
-        "speed_constant", "speed_segmented", "speed_smooth", "reverse", "marker",
+        "speed_constant", "speed_segmented", "speed_smooth", "reverse", "marker", "marker_level",
         "subtitle_text_timing", "subtitle_style", "subtitle_override", "ext_data", "media"
       ]
     },

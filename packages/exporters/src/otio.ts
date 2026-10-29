@@ -444,6 +444,19 @@ export const otioExporter: Exporter & { validationNotes?: string } = {
   },
   losses(project, timeline) {
     const items: LossItem[] = [];
+    for (const marker of timeline.markers)
+      if (marker.kind === "chapter" && marker.level !== undefined)
+        items.push(
+          item(
+            marker.id,
+            "marker",
+            "marker_level",
+            "approximated",
+            "warning",
+            "R_FORMAT_NO_FIELD",
+            "目标格式的章节标记不区分层级",
+          ),
+        );
     for (const style of project.subtitle_styles)
       items.push(
         item(

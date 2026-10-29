@@ -10,6 +10,7 @@ import {
   textWidth,
   transcriptRules,
 } from "./subtitle-rules.ts";
+import { automaticTrackName } from "./track-name.ts";
 import type {
   Cue,
   Project,
@@ -418,7 +419,7 @@ export function applySubtitleEdit(
       timeline.tracks.push({
         id: (op.id as string | undefined) ?? generate("trk_"),
         kind: "subtitle",
-        name: op.name as string,
+        name: (op.name as string | undefined) ?? automaticTrackName(timeline.tracks, "subtitle"),
         enabled: true,
         language: op.language as string,
         carrier_tracks: op.carrier_tracks as string[],

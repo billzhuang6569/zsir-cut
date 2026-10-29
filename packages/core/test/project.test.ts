@@ -13,6 +13,44 @@ function parsed(text: string) {
 }
 
 describe("project IO", () => {
+  it("migrates every 0.1 example by changing only the version bytes", () => {
+    for (const name of readdirSync(new URL("examples", root)).filter((entry) => entry.endsWith(".zcut.json"))) {
+      const current = read(`examples/${name}`);
+      const legacy = current.replace('"schema_version": "0.2"', '"schema_version": "0.1"');
+      expect(serializeProject(parsed(legacy).project)).toBe(current);
+    }
+  });
+
+  it("preserves recognition and organize without injecting defaults", () => {
+    const source = JSON.parse(standard);
+    source.recognition = {
+      language: "zh",
+      reference_text: "  原文\n",
+      terms: ["飞书", "庄Sir"],
+      remove_fillers: true,
+      filler_words: ["嗯"],
+    };
+    source.media[0].organize = {
+      tags: ["采访", "产品"],
+      folders: ["客户/原片"],
+      rating: 5,
+      note: "笔记",
+      link: "来源",
+    };
+    const first = serializeProject(parsed(JSON.stringify(source)).project);
+    expect(JSON.parse(first)).toEqual(source);
+    expect(serializeProject(parsed(first).project)).toBe(first);
+    expect(parsed(standard).project.recognition).toBeUndefined();
+  });
+
+  it("rejects duplicate terms/tags and invalid ratings in project input", () => {
+    for (const patch of [
+      { recognition: { terms: ["a", "a"] } },
+      ...[-1, 6, 1.5].map((rating) => ({ media: [{ ...JSON.parse(standard).media[0], organize: { rating } }] })),
+      { media: [{ ...JSON.parse(standard).media[0], organize: { tags: ["a", "a"] } }] },
+    ])
+      expect(parseProject(JSON.stringify({ ...JSON.parse(standard), ...patch })).ok).toBe(false);
+  });
   for (const directory of ["examples", "fixtures/projects"]) {
     for (const name of readdirSync(new URL(directory, root)).filter((entry) => entry.endsWith(".zcut.json"))) {
       it(`round trips ${directory}/${name} byte for byte`, () => {
@@ -88,7 +126,7 @@ describe("project IO", () => {
   });
 
   it("prompts an upgrade for an unrecognized project version", () => {
-    for (const version of ["0.2", "1.0"]) {
+    for (const version of ["0.3", "1.0"]) {
       const source = JSON.parse(standard);
       source.schema_version = version;
       const result = parseProject(JSON.stringify(source));

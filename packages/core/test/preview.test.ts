@@ -128,7 +128,7 @@ async function setup() {
   ]);
   const project: Project = {
     schema: "zsir-cut/timeline",
-    schema_version: "0.1",
+    schema_version: "0.2",
     id: "prj_preview",
     name: "Barcode",
     revision: {

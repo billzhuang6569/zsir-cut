@@ -1150,3 +1150,126 @@ describe("place tokens and request times", () => {
     );
   });
 });
+
+describe("format 0.2 operations", () => {
+  it("updates only organize, deduplicates tags in order, and restores content bytes on undo", async () => {
+    const before = await read();
+    const output = await edit([
+      {
+        op: "update_media",
+        media_id: "med_A",
+        tags: ["二", "一", "二"],
+        folders: ["客户/素材"],
+        rating: 5,
+        note: "备注",
+        link: "https://example.com",
+      },
+    ]);
+    expect(output.status).toBe("applied");
+    expect(output.changes).toEqual([expect.objectContaining({ entity: "media", id: "med_A", op: "update_media" })]);
+    const after = await read();
+    expect(after.media[0]!.organize).toEqual({
+      tags: ["二", "一"],
+      folders: ["客户/素材"],
+      rating: 5,
+      note: "备注",
+      link: "https://example.com",
+    });
+    const withoutOrganize = structuredClone(after);
+    delete withoutOrganize.media[0]!.organize;
+    expect(withoutRevision(withoutOrganize)).toBe(withoutRevision(before));
+    await validateAndUndo(before);
+    const restored = await read();
+    restored.revision = before.revision;
+    expect(serializeProject(restored)).toBe(serializeProject(before));
+  });
+
+  it("replaces supplied organize fields and keeps unspecified fields", async () => {
+    await edit([{ op: "update_media", media_id: "med_A", tags: ["old"], note: "keep" }]);
+    expect((await edit([{ op: "update_media", media_id: "med_A", tags: [] }])).status).toBe("applied");
+    expect((await read()).media[0]!.organize).toEqual({ tags: [], note: "keep" });
+    for (const fields of [{ path: "other" }, { rating: -1 }, { rating: 6 }, { rating: 0.5 }, {}])
+      expect((await edit([{ op: "update_media", media_id: "med_A", ...fields }])).error?.code).toBe("E_VALIDATION");
+  });
+
+  it("names tracks after the highest existing same-kind name, including Z to AA", async () => {
+    expect(
+      (
+        await edit([
+          { op: "rename_track", track_id: "trk_v1", name: "视频 Z" },
+          { op: "add_track", id: "trk_new", kind: "video" },
+          { op: "add_track", kind: "video" },
+        ])
+      ).status,
+    ).toBe("applied");
+    expect((await read()).timelines[0]!.tracks.slice(-2).map((track) => track.name)).toEqual(["视频 AA", "视频 AB"]);
+    expect(
+      (
+        await edit([
+          {
+            op: "add_subtitle_track",
+            id: "trk_sub_new",
+            language: "zh",
+            carrier_tracks: ["trk_a1"],
+            default_style_id: "sty_zh",
+          },
+        ])
+      ).status,
+    ).toBe("applied");
+    expect((await read()).timelines[0]!.tracks.at(-1)!.name).toBe("字幕 A");
+  });
+
+  it("assigns rename_track to its target domain and rejects mixed batches atomically", async () => {
+    const subtitle = (await read()).timelines[0]!.tracks.find((track) => track.kind === "subtitle")!;
+    expect(
+      (
+        await edit([
+          { op: "rename_track", track_id: subtitle.id, name: "字幕 Z" },
+          {
+            op: "add_subtitle_track",
+            id: "trk_sub_new",
+            language: "zh",
+            carrier_tracks: ["trk_a1"],
+            default_style_id: subtitle.kind === "subtitle" ? subtitle.default_style_id : "",
+          },
+          { op: "rename_track", track_id: "trk_sub_new", name: "新字幕" },
+        ])
+      ).status,
+    ).toBe("applied");
+    const bytes = await readFile(path, "utf8");
+    expect(
+      (
+        await edit([
+          { op: "rename_track", track_id: subtitle.id, name: "混合" },
+          { op: "update_media", media_id: "med_A", note: "no" },
+        ])
+      ).error?.code,
+    ).toBe("E_MIXED_DOMAIN");
+    expect(await readFile(path, "utf8")).toBe(bytes);
+    expect((await edit([{ op: "rename_track", track_id: "trk_missing", name: "no" }])).error?.code).toBe("E_NOT_FOUND");
+  });
+
+  it("round trips chapter levels, updates them, and rejects levels on other markers at L1", async () => {
+    expect(
+      (
+        await edit([
+          { op: "add_marker", id: "mrk_level", at: "0s", duration: "0s", kind: "chapter", text: "章", level: 1 },
+        ])
+      ).status,
+    ).toBe("applied");
+    expect((await edit([{ op: "update_marker", marker_id: "mrk_level", level: 2 }])).status).toBe("applied");
+    expect((await read()).timelines[0]!.markers.find((marker) => marker.id === "mrk_level")?.level).toBe(2);
+    for (const kind of ["note", "todo", "review"]) {
+      const result = await edit([{ op: "add_marker", at: "0s", duration: "0s", kind, text: "bad", level: 1 }]);
+      expect(result.error?.code).toBe("E_VALIDATION");
+      expect(result.verification).toMatchObject({
+        level: "L1",
+        passed: false,
+        issues: expect.arrayContaining([expect.objectContaining({ code: "E_VALIDATION" })]),
+      });
+    }
+    expect((await edit([{ op: "update_marker", marker_id: "mrk_level", kind: "note" }])).error?.code).toBe(
+      "E_VALIDATION",
+    );
+  });
+});

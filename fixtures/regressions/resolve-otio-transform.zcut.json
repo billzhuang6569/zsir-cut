@@ -1,6 +1,6 @@
 {
   "schema": "zsir-cut/timeline",
-  "schema_version": "0.1",
+  "schema_version": "0.2",
   "id": "prj_resolve_otio_fix",
   "name": "Resolve OTIO path, DF, reverse and transform",
   "revision": {

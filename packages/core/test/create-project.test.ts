@@ -67,6 +67,22 @@ afterEach(async () => {
 });
 
 describe("create_project", () => {
+  it("automatically names three successive video tracks B, C, D", async () => {
+    await dispatch("create_project", input());
+    for (let index = 0; index < 3; index++) {
+      const result = await dispatch("edit", {
+        project,
+        author,
+        base_revision: (await read()).revision.id,
+        idempotency_key: `track-${index}`,
+        ops: [{ op: "add_track", kind: "video" }],
+      });
+      expect(result.status).toBe("applied");
+    }
+    expect(
+      (await read()).timelines[0]?.tracks.filter((track) => track.kind === "video").map((track) => track.name),
+    ).toEqual(["视频 A", "视频 B", "视频 C", "视频 D"]);
+  });
   it("creates the canonical empty project, tracks, style and first journal entry", async () => {
     const output = await dispatch("create_project", input({ subtitles: { language: "zh-Hans" } }));
     expect(output.status).toBe("applied");
@@ -75,7 +91,8 @@ describe("create_project", () => {
     const created = await read();
     const timeline = created.timelines[0];
     expect(created).toMatchObject({
-      schema_version: "0.1",
+      schema_version: "0.2",
+      recognition: { language: "zh-Hans" },
       name: "新工程",
       media: [],
       transcripts: [],
@@ -86,12 +103,12 @@ describe("create_project", () => {
       drop_frame: false,
       start_timecode: "00:00:00:00",
       tracks: [
-        { id: "trk_v1", name: "V1", enabled: true, clips: [], transitions: [] },
-        { id: "trk_a1", name: "A1" },
-        { id: "trk_a2", name: "A2" },
+        { id: "trk_v1", name: "视频 A", enabled: true, clips: [], transitions: [] },
+        { id: "trk_a1", name: "声音 A" },
+        { id: "trk_a2", name: "声音 B" },
         {
           id: "trk_sub1",
-          name: "字幕",
+          name: "字幕 A",
           language: "zh-Hans",
           carrier_tracks: ["trk_a1"],
           default_style_id: "sty_default",
