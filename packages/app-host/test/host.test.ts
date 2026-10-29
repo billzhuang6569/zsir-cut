@@ -138,7 +138,7 @@ describe("desktop host", () => {
       );
       await writeFile(project, "{}");
       expect(await send({ id: "failed-preview", type: "preview_data" })).toMatchObject({
-        envelope: { ok: false, error: { message: expect.stringContaining("Invalid project") } },
+        envelope: { ok: false, error: { message: expect.stringContaining("工程文件无效，可能已损坏或版本不兼容") } },
       });
       await copyFile(fixture, project);
       expect(await send({ id: "unknown", verb: "unknown", request: {} })).toMatchObject({
