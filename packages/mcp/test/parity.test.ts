@@ -268,6 +268,10 @@ describe("CLI and MCP", () => {
           },
         },
         ...[
+          [{ op: "set_recognition", terms: [" 飞书 ", "飞书", ""], remove_fillers: true }],
+          [{ op: "replace_text", find: "今天", replace: "现在" }],
+          [{ op: "replace_text", find: "先", replace: "首先" }],
+          [{ op: "replace_text", find: "never matches", replace: "" }],
           [{ op: "update_media", media_id: "med_A", tags: ["A", "A", "B"], rating: 4 }],
           [
             { op: "rename_track", track_id: "trk_v1", name: "视频 Z" },
@@ -450,6 +454,89 @@ describe("CLI and MCP", () => {
     expect(malformed.status).toBe(2);
     expect(validateEnvelope(JSON.parse(malformed.stdout)).valid).toBe(true);
   }, 15000);
+
+  it.each(["direct-srt", "direct-audio-wav"])("matches %s dry-run across CLI and MCP", async (profile) => {
+    const server = createServer();
+    const client = new Client({ name: "direct-test", version: "1" });
+    const [left, right] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(left), client.connect(right)]);
+    try {
+      const input = {
+        project,
+        base_revision: "rev_fixture_1",
+        idempotency_key: "direct-parity",
+        author,
+        profile,
+        dry_run: true,
+        output: join(directory, "out"),
+      };
+      const cliResult = invokeCli("export", input);
+      const mcpResult = (await client.callTool({ name: "zcut_export", arguments: input })).structuredContent as Record<
+        string,
+        unknown
+      >;
+      expect(cliResult.code).toBe(0);
+      expect(cliResult.envelope.status).toBe("dry_run");
+      expect(validateEnvelope(mcpResult).valid).toBe(true);
+      expect(withoutRequestId(cliResult.envelope)).toEqual(withoutRequestId(mcpResult));
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it.each(["direct-srt", "direct-audio-wav"])(
+    "matches %s worker results and bytes across CLI and MCP",
+    async (profile) => {
+      if (profile === "direct-audio-wav") {
+        const raw = JSON.parse(await readFile(project, "utf8"));
+        raw.media = [];
+        raw.transcripts = [];
+        raw.timelines[0].markers = [];
+        raw.timelines[0].tracks = [
+          { id: "trk_audio", kind: "audio", name: "Audio", enabled: true, clips: [], transitions: [] },
+        ];
+        await writeFile(project, JSON.stringify(raw));
+      }
+      const server = createServer();
+      const client = new Client({ name: "direct-worker", version: "1" });
+      const [left, right] = InMemoryTransport.createLinkedPair();
+      await Promise.all([server.connect(left), client.connect(right)]);
+      try {
+        const input = { project, base_revision: "rev_fixture_1", idempotency_key: "direct-worker", author, profile };
+        const run = spawnSync(process.execPath, [cli, "export", project, "--wait"], {
+          input: JSON.stringify({ ...input, output: join(directory, "cli") }),
+          encoding: "utf8",
+        });
+        const cliResult = JSON.parse(run.stdout);
+        expect(cliResult.status).toBe("applied");
+        const accepted = (
+          await client.callTool({ name: "zcut_export", arguments: { ...input, output: join(directory, "mcp") } })
+        ).structuredContent as { result: { job_id: string } };
+        let final: Record<string, unknown> | undefined;
+        for (let i = 0; i < 100; i++) {
+          const response = (
+            await client.callTool({ name: "zcut_job_status", arguments: { project, job_id: accepted.result.job_id } })
+          ).structuredContent as { result: { state: string; envelope: Record<string, unknown> } };
+          if (["succeeded", "failed"].includes(response.result.state)) {
+            final = response.result.envelope;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        expect(final).toBeDefined();
+        expect(withoutRequestId(cliResult)).toEqual(withoutRequestId(final as Record<string, unknown>));
+        for (const file of cliResult.result.files)
+          expect(await readFile(join(directory, "cli", file.name))).toEqual(
+            await readFile(join(directory, "mcp", file.name)),
+          );
+      } finally {
+        await client.close();
+        await server.close();
+      }
+    },
+    20000,
+  );
 
   it("matches export dry run and job status across CLI and MCP", async () => {
     const server = createServer({ exporterModule: fake });

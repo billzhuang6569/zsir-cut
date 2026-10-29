@@ -105,20 +105,100 @@ export function applySubtitleEdit(
   op: Op,
   generate: (prefix: string) => string,
   allowForce = false,
+  warnings: Record<string, unknown>[] = [],
 ): void {
   if (op.force === true && !allowForce) fail("E_SESSION_STATE", "force requires a manual approval session");
   const force = op.force === true && allowForce;
   switch (op.op) {
+    case "set_recognition": {
+      const { op: _op, ...fields } = op;
+      if (fields.terms)
+        fields.terms = [...new Set((fields.terms as string[]).map((term) => term.trim()).filter(Boolean))];
+      if (Object.keys(fields).length) project.recognition = { ...project.recognition, ...structuredClone(fields) };
+      break;
+    }
+    case "replace_text": {
+      const selected = op.transcript_ids as string[] | undefined;
+      const cueIds = op.cue_ids as string[] | undefined;
+      for (const id of selected ?? []) transcript(project, id);
+      for (const id of cueIds ?? []) cueOwner(project, id);
+      const fold = (text: string) =>
+        op.match_case
+          ? text
+          : text.replace(/\p{Script=Latin}/gu, (letter) => {
+              const lower = letter.toLowerCase();
+              return lower.length === letter.length ? lower : letter;
+            });
+      const skipped = new Set<string>();
+      for (const item of project.transcripts) {
+        if (selected && !selected.includes(item.id)) continue;
+        for (const cue of item.cues) {
+          if (cueIds && !cueIds.includes(cue.id)) continue;
+          let cursor = 0;
+          while (true) {
+            const [a, b] = cueSpan(item, cue);
+            const tokens = item.tokens.slice(a, b + 1);
+            const text = tokens.map((token) => token.text).join("");
+            const at = fold(text).indexOf(fold(op.find as string), cursor);
+            if (at < 0) break;
+            const end = at + (op.find as string).length;
+            let offset = 0;
+            const offsets = tokens.map((token) => {
+              const start = offset;
+              offset += token.text.length;
+              return { start, end: offset };
+            });
+            const first = offsets.findIndex((range) => range.end > at);
+            const last = offsets.findIndex((range) => range.end >= end);
+            try {
+              protect(item, a + first, a + last, force);
+            } catch (error) {
+              if (!(error instanceof EditError) || error.code !== "E_LOCKED") throw error;
+              skipped.add(cue.id);
+              cursor = end;
+              continue;
+            }
+            const suffix = tokens[last]!.text.slice(end - offsets[last]!.start);
+            applySubtitleEdit(
+              project,
+              timeline,
+              {
+                op: "edit_text",
+                transcript_id: item.id,
+                from_token: tokens[first]!.id,
+                to_token: tokens[last]!.id,
+                text: tokens[first]!.text.slice(0, at - offsets[first]!.start) + (op.replace as string) + suffix,
+                force,
+              },
+              generate,
+              allowForce,
+            );
+            const [nextA, nextB] = cueSpan(item, cue);
+            cursor =
+              item.tokens
+                .slice(nextA, nextB + 1)
+                .map((token) => token.text)
+                .join("").length -
+              (text.length - end);
+          }
+        }
+      }
+      if (skipped.size) warnings.push({ code: "W_REPLACE_SKIPPED_LOCKED", cue_ids: [...skipped] });
+      break;
+    }
     case "edit_text": {
       const item = transcript(project, op.transcript_id);
       const [first, last] = span(item, op.from_token, op.to_token);
       protect(item, first, last, force);
       const old = item.tokens.slice(first, last + 1);
-      const pieces = (op.text as string).includes(" ")
-        ? (op.text as string).trim().split(/\s+/u)
-        : ((op.text as string).match(
-            /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]+|[A-Za-z0-9]+|[^\s]/gu,
-          ) ?? []);
+      const pieces =
+        op.text === ""
+          ? [""]
+          : (op.text as string).includes(" ")
+            ? (op.text as string).trim().split(/\s+/u)
+            : ((op.text as string).match(
+                /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]+|[A-Za-z0-9]+|[^\s]/gu,
+              ) ?? []);
       if (!pieces.length) fail("E_VALIDATION", "Replacement text is empty");
       const ids = op.new_ids as string[] | undefined;
       if (ids && ids.length !== pieces.length) fail("E_VALIDATION", "new_ids length differs from token count");

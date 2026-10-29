@@ -504,3 +504,20 @@ describe("decisions", () => {
     expect(approved.result?.warnings).toEqual([expect.objectContaining({ code: "W_DECISIONS_PENDING", count: 1 })]);
   });
 });
+
+it("reviews recognition as subtitles and carries replace lock warnings into manual drafts", async () => {
+  const session_id = await begin();
+  const settings = await send("edit", { session_id, ops: [{ op: "set_recognition", terms: [" 飞书 "] }] });
+  expect(settings.status).toBe("drafted");
+  const reviewed = await send("session_review", { session_id }, settings.receipt?.after ?? "");
+  expect(reviewed.result?.timeline_changes).toEqual([]);
+  expect(reviewed.result?.subtitle_changes).toEqual([expect.objectContaining({ entity: "project" })]);
+  const op = { op: "replace_text", find: "今天", replace: "现在", cue_ids: ["cue_zh_01"] };
+  const skipped = await send("edit", { session_id, ops: [op] }, settings.receipt?.after ?? "");
+  expect(skipped.status).toBe("no_op");
+  expect(skipped.result?.warnings).toEqual([{ code: "W_REPLACE_SKIPPED_LOCKED", cue_ids: ["cue_zh_01"] }]);
+  const forced = await send("edit", { session_id, ops: [{ ...op, force: true }] }, settings.receipt?.after ?? "");
+  expect(forced.status, JSON.stringify(forced)).toBe("drafted");
+  expect(forced.result?.warnings).toBeUndefined();
+  expect((await load()).recognition).toBeUndefined();
+});
