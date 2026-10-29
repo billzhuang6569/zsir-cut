@@ -2,7 +2,7 @@
 import { execFile } from "node:child_process";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { once } from "node:events";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -41,7 +41,7 @@ const duration = time.refine((value) => !/^0(?:\/\d+)?s$/.test(value), "Duration
 const id = z.string().min(1).max(200);
 const uiSchemas = {
   ui_state: z.strictObject({}),
-  ui_show_panel: z.strictObject({ panel: z.enum([...PANELS, "export"]), sub: z.string().optional() }),
+  ui_show_panel: z.strictObject({ panel: z.enum([...PANELS, "export", "history"]), sub: z.string().optional() }),
   ui_seek: z.union([z.strictObject({ at: time }), z.strictObject({ id })]),
   ui_select: z.strictObject({ ids: z.array(id) }),
   ui_play: z.strictObject({
@@ -60,6 +60,7 @@ const uiStateSchema = z.strictObject({
   playing: z.boolean(),
   range: z.strictObject({ start: time, duration }).nullable(),
   loop: z.boolean(),
+  history: z.strictObject({ open: z.boolean(), revision: id.nullable(), label: z.string().nullable() }).optional(),
   export: z
     .strictObject({
       open: z.boolean(),
@@ -164,6 +165,31 @@ export async function readAiState(
   return { sessions, batches: batchStates };
 }
 
+export async function readHistoryBatches(root: string): Promise<string[]> {
+  let names: string[];
+  try {
+    names = await readdir(join(root, "batches"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+  const states = await Promise.all(
+    names
+      .sort()
+      .filter((name) => /^bat_[A-Za-z0-9_-]+$/.test(name))
+      .map(async (name) => {
+        try {
+          const state = JSON.parse(await readFile(join(root, "batches", name, "state.json"), "utf8"));
+          return state.target === null && state.state === "open" ? name : null;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+          throw error;
+        }
+      }),
+  );
+  return states.filter((id): id is string => id !== null);
+}
+
 export async function readFcpIcon(): Promise<string | null> {
   if (process.platform !== "darwin") return null;
   let directory: string | undefined;
@@ -252,7 +278,10 @@ export async function startHost(
     const job = verb === "job_status" ? (envelope.result as { envelope?: { receipt?: unknown } } | null) : null;
     if (envelope.receipt || job?.envelope?.receipt) notify("project_changed");
     const request = input as { batch?: { id?: string } };
-    if (envelope.ok && request?.batch?.id) batches.add(request.batch.id);
+    if (envelope.ok && request?.batch?.id) {
+      batches.add(request.batch.id);
+      if (!envelope.receipt) notify("project_changed");
+    }
     if (["session_begin", "session_ask", "session_answer", "session_review", "session_approve", "edit"].includes(verb))
       notify("ai_changed");
     return envelope;
@@ -337,7 +366,11 @@ export async function startHost(
           return;
         }
         if (message.type === "preview_data" && typeof message.id === "string") {
-          const project = await load();
+          if (!options.project) throw new Error("No project");
+          const project =
+            typeof message.at_revision === "string"
+              ? await openProject({ projectPath: options.project }).snapshotAt(message.at_revision)
+              : await load();
           const timeline = project.timelines[0];
           const journal = options.project ? await openProject({ projectPath: options.project }).journal() : [];
           const lastRecognition = journal.findLast((entry) => entry.verb === "transcribe");
@@ -370,6 +403,9 @@ export async function startHost(
               envelope: {
                 ok: true,
                 result: {
+                  historyBatches: await readHistoryBatches(
+                    join(dirname(resolve(options.project)), ".zcut", project.id),
+                  ),
                   media: project.media.map((item) => ({
                     uses: new Set(
                       timeline?.tracks.flatMap((track) =>

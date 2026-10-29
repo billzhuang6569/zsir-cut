@@ -555,54 +555,65 @@ export function ExportPanel({
               {status("direct")}
             </section>
             <section className="zc-export-node" data-destination="overlays">
-              <h3>
-                <Icon name="subtitle" /> 字幕叠层
-              </h3>
-              <p>剪辑线定稿后再出；改字幕后点这里覆盖同一个文件</p>
-              {(project.subtitleOverlays ?? [])
-                .filter((overlay) => overlay.timeline_id === project.id)
-                .map((overlay) => (
-                  <div className="zc-overlay-row" key={overlay.id}>
-                    <Button
-                      disabled={Boolean(settings.active)}
-                      onClick={() => void run(overlay.id, ["subtitle-overlay"], false, overlay)}
-                      title={overlay.output_path}
-                    >
-                      <FileIcon ext="mov" />
-                      <span>
-                        {overlay.name}
-                        <small>
-                          {project.subtitleTracks?.find((t) => t.id === overlay.subtitle_track_id)?.name ?? "字幕轨"} ·{" "}
-                          {overlay.last_export
-                            ? new Date(overlay.last_export.created_at).toLocaleString("zh-CN")
-                            : "尚未导出"}
-                        </small>
-                      </span>
-                    </Button>
-                    <IconButton
-                      icon="list"
-                      label={`编辑叠层「${overlay.name}」`}
-                      disabled={Boolean(settings.active)}
-                      onClick={() => begin(overlay)}
-                    />
-                    <IconButton
-                      icon="trash"
-                      label={`删除叠层「${overlay.name}」`}
-                      disabled={Boolean(settings.active)}
-                      onClick={() =>
-                        void edit(`删除字幕叠层「${overlay.name}」`, [{ op: "remove_overlay", overlay_id: overlay.id }])
-                      }
-                    />
-                    {status(overlay.id)}
-                  </div>
-                ))}
-              <Button
-                icon="plus"
-                disabled={Boolean(settings.active) || !project.subtitleTracks?.length}
-                onClick={() => begin()}
-              >
-                新建叠层
-              </Button>
+              <div className="zc-dest zc-overlay-heading">
+                <span className="zc-app-tile">
+                  <Icon name="subtitle" size={24} />
+                </span>
+                <strong>字幕叠层</strong>
+                <span className="zc-dest-files">
+                  <FileIcon ext="mov" />
+                </span>
+              </div>
+              <div className="zc-overlay-content">
+                <p>剪辑线定稿后再出；改字幕后点这里覆盖同一个文件</p>
+                {(project.subtitleOverlays ?? [])
+                  .filter((overlay) => overlay.timeline_id === project.id)
+                  .map((overlay) => (
+                    <div className="zc-overlay-row" key={overlay.id}>
+                      <Button
+                        disabled={Boolean(settings.active)}
+                        onClick={() => void run(overlay.id, ["subtitle-overlay"], false, overlay)}
+                        title={overlay.output_path}
+                      >
+                        <FileIcon ext="mov" />
+                        <span>
+                          {overlay.name}
+                          <small>
+                            {project.subtitleTracks?.find((t) => t.id === overlay.subtitle_track_id)?.name ?? "字幕轨"}{" "}
+                            ·{" "}
+                            {overlay.last_export
+                              ? new Date(overlay.last_export.created_at).toLocaleString("zh-CN")
+                              : "尚未导出"}
+                          </small>
+                        </span>
+                      </Button>
+                      <IconButton
+                        icon="list"
+                        label={`编辑叠层「${overlay.name}」`}
+                        disabled={Boolean(settings.active)}
+                        onClick={() => begin(overlay)}
+                      />
+                      <IconButton
+                        icon="trash"
+                        label={`删除叠层「${overlay.name}」`}
+                        disabled={Boolean(settings.active)}
+                        onClick={() =>
+                          void edit(`删除字幕叠层「${overlay.name}」`, [
+                            { op: "remove_overlay", overlay_id: overlay.id },
+                          ])
+                        }
+                      />
+                      {status(overlay.id)}
+                    </div>
+                  ))}
+                <Button
+                  icon="plus"
+                  disabled={Boolean(settings.active) || !project.subtitleTracks?.length}
+                  onClick={() => begin()}
+                >
+                  新建叠层
+                </Button>
+              </div>
             </section>
           </div>
         </fieldset>
@@ -715,10 +726,20 @@ export function ExportPanel({
                 <span className="zc-export-path">{output}</span>
               </>
             )}
-            <Button disabled={Boolean(settings.active)} onClick={() => setEditing(null)}>
+            <Button
+              variant="secondary"
+              icon="close"
+              disabled={Boolean(settings.active)}
+              onClick={() => setEditing(null)}
+            >
               取消
             </Button>
-            <Button type="submit" disabled={Boolean(settings.active) || !name.trim() || !track || !output}>
+            <Button
+              variant="primary"
+              icon="check"
+              type="submit"
+              disabled={Boolean(settings.active) || !name.trim() || !track || !output}
+            >
               保存叠层
             </Button>
           </form>

@@ -17,6 +17,7 @@ export function initialState(): UiState {
 export function applyUi(state: UiState, verb: UiVerb, request: Record<string, unknown>): UiState {
   switch (verb) {
     case "ui_show_panel":
+      if (request.panel === "history") return { ...state, history: { open: true, revision: null, label: null } };
       if (request.panel === "export")
         return {
           ...state,
