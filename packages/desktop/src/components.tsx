@@ -1,6 +1,8 @@
 import type { ButtonHTMLAttributes, CSSProperties, ReactNode } from "react";
 
 const PATHS: Record<string, string> = {
+  history: "M8 1.5a6.5 6.5 0 1 1-6.5 6.5A6.5 6.5 0 0 1 8 1.5M8 4v4l3 2",
+  human: "M11 4a3 3 0 1 1-6 0 3 3 0 0 1 6 0M2 14a6 6 0 0 1 12 0",
   refresh: "M13 6a5 5 0 1 0 0 5M13 2v4H9",
   select: "M3 2l10 5.5-4.5 1.2L7 13z",
   blade: "M3 13 13 3M10 3h3v3",

@@ -2,6 +2,7 @@ import type { UiState, UiVerb } from "../../app-host/src/ui.js";
 
 import type { PreviewData, TimelineView } from "./timeline.js";
 export interface ProjectView extends TimelineView, PreviewData {
+  historyBatches?: string[];
   name: string;
   revision: { id: string; seq: number };
 }
@@ -29,7 +30,13 @@ export function connectHost(
     new Promise<unknown>((resolve, reject) => {
       const id = String(++sequence);
       pending.set(id, { resolve, reject });
-      socket.send(JSON.stringify(verb === "preview_data" ? { id, type: "preview_data" } : { id, verb, request }));
+      socket.send(
+        JSON.stringify(
+          verb === "preview_data"
+            ? { id, type: "preview_data", at_revision: request.at_revision }
+            : { id, verb, request },
+        ),
+      );
     });
   async function refresh() {
     if (!project) return;

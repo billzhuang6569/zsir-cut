@@ -1,6 +1,6 @@
 // biome-ignore-all lint/suspicious/noArrayIndexKey: Film cells, waveform bars and ruler ticks are fixed geometric slots.
 
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { UiState } from "../../app-host/src/ui.js";
 import { Clip, Icon, IconButton } from "./components.js";
 import type { ProjectView } from "./connection.js";
@@ -122,10 +122,16 @@ export function TimelinePreview({
   error,
   errorDetail,
   dragging,
+  readOnly = false,
+  historyBanner,
+  onHistory,
   viewerOnly = false,
   hideViewer = false,
   onMediaDrop,
 }: {
+  readOnly?: boolean;
+  historyBanner?: ReactNode;
+  onHistory?: () => void;
   viewerOnly?: boolean;
   hideViewer?: boolean;
   onMediaDrop?: (id: string, at: string, track: string) => void;
@@ -270,7 +276,7 @@ export function TimelinePreview({
   const markerDrag = useRef<number | null>(null);
   const markerMoved = useRef(false);
   const write = async (verb: string, label: string, ops?: unknown[]) => {
-    if (!project || busy) return;
+    if (!project || busy || readOnly) return;
     setBusy(true);
     setWriteError(null);
     setWriteErrorDetail(undefined);
@@ -454,30 +460,32 @@ export function TimelinePreview({
       {!viewerOnly && (
         <>
           <section aria-label="工具栏" className="zc-toolbar">
+            {historyBanner}
             <IconButton icon="select" label="选择 A" pressed={tool === "select"} onClick={() => setTool("select")} />
             <IconButton
               icon="blade"
               label="切割 B"
               pressed={tool === "blade"}
-              disabled={!project || busy}
+              disabled={!project || busy || readOnly}
               onClick={() => {
                 setTool("blade");
                 split();
               }}
             />
-            <IconButton icon="marker" label="加标记 M" disabled={!project || busy} onClick={marker} />
+            <IconButton icon="marker" label="加标记 M" disabled={!project || busy || readOnly} onClick={marker} />
             <IconButton
               icon="undo"
               label="撤销"
-              disabled={!project || busy}
+              disabled={!project || busy || readOnly}
               onClick={() => void write("undo", "撤销")}
             />
             <IconButton
               icon="redo"
               label="重做"
-              disabled={!project || busy}
+              disabled={!project || busy || readOnly}
               onClick={() => void write("redo", "重做")}
             />
+            <IconButton icon="history" label="历史 ⌘ Y" pressed={state.history?.open === true} onClick={onHistory} />
             <IconButton icon="snap" label="吸附" pressed={snap} onClick={() => setSnap(!snap)} />
             <span className="zc-grow" />
             <span className="zc-count" title="片段">
@@ -554,7 +562,7 @@ export function TimelinePreview({
                         aria-label={marker.text}
                         style={{ left: pixelAt(marker.at.t, scale) }}
                         onPointerDown={(event) => {
-                          if (marker.kind !== "chapter" || busy) return;
+                          if (marker.kind !== "chapter" || busy || readOnly) return;
                           event.stopPropagation();
                           markerMoved.current = false;
                           markerDrag.current = event.clientX;
@@ -618,7 +626,11 @@ export function TimelinePreview({
                       className="zc-track-lane"
                       style={{ width }}
                       onDragOver={(event) => {
-                        if (track.kind === "subtitle" || !event.dataTransfer.types.includes("application/x-zcut-media"))
+                        if (
+                          readOnly ||
+                          track.kind === "subtitle" ||
+                          !event.dataTransfer.types.includes("application/x-zcut-media")
+                        )
                           return;
                         event.preventDefault();
                         event.dataTransfer.dropEffect = "copy";
@@ -630,7 +642,7 @@ export function TimelinePreview({
                         event.preventDefault();
                         const at = dropPoint(event.clientX, event.currentTarget);
                         const id = event.dataTransfer.getData("application/x-zcut-media");
-                        if (id && at) onMediaDrop?.(id, at, track.id);
+                        if (id && at && !readOnly) onMediaDrop?.(id, at, track.id);
                         setDrop(null);
                       }}
                     >

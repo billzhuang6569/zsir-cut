@@ -11,6 +11,7 @@ export interface UiState {
   playing: boolean;
   range: { start: string; duration: string } | null;
   loop: boolean;
+  history?: { open: boolean; revision: string | null; label: string | null } | undefined;
   export?: { open: boolean; sub: string | null; srt: boolean; wav: boolean; active: string | null } | undefined;
   subtitleBrowser?: { search: string; find: string; replace: string; matchCase: boolean } | undefined;
   chapters?: { levels: 1 | 2; timecodes: boolean } | undefined;

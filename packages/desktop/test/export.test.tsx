@@ -185,7 +185,15 @@ it.each(["srt", "wav", "both"])(
 );
 it("creates, updates and removes overlays through labeled human edits, and exports to the original path", async () => {
   const ui = await mount();
+  const overlayCard = ui.container.querySelector('[data-destination="overlays"]');
+  expect(overlayCard?.querySelector(".zc-dest .zc-app-tile svg")).not.toBeNull();
+  expect(overlayCard?.querySelector(".zc-dest .zc-dest-files")?.textContent).toContain("MOV");
+  expect(overlayCard?.querySelector(".zc-overlay-content .zc-overlay-row")).not.toBeNull();
   await ui.click("新建叠层");
+  const form = ui.container.querySelector("form");
+  expect(form?.querySelector(".zc-btn-secondary .zc-icon")).not.toBeNull();
+  expect(form?.querySelector(".zc-btn-primary .zc-icon")).not.toBeNull();
+  expect(form?.querySelector(".zc-btn-primary")?.textContent).toContain("保存叠层");
   await ui.input("叠层名称", "英文字幕层");
   await ui.input("叠层保存位置", "/tmp/英文.mov");
   await ui.submit();

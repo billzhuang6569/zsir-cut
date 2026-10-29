@@ -400,3 +400,19 @@
   align-items: center;
   justify-content: center;
 }
+
+.zc-export-node[data-destination="overlays"] {
+  gap: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+}
+.zc-overlay-heading {
+  border: 0;
+  cursor: default;
+}
+.zc-overlay-heading:hover {
+  background: var(--panel);
+}
+.zc-overlay-content {
+  padding: 0 var(--space-6) var(--space-5);
+}

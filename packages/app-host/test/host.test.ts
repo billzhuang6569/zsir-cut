@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { copyFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,8 +9,8 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import type { Envelope } from "../../core/src/index.ts";
-import { VERBS } from "../../core/src/index.ts";
-import { createMcpServer, readAiState, startHost } from "../src/index.js";
+import { dispatch, VERBS } from "../../core/src/index.ts";
+import { createMcpServer, readAiState, readHistoryBatches, startHost } from "../src/index.js";
 import { UI_VERBS } from "../src/ui.js";
 
 let host: Awaited<ReturnType<typeof startHost>> | undefined;
@@ -106,6 +106,30 @@ describe("desktop host", () => {
             tokens: expect.arrayContaining([{ id: "tok_01", text: "我们" }]),
           }),
         ]),
+      );
+      expect(
+        (
+          await dispatch("edit", {
+            project,
+            base_revision: subtitles.revision.id,
+            idempotency_key: "history-preview",
+            author: { kind: "human", name: "测试" },
+            label: "修改识别语言",
+            ops: [{ op: "set_recognition", language: "en" }],
+          })
+        ).ok,
+      ).toBe(true);
+      expect(
+        (
+          await send({
+            id: "historical-preview",
+            type: "preview_data",
+            at_revision: subtitles.revision.id,
+          })
+        ).envelope.result.recognition.language,
+      ).toBe("zh");
+      expect((await send({ id: "present-preview", type: "preview_data" })).envelope.result.recognition.language).toBe(
+        "en",
       );
       await writeFile(project, "{}");
       expect(await send({ id: "failed-preview", type: "preview_data" })).toMatchObject({
@@ -245,6 +269,9 @@ it("serves valid MCP schemas and no-UI failures without a network listener", asy
         type: "object",
         properties: { kind: expect.any(Object), name: { type: "string", minLength: 1 } },
       });
+    expect(tools.tools.find((tool) => tool.name === "zcut_ui_show_panel")?.inputSchema.properties?.panel).toMatchObject(
+      { enum: expect.arrayContaining(["history"]) },
+    );
     for (const verb of UI_VERBS) {
       const schema = tools.tools.find((tool) => tool.name === `zcut_${verb}`)?.inputSchema;
       expect(Object.keys(schema?.properties ?? {}).sort()).toEqual([...uiFields[verb]].sort());
@@ -349,4 +376,24 @@ it("reads complete draft summaries and batch status without mutating sessions", 
   });
   expect(kernel).toHaveBeenCalledWith("diff", { project, session_id: "ses_test", from: "rev_base", to: "rev_current" });
   expect(kernel.mock.calls.every(([verb]) => ["inspect", "diff", "batch_status"].includes(verb))).toBe(true);
+});
+
+it("discovers only open main-project batches, including batches with no journal steps", async () => {
+  const root = await mkdtemp(join(tmpdir(), "zcut-history-batches-"));
+  try {
+    expect(await readHistoryBatches(root)).toEqual([]);
+    for (const [id, target, state] of [
+      ["bat_queued", null, "open"],
+      ["bat_draft", "ses_draft", "open"],
+      ["bat_done", null, "complete"],
+    ]) {
+      const directory = join(root, "batches", id as string);
+      await mkdir(directory, { recursive: true });
+      await writeFile(join(directory, "state.json"), JSON.stringify({ target, state }));
+    }
+    await mkdir(join(root, "batches", "bat_initializing"));
+    expect(await readHistoryBatches(root)).toEqual(["bat_queued"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

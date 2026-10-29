@@ -1,0 +1,52 @@
+.zc-parameters[data-panel="history"] {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.zc-history-heading,
+.zc-history-progress,
+.zc-history-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+.zc-history-heading {
+  justify-content: space-between;
+}
+.zc-history-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.zc-history-step {
+  text-align: left;
+}
+.zc-history-step[aria-pressed="true"] {
+  background: var(--raised);
+}
+.zc-history-step time,
+.zc-history-step small {
+  color: var(--text-3);
+  font-size: var(--caption-size);
+  white-space: nowrap;
+}
+.zc-history-group {
+  padding-left: var(--space-5);
+}
+.zc-history-banner {
+  width: 100%;
+  flex-wrap: wrap;
+  color: var(--attention);
+}
+.zc-history-progress {
+  padding-block: var(--space-5);
+}
+.zc-toolbar:has(.zc-history-banner) {
+  flex-wrap: wrap;
+  height: auto;
+}
+
+.zc-shell:has(.zc-history-banner) {
+  grid-template-rows: var(--menubar-h) minmax(0, 1fr) auto var(--timeline-h);
+}

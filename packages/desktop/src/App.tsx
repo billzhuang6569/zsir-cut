@@ -4,6 +4,7 @@ import { type AiNotice, useAiPanel } from "./AiPanel.js";
 import { useChapterPanel } from "./ChapterPanel.js";
 import { connectHost, type ProjectView } from "./connection.js";
 import { ExportPanel } from "./ExportPanel.js";
+import { useHistoryPanel } from "./HistoryPanel.js";
 import { useMediaPanel } from "./MediaPanel.js";
 import { sourceProject } from "./media.js";
 import { useSubtitlePanel } from "./SubtitlePanel.js";
@@ -24,10 +25,21 @@ export function App({ config }: { config?: { port: number; token: string } }) {
   const [notices, setNotices] = useState<AiNotice[]>([]);
   const [aiRevision, setAiRevision] = useState(0);
   const [connectionEpoch, setConnectionEpoch] = useState(0);
-  const call = useCallback(
+  const rawCall = useCallback(
     (verb: string, request: Record<string, unknown>) =>
       connection.current?.call(verb, request) ?? Promise.reject(new Error("宿主未连接")),
     [],
+  );
+  const call = useCallback(
+    (verb: string, request: Record<string, unknown>) => {
+      if (
+        current.current.history?.revision &&
+        !["inspect", "batch_status", "preview_data", "job_status"].includes(verb)
+      )
+        return Promise.reject(new Error("正在看历史，请先返回现在"));
+      return rawCall(verb, request);
+    },
+    [rawCall],
   );
   const ai = useAiPanel({ call, path: state.project, project, notices, revision: aiRevision, connectionEpoch });
   const [fcpIcon, setFcpIcon] = useState<string | null>(null);
@@ -86,6 +98,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
       connection.current = null;
     };
   }, [config, update]);
+  const history = useHistoryPanel({ project, state, update, call: rawCall });
   const media = useMediaPanel({ project, state, update, call, config });
   const chapters = useChapterPanel({
     project,
@@ -102,8 +115,11 @@ export function App({ config }: { config?: { port: number; token: string } }) {
   });
   const subtitles = useSubtitlePanel({ project, state, update, call, config });
   const source = useMemo(
-    () => (project && media.selected && state.preview === "media" ? sourceProject(project, media.selected) : null),
-    [project, media.selected, state.preview],
+    () =>
+      project && media.selected && state.preview === "media" && !state.history?.revision
+        ? sourceProject(project, media.selected)
+        : null,
+    [project, media.selected, state.preview, state.history?.revision],
   );
   const updateSource = useCallback(
     (next: UiState) => {
@@ -127,7 +143,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
         <button
           type="button"
           className="zc-btn"
-          disabled={!project}
+          disabled={!project || history.viewing}
           onClick={() => update(applyUi(current.current, "ui_show_panel", { panel: "export" }))}
         >
           导出
@@ -155,6 +171,9 @@ export function App({ config }: { config?: { port: number; token: string } }) {
           role="tabpanel"
           aria-labelledby={`${uniqueId}-tab-${state.panel}`}
           className="zc-pad zc-function-panel"
+          ref={(node) => {
+            node?.toggleAttribute("inert", history.viewing);
+          }}
         >
           <h2>{labels[state.panel]}</h2>
           {state.panel === "media" && media.library}
@@ -165,12 +184,22 @@ export function App({ config }: { config?: { port: number; token: string } }) {
           </div>
         </div>
       </section>
-      <section aria-label="参数区" className="zc-parameters zc-pad" data-panel={state.panel}>
-        <h2>{parameters[state.panel]}</h2>
-        {state.panel === "ai" && ai.parameters}
-        {state.panel === "media" && media.parameters}
-        {state.panel === "chapters" && chapters.outline}
-        {state.panel === "subtitles" && subtitles.parameters}
+      <section
+        aria-label="参数区"
+        className="zc-parameters zc-pad"
+        data-panel={state.history?.open ? "history" : state.panel}
+      >
+        {state.history?.open ? (
+          history.panel
+        ) : (
+          <>
+            <h2>{parameters[state.panel]}</h2>
+            {state.panel === "ai" && ai.parameters}
+            {state.panel === "media" && media.parameters}
+            {state.panel === "chapters" && chapters.outline}
+            {state.panel === "subtitles" && subtitles.parameters}
+          </>
+        )}
       </section>
       {source && state.media && (
         <TimelinePreview
@@ -188,16 +217,19 @@ export function App({ config }: { config?: { port: number; token: string } }) {
         hideViewer={Boolean(source)}
         onMediaDrop={(id, at, track) => {
           const item = project?.media.find((m) => m.id === id);
-          if (item) media.place(item, at, track);
+          if (item && !history.viewing) media.place(item, at, track);
         }}
-        project={project}
+        project={history.view}
+        historyBanner={history.banner}
+        onHistory={history.toggle}
+        readOnly={history.viewing}
         state={state}
         update={update}
         config={config}
         error={error}
         errorDetail={errorDetail}
         dragging={dragging}
-        call={(verb, request) => connection.current?.call(verb, request) ?? Promise.reject(new Error("宿主未连接"))}
+        call={call}
       />
       {project && (
         <ExportPanel project={project} state={state} update={update} call={call} config={config} fcpIcon={fcpIcon} />
