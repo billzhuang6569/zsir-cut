@@ -1,6 +1,6 @@
 {
   "schema": "zsir-cut/timeline",
-  "schema_version": "0.2",
+  "schema_version": "0.3",
   "id": "prj_xmeml_sequence_grid",
   "name": "xmeml sequence-frame source cuts",
   "revision": {

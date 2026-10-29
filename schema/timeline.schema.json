@@ -21,7 +21,7 @@
       "const": "zsir-cut/timeline"
     },
     "schema_version": {
-      "const": "0.2"
+      "const": "0.3"
     },
     "id": {
       "$ref": "#/$defs/id_prj"
@@ -62,6 +62,12 @@
     },
     "recognition": {
       "$ref": "#/$defs/recognition"
+    },
+    "subtitle_overlays": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/subtitle_overlay"
+      }
     }
   },
   "$defs": {
@@ -1269,6 +1275,10 @@
             "padding": {
               "type": "number",
               "minimum": 0
+            },
+            "radius": {
+              "type": "number",
+              "minimum": 0
             }
           }
         },
@@ -1292,6 +1302,14 @@
               "minimum": 0,
               "maximum": 1,
               "description": "Fraction of timeline height."
+            },
+            "offset_x": {
+              "type": "number"
+            },
+            "max_width": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1
             }
           }
         },
@@ -1302,6 +1320,10 @@
         },
         "ext": {
           "$ref": "#/$defs/ext"
+        },
+        "line_spacing": {
+          "type": "number",
+          "exclusiveMinimum": 0
         }
       }
     },
@@ -1360,6 +1382,66 @@
         },
         "link": {
           "type": "string"
+        }
+      }
+    },
+    "subtitle_overlay": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "timeline_id",
+        "subtitle_track_id",
+        "output_path",
+        "last_export"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^ovl_[A-Za-z0-9_-]{1,64}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "timeline_id": {
+          "$ref": "#/$defs/id_tl"
+        },
+        "subtitle_track_id": {
+          "$ref": "#/$defs/id_trk"
+        },
+        "output_path": {
+          "type": "string",
+          "pattern": "\\.mov$"
+        },
+        "tail": {
+          "$ref": "#/$defs/time"
+        },
+        "last_export": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "required": [
+            "revision_id",
+            "created_at",
+            "size_bytes"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "revision_id": {
+              "$ref": "#/$defs/id_rev"
+            },
+            "created_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
         }
       }
     }

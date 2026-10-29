@@ -1,6 +1,6 @@
 {
   "schema": "zsir-cut/timeline",
-  "schema_version": "0.2",
+  "schema_version": "0.3",
   "id": "prj_std_2997_df",
   "name": "标准测试工程 std-2997-df",
   "revision": {

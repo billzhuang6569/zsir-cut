@@ -128,7 +128,7 @@ export function errorEnvelope(
 }
 
 function writeRequest(
-  verb: "edit" | "import_media" | "transcribe" | "undo" | "redo" | "restore",
+  verb: "export" | "edit" | "import_media" | "transcribe" | "undo" | "redo" | "restore",
   requestId: string,
   input: Request,
 ): WriteRequest {
@@ -153,9 +153,11 @@ function writeRequest(
           ]
         : verb === "import_media"
           ? [{ paths: input.paths, relink: input.relink }]
-          : verb === "edit"
-            ? (input.ops as unknown[])
-            : [],
+          : verb === "export"
+            ? [{ profile: input.profile, overlay_id: input.overlay_id }]
+            : verb === "edit"
+              ? (input.ops as unknown[])
+              : [],
     ...(typeof input.timeline_id === "string" ? { timeline_id: input.timeline_id } : {}),
     ...(typeof input.target === "string" ? { target: input.target } : {}),
     ...(typeof input.label === "string" ? { label: input.label } : {}),
@@ -572,6 +574,65 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
       const parsed = parseProject(await readFile(request.project as string, "utf8"));
       if (!parsed.ok) return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Project file is invalid");
       const project = parsed.project;
+      if (request.profile === "subtitle-overlay") {
+        const write = writeRequest("export", requestId, request);
+        const replay = await findIdempotentWrite(request.project as string, project.id, write);
+        if (replay === "mismatch")
+          return errorEnvelope(
+            verb,
+            requestId,
+            "rejected",
+            "E_IDEMPOTENCY_MISMATCH",
+            "Idempotency key was used for another export",
+          );
+        if (replay) return replay;
+        if (request.base_revision !== project.revision.id)
+          return errorEnvelope(verb, requestId, "conflict", "E_CONFLICT", "Base revision differs from project");
+        const overlay = project.subtitle_overlays?.find((item) => item.id === request.overlay_id);
+        if (!overlay) return errorEnvelope(verb, requestId, "rejected", "E_NOT_FOUND", "Overlay not found");
+        const issues = validateProjectSemantics(project, parsed.issues);
+        if (issues.some((issue) => issue.severity === "error"))
+          return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Project semantics are invalid");
+        const output = basic(verb, requestId);
+        if (request.dry_run) {
+          output.status = "dry_run";
+          output.result = { files: [{ path: overlay.output_path }] };
+          return output;
+        }
+        const blocker = await openProject({ projectPath: request.project as string }).batchBlocker();
+        if (blocker)
+          return errorEnvelope(verb, requestId, "failed", "E_BATCH_OPEN", "A batch is open on this target", true);
+        if (!options.worker) {
+          const jobId = await startExportJob(request.project as string, project.id, request, "subtitle-overlay");
+          output.status = "accepted";
+          output.result = { job_id: jobId };
+          return output;
+        }
+        const modulePath = new URL(
+          import.meta.url.endsWith(".ts")
+            ? "../../exporters/src/subtitle-overlay.ts"
+            : "../../exporters/dist/subtitle-overlay.js",
+          import.meta.url,
+        );
+        const { renderSubtitleOverlay } = await import(modulePath.href);
+        const result: Record<string, unknown> = {};
+        return await openProject({ projectPath: request.project as string }).commitWrite(
+          write,
+          async (candidate) => {
+            const target = candidate.subtitle_overlays?.find((item) => item.id === request.overlay_id);
+            if (!target) throw new HistoryError("E_NOT_FOUND");
+            const rendered = await renderSubtitleOverlay(candidate, target, request.project as string);
+            Object.assign(result, rendered);
+            target.last_export = {
+              revision_id: candidate.revision.id,
+              created_at: new Date().toISOString(),
+              size_bytes: rendered.files[0].size_bytes,
+            };
+          },
+          {},
+          result,
+        );
+      }
       if (request.base_revision !== project.revision.id)
         return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Base revision differs from project");
       if (request.profile === "direct-srt" || request.profile === "direct-audio-wav") {

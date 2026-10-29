@@ -161,6 +161,15 @@ export function parseProject(text: string): ParseProjectResult {
   ) {
     value.schema_version = "0.2";
   }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schema" in value &&
+    value.schema === "zsir-cut/timeline" &&
+    "schema_version" in value &&
+    value.schema_version === "0.2"
+  )
+    value.schema_version = "0.3";
   const validation = validateProject(value);
   if (!validation.valid) {
     return {

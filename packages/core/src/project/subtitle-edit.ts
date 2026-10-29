@@ -1,5 +1,7 @@
 // biome-ignore-all lint/style/noNonNullAssertion: Indexed entries are guarded by command validation and local range checks.
-import { add, div, mul, parseRational, type Rational, rational, sub } from "../rational.ts";
+import { statSync } from "node:fs";
+import { dirname, isAbsolute, normalize } from "node:path";
+import { add, compare, div, mul, parseRational, type Rational, rational, sub } from "../rational.ts";
 import { EditError } from "./edit.ts";
 import { transcriptIds } from "./id.ts";
 import {
@@ -14,6 +16,7 @@ import { automaticTrackName } from "./track-name.ts";
 import type {
   Cue,
   Project,
+  SubtitleOverlay,
   SubtitleStyle,
   SubtitleTrack,
   Timeline,
@@ -470,6 +473,49 @@ export function applySubtitleEdit(
       track.free_cues.splice(track.free_cues.indexOf(cue), 1);
       break;
     }
+    case "add_overlay":
+    case "update_overlay":
+    case "remove_overlay": {
+      project.subtitle_overlays ??= [];
+      const overlays = project.subtitle_overlays;
+      if (op.op === "remove_overlay") {
+        const overlay = find(overlays, op.overlay_id, "Overlay");
+        overlays.splice(overlays.indexOf(overlay), 1);
+        break;
+      }
+      const overlay: SubtitleOverlay =
+        op.op === "add_overlay"
+          ? {
+              id: (op.id as string | undefined) ?? generate("ovl_"),
+              name: op.name as string,
+              timeline_id: op.timeline_id as string,
+              subtitle_track_id: op.subtitle_track_id as string,
+              output_path: op.output_path as string,
+              last_export: null,
+            }
+          : find(overlays, op.overlay_id, "Overlay");
+      setFields(overlay as unknown as Record<string, unknown>, op, [
+        "name",
+        "timeline_id",
+        "subtitle_track_id",
+        "output_path",
+      ]);
+      if (op.tail !== undefined) overlay.tail = seconds(op.tail);
+      if (overlay.tail && (compare(overlay.tail, rational(0n)) < 0 || compare(overlay.tail, rational(600n)) > 0))
+        fail("E_VALIDATION", "Overlay tail must be between 0 and 600 seconds");
+      if (!isAbsolute(overlay.output_path) || !overlay.output_path.endsWith(".mov"))
+        fail("E_VALIDATION", "Overlay output must be an absolute .mov path");
+      try {
+        if (!statSync(dirname(overlay.output_path)).isDirectory())
+          fail("E_VALIDATION", "Overlay directory does not exist");
+      } catch {
+        fail("E_VALIDATION", "Overlay directory does not exist");
+      }
+      if (overlays.some((item) => item !== overlay && normalize(item.output_path) === normalize(overlay.output_path)))
+        fail("E_VALIDATION", "Overlay output path is already used");
+      if (op.op === "add_overlay") overlays.push(overlay);
+      break;
+    }
     case "add_style": {
       const style = { ...op } as Record<string, unknown>;
       delete style.op;
@@ -491,6 +537,7 @@ export function applySubtitleEdit(
         "box",
         "position",
         "max_lines",
+        "line_spacing",
       ]);
       style.version++;
       break;
