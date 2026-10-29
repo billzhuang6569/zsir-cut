@@ -1,6 +1,6 @@
 ---
 name: zsir-cut
-description: 庄Sir剪辑助手。把采访、口播素材做成粗剪和字幕，再交给 Final Cut Pro、DaVinci Resolve 或 Premiere Pro 收尾。用户说「帮我粗剪这段采访」「把这些素材剪成三分钟」「出字幕」「校对字幕」「导出给 FCP / 达芬奇 / PR」「看看交接包有什么损失」，或者给出一个 .zcut.json 工程、一个素材目录时使用。只做剪辑决策和字幕，不做调色、特效和成片渲染。
+description: 庄Sir剪辑助手。把视频素材做成粗剪和字幕，再交给 Final Cut Pro、DaVinci Resolve 或 Premiere Pro 收尾。用户说「帮我粗剪这段素材」「帮我粗剪这段采访」「把这些素材剪成三分钟」「出字幕」「校对字幕」「导出给 FCP / 达芬奇 / PR」「看看交接包有什么损失」，或者给出一个 .zcut.json 工程、一个素材目录时使用。只做剪辑决策和字幕，不做调色、特效和成片渲染。
 ---
 
 # 庄Sir剪辑助手
