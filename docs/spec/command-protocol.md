@@ -462,7 +462,7 @@
 
 ### 9.5 直接导出
 
-`export` 的 `profile` 除了交接 profile，还可以取直接导出的 profile：`direct-srt`、`direct-audio-wav`。它们不生成交接包，只往 `output` 里写文件，规则见 `handoff-profile.md` 第 8 节。成片 profile 放二期（ADR-0015）。
+`export` 的 `profile` 除了交接 profile，还可以取直接导出的 profile：`direct-srt`、`direct-audio-wav`，以及字幕叠层 `subtitle-overlay`（参数 `overlay_id`，见 `handoff-profile.md` 第 9 节）。它们不生成交接包，只往 `output` 里写文件，规则见 `handoff-profile.md` 第 8 节。成片 profile 放二期（ADR-0015）。
 
 ### 9.6 界面动词（桌面版）
 
@@ -536,7 +536,7 @@
 | `E_BATCH_SEQ_TAKEN` | `rejected` | 同一批次的这个序号已经收到过另一个不同的请求（6.1） |
 | `E_BATCH_CLOSED` | `rejected` | 批次已经完成、失败或超时，不再收步骤（6.1） |
 
-警告码（写在结果信封的 `result.warnings` 数组里，每项 `{code, …}`，不改变 `status`；信封顶层没有 `warnings` 字段）：本文新增的有 `W_DECISIONS_PENDING`（批准时还有没回答的决定，7.4）、`W_REPLACE_SKIPPED_LOCKED`（查找替换跳过了锁定的字幕条，见 `edit-ops.md`）、`W_FILLERS_HIDDEN`（识别后自动隐藏了水词，附个数，见 `asr-worker.md` 第 6 节）。校验类警告见 `timeline-schema.md` 第 8 节。
+警告码（写在结果信封的 `result.warnings` 数组里，每项 `{code, …}`，不改变 `status`；信封顶层没有 `warnings` 字段）：`W_FONT_FALLBACK`、`W_SUB_OVERFLOW` 见 `handoff-profile.md` 第 9 节；本文新增的还有 `W_DECISIONS_PENDING`（批准时还有没回答的决定，7.4）、`W_REPLACE_SKIPPED_LOCKED`（查找替换跳过了锁定的字幕条，见 `edit-ops.md`）、`W_FILLERS_HIDDEN`（识别后自动隐藏了水词，附个数，见 `asr-worker.md` 第 6 节）。校验类警告见 `timeline-schema.md` 第 8 节。
 
 ## 12. 一期不做
 

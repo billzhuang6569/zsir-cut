@@ -114,6 +114,12 @@
 4. 匹配碰到锁定保护的字词或字幕条时跳过这一处，不中断其他处，`warnings` 加 `W_REPLACE_SKIPPED_LOCKED` 并列出跳过的字幕条。带 `force` 时按锁定保护的规则处理。
 5. 一处都没找到时返回 `no_op`。
 
+### 字幕叠层
+
+- `add_overlay`：`id`（可选）、`name`、`timeline_id`、`subtitle_track_id`、`output_path`、`tail`（可选）。`output_path` 必须是绝对路径、以 `.mov` 结尾，所在目录要存在；同一工程里两个叠层不能用同一个 `output_path`。
+- `update_overlay`：`overlay_id` 加要改的字段（不能改 `last_export`）。`remove_overlay`：`overlay_id`，只删设置，不删已经导出的文件。
+- 这三个操作属于字幕域。
+
 ### `set_recognition`
 
 参数：`recognition` 对象的任意字段，见 `timeline-schema.md` 4.1，按字段替换。`terms` 写入前去掉首尾空白、去掉空串、去重。只改设置，不重新识别；要按新设置识别，再调用 `transcribe`。
