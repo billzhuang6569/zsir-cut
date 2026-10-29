@@ -97,7 +97,39 @@
 
 验收：Claude 在本机打开物美工程（真实素材），截图核对胶片条、波形、字幕条和播放；把截图发给 Bill 看界面。
 
-3.7 起的详细说明，在 3.6 合并后再写。验收方式：Claude 对照设计稿和 `design.md` 检查每个状态，Bill 验收界面效果；最后用一个非采访素材的项目走一遍（ADR-0013）。
+### 3.7 详细说明：AI 面板与决定
+
+3.6 已合并（#92）。依据：ADR-0014、`product.md` 第 4 节、`command-protocol.md` 6.1（批次与 `label`）和 7.6（决定），设计系统的 `DecisionCard`、`DecisionProgress`、`StepRow`，设计画布草稿 5 的 AI 画板。本任务不新增依赖（MCP 的 HTTP 传输用已有的 `@modelcontextprotocol/sdk`）。
+
+1. **给 Agent 的 MCP 入口**（`packages/app-host`）
+   - 除了现有的 stdio，再在同一个本机端口上提供 MCP 的 HTTP 传输（`@modelcontextprotocol/sdk` 的 Streamable HTTP），路径 `/mcp`，必须带令牌。工具与 stdio 相同：23 个内核动词加 6 个界面动词。
+   - 被启动的 Agent 用这个入口操作当前工程。宿主进程为每次对话生成一份临时 MCP 配置文件（权限 0600，对话结束删除）。
+2. **启动本机 Agent**（`packages/app-host`）
+   - 检测本机的 `claude`（Claude Code）和 `codex`（Codex CLI）是否可用及版本，界面里能选哪个。都没有时，对话区只显示一句说明和「安装说明」链接。
+   - Claude Code：`claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --mcp-config <临时文件> --strict-mcp-config --allowedTools 'mcp__zsir-cut__*' --append-system-prompt-file skills/zsir-cut/SKILL.md`，继续对话用 `--resume <会话 ID>`。只放行本工程的 MCP 工具，不给 shell 和文件写入权限。
+   - Codex：`codex exec --json`，用 `-c` 传入 MCP 服务器配置，沙箱 `read-only`；继续对话用 `codex exec resume <会话 ID>`。
+   - 工作目录是工程文件所在目录。Agent 的输出逐行解析成统一的事件：文字增量、工具调用开始和结束、回合结束、出错。
+   - 对话记录存在 `.zcut/<project_id>/chats/<chat_id>.jsonl`（不是工程数据，不产生修订），重新打开工程能看到历史对话。
+   - 停止：结束子进程；正在执行的批次按 6.1 的超时规则处理。
+3. **AI 面板**（`packages/desktop`）
+   - 对话区按设计画布：用户消息气泡（引用的素材显示为 `info` 色小标签）；Agent 回复逐字出现，Markdown 渲染（标题、列表、粗体、代码）；每次工具调用显示为一行可折叠的 `StepRow`（进行中琥珀色、完成青绿色），折叠里是工具名和参数摘要；回复下方是复制按钮。
+   - 输入框：多行，`↵` 发送、`⇧↵` 换行；`@` 弹出素材列表，选中后插入引用；左下角切换 Agent；生成时发送按钮变成停止。
+   - 对话列表：新对话、历史对话（图标按钮）。
+   - Agent 开了编辑会话、交出草稿时，对话里出现草稿卡片：修订数、片段和字幕的改动数，加「批准」（`approve` 按钮）。批准调用 `session_approve`。
+4. **决定**（`packages/desktop`）
+   - AI 标签下的参数区显示当前会话的决定，按设计系统的 `DecisionCard`：一次一件，头部是 `ask` 图标、标题「决定」和 `DecisionProgress` 进度环；选项带字母键；最后一行是「其他想法…」；底部是「跳过」和「下一件 ⌘↵」，最后一件写「发给 AI」。
+   - 「下一件」调用 `session_answer`；最后一件答完，把这一轮全部回答拼成一条消息自动发进对话，例如「关于『其余 5 处跳剪怎么处理』：换到卡 A 机位」。
+   - 每次 Agent 回合结束、或宿主进程收到 `session_ask` 时，刷新决定。
+   - 批次进行中，参数区顶部显示「AI 正在做第 x / n 步」（按 `batch_status`）。
+5. **测试**（不联网，不调用真的 Agent）
+   - 用假的 `claude` 和 `codex` 脚本按真实格式输出一段 stream-json / json 事件，验证解析成统一事件、逐字增量、工具调用折叠行、出错和停止。
+   - MCP HTTP 入口：没有令牌被拒绝；用 SDK 客户端连上后能列出 29 个工具并调用 `inspect`。
+   - 决定：假会话里写入 3 件决定，界面一次只显示一件，答完自动发出的消息内容正确，`session_answer` 被调用 3 次。
+   - 临时 MCP 配置文件权限是 0600，对话结束后被删除。
+
+验收：Claude 在本机用真的 Claude Code 打开 std-25 工程对话一轮（让它加一个标记并写一件决定），截图核对对话区和决定卡片，发给 Bill 看界面。
+
+3.8 起的详细说明，在 3.7 合并后再写。验收方式：Claude 对照设计稿和 `design.md` 检查每个状态，Bill 验收界面效果；最后用一个非采访素材的项目走一遍（ADR-0013）。
 
 ## 需要 Bill 做的
 
