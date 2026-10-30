@@ -53,3 +53,42 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+### R1.9 timeline gestures
+
+Additionally referenced and adapted these opencut-classic files at the same commit in `packages/desktop/src/useTimelineGestures.ts` and `packages/desktop/src/TimelinePreview.tsx`:
+
+- `apps/web/src/timeline/controllers/element-interaction-controller.ts` (pending gesture, drag threshold, lifecycle)
+- `apps/web/src/timeline/controllers/zoom-controller.ts` (wheel normalization, playhead anchor, scroll after layout)
+- `apps/web/src/timeline/components/selection-hit-testing.ts` (content coordinates, rectangle intersection)
+
+The OpenCut copyright and MIT permission notice above apply. The WASM time model and runtime dependencies were not imported; timeline time remains rational.
+
+## openreel-video (MIT)
+
+Repository: https://github.com/Augani/openreel-video
+
+Commit: `367d7e90b61b5181f9861b852bb8b9d7a7d2954a`
+
+Referenced and adapted `apps/web/src/components/editor/Timeline.tsx` (marquee selection, suppressing its trailing background click) in `packages/desktop/src/useTimelineGestures.ts`. No runtime dependencies imported.
+MIT License
+
+Copyright (c) 2024-2026 Augustus Otu and Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

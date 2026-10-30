@@ -77,6 +77,7 @@ export function Clip({
   style,
   children,
   onClick,
+  selectionId,
 }: {
   kind: string;
   label: string;
@@ -84,11 +85,13 @@ export function Clip({
   dimmed: boolean;
   style: CSSProperties;
   children?: ReactNode;
-  onClick: () => void;
+  onClick: React.MouseEventHandler<HTMLButtonElement>;
+  selectionId?: string;
 }) {
   return (
     <button
       type="button"
+      data-selection-id={selectionId}
       title={label}
       aria-label={label}
       onClick={onClick}
