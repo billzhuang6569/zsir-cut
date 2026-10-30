@@ -50,7 +50,7 @@
 
 ## 4. 识别时使用
 
-`transcribe` 把名词库里所有 `active` 的名词排在工程名词和热词文件之后，合并去重，交给 worker（`asr-worker.md` 第 6 节第 4 条）。合并后超过 300 个时，从名词库的部分截掉多出的，按 `projects` 个数从多到少保留，个数相同按 `text` 排序。实际用到的完整热词表写进本次 `asr` 运行记录的 `params.hotwords`，以后能追查。名词库变了，热词摘要随之变化，同一素材会重新识别。
+`transcribe` 把名词库里所有 `active` 的名词排在工程名词和热词文件之后，合并去重，交给 worker（`asr-worker.md` 第 6 节第 4 条）。合并后超过 300 个时，从名词库的部分截掉多出的，按 `projects` 个数从多到少保留，个数相同按 `text` 排序。实际用到的完整热词表写进 `transcribe` 结果的 `result.hotwords`（长任务的 `job.json` 里保留完整信封），以后能追查。工程文件的运行记录不加字段。名词库变了，热词摘要随之变化，同一素材会重新识别。
 
 ## 5. 动词
 
@@ -59,7 +59,7 @@
 | 动词 | 参数 | 说明 |
 |---|---|---|
 | `terms_list` | `state`（可选，`active` 或 `blocked`）、`query`（可选，子串匹配） | 读动词，`result.terms` 是匹配的条目 |
-| `terms_edit` | `ops`：数组，每项 `{ "op": "add" \| "remove" \| "block" \| "unblock", "text": "…" }` | 按顺序执行。`add` 以 `active`、`source: user` 加入，已存在时改为 `active`；`remove` 删除条目；`block` 改为 `blocked`，不存在时新建一条 `blocked`；`unblock` 改为 `active`。全部成功返回 `applied`，`changes` 每项一条；一个都没变返回 `no_op` |
+| `terms_edit` | `ops`：数组，每项 `{ "op": "add" \| "remove" \| "block" \| "unblock", "text": "…" }` | 按顺序执行。`add` 以 `active`、`source: user` 加入，已存在时改为 `active`；`remove` 删除条目；`block` 改为 `blocked`，不存在时新建一条 `blocked`；`unblock` 改为 `active`。全部成功返回 `applied`，`changes` 每项一条（`entity` 为 `term`，`id` 为名词原文）；一个都没变返回 `no_op` |
 
 参数不合法（空文本、超过 64 个字符、未知 `op`）返回 `rejected`、`E_VALIDATION`，什么都不写。设置页在以后的版本里做，界面通过这两个动词读写。
 
@@ -68,4 +68,4 @@
 - 用临时 `HOME`，不碰真实的名词库。
 - 收录：出现 2 次的名词进库，1 次的不进；`blocked` 的不会被自动改回；同一名词从两个工程收录时 `projects` 有两项。
 - 序列化确定；两个进程同时写不丢条目。
-- `transcribe` 的热词合并顺序、300 个上限和截断顺序；运行记录里的 `params.hotwords`。
+- `transcribe` 的热词合并顺序、300 个上限和截断顺序；结果里的 `result.hotwords`。
