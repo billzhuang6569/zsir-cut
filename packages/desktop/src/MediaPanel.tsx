@@ -2,7 +2,7 @@ import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { UiState } from "../../app-host/src/ui.js";
 import { Icon, IconButton } from "./components.js";
 import type { ProjectView } from "./connection.js";
@@ -20,6 +20,7 @@ function Field({
   commit,
   clear = false,
   disabled = false,
+  options,
 }: {
   label: string;
   value: string;
@@ -27,7 +28,9 @@ function Field({
   commit: (value: string) => void;
   clear?: boolean;
   disabled?: boolean;
+  options?: string[] | undefined;
 }) {
+  const listId = useId();
   const [draft, setDraft] = useState(value);
   const submitted = useRef(value);
   useEffect(() => {
@@ -48,6 +51,7 @@ function Field({
     <label className="zc-media-field">
       <input
         className="zc-input"
+        list={options ? listId : undefined}
         disabled={disabled}
         placeholder={placeholder}
         aria-label={label}
@@ -61,14 +65,32 @@ function Field({
           }
         }}
       />
+      {options && (
+        <datalist id={listId}>
+          {options.map((option) => (
+            <option key={option} value={option} />
+          ))}
+        </datalist>
+      )}
     </label>
   );
 }
-function AddValue({ label, disabled, commit }: { label: string; disabled: boolean; commit: (value: string) => void }) {
+function AddValue({
+  label,
+  disabled,
+  commit,
+  options,
+}: {
+  label: string;
+  disabled: boolean;
+  commit: (value: string) => void;
+  options?: string[] | undefined;
+}) {
   const [adding, setAdding] = useState(false);
   return adding ? (
     <Field
       label={label}
+      options={options}
       value=""
       disabled={disabled}
       commit={(value) => {
@@ -137,7 +159,21 @@ export function useMediaPanel({
   const [error, setError] = useState<string | null>(null);
   const [colors, setColors] = useState<string[]>([]);
   const area = useRef<HTMLDivElement>(null);
-  const selected = project?.media.find((item) => item.id === state.media?.id);
+  const [folderEdits, setFolderEdits] = useState<{ project: ProjectView; values: Record<string, string[]> } | null>(
+    null,
+  );
+  const media = useMemo(
+    () =>
+      (project?.media ?? []).map((item) => {
+        const folders = folderEdits?.project === project ? folderEdits?.values[item.id] : undefined;
+        return folders ? { ...item, organize: { ...item.organize, folders } } : item;
+      }),
+    [project, folderEdits],
+  );
+  const selectedMedia = media.filter((item) => state.selected.includes(item.id));
+  const selected = media.find((item) => item.id === state.media?.id) ?? selectedMedia[0];
+  const folderTargets = selectedMedia.length ? selectedMedia : selected ? [selected] : [];
+  const joinedFolders = [...new Set(folderTargets.flatMap((item) => item.organize?.folders ?? []))];
   const write = async (verb: string, label: string, data: Record<string, unknown>) => {
     if (!project || locked.current) return;
     locked.current = true;
@@ -166,8 +202,10 @@ export function useMediaPanel({
         await new Promise((resolve) => setTimeout(resolve, 500));
         result = { job_id: jobId };
       }
+      return true;
     } catch (e) {
       setError(e instanceof Error ? e.message : "操作失败");
+      return false;
     } finally {
       locked.current = false;
       setBusy(false);
@@ -175,14 +213,26 @@ export function useMediaPanel({
     }
   };
   const importPaths = (paths: string[]) => paths.length && void write("import_media", "导入素材", { paths });
-  const choose = (media: MediaView) =>
+  const choose = (media: MediaView, multiple: boolean) => {
+    const ids = multiple
+      ? state.selected.includes(media.id)
+        ? state.selected.filter((id) => id !== media.id)
+        : [...state.selected, media.id]
+      : [media.id];
     update({
       ...state,
-      selected: [media.id],
+      selected: ids,
       preview: "media",
       playing: false,
-      media: state.media?.id === media.id ? state.media : { id: media.id, at: "0s", in: null, out: null },
+      media: ids.includes(media.id)
+        ? state.media?.id === media.id
+          ? state.media
+          : { id: media.id, at: "0s", in: null, out: null }
+        : ids[0]
+          ? { id: ids[0], at: "0s", in: null, out: null }
+          : undefined,
     });
+  };
   const place = (
     media = selected,
     at = project ? seekTarget(project, project.cues, state.playhead) : "0s",
@@ -203,6 +253,29 @@ export function useMediaPanel({
       `修改 ${selected.name ?? "素材"} 的${({ note: "注释", link: "来源链接", tags: "标签", folders: "文件夹", rating: "评分" } as Record<string, string>)[field]}`,
       { ops: [{ op: "update_media", media_id: selected.id, [field]: value }] },
     );
+  const changeFolders = async (folder: string, remove = false) => {
+    if (!project || locked.current || !folder.trim()) return;
+    const values = Object.fromEntries(
+      folderTargets.map((item) => [
+        item.id,
+        remove
+          ? (item.organize?.folders ?? []).filter((value) => value !== folder)
+          : [...new Set([...(item.organize?.folders ?? []), folder.trim()])],
+      ]),
+    );
+    const applied = await write(
+      "edit",
+      `修改 ${folderTargets.length > 1 ? `${folderTargets.length} 个素材` : (selected?.name ?? "素材")} 的文件夹`,
+      {
+        ops: Object.entries(values).map(([media_id, folders]) => ({ op: "update_media", media_id, folders })),
+      },
+    );
+    if (applied)
+      setFolderEdits({
+        project,
+        values: { ...(folderEdits?.project === project ? folderEdits.values : {}), ...values },
+      });
+  };
   useEffect(() => {
     setColors([]);
     if (!selected || !config || selected.kind === "audio") return;
@@ -285,7 +358,6 @@ export function useMediaPanel({
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   });
-  const media = project?.media ?? [];
   const folders = [
     ...new Set(
       media.flatMap(
@@ -293,7 +365,15 @@ export function useMediaPanel({
           m.organize?.folders?.flatMap((f) => f.split("/").map((_, i, parts) => parts.slice(0, i + 1).join("/"))) ?? [],
       ),
     ),
-  ].sort();
+  ].sort((a, b) => {
+    const left = a.split("/");
+    const right = b.split("/");
+    for (let i = 0; i < Math.min(left.length, right.length); i++) {
+      const order = (left[i] ?? "").localeCompare(right[i] ?? "");
+      if (order) return order;
+    }
+    return left.length - right.length;
+  });
   const tags = [...new Set(media.flatMap((m) => m.organize?.tags ?? []))].sort();
   const visible = media.filter(
     (m) =>
@@ -329,6 +409,9 @@ export function useMediaPanel({
         <span className="zc-media-scope">
           <select aria-label="素材范围" value={scope} onChange={(e) => setScope(e.target.value)}>
             <option value="all">全部</option>
+            {scope.startsWith("folder:") && !folders.includes(scope.slice(7)) && (
+              <option value={scope}>{scope.slice(7)}（空）</option>
+            )}
             {folders.map((f) => (
               <option
                 key={f}
@@ -404,9 +487,9 @@ export function useMediaPanel({
             type="button"
             key={m.id}
             draggable
-            aria-pressed={selected?.id === m.id}
+            aria-pressed={selectedMedia.some((item) => item.id === m.id)}
             className="zc-media-card"
-            onClick={() => choose(m)}
+            onClick={(e) => choose(m, e.metaKey || e.ctrlKey)}
             onDragStart={(e) => {
               e.dataTransfer.setData("application/x-zcut-media", m.id);
               e.dataTransfer.effectAllowed = "copy";
@@ -507,7 +590,7 @@ export function useMediaPanel({
         <section className="zc-media-group" key={`${selected.id}-${field}`}>
           <h4>{field === "tags" ? "标签" : "文件夹"}</h4>
           <div className="zc-media-tags">
-            {selected.organize?.[field]?.map((v) => (
+            {(field === "folders" ? joinedFolders : selected.organize?.tags)?.map((v) => (
               <span key={v} className="zc-tag">
                 {field === "folders" && <Icon name="folder" />}
                 {v}
@@ -516,10 +599,12 @@ export function useMediaPanel({
                   aria-label={`删除${field === "tags" ? "标签" : "文件夹"} ${v}`}
                   disabled={busy}
                   onClick={() =>
-                    organize(
-                      field,
-                      selected.organize?.[field]?.filter((s) => s !== v),
-                    )
+                    field === "folders"
+                      ? void changeFolders(v, true)
+                      : organize(
+                          "tags",
+                          selected.organize?.tags?.filter((s) => s !== v),
+                        )
                   }
                 >
                   ×
@@ -529,7 +614,12 @@ export function useMediaPanel({
             <AddValue
               disabled={busy}
               label={field === "tags" ? "添加标签" : "添加文件夹"}
-              commit={(v) => organize(field, [...new Set([...(selected.organize?.[field] ?? []), ...splitValues(v)])])}
+              options={field === "folders" ? folders : undefined}
+              commit={(v) =>
+                field === "folders"
+                  ? void changeFolders(v)
+                  : organize("tags", [...new Set([...(selected.organize?.tags ?? []), ...splitValues(v)])])
+              }
             />
           </div>
         </section>
