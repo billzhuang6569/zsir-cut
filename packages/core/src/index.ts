@@ -1,6 +1,7 @@
 export * from "./dispatch.ts";
 export * from "./export-framework.ts";
 export * from "./fingerprint.ts";
+export * from "./fish-audio.ts";
 export * from "./preview.ts";
 export * from "./project/entities.ts";
 export * from "./project/id.ts";
@@ -25,3 +26,6 @@ export {
 } from "./schema.ts";
 export * from "./term-library.ts";
 export * from "./timecode.ts";
+export * from "./voice.ts";
+export * from "./voice-keychain.ts";
+export * from "./voice-storage.ts";

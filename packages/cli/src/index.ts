@@ -8,6 +8,13 @@ const { dispatch, errorEnvelope, newId, parseProject, VERBS }: typeof import("..
     .href
 );
 
+const { voiceJobPath }: typeof import("../../core/dist/voice-jobs.js") = await import(
+  new URL(
+    import.meta.url.endsWith(".ts") ? "../../core/src/voice-jobs.ts" : "../../core/dist/voice-jobs.js",
+    import.meta.url,
+  ).href
+);
+
 const { jobPath, readJob }: typeof import("../../core/dist/jobs.js") = await import(
   new URL(import.meta.url.endsWith(".ts") ? "../../core/src/jobs.ts" : "../../core/dist/jobs.js", import.meta.url).href
 );
@@ -44,10 +51,18 @@ async function main(): Promise<void> {
     process.exitCode = codes[envelope.status];
     return;
   }
-  if (positionals[0] === "terms" && ["list", "edit"].includes(positionals[1] ?? ""))
-    positionals = [`terms_${positionals[1]}`, ...positionals.slice(2)];
+  if (
+    (positionals[0] === "terms" && ["list", "edit"].includes(positionals[1] ?? "")) ||
+    (positionals[0] === "voice" && ["list", "edit", "clone"].includes(positionals[1] ?? "")) ||
+    (positionals[0] === "settings" && ["get", "set"].includes(positionals[1] ?? ""))
+  )
+    positionals = [`${positionals[0]}_${positionals[1]}`, ...positionals.slice(2)];
   const [verb, positionalProject] = positionals;
-  const globalTerms = verb === "terms_list" || verb === "terms_edit";
+  const globalCommand =
+    ["terms_list", "terms_edit", "settings_get", "settings_set", "voice_list", "voice_edit", "voice_clone"].includes(
+      verb ?? "",
+    ) ||
+    (verb === "job_status" && !positionalProject);
   if (!VERBS.includes(verb as Verb)) throw new Error("Unknown verb");
   const reject = (message: string) => {
     const envelope = errorEnvelope(verb as Verb, newId("req_"), "rejected", "E_VALIDATION", message);
@@ -57,7 +72,7 @@ async function main(): Promise<void> {
   let request: unknown;
   try {
     const text =
-      verb === "terms_list" && !inputPath
+      ["terms_list", "voice_list", "settings_get"].includes(verb ?? "") && !inputPath
         ? "{}"
         : inputPath
           ? await readFile(inputPath, "utf8")
@@ -72,7 +87,11 @@ async function main(): Promise<void> {
             });
     request = JSON.parse(text);
   } catch (error) {
-    reject(`无法读取请求${inputPath ? ` ${inputPath}` : ""}：${String(error)}`);
+    reject(
+      verb === "settings_set"
+        ? "无法读取设置请求：请检查文件和 JSON 格式"
+        : `无法读取请求${inputPath ? ` ${inputPath}` : ""}：${String(error)}`,
+    );
     return;
   }
   if (!request || typeof request !== "object" || Array.isArray(request)) {
@@ -88,28 +107,32 @@ async function main(): Promise<void> {
     reject(`工程路径不一致：${positionalProject}；请求 project：${String(input.project)}`);
     return;
   }
-  if (globalTerms && positionalProject) {
-    reject("名词库动词不接受工程路径");
+  if (globalCommand && positionalProject) {
+    reject("全局动词不接受工程路径");
     return;
   }
   const project = positionalProject ?? input.project;
-  if (!globalTerms && verb !== "record_handoff_check" && (project === undefined || project === "")) {
+  if (!globalCommand && verb !== "record_handoff_check" && (project === undefined || project === "")) {
     reject("缺少工程路径");
     return;
   }
   let envelope = await dispatch(
     verb as Verb,
-    globalTerms || (verb === "record_handoff_check" && positionals.length === 1) ? input : { ...input, project },
+    globalCommand || (verb === "record_handoff_check" && positionals.length === 1) ? input : { ...input, project },
     process.env.ZSIR_CUT_EXPORTER_MODULE ? { exporterModule: process.env.ZSIR_CUT_EXPORTER_MODULE } : {},
   );
-  if (process.argv.includes("--wait") && envelope.status === "accepted" && project) {
+  if (process.argv.includes("--wait") && envelope.status === "accepted") {
     const jobId = (envelope.result as { job_id: string }).job_id;
     try {
-      const parsed = parseProject(await readFile(project as string, "utf8"));
-      if (!parsed.ok) throw new Error("Project file is invalid");
+      let path = voiceJobPath(jobId);
+      if (verb !== "voice_clone") {
+        const parsed = parseProject(await readFile(project as string, "utf8"));
+        if (!parsed.ok) throw new Error("Project file is invalid");
+        path = jobPath(project as string, parsed.project.id, jobId);
+      }
       for (;;) {
         await new Promise((resolve) => setTimeout(resolve, 500));
-        const job = await readJob(jobPath(project as string, parsed.project.id, jobId));
+        const job = await readJob(path);
         if (job.state === "succeeded" || job.state === "failed") {
           envelope = job.envelope ?? {
             ...envelope,

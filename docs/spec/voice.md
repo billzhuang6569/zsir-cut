@@ -78,6 +78,13 @@
 
 `voice_generate` 是工程动词，见第 4 节。
 
+不属于工程的长任务（`voice_clone`）的任务目录放在 `~/Library/Application Support/zsir-cut/jobs/<job_id>/`，`job.json` 格式同 `command-protocol.md` 9.1.1；`job_status` 不带 `project` 时查这里。
+
+远端和本机不能一起原子提交，按「先远端、后本机」的顺序做，有这些已知的窗口，一期接受，不做补偿：
+- `voice_edit` 多项操作里后面一项远端失败时，本机库不写，但前面已成功的远端改名或删除不回滚。界面一次只发一项。
+- `voice_clone` 远端建好、本机写库失败时，fish.audio 上会多一个没入库的音色。
+- `settings_set` 同时改 Key 和设置文件时，Key 写进钥匙串后设置文件写失败，Key 不回滚。
+
 ## 3. 克隆 `voice_clone`
 
 参数：
@@ -87,7 +94,7 @@
 | `name` | 是 | 音色名 |
 | `file` | 二选一 | 本机音频或视频文件的绝对路径 |
 | `media` | 二选一 | `{project, media_id, source_start, duration}`：工程里一个素材的一段，桌面版从时间线片段右键发起时用片段的源区间 |
-| `text` | 否 | 参考音频里说的话。不给时：来自工程素材且该区间有母稿的，取第 2 层 `text` 非空的字词拼起来；否则不传，由 fish.audio 自己识别 |
+| `text` | 否 | 参考音频里说的话。不给时：来自工程素材且该区间有母稿的，取第 2 层 `text` 非空的字词拼起来；否则不传，由 fish.audio 自己识别。素材有多份母稿时取第一份；只取对齐区间和实际取样区间重叠的字词 |
 
 步骤：
 

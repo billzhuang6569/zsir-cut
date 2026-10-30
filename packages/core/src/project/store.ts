@@ -72,7 +72,10 @@ type ErrorCode =
   | "E_LOCKED"
   | "E_SESSION_STATE"
   | "E_IO"
-  | "E_INTERNAL";
+  | "E_INTERNAL"
+  | "E_VOICE_AUTH"
+  | "E_VOICE_PAYMENT"
+  | "E_VOICE_UPSTREAM";
 export interface WriteEnvelope {
   ok: boolean;
   status: EnvelopeStatus;

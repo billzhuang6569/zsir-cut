@@ -91,7 +91,7 @@ export function validateCommand(verb: string, value: unknown): { valid: boolean;
   const result = validate(validator, value);
   if (
     result.valid ||
-    verb !== "edit" ||
+    (verb !== "edit" && verb !== "voice_edit") ||
     !value ||
     typeof value !== "object" ||
     !("ops" in value) ||
@@ -104,9 +104,16 @@ export function validateCommand(verb: string, value: unknown): { valid: boolean;
       !(error.keyword === "unevaluatedProperties" && error.params.unevaluatedProperty === "ops"),
   );
   const schema = ajv.getSchema(commandId)?.schema as {
-    $defs: { edit_op: { oneOf: { properties: { op: { const: string } } }[] } };
+    $defs: {
+      edit_op: { oneOf: { properties: { op: { const: string } } }[] };
+      requests: {
+        voice_edit: { properties: { ops: { items: { oneOf: { properties: { op: { const: string } } }[] } } } };
+      };
+    };
   };
-  const branches = schema.$defs.edit_op.oneOf;
+  const branchPath = verb === "edit" ? "edit_op" : "requests/voice_edit/properties/ops/items";
+  const branches =
+    verb === "edit" ? schema.$defs.edit_op.oneOf : schema.$defs.requests.voice_edit.properties.ops.items.oneOf;
   for (const [index, op] of value.ops.entries()) {
     const name = op && typeof op === "object" && "op" in op ? op.op : undefined;
     const branch = branches.findIndex((item) => item.properties.op.const === name);
@@ -120,7 +127,7 @@ export function validateCommand(verb: string, value: unknown): { valid: boolean;
       });
       continue;
     }
-    const selected = ajv.getSchema(`${commandId}#/$defs/edit_op/oneOf/${branch}`);
+    const selected = ajv.getSchema(`${commandId}#/$defs/${branchPath}/oneOf/${branch}`);
     if (!selected) throw new Error("Missing edit operation schema");
     errors.push(
       ...validate(selected, op).errors.map((error) => ({

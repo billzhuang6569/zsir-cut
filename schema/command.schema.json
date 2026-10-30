@@ -85,7 +85,177 @@
         }
       }
     },
+    "voice_id": { "type": "string", "pattern": "^voc_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
     "requests": {
+      "settings_get": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "settings_set": {
+        "type": "object",
+        "properties": {
+          "voice": {
+            "type": "object",
+            "required": [
+              "model"
+            ],
+            "properties": {
+              "model": {
+                "enum": [
+                  "s2.1-pro",
+                  "s2.1-pro-free",
+                  "s2-pro",
+                  "drama-3"
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "network": {
+            "type": "object",
+            "required": [
+              "proxy"
+            ],
+            "properties": {
+              "proxy": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "voice_key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "voice_list": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "voice_edit": {
+        "type": "object",
+        "required": [
+          "ops"
+        ],
+        "properties": {
+          "ops": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "required": [
+                    "op",
+                    "id",
+                    "name"
+                  ],
+                  "properties": {
+                    "op": {
+                      "const": "rename"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/voice_id"
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 40
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "op",
+                    "id"
+                  ],
+                  "properties": {
+                    "op": {
+                      "const": "delete"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/voice_id"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ]
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "voice_clone": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "file": {
+            "type": "string",
+            "minLength": 1
+          },
+          "media": {
+            "type": "object",
+            "required": [
+              "project",
+              "media_id",
+              "source_start",
+              "duration"
+            ],
+            "properties": {
+              "project": {
+                "type": "string",
+                "minLength": 1
+              },
+              "media_id": {
+                "$ref": "#/$defs/id"
+              },
+              "source_start": {
+                "$ref": "#/$defs/seconds"
+              },
+              "duration": {
+                "$ref": "#/$defs/seconds"
+              }
+            },
+            "additionalProperties": false
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "file"
+            ],
+            "properties": { "file": true }
+          },
+          {
+            "required": [
+              "media"
+            ],
+            "properties": { "media": true }
+          }
+        ],
+        "additionalProperties": false
+      },
+
       "terms_list": {
         "type": "object",
         "properties": {
@@ -740,7 +910,7 @@
       },
       "job_status": {
         "type": "object",
-        "allOf": [{ "$ref": "#/$defs/read" }],
+        "allOf": [{ "type": "object", "properties": { "project": { "type": "string", "minLength": 1 }, "author": { "$ref": "#/$defs/author" }, "session_id": { "$ref": "#/$defs/session_id" } } }],
         "required": ["job_id"],
         "properties": { "job_id": { "type": "string", "pattern": "^job_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" } },
         "unevaluatedProperties": false
