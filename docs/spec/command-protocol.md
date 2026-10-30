@@ -391,7 +391,7 @@
 
 1. 请求先按普通规则检查（`dry_run` 的 `export` 除外，它同步返回损失报告）。检查通过后，内核在 `.zcut/<project_id>/jobs/<job_id>/` 下建任务目录，写 `job.json`，启动一个独立的子进程执行，然后立即返回 `accepted`，`result` 含 `job_id`。`job_id` 格式为 `job_` 加小写 UUIDv7。
 2. `job.json` 字段：`job_id`、`verb`、`request`、`state`（`queued`、`running`、`succeeded`、`failed`）、`progress`（0 到 1）、`message`、`created_at`、`updated_at`、`envelope`（结束后的最终结果信封）。子进程每次更新都原子替换这个文件。
-3. `job_status`：参数 `job_id`，读动词，`result` 是 `job.json` 的摘要，整个结果信封不超过 8 KB：`request` 只留 `verb`、`idempotency_key`、`label`；`envelope.changes` 换成 `changes_count`（条数）和 `changes_sample`（前 10 条），其余字段照抄。完整内容仍在 `job.json` 里。子进程已不存在而状态仍是 `running` 时，状态改报 `failed`，`message` 写明进程意外退出。（2026-10-30：桌面 Agent 查一次识别任务拿到 5.5 万字，超过读取上限。）
+3. `job_status`：参数 `job_id`，读动词，`result` 是 `job.json` 的摘要：`request` 只留 `verb`、`idempotency_key`、`label`；`envelope.changes` 换成 `changes_count`（条数）和 `changes_sample`（前 10 条）；`envelope.verification.issues` 换成 `issues_count` 和 `issues_sample`（前 10 条，错误级在前）；其余字段照抄。目标是常见任务的结果在 8 KB 以内，但这不是硬上限：摘要再大也照常返回，不能因为大小报错，否则调用方读不到任务状态。完整内容仍在 `job.json` 里。子进程已不存在而状态仍是 `running` 时，状态改报 `failed`，`message` 写明进程意外退出。（2026-10-30：桌面 Agent 查一次识别任务拿到 5.5 万字，超过读取上限。）
 4. 长任务产生的工程写入（例如 `transcribe` 写母稿）在子进程里走第 5 节的写入流程，`base_revision` 用请求里的值，幂等键用请求里的键。
 5. CLI 加 `--wait` 时，提交后每 500 毫秒查一次 `job_status`，结束后输出最终结果信封，退出码按最终状态。MCP 不等待，由 Agent 调用 `zcut_job_status`。
 
