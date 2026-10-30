@@ -196,10 +196,11 @@ it.each([
   const accepted = await dispatch("export", request(false, profile));
   expect(accepted.status).toBe("accepted");
   const { job_id } = accepted.result as { job_id: string };
+  const { readJob, jobPath } = await import(join(directory, "packages/core/src/jobs.ts"));
+  const { id } = JSON.parse(await readFile(project, "utf8"));
   let envelope: Envelope | null = null;
   for (let i = 0; i < 100; i++) {
-    const result = await dispatch("job_status", { project, job_id });
-    const job = result.result as { state: string; envelope: Envelope | null };
+    const job = await readJob(jobPath(project, id, job_id));
     if (job.state === "succeeded" || job.state === "failed") {
       envelope = job.envelope;
       break;

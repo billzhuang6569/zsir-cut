@@ -157,6 +157,8 @@
   grid-row: 3;
 }
 .zc-timeline {
+  -webkit-user-select: none;
+  user-select: none;
   grid-row: 4;
 }
 .zc-picture {

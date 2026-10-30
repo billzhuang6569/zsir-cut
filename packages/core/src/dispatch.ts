@@ -379,9 +379,32 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
       const parsed = parseProject(await readFile(request.project as string, "utf8"));
       if (!parsed.ok) return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Project file is invalid");
       const output = basic(verb, requestId);
-      output.result = (await readJob(
-        jobPath(request.project as string, parsed.project.id, request.job_id as string),
-      )) as unknown as Record<string, unknown>;
+      const job = await readJob(jobPath(request.project as string, parsed.project.id, request.job_id as string));
+      const { changes, ...envelope } = job.envelope ?? { changes: [] };
+      const { issues, ...verification } = job.envelope?.verification ?? { issues: [] };
+      output.result = {
+        ...job,
+        request: Object.fromEntries(
+          ["verb", "idempotency_key", "label"]
+            .filter((key) => key in job.request)
+            .map((key) => [key, job.request[key]]),
+        ),
+        envelope: job.envelope
+          ? {
+              ...envelope,
+              changes_count: changes.length,
+              changes_sample: changes.slice(0, 10),
+              verification: {
+                ...verification,
+                issues_count: issues.length,
+                issues_sample: [
+                  ...issues.filter((issue) => issue.severity === "error"),
+                  ...issues.filter((issue) => issue.severity !== "error"),
+                ].slice(0, 10),
+              },
+            }
+          : null,
+      };
       return output;
     }
     let projectPath = request.project as string;

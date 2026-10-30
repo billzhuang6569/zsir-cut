@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { dispatch, parseProject, validateCommand, validateEnvelope } from "../src/index.js";
 
+import { jobPath, readJob } from "../src/jobs.ts";
+
 let directory: string;
 let path: string;
 let python: string;
@@ -28,7 +30,7 @@ const finish = async (jobId: string) => {
   for (let i = 0; i < 100; i++) {
     const status = await dispatch("job_status", { project: path, job_id: jobId });
     const job = status.result as { state: string; envelope: Awaited<ReturnType<typeof dispatch>> | null };
-    if (job.state === "succeeded" || job.state === "failed") return job;
+    if (job.state === "succeeded" || job.state === "failed") return readJob(jobPath(path, (await project()).id, jobId));
     await new Promise((resolve) => setTimeout(resolve, 30));
   }
   throw new Error("ASR job timeout");

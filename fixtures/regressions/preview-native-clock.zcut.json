@@ -1,0 +1,88 @@
+{
+  "schema": "zsir-cut/timeline",
+  "schema_version": "0.3",
+  "id": "prj_minimal",
+  "name": "原生播放时钟回归",
+  "revision": {
+    "seq": 1,
+    "id": "rev_example_1",
+    "parent": null,
+    "created_at": "2026-10-26T12:00:00Z",
+    "author": {
+      "kind": "human",
+      "name": "example"
+    }
+  },
+  "media": [
+    {
+      "id": "med_a",
+      "kind": "video",
+      "name": "A001.mov",
+      "path": "media/A001.mov",
+      "size_bytes": 104857600,
+      "fingerprint": {
+        "algo": "sampled-sha256-v1",
+        "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "duration": "60s",
+      "start_timecode": "10:00:00:00",
+      "reel": "A001",
+      "video": {
+        "rate": "30",
+        "width": 1920,
+        "height": 1080,
+        "pixel_aspect": "1",
+        "vfr": false
+      },
+      "audio": {
+        "sample_rate": "48000",
+        "channels": 2
+      }
+    }
+  ],
+  "timelines": [
+    {
+      "id": "tl_main",
+      "name": "主时间线",
+      "edit_rate": "30",
+      "drop_frame": false,
+      "start_timecode": "00:00:00:00",
+      "audio_rate": "48000",
+      "format": {
+        "width": 1920,
+        "height": 1080,
+        "pixel_aspect": "1"
+      },
+      "tracks": [
+        {
+          "id": "trk_v1",
+          "kind": "video",
+          "name": "V1",
+          "enabled": true,
+          "clips": [
+            {
+              "id": "clp_v1",
+              "occurrence_id": "occ_1",
+              "media_id": "med_a",
+              "timeline_start": "0s",
+              "duration": "2s",
+              "source_start": "10s"
+            },
+            {
+              "id": "clp_v2",
+              "occurrence_id": "occ_2",
+              "media_id": "med_a",
+              "timeline_start": "2s",
+              "duration": "2s",
+              "source_start": "20s"
+            }
+          ],
+          "transitions": []
+        }
+      ],
+      "markers": []
+    }
+  ],
+  "transcripts": [],
+  "subtitle_styles": []
+}

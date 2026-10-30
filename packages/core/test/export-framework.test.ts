@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
-import { copyFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -20,6 +20,7 @@ import {
   runExport,
   subtitleFiles,
   validateCommand,
+  validateEnvelope,
   validateLossReport,
   validateManifest,
 } from "../src/index.js";
@@ -467,7 +468,7 @@ it.each(["succeeded", "failed"] as const)(
   },
 );
 
-it("CLI --wait prints the final envelope", () => {
+it("CLI --wait prints the complete on-disk final envelope", async () => {
   const cli = fileURLToPath(new URL("../../cli/dist/index.js", import.meta.url));
   const run = spawnSync(process.execPath, [cli, "export", projectPath, "--wait"], {
     input: JSON.stringify(request()),
@@ -476,5 +477,13 @@ it("CLI --wait prints the final envelope", () => {
     timeout: 10000,
   });
   expect(run.status, JSON.stringify({ error: run.error?.message, stderr: run.stderr, stdout: run.stdout })).toBe(0);
-  expect(JSON.parse(run.stdout).status).toBe("applied");
+  const final = JSON.parse(run.stdout);
+  expect(final.status).toBe("applied");
+  expect(validateEnvelope(final).valid).toBe(true);
+  expect(final).toHaveProperty("changes");
+  expect(final).not.toHaveProperty("changes_count");
+  const jobs = join(directory, ".zcut", (await project()).id, "jobs");
+  const [id] = await readdir(jobs);
+  if (!id) throw new Error("Missing job");
+  expect(final).toEqual((await readJob(join(jobs, id, "job.json"))).envelope);
 });
