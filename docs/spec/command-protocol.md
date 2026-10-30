@@ -337,6 +337,9 @@
 | `record_handoff_check` | 写交接包 | 把 `host_import` 或 `host_render_comparison` 的检查结果写进交接包的 `manifest.json`，不改工程。参数：`package`（交接包目录）、`check`（两者之一）、`status`、`host_version`、`by`、`notes`、`items`（逐项的 `check`、`status`、`notes`）。不需要 `base_revision`，不写工程日志；同一项检查再次记录时整体覆盖，所以天然幂等 |
 | `job_status` | 读 | 查长任务进度与结果 |
 | `terms_list` / `terms_edit` | 读 / 写 | 全局名词库，不属于工程，见 `term-library.md` 第 5 节 |
+| `settings_get` / `settings_set` | 读 / 写 | 本机设置和 fish.audio Key，不属于工程，见 `voice.md` 第 2 节 |
+| `voice_list` / `voice_edit` / `voice_clone` | 读 / 写 / 长任务 | 全局音色库，不属于工程，见 `voice.md` 第 2、3 节 |
+| `voice_generate` | 长任务 | 用音色生成配音，结果作为素材写进工程，见 `voice.md` 第 4、5 节 |
 
 共 23 个。新增动词要先改本文。另有只在桌面版运行时存在的界面动词，见 9.6，不计入这 21 个。
 
@@ -471,8 +474,8 @@
 
 | 动词 | 参数 | 作用 |
 |---|---|---|
-| `ui_state` | 无 | 读当前界面：打开的工程、当前标签（`ai`、`media`、`chapters`、`subtitles`）、参数区子标签、历史面板是否打开、播放头位置、选中对象、是否在播放 |
-| `ui_show_panel` | `panel`，可选 `sub` | 切换功能区标签，例如 `subtitles` 加 `sub: "style"`（字幕面板的 `sub` 取 `subtitles`、`style`）；`panel` 取 `history` 时在参数区打开历史面板，不改功能区标签 |
+| `ui_state` | 无 | 读当前界面：打开的工程、当前标签（`ai`、`media`、`chapters`、`subtitles`、`voice`）、参数区子标签、历史面板是否打开、播放头位置、选中对象、是否在播放 |
+| `ui_show_panel` | `panel`，可选 `sub` | 切换功能区标签，例如 `subtitles` 加 `sub: "style"`（字幕面板的 `sub` 取 `subtitles`、`style`；语音面板的 `sub` 取 `clone`、`generate`、`results`）；`panel` 取 `history` 时在参数区打开历史面板，不改功能区标签 |
 | `ui_seek` | `at`（序列时间）或 `id`（片段、标记、字幕条、章节） | 把播放头移到那里并滚动到可见 |
 | `ui_select` | `ids` | 选中这些对象，空数组表示取消选中 |
 | `ui_play` | `range`（可选）、`loop`（可选） | 播放一段；不带 `range` 从播放头开始 |
@@ -536,8 +539,11 @@
 | `E_BATCH_OPEN` | `failed` | 同一目标上有一个批次还没执行完，这次写入要等；`retryable` 为 true（6.1） |
 | `E_BATCH_SEQ_TAKEN` | `rejected` | 同一批次的这个序号已经收到过另一个不同的请求（6.1） |
 | `E_BATCH_CLOSED` | `rejected` | 批次已经完成、失败或超时，不再收步骤（6.1） |
+| `E_VOICE_AUTH` | `rejected` 或 `failed` | 没设置 fish.audio Key，或 Key 无效，见 `voice.md` 第 7 节 |
+| `E_VOICE_PAYMENT` | `failed` | fish.audio 余额不足 |
+| `E_VOICE_UPSTREAM` | `failed` | fish.audio 出错或连不上，`retryable` 说明能否重试 |
 
-警告码（写在结果信封的 `result.warnings` 数组里，每项 `{code, …}`，不改变 `status`；信封顶层没有 `warnings` 字段）：`W_FONT_FALLBACK`、`W_SUB_OVERFLOW` 见 `handoff-profile.md` 第 9 节；本文新增的还有 `W_DECISIONS_PENDING`（批准时还有没回答的决定，7.4）、`W_REPLACE_SKIPPED_LOCKED`（查找替换跳过了锁定的字幕条，见 `edit-ops.md`）、`W_FILLERS_HIDDEN`（识别后自动隐藏了水词，附个数，见 `asr-worker.md` 第 6 节）、`W_TERMS_LIBRARY`（工程名词没能更新到全局名词库，附原因，见 `term-library.md` 第 3 节）。校验类警告见 `timeline-schema.md` 第 8 节。
+警告码（写在结果信封的 `result.warnings` 数组里，每项 `{code, …}`，不改变 `status`；信封顶层没有 `warnings` 字段）：`W_FONT_FALLBACK`、`W_SUB_OVERFLOW` 见 `handoff-profile.md` 第 9 节；本文新增的还有 `W_DECISIONS_PENDING`（批准时还有没回答的决定，7.4）、`W_REPLACE_SKIPPED_LOCKED`（查找替换跳过了锁定的字幕条，见 `edit-ops.md`）、`W_FILLERS_HIDDEN`（识别后自动隐藏了水词，附个数，见 `asr-worker.md` 第 6 节）、`W_TERMS_LIBRARY`（工程名词没能更新到全局名词库，附原因，见 `term-library.md` 第 3 节）、`W_VOICE_SAMPLE_TRIMMED`（克隆参考音频超过 60 秒，只用了前 60 秒，见 `voice.md` 第 3 节）。校验类警告见 `timeline-schema.md` 第 8 节。
 
 ## 12. 一期不做
 
