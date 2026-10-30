@@ -715,3 +715,135 @@ it("adds and removes folders for every selected media in one edit while preservi
     await h.close();
   }
 });
+
+function skimImages() {
+  const images: HTMLImageElement[] = [];
+  vi.stubGlobal("Image", function MockImage() {
+    const image = document.createElement("img");
+    images.push(image);
+    return image;
+  });
+  return images;
+}
+async function moveSkim(container: HTMLElement, x: number) {
+  const film = container.querySelector<HTMLElement>(".zc-media-film");
+  if (!film) throw new Error("Missing film");
+  vi.spyOn(film, "getBoundingClientRect").mockReturnValue({ left: 10, width: 200 } as DOMRect);
+  await act(async () => {
+    film.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 10 + x }));
+  });
+}
+it.each([
+  ["25", "10s", "5s", "249/25s"],
+  ["30000/1001", "1001/100s", "1001/200s", "299299/30000s"],
+  ["30000/1001", "10s", "149149/30000s", "299299/30000s"],
+])("maps hover to the %s source frame grid and clamps the right edge", async (rate, duration, midpoint, last) => {
+  const images = skimImages();
+  const h = await mount(
+    false,
+    false,
+    { ...project, media: [{ ...media, duration, video: { ...media.video, rate } }] },
+    true,
+  );
+  vi.useFakeTimers();
+  try {
+    await h.change({ ...h.state(), selected: [media.id], media: { id: media.id, at: "3s", in: "1s", out: "7s" } });
+    const before = h.state();
+    await moveSkim(h.container, 100);
+    expect(new URL(images[0]?.src ?? "").searchParams.get("at")).toBe(midpoint);
+    await act(async () => images[0]?.dispatchEvent(new Event("load")));
+    expect(h.container.querySelector(".zc-media-skim-frame")).not.toBeNull();
+    expect(h.state()).toEqual(before);
+    expect(h.call).not.toHaveBeenCalled();
+    await moveSkim(h.container, 250);
+    await act(async () => vi.advanceTimersByTime(80));
+    expect(new URL(images[1]?.src ?? "").searchParams.get("at")).toBe(last);
+    await act(async () =>
+      h.container.querySelector(".zc-media-film")?.dispatchEvent(new MouseEvent("pointerout", { bubbles: true })),
+    );
+    expect(h.container.querySelector(".zc-media-skim-frame")).toBeNull();
+    expect(h.container.querySelector(".zc-media-skim-line")).toBeNull();
+    expect(h.container.querySelectorAll(".zc-media-film > img")).toHaveLength(3);
+    await h.select();
+    expect(h.state().selected).toEqual([media.id]);
+  } finally {
+    await h.close();
+    vi.useRealTimers();
+  }
+});
+it("throttles, dedupes frames, discards stale loads, keeps cover on failure and cancels on unmount", async () => {
+  const images = skimImages();
+  const h = await mount(false, false, project, true);
+  vi.useFakeTimers();
+  try {
+    await moveSkim(h.container, 20);
+    const staleLoad = images[0]?.onload;
+    await moveSkim(h.container, 20.1);
+    await moveSkim(h.container, 40);
+    expect(images).toHaveLength(1);
+    await act(async () => images[0] && staleLoad?.call(images[0], new Event("load")));
+    expect(h.container.querySelector(".zc-media-skim-frame")).toBeNull();
+    await act(async () => vi.advanceTimersByTime(80));
+    expect(images).toHaveLength(2);
+    expect(new URL(images[1]?.src ?? "").searchParams.get("at")).toBe("2s");
+    await act(async () => images[1]?.dispatchEvent(new Event("load")));
+    const current = h.container.querySelector<HTMLImageElement>(".zc-media-skim-frame")?.src;
+    await act(async () => images[0] && staleLoad?.call(images[0], new Event("load")));
+    expect(h.container.querySelector<HTMLImageElement>(".zc-media-skim-frame")?.src).toBe(current);
+    await moveSkim(h.container, 40.1);
+    await act(async () => vi.advanceTimersByTime(80));
+    expect(images).toHaveLength(2);
+    await moveSkim(h.container, 60);
+    await act(async () => images[2]?.dispatchEvent(new Event("error")));
+    expect(h.container.querySelector(".zc-media-skim-frame")).toBeNull();
+    await moveSkim(h.container, 80);
+    const late = images[2]?.onload;
+    await act(async () =>
+      h.container.querySelector(".zc-media-film")?.dispatchEvent(new MouseEvent("pointerout", { bubbles: true })),
+    );
+    await act(async () => {
+      images[2] && late?.call(images[2], new Event("load"));
+      vi.advanceTimersByTime(160);
+    });
+    expect(images).toHaveLength(3);
+    expect(h.container.querySelector(".zc-media-skim-frame")).toBeNull();
+    await moveSkim(h.container, 100);
+    await moveSkim(h.container, 120);
+    await h.close();
+    await act(async () => vi.advanceTimersByTime(160));
+    expect(images).toHaveLength(4);
+    expect(images[3]?.getAttribute("src")).toBeNull();
+  } finally {
+    if (h.container.isConnected) await h.close();
+    vi.useRealTimers();
+  }
+});
+it("does not scrub list, image or audio cards and preserves drag payload", async () => {
+  const images = skimImages();
+  const h = await mount(
+    false,
+    false,
+    { ...project, media: [media, { ...media, id: "image", kind: "image" }, { ...media, id: "audio", kind: "audio" }] },
+    true,
+  );
+  try {
+    const films = h.container.querySelectorAll(".zc-media-film");
+    await act(async () => {
+      for (const film of [...films].slice(1))
+        film.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 50 }));
+    });
+    expect(images).toHaveLength(0);
+    await moveSkim(h.container, 100);
+    const setData = vi.fn();
+    const event = new Event("dragstart", { bubbles: true });
+    Object.defineProperty(event, "dataTransfer", { value: { setData, effectAllowed: "" } });
+    await act(async () => films[0]?.dispatchEvent(event));
+    expect(setData).toHaveBeenCalledWith("application/x-zcut-media", media.id);
+    expect(h.container.querySelector(".zc-media-skim-line")).toBeNull();
+    await h.click("列表");
+    expect(h.container.querySelector(".zc-media-film")).toBeNull();
+    expect(images).toHaveLength(1);
+  } finally {
+    await h.close();
+  }
+});

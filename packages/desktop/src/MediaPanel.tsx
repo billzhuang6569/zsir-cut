@@ -2,14 +2,14 @@ import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { UiState } from "../../app-host/src/ui.js";
 import { Icon, IconButton } from "./components.js";
 import type { ProjectView } from "./connection.js";
 import { DESKTOP_AUTHOR } from "./connection.js";
 import { mediaDuration, mediaRange, middle, placeMedia, sourceProject } from "./media.js";
 import { mediaUrl, Wave } from "./TimelinePreview.js";
-import { compare, floor, type MediaView, parseRational, seekTarget, timecode } from "./timeline.js";
+import { ceil, compare, floor, frameTime, type MediaView, parseRational, seekTarget, timecode } from "./timeline.js";
 import "./media.css";
 
 type Config = { port: number; token: string };
@@ -132,6 +132,82 @@ function AudioThumbnail({
         config={config}
       />
     )
+  );
+}
+function MediaFilm({ media, config, children }: { media: MediaView; config: Config | undefined; children: ReactNode }) {
+  const [position, setPosition] = useState<number | null>(null);
+  const [frame, setFrame] = useState<string | null>(null);
+  const pending = useRef<{ at: string; url: string } | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const image = useRef<HTMLImageElement | null>(null);
+  const latest = useRef<string | null>(null);
+  const cancel = useCallback(() => {
+    clearTimeout(timer.current);
+    timer.current = undefined;
+    pending.current = null;
+    latest.current = null;
+    if (image.current) {
+      image.current.onload = image.current.onerror = null;
+      image.current.removeAttribute("src");
+      image.current = null;
+    }
+  }, []);
+  useEffect(() => cancel, [cancel]);
+  const reset = () => {
+    cancel();
+    setFrame(null);
+    setPosition(null);
+  };
+  const request = () => {
+    const next = pending.current;
+    if (!next) return;
+    pending.current = null;
+    if (image.current) image.current.removeAttribute("src");
+    const img = new Image();
+    image.current = img;
+    img.onload = () => {
+      if (image.current === img && latest.current === next.at) setFrame(next.url);
+    };
+    img.onerror = () => {
+      if (image.current === img && latest.current === next.at) setFrame(null);
+    };
+    img.src = next.url;
+    timer.current = setTimeout(() => {
+      timer.current = undefined;
+      request();
+    }, 80);
+  };
+  return (
+    <span
+      className="zc-media-film"
+      role="img"
+      aria-label="素材缩略图"
+      onPointerMove={(event) => {
+        if (!config || media.kind !== "video" || !media.video || event.buttons) return;
+        const rect = event.currentTarget.getBoundingClientRect();
+        const width = Math.round(rect.width * 1000);
+        if (width <= 0) return;
+        const x = Math.max(0, Math.min(width, Math.round((event.clientX - rect.left) * 1000)));
+        const duration = parseRational(mediaDuration(media), true);
+        if (duration.numerator <= 0n) return;
+        const rate = parseRational(media.video.rate);
+        const last = ceil(mul(duration, rate)) - 1n;
+        const target = floor(mul(mul(duration, rational(BigInt(x), BigInt(width))), rate));
+        const at = frameTime(target > last ? last : target, media.video.rate);
+        setPosition((x / width) * 100);
+        if (latest.current === at) return;
+        latest.current = at;
+        pending.current = { at, url: mediaUrl(config, "thumb", media.id, at) };
+        if (!timer.current) request();
+      }}
+      onPointerLeave={reset}
+      onPointerCancel={reset}
+      onDragStart={reset}
+    >
+      {children}
+      {frame && <img className="zc-media-skim-frame" alt="" src={frame} draggable={false} />}
+      {position !== null && <span className="zc-media-skim-line" style={{ left: `${position}%` }} />}
+    </span>
   );
 }
 export function useMediaPanel({
@@ -512,7 +588,11 @@ export function useMediaPanel({
               </>
             ) : (
               <>
-                <span className="zc-media-film">
+                <MediaFilm
+                  key={`${m.id}:${m.duration}:${m.video?.rate}:${config?.port}:${config?.token}`}
+                  media={m}
+                  config={config}
+                >
                   {m.kind === "audio" && project ? (
                     <AudioThumbnail project={project} media={m} config={config} width={size} />
                   ) : config ? (
@@ -534,7 +614,7 @@ export function useMediaPanel({
                   {state.media?.id === m.id && (state.media.in || state.media.out) && (
                     <RangeBar media={m} state={state} />
                   )}
-                </span>
+                </MediaFilm>
                 <span className="zc-media-caption" title={[m.name, m.organize?.note].filter(Boolean).join(" · ")}>
                   {m.name ?? "未命名素材"}
                   {m.organize?.note && <small> · {m.organize.note}</small>}

@@ -147,3 +147,78 @@ describe("read-only media channel", () => {
     }
   });
 });
+
+it("caps thumbnails globally, merges queued keys, cancels disconnected waiters and recovers after failure", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "zcut-skim-"));
+  const jobs: { resolve: (value: Buffer) => void; reject: (error: Error) => void }[] = [];
+  let active = 0;
+  let maximum = 0;
+  try {
+    const parsed = parseProject(
+      await readFile(new URL("../../../examples/interview.zcut.json", import.meta.url), "utf8"),
+    );
+    if (!parsed.ok) throw new Error("Invalid fixture");
+    const project = parsed.project;
+    const media = project.media[0];
+    if (!media) throw new Error("Missing media");
+    const run = vi.fn(async () => {
+      maximum = Math.max(maximum, ++active);
+      try {
+        return await new Promise<Buffer>((resolve, reject) => jobs.push({ resolve, reject }));
+      } finally {
+        active--;
+      }
+    });
+    const channel = () => mediaChannel(join(directory, "project.zcut.json"), "secret", async () => project, run);
+    const first = channel();
+    const second = channel();
+    const request = (serve: ReturnType<typeof channel>, at: string, token = "secret") => {
+      const response = new Response();
+      const done = serve(
+        { url: `/thumb?token=${token}&media_id=${media.id}&at=${at}`, method: "GET", headers: {} } as IncomingMessage,
+        response as unknown as ServerResponse,
+      );
+      return { response, done };
+    };
+    const a = request(first, "1s");
+    await vi.waitFor(() => expect(jobs).toHaveLength(1));
+    const b = request(second, "2s");
+    await vi.waitFor(() => expect(jobs).toHaveLength(2));
+    const c = request(first, "3s");
+    const duplicate = request(first, "3s");
+    const cancelled = request(second, "4s");
+    // Give cache misses time to enter the queue before disconnecting.
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(run).toHaveBeenCalledTimes(2);
+    c.response.destroy();
+    cancelled.response.destroy();
+    await cancelled.done;
+    jobs[0]?.reject(new Error("decode failed"));
+    await vi.waitFor(() => expect(jobs).toHaveLength(3));
+    jobs[1]?.resolve(Buffer.from("second"));
+    jobs[2]?.resolve(Buffer.from("shared"));
+    await Promise.all([a.done, b.done, c.done, duplicate.done]);
+    expect(a.response.status).toBe(500);
+    expect(duplicate.response.bytes.toString()).toBe("shared");
+    expect(c.response.headersSent).toBe(false);
+    expect(cancelled.response.headersSent).toBe(false);
+    expect(maximum).toBe(2);
+    expect(run).toHaveBeenCalledTimes(3);
+    const hit = request(first, "3s");
+    await hit.done;
+    expect(hit.response.bytes.toString()).toBe("shared");
+    expect(run).toHaveBeenCalledTimes(3);
+    const denied = request(first, "5s", "wrong");
+    await denied.done;
+    expect(denied.response.status).toBe(401);
+    expect(run).toHaveBeenCalledTimes(3);
+    const retry = request(second, "4s");
+    await vi.waitFor(() => expect(jobs).toHaveLength(4));
+    jobs[3]?.resolve(Buffer.from("retry"));
+    await retry.done;
+    expect(retry.response.bytes.toString()).toBe("retry");
+  } finally {
+    for (const job of jobs) job.resolve(Buffer.from("cleanup"));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
