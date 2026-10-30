@@ -16,6 +16,7 @@ export type WriteVerb =
   | "create_project"
   | "edit"
   | "import_media"
+  | "voice_generate"
   | "transcribe"
   | "undo"
   | "redo"
@@ -718,6 +719,7 @@ export function openProject(options: OpenProjectOptions) {
       const output = envelope("applied", before, candidate.revision.id);
       output.result = result;
       output.verification = { level: "L1", passed: true, issues };
+      if (request.verb === "voice_generate") changes.sort((a, b) => (a.after_index ?? 0) - (b.after_index ?? 0));
       output.changes = changes.map((change) => describeChange(change, entityOps, request.verb));
       options.fault?.("before_step_7");
       const temp = join(dirname(projectPath), `.${current.id}.${randomUUID()}.tmp`);

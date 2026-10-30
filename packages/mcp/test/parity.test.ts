@@ -1,8 +1,8 @@
 import { spawnSync } from "node:child_process";
-import { copyFile, cp, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, copyFile, cp, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -15,6 +15,7 @@ import {
   VERBS,
   validateCommand,
   validateEnvelope,
+  writeVoices,
 } from "../../core/src/index.ts";
 import { createServer } from "../src/index.js";
 
@@ -51,7 +52,7 @@ describe("CLI and MCP", () => {
     await Promise.all([server.connect(left), client.connect(right)]);
     try {
       const tools = await client.listTools();
-      expect(tools.tools).toHaveLength(30);
+      expect(tools.tools).toHaveLength(31);
       for (const tool of tools.tools) {
         if (
           ![
@@ -662,7 +663,7 @@ it("shares queued admission, batch status, undo, restore and historical reads be
   const [left, right] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(left), client.connect(right)]);
   try {
-    expect((await client.listTools()).tools).toHaveLength(30);
+    expect((await client.listTools()).tools).toHaveLength(31);
     const base = { base_revision: "rev_fixture_1", author, label: "Parity step" };
     const pair = async (verb: string, input: Record<string, unknown>, expectedStatus: string) => {
       const cliResult = invokeCli(verb, input);
@@ -934,3 +935,96 @@ it("never reflects a malformed settings request containing a key in CLI errors",
   expect(JSON.parse(run.stdout)).toMatchObject({ status: "rejected", error: { code: "E_VALIDATION" } });
   expect(run.stdout + run.stderr).not.toContain(secret);
 });
+
+it("shares project voice_generate validation, completed worker receipts and idempotent replay between CLI and MCP", async () => {
+  vi.stubEnv("ZSIR_FISH_API_KEY", "fake-generation-key");
+  vi.stubEnv("HTTPS_PROXY", "");
+  const voiceId = "voc_019a0000-0000-7000-8000-000000000001";
+  await mkdir(join(directory, "Library/Application Support/zsir-cut"), { recursive: true });
+  await writeVoices([
+    {
+      id: voiceId,
+      name: "Test voice",
+      fish_model_id: "fish-ref",
+      source: { kind: "file", name: "sample.wav" },
+      sample: `voices/${voiceId}.wav`,
+      created_at: "2026-10-30T00:00:00.000Z",
+    },
+  ]);
+  const bin = join(directory, "bin");
+  await mkdir(bin);
+  const probe = join(bin, "ffprobe");
+  const metadata = {
+    streams: [
+      { index: 0, codec_type: "audio", sample_rate: "44100", channels: 1, duration_ts: "44100", time_base: "1/44100" },
+    ],
+  };
+  await writeFile(probe, `#!${process.execPath}\nprocess.stdout.write(${JSON.stringify(JSON.stringify(metadata))});\n`);
+  await chmod(probe, 0o700);
+  const preload = join(directory, "fake-tts.mjs");
+  await writeFile(
+    preload,
+    'globalThis.fetch = async (_url, init) => new Response("fake WAV:" + JSON.parse(init.body).text);',
+  );
+  const server = createServer();
+  const client = new Client({ name: "voice-generation-parity", version: "1" });
+  const [left, right] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(left), client.connect(right)]);
+  try {
+    const base = {
+      project,
+      base_revision: "rev_fixture_1",
+      idempotency_key: "voice-parity",
+      author,
+      voice_id: voiceId,
+      items: [{ text: "第一段" }, { text: "第二段" }],
+    };
+    for (const extra of [
+      { items: [] },
+      { params: { speed: 3 } },
+      { cues: { transcript_id: "trs_A_zh", cue_ids: ["cue_zh_00"], mode: "merged" } },
+      { voice_id: "voc_missing" },
+      { base_revision: "rev_old" },
+    ]) {
+      const input = { ...base, ...extra };
+      const run = invokeCli("voice_generate", input);
+      const mcp = (await client.callTool({ name: "zcut_voice_generate", arguments: input }))
+        .structuredContent as Record<string, unknown>;
+      expect(withoutRequestId(run.envelope)).toEqual(withoutRequestId(mcp));
+    }
+    for (const entry of ["src/index.ts", "dist/index.js"]) {
+      const parsed = parseProject(await readFile(project, "utf8"));
+      if (!parsed.ok) throw new Error("Invalid fixture");
+      const input = { ...base, base_revision: parsed.project.revision.id, idempotency_key: `voice-${entry}` };
+      const file = join(directory, "generate-request.json");
+      await writeFile(file, JSON.stringify(input));
+      const cliEntry = fileURLToPath(new URL(`../../cli/${entry}`, import.meta.url));
+      const run = spawnSync(process.execPath, [cliEntry, "voice", "generate", project, "--input", file, "--wait"], {
+        encoding: "utf8",
+        timeout: 15000,
+        env: {
+          ...process.env,
+          PATH: `${bin}:${process.env.PATH}`,
+          NODE_OPTIONS: `--import=${pathToFileURL(preload).href}`,
+        },
+      });
+      expect(run.status, run.stderr + run.stdout).toBe(0);
+      const output = JSON.parse(run.stdout);
+      expect(output).toMatchObject({
+        status: "applied",
+        verb: "voice_generate",
+        changes: [{ entity: "media" }, { entity: "media" }],
+      });
+      expect(validateEnvelope(output).valid).toBe(true);
+      const mcp = (await client.callTool({ name: "zcut_voice_generate", arguments: input }))
+        .structuredContent as Record<string, unknown>;
+      expect(mcp.receipt).toMatchObject({ replayed: true });
+      output.receipt.replayed = true;
+      expect(withoutRequestId(output)).toEqual(withoutRequestId(mcp));
+      expect(JSON.stringify(mcp)).not.toContain("fake-generation-key");
+    }
+  } finally {
+    await client.close();
+    await server.close();
+  }
+}, 30000);

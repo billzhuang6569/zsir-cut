@@ -41,6 +41,7 @@ beforeEach(async () => {
   vi.stubEnv("ZSIR_FISH_API_KEY", key);
   vi.stubEnv("HTTPS_PROXY", "");
   client = {
+    generate: vi.fn(async () => new Uint8Array()),
     createModel: vi.fn(async () => ({ _id: "fish_model" })),
     updateModel: vi.fn(async () => {}),
     deleteModel: vi.fn(async () => {}),

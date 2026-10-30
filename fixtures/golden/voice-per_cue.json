@@ -1,0 +1,97 @@
+{
+  "media": [
+    {
+      "kind": "audio",
+      "name": "第三句",
+      "duration": "1s",
+      "audio": {
+        "sample_rate": "44100",
+        "channels": 1
+      },
+      "ext": {
+        "zsir.voice": {
+          "kind": "cues",
+          "voice_id": "voc_019a0000-0000-7000-8000-000000000001",
+          "voice_name": "庄Sir",
+          "model": "s2.1-pro",
+          "params": {
+            "speed": 1.2,
+            "volume": -2,
+            "temperature": 0,
+            "top_p": 1,
+            "normalize_loudness": false
+          },
+          "transcript_id": "trs_A_zh",
+          "take_of": "med_A",
+          "generated_at": "2026-10-30T00:00:00.000Z",
+          "text": "第三句",
+          "cue_ids": [
+            "cue_zh_02"
+          ]
+        }
+      }
+    },
+    {
+      "kind": "audio",
+      "name": "第二句。",
+      "duration": "1s",
+      "audio": {
+        "sample_rate": "44100",
+        "channels": 1
+      },
+      "ext": {
+        "zsir.voice": {
+          "kind": "cues",
+          "voice_id": "voc_019a0000-0000-7000-8000-000000000001",
+          "voice_name": "庄Sir",
+          "model": "s2.1-pro",
+          "params": {
+            "speed": 1.2,
+            "volume": -2,
+            "temperature": 0,
+            "top_p": 1,
+            "normalize_loudness": false
+          },
+          "transcript_id": "trs_A_zh",
+          "take_of": "med_A",
+          "generated_at": "2026-10-30T00:00:00.000Z",
+          "text": "第二句。",
+          "cue_ids": [
+            "cue_zh_01"
+          ]
+        }
+      }
+    },
+    {
+      "kind": "audio",
+      "name": "你好世界",
+      "duration": "1s",
+      "audio": {
+        "sample_rate": "44100",
+        "channels": 1
+      },
+      "ext": {
+        "zsir.voice": {
+          "kind": "cues",
+          "voice_id": "voc_019a0000-0000-7000-8000-000000000001",
+          "voice_name": "庄Sir",
+          "model": "s2.1-pro",
+          "params": {
+            "speed": 1.2,
+            "volume": -2,
+            "temperature": 0,
+            "top_p": 1,
+            "normalize_loudness": false
+          },
+          "transcript_id": "trs_A_zh",
+          "take_of": "med_A",
+          "generated_at": "2026-10-30T00:00:00.000Z",
+          "text": "你好世界",
+          "cue_ids": [
+            "cue_zh_00"
+          ]
+        }
+      }
+    }
+  ]
+}
