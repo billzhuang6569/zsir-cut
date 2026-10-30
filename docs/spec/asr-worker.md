@@ -104,7 +104,7 @@ Qwen3-ForcedAligner 一次只能可靠对齐几分钟的音频。2026-10-28 用�
 1. 调用 worker，拿到结果。一期一次只识别一个声道，`source_channels` 有多个时返回 `E_UNSUPPORTED`；`range` 必须能用整数毫秒表示，否则返回 `E_VALIDATION`。worker 返回的引擎版本为 null 时，写入母稿记为 `unknown`。
 2. worker 的字词不满足第 4 节的约束时，报 `E_ASR_INTERNAL` 并在 `message` 里写出第一个出问题的字词序号和原因。`tokens` 为空时照常写入：母稿有运行记录、没有字词和字幕条，`result.warnings` 加 `W_ASR_EMPTY`。
 3. 结果写进母稿：第 1 层追加一条 `asr` 运行和一条 `align` 运行；第 3 层更新对齐时间；第 2 层只新增或替换 `state` 为 `auto` 的字词，不动 `edited` 和 `approved` 的；第 4 层按 `subtitle-rules.md` 对受影响的范围重新断句，跳过锁定的字幕条。
-4. **识别设置**：工程有 `recognition` 时（`timeline-schema.md` 4.1），`transcribe` 没写的 `language` 取 `recognition.language`；`recognition.terms` 和请求里的热词文件合并去重后作为热词交给 worker，并按第 1 节加入分词词典。`terms` 变了，缓存键里的热词摘要随之改变，会重新识别。
+4. **识别设置**：工程有 `recognition` 时（`timeline-schema.md` 4.1），`transcribe` 没写的 `language` 取 `recognition.language`；`recognition.terms`、请求里的热词文件和全局名词库的启用词（`term-library.md` 第 4 节）按这个顺序合并去重后作为热词交给 worker，并按第 1 节加入分词词典。`terms` 变了，缓存键里的热词摘要随之改变，会重新识别。
 5. **去水词**：`recognition.remove_fillers` 为 true 时，第 3 步写完第 2 层后，对本次新增或替换的、`state` 为 `auto` 的字词逐个检查：`text` 去掉首尾标点后整个等于 `filler_words`（没写用默认表）里的某一项，就按 `hide_tokens` 处理，即 `text` 设为空串、原文存进 `heard`，`state` 仍为 `auto`。只比较整个字词，不在字词内部截取，所以「那个」只在用户把它加进水词表、并且它单独成为一个字词时才隐藏。隐藏了几个写进 `warnings` 的 `W_FILLERS_HIDDEN`。之后断句按 `timeline-schema.md` 5.2，隐藏字词不断开字幕。
 6. 整个过程是一个修订，可以撤销。
 7. worker 运行时间长，`transcribe` 按长任务返回 `accepted` 和任务 ID。
