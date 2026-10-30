@@ -1,6 +1,6 @@
 export const UI_VERBS = ["ui_state", "ui_show_panel", "ui_seek", "ui_select", "ui_play", "ui_pause"] as const;
 export type UiVerb = (typeof UI_VERBS)[number];
-export const PANELS = ["ai", "media", "chapters", "subtitles"] as const;
+export const PANELS = ["ai", "media", "chapters", "subtitles", "voice"] as const;
 export type Panel = (typeof PANELS)[number];
 export interface UiState {
   project: string | null;

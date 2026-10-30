@@ -1,6 +1,8 @@
 import type { ButtonHTMLAttributes, CSSProperties, ReactNode } from "react";
 
 const PATHS: Record<string, string> = {
+  settings:
+    "M6 2h4l.5 2 2 .5 1.5 3.5-1.5 3.5-2 .5-.5 2H6l-.5-2-2-.5L2 8l1.5-3.5 2-.5zM10 8a2 2 0 1 1-4 0 2 2 0 0 1 4 0",
   history: "M8 1.5a6.5 6.5 0 1 1-6.5 6.5A6.5 6.5 0 0 1 8 1.5M8 4v4l3 2",
   human: "M11 4a3 3 0 1 1-6 0 3 3 0 0 1 6 0M2 14a6 6 0 0 1 12 0",
   refresh: "M13 6a5 5 0 1 0 0 5M13 2v4H9",
