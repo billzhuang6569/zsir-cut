@@ -598,3 +598,180 @@ it("checks the final release position even without a preceding blocked preview",
   expect(call).not.toHaveBeenCalled();
   expect(host.textContent).toContain("这里放不下：会和其他片段重叠");
 });
+
+async function prepareTrim(linked = false) {
+  project.media = [{ id: "media", kind: "video", duration: "20s" }];
+  const anchor = project.tracks[0]?.clips[0];
+  if (!anchor) throw new Error("trim fixture");
+  anchor.occurrence_id = "occ_trim";
+  anchor.source_in.t = "1s";
+  anchor.source_out.t = "3s";
+  if (linked)
+    project.tracks.push({
+      id: "a",
+      name: "声音 A",
+      kind: "audio",
+      enabled: true,
+      clips: [{ ...anchor, id: "linked-audio", source_in: { t: "1s" } }],
+    });
+  await act(render);
+  return get('[data-selection-id="c1"]');
+}
+const handle = (edge: string) => get(`[data-selection-id="c1"] [data-trim-edge="${edge}"]`);
+
+it.each(["in", "out"])("previews %s trim and sends exactly one labeled desktop edit on release", async (edge) => {
+  const clip = await prepareTrim(true);
+  await pointer(handle(edge), "pointerdown", 200, 85);
+  await pointer(clip, "pointermove", 248, 85);
+  expect(clip.style.width).toBe(edge === "in" ? "48px" : "144px");
+  expect(get('[data-selection-id="linked-audio"]').style.width).toBe(clip.style.width);
+  expect(call).not.toHaveBeenCalled();
+  expect(project.tracks[0]?.clips[0]?.timeline_in.t).toBe("2s");
+  await pointer(clip, "pointerup", 248, 85);
+  expect(call).toHaveBeenCalledTimes(1);
+  expect(call).toHaveBeenCalledWith(
+    "edit",
+    expect.objectContaining({
+      author: DESKTOP_AUTHOR,
+      base_revision: "revision",
+      timeline_id: "timeline",
+      label: edge === "in" ? "修剪片段入点" : "修剪片段出点",
+      ops: [{ op: "trim", clip_id: "c1", edge, to: edge === "in" ? "3s" : "5s", ripple: false, linked: true }],
+    }),
+  );
+  expect(clip.style.width).toBe("96px");
+});
+
+it("uses Alt during preview and release for a single-track J/L cut", async () => {
+  const clip = await prepareTrim(true);
+  await pointer(handle("out"), "pointerdown", 200, 85);
+  await pointer(clip, "pointermove", 248, 85);
+  expect(get('[data-selection-id="linked-audio"]').style.width).toBe("144px");
+  await pointer(clip, "pointermove", 248, 85, { altKey: true });
+  expect(get('[data-selection-id="linked-audio"]').style.width).toBe("96px");
+  await pointer(clip, "pointerup", 248, 85, { altKey: true });
+  expect(call).toHaveBeenCalledWith(
+    "edit",
+    expect.objectContaining({
+      ops: [{ op: "trim", clip_id: "c1", edge: "out", to: "5s", ripple: false, linked: false }],
+    }),
+  );
+});
+
+it.each(["Escape", "pointercancel", "lostpointercapture"])("discards trim preview on %s", async (cancel) => {
+  const clip = await prepareTrim();
+  await pointer(handle("out"), "pointerdown", 200, 85);
+  await pointer(clip, "pointermove", 248, 85);
+  if (cancel === "Escape") await act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: cancel })));
+  else await pointer(clip, cancel, 248, 85);
+  expect(clip.style.width).toBe("96px");
+  expect(dragging.current).toBe(false);
+  expect(captures.size).toBe(0);
+  await pointer(clip, "pointerup", 248, 85);
+  expect(call).not.toHaveBeenCalled();
+});
+
+it.each(["in", "out"])(
+  "stops %s preview at a legal boundary and does not send an out-of-range release",
+  async (edge) => {
+    const clip = await prepareTrim();
+    await pointer(handle(edge), "pointerdown", 200, 85);
+    await pointer(clip, "pointermove", 500, 85);
+    expect(clip.style.outline).toBe("2px solid var(--attention)");
+    expect(Number.parseFloat(clip.style.width)).toBeCloseTo(edge === "in" ? 1.92 : 288);
+    expect(call).not.toHaveBeenCalled();
+    await pointer(clip, "pointerup", 500, 85);
+    expect(call).not.toHaveBeenCalled();
+    expect(clip.style.width).toBe("96px");
+    expect(host.querySelector('[role="alert"]')).not.toBeNull();
+  },
+);
+
+it("clamps the source start, accepts returning to range and checks the final source end at release", async () => {
+  const clip = await prepareTrim();
+  const media = project.media[0];
+  if (!media) throw new Error("media fixture");
+  media.duration = "4s";
+  await act(render);
+  await pointer(handle("in"), "pointerdown", 200, 85);
+  await pointer(clip, "pointermove", 56, 85);
+  expect(clip.style.left).toBe("48px");
+  expect(clip.style.outline).toBe("2px solid var(--attention)");
+  await pointer(clip, "pointermove", 248, 85);
+  expect(clip.style.outline).toBe("");
+  await pointer(clip, "pointerup", 248, 85);
+  expect(call).toHaveBeenCalledTimes(1);
+  call.mockClear();
+  await pointer(handle("out"), "pointerdown", 200, 85);
+  await pointer(clip, "pointermove", 248, 85);
+  await pointer(clip, "pointerup", 344, 85);
+  expect(call).not.toHaveBeenCalled();
+  expect(clip.style.width).toBe("96px");
+});
+
+it.each(["没能完成这次修改", "工程刚被别处改过，已刷新，请重试"])("restores rejected trim: %s", async (message) => {
+  const clip = await prepareTrim();
+  call.mockRejectedValueOnce(new Error(message));
+  await pointer(handle("out"), "pointerdown", 200, 85);
+  await pointer(clip, "pointermove", 248, 85);
+  await pointer(clip, "pointerup", 248, 85);
+  expect(clip.style.width).toBe("96px");
+  expect(clip.style.opacity).toBe("");
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe(message);
+});
+
+it("shows trim snap feedback and respects its switch, including release without another move", async () => {
+  const clip = await prepareTrim();
+  project.markers = [{ id: "m", at: { t: "6s" }, text: "目标", kind: "review" }];
+  await act(render);
+  await pointer(handle("out"), "pointerdown", 200, 85);
+  await pointer(clip, "pointermove", 294, 85);
+  expect(get(".zc-snap-line").style.left).toContain("288px");
+  expect(clip.style.width).toBe("192px");
+  await click(get('[aria-label="吸附"]'), { detail: 0 });
+  await pointer(clip, "pointerup", 294, 85);
+  expect(call).toHaveBeenCalledWith(
+    "edit",
+    expect.objectContaining({
+      ops: [{ op: "trim", clip_id: "c1", edge: "out", to: "149/25s", ripple: false, linked: true }],
+    }),
+  );
+});
+
+it("has no trim handles for time maps, subtitles, read-only views or blade mode", async () => {
+  await prepareTrim();
+  const clip = project.tracks[0]?.clips[0];
+  if (!clip) throw new Error("clip fixture");
+  clip.time_map = [];
+  await act(render);
+  expect(handle("in")).toBeNull();
+  expect(get('[data-selection-id="q"] [data-trim-edge]')).toBeNull();
+  readOnly = true;
+  await act(render);
+  expect(host.querySelectorAll("[data-trim-edge]")).toHaveLength(0);
+  readOnly = false;
+  await act(render);
+  await click(get('[aria-label="切割 B"]'), { detail: 0 });
+  expect(host.querySelectorAll("[data-trim-edge]")).toHaveLength(0);
+});
+
+it("uses scroll displacement, freezes the starting revision and cancels trim on a timeline switch", async () => {
+  const clip = await prepareTrim();
+  await pointer(handle("out"), "pointerdown", 200, 85);
+  await pointer(clip, "pointermove", 248, 85);
+  timeline().scrollLeft = 48;
+  await act(() => timeline().dispatchEvent(new Event("scroll")));
+  expect(clip.style.width).toBe("192px");
+  project = { ...project, revision: { id: "later", seq: 1 } };
+  await act(render);
+  await pointer(clip, "pointerup", 248, 85);
+  expect(call).toHaveBeenCalledWith("edit", expect.objectContaining({ base_revision: "revision" }));
+  call.mockClear();
+  await pointer(handle("out"), "pointerdown", 200, 85);
+  await pointer(clip, "pointermove", 248, 85);
+  project = { ...project, id: "different" };
+  await act(render);
+  expect(clip.style.width).toBe("96px");
+  expect(dragging.current).toBe(false);
+  expect(call).not.toHaveBeenCalled();
+});

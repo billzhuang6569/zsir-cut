@@ -6,6 +6,7 @@
 import type { ProjectView } from "./connection.js";
 import {
   add,
+  type ClipView,
   compare,
   div,
   floor,
@@ -46,10 +47,33 @@ export function moveTarget(
   snap: boolean,
   playhead: string,
 ) {
+  const to = add(group.earliest, div(rational(BigInt(Math.round(pixels))), rational(BigInt(scale))));
+  return snapEdges(
+    project,
+    group.moving.map((clip) => clip.id),
+    group.moving.flatMap((clip) => [clip.timeline_in.t, clip.timeline_out.t]),
+    group.earliest,
+    to,
+    scale,
+    snap,
+    playhead,
+  );
+}
+
+export function snapEdges(
+  project: ProjectView,
+  excluded: string[],
+  edges: string[],
+  origin: ReturnType<typeof rational>,
+  raw: ReturnType<typeof rational>,
+  scale: number,
+  snap: boolean,
+  playhead: string,
+) {
   const rate = parseRational(project.edit_rate);
   const grid = (time: ReturnType<typeof rational>) =>
     parseRational(frameTime(floor(add(mul(time, rate), rational(1n, 2n))), project.edit_rate), true);
-  const to = grid(add(group.earliest, div(rational(BigInt(Math.round(pixels))), rational(BigInt(scale)))));
+  const to = grid(raw);
   let nearest = Number.POSITIVE_INFINITY;
   let line: string | null = null;
   let snapped = to;
@@ -59,37 +83,35 @@ export function moveTarget(
     ...project.tracks
       .filter((track) => track.kind !== "subtitle")
       .flatMap((track) => track.clips)
-      .filter((clip) => !group.moving.some((item) => item.id === clip.id))
+      .filter((clip) => !excluded.includes(clip.id))
       .flatMap((clip) => [clip.timeline_in.t, clip.timeline_out.t]),
   ];
   if (snap) {
-    for (const clip of group.moving) {
-      for (const edge of [clip.timeline_in.t, clip.timeline_out.t]) {
-        const offset = sub(parseRational(edge, true), group.earliest);
-        for (const point of points) {
-          const candidate = sub(parseRational(point, true), offset);
-          if (candidate.numerator < 0n) continue;
-          const distance = Math.abs(pixelAt(printRational(add(to, offset), true), scale) - pixelAt(point, scale));
-          if (distance <= 8 && distance < nearest) {
-            nearest = distance;
-            line = point;
-            snapped = grid(candidate);
-            // Keep comparing against the unsnapped position, not the previous candidate.
-          }
+    for (const edge of edges) {
+      const offset = sub(parseRational(edge, true), origin);
+      for (const point of points) {
+        const candidate = sub(parseRational(point, true), offset);
+        if (candidate.numerator < 0n) continue;
+        const distance = Math.abs(pixelAt(printRational(add(to, offset), true), scale) - pixelAt(point, scale));
+        if (distance <= 8 && distance < nearest) {
+          nearest = distance;
+          line = point;
+          snapped = grid(candidate);
+          // Keep comparing against the unsnapped position, not the previous candidate.
         }
       }
     }
     if (line !== null)
       return {
         to: printRational(snapped, true),
-        delta: sub(snapped, group.earliest),
+        delta: sub(snapped, origin),
         line,
         distance: nearest,
       };
   }
   return {
     to: printRational(to, true),
-    delta: sub(to, group.earliest),
+    delta: sub(to, origin),
     line: null,
     distance: null,
   };
@@ -109,11 +131,15 @@ export function moveOverlaps(
       const start = add(parseRational(clip.timeline_in.t, true), delta);
       const end = add(parseRational(clip.timeline_out.t, true), delta);
       return destination?.clips.some(
-        (other) =>
-          !group.moving.some((item) => item.id === other.id) &&
-          compare(start, parseRational(other.timeline_out.t, true)) < 0 &&
-          compare(parseRational(other.timeline_in.t, true), end) < 0,
+        (other) => !group.moving.some((item) => item.id === other.id) && clipsOverlap(start, end, other),
       );
     }),
+  );
+}
+
+export function clipsOverlap(start: ReturnType<typeof rational>, end: ReturnType<typeof rational>, other: ClipView) {
+  return (
+    compare(start, parseRational(other.timeline_out.t, true)) < 0 &&
+    compare(parseRational(other.timeline_in.t, true), end) < 0
   );
 }
