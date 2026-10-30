@@ -2,10 +2,18 @@
 export function recordingCanvas() {
   const calls: unknown[][] = [];
   const methods = Object.fromEntries(
-    ["save", "restore", "fillText", "strokeText", "beginPath", "roundRect", "fill", "clearRect"].map((name) => [
-      name,
-      (...args: unknown[]) => calls.push([name, ...args]),
-    ]),
+    [
+      "save",
+      "restore",
+      "fillText",
+      "strokeText",
+      "beginPath",
+      "roundRect",
+      "fill",
+      "clearRect",
+      "scale",
+      "fillRect",
+    ].map((name) => [name, (...args: unknown[]) => calls.push([name, ...args])]),
   );
   const context = new Proxy(
     {

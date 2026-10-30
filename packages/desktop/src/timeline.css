@@ -96,7 +96,8 @@
   position: absolute;
   left: 0;
   top: 4px;
-  fill: var(--track-audio-wave);
+  color: var(--track-audio-wave);
+  pointer-events: none;
 }
 .zc-clip-subtitle {
   height: var(--track-subtitle-h);
