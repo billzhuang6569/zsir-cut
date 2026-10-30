@@ -80,11 +80,20 @@ async function mount(nativeMode = false, preview = false, view = project, withCo
   const call = vi.fn(async (_verb: string, _request: Record<string, unknown>): Promise<unknown> => ({}));
   let state: UiState = { ...initialState(), panel: "media", project: "/工程.zcut.json", playhead: { at: "4s" } };
   let change: (next: UiState) => void = () => {};
+  let refresh: (next: ProjectView) => void = () => {};
   function Harness() {
     const [ui, update] = useState(state);
+    const [currentProject, setProject] = useState(view);
+    refresh = setProject;
     state = ui;
     change = update;
-    const panel = useMediaPanel({ project: view, state: ui, update, call, config: withConfig ? config : undefined });
+    const panel = useMediaPanel({
+      project: currentProject,
+      state: ui,
+      update,
+      call,
+      config: withConfig ? config : undefined,
+    });
     const source = preview && ui.preview === "media" && panel.selected ? sourceProject(project, panel.selected) : null;
     return (
       <>
@@ -161,6 +170,11 @@ async function mount(nativeMode = false, preview = false, view = project, withCo
     setInput,
     close,
     state: () => state,
+    refresh: async (next: ProjectView) => {
+      await act(async () => {
+        refresh(next);
+      });
+    },
     change: async (next: UiState) => {
       await act(async () => {
         change(next);
@@ -218,7 +232,7 @@ it("sends every organizing field and browser import paths only at submission", a
     await h.click("删除文件夹 项目/原始");
     expect(h.call).toHaveBeenLastCalledWith(
       "edit",
-      expect.objectContaining({ ops: [{ op: "update_media", media_id: media.id, folders: [] }] }),
+      expect.objectContaining({ ops: [{ op: "update_media", media_id: media.id, folders: ["项目/精选"] }] }),
     );
     await h.click("导入素材");
     const input = await h.setInput("导入文件路径（逗号分隔）", "/素材/一.mov,/素材/二.wav");
@@ -487,5 +501,202 @@ it.each(["audio", "image", "video"])("shows only applicable media metadata for %
     expect(Boolean(ui.container.querySelector(".zc-media-duration"))).toBe(kind !== "image");
   } finally {
     await ui.close();
+  }
+});
+
+async function scope(h: Awaited<ReturnType<typeof mount>>, value: string) {
+  const select = h.container.querySelector<HTMLSelectElement>('[aria-label="素材范围"]');
+  if (!select) throw new Error("scope");
+  await act(async () => {
+    select.value = value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+}
+async function addFolder(h: Awaited<ReturnType<typeof mount>>, folder: string) {
+  await h.click("添加文件夹");
+  const input = await h.setInput("添加文件夹", folder);
+  await act(async () => {
+    input.blur();
+  });
+}
+it("lists all folders in hierarchy order and filters descendants in grid and list", async () => {
+  const view = {
+    ...project,
+    media: [
+      { ...media, organize: { folders: ["A/child/deep", "A-other", "A/child"] } },
+      { ...media, id: "med_two", organize: { folders: ["A/sibling"] } },
+      { ...media, id: "med_three", organize: {} },
+    ],
+  };
+  const h = await mount(false, false, view);
+  try {
+    const options = [...h.container.querySelectorAll('select[aria-label="素材范围"] option')];
+    expect(options.map((node) => [node.getAttribute("value"), node.textContent])).toEqual([
+      ["all", "全部"],
+      ["folder:A", "A"],
+      ["folder:A/child", "　child"],
+      ["folder:A/child/deep", "　　deep"],
+      ["folder:A/sibling", "　sibling"],
+      ["folder:A-other", "A-other"],
+    ]);
+    await scope(h, "folder:A");
+    expect(h.container.querySelectorAll(".zc-media-card")).toHaveLength(2);
+    await h.click("列表");
+    await scope(h, "folder:A/child");
+    expect(h.container.querySelectorAll(".zc-media-list .zc-media-card")).toHaveLength(1);
+    await scope(h, "folder:A-other");
+    expect(h.container.querySelectorAll(".zc-media-card")).toHaveLength(1);
+    await scope(h, "all");
+    expect(h.container.querySelectorAll(".zc-media-card")).toHaveLength(3);
+  } finally {
+    await h.close();
+  }
+});
+it("offers existing folders and links successful whole-field writes to tags, dropdown, and filtering", async () => {
+  const h = await mount();
+  try {
+    await h.select();
+    await h.click("添加文件夹");
+    const input = h.container.querySelector<HTMLInputElement>('input[aria-label="添加文件夹"]');
+    expect(input?.getAttribute("list")).toBe(h.container.querySelector("datalist")?.id);
+    expect([...h.container.querySelectorAll("datalist option")].map((node) => node.getAttribute("value"))).toEqual([
+      "项目",
+      "项目/原始",
+    ]);
+    await h.setInput("添加文件夹", "新项目/精选");
+    await act(async () => {
+      input?.blur();
+    });
+    expect(h.call).toHaveBeenLastCalledWith(
+      "edit",
+      expect.objectContaining({
+        project: "/工程.zcut.json",
+        base_revision: "rev_one",
+        idempotency_key: expect.any(String),
+        author: { kind: "human", name: "桌面用户" },
+        label: "修改 镜头.mov 的文件夹",
+        ops: [{ op: "update_media", media_id: "med_one", folders: ["项目/原始", "新项目/精选"] }],
+      }),
+    );
+    expect(h.container.querySelector('option[value="folder:新项目/精选"]')).not.toBeNull();
+    expect(h.container.querySelector('[aria-label="删除文件夹 新项目/精选"]')).not.toBeNull();
+    await scope(h, "folder:新项目");
+    await h.click("删除文件夹 新项目/精选");
+    expect(h.container.querySelector<HTMLSelectElement>('[aria-label="素材范围"]')?.value).toBe("folder:新项目");
+    expect(h.container.querySelector('option[value="folder:新项目"]')?.textContent).toBe("新项目（空）");
+    expect(h.call).toHaveBeenLastCalledWith(
+      "edit",
+      expect.objectContaining({ ops: [{ op: "update_media", media_id: "med_one", folders: ["项目/原始"] }] }),
+    );
+    expect(h.container.querySelectorAll(".zc-media-card")).toHaveLength(0);
+    await scope(h, "all");
+    expect(h.container.querySelectorAll(".zc-media-card")).toHaveLength(2);
+    await addFolder(h, "项目/原始");
+    expect(h.call).toHaveBeenLastCalledWith(
+      "edit",
+      expect.objectContaining({ ops: [{ op: "update_media", media_id: "med_one", folders: ["项目/原始"] }] }),
+    );
+    await h.refresh({
+      ...project,
+      revision: { id: "rev_two", seq: 2 },
+      media: [{ ...media, organize: { folders: ["远端"] } }],
+    });
+    expect(h.container.querySelector('[aria-label="删除文件夹 远端"]')).not.toBeNull();
+    expect(h.container.querySelector('[aria-label="删除文件夹 项目/原始"]')).toBeNull();
+  } finally {
+    await h.close();
+  }
+});
+it("keeps folders and filtered media on failed edits, shows errors, and prevents duplicate writes", async () => {
+  const h = await mount();
+  try {
+    await h.select();
+    await scope(h, "folder:项目");
+    let reject: (error: Error) => void = () => {};
+    h.call.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, fail) => {
+          reject = fail;
+        }),
+    );
+    await h.click("删除文件夹 项目/原始");
+    expect(h.container.querySelector<HTMLButtonElement>('[aria-label="删除文件夹 项目/原始"]')?.disabled).toBe(true);
+    await h.click("删除文件夹 项目/原始");
+    expect(h.call).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      reject(new Error("修订冲突"));
+    });
+    expect(h.container.querySelector('[role="alert"]')?.textContent).toBe("修订冲突");
+    expect(h.container.querySelectorAll(".zc-media-card")).toHaveLength(1);
+    expect(h.container.querySelector('[aria-label="删除文件夹 项目/原始"]')).not.toBeNull();
+    h.call.mockRejectedValueOnce(new Error("写入失败"));
+    await addFolder(h, "失败文件夹");
+    expect(h.container.querySelector('option[value="folder:失败文件夹"]')).toBeNull();
+    expect(h.container.querySelector('[aria-label="删除文件夹 失败文件夹"]')).toBeNull();
+    expect(h.container.querySelector('[role="alert"]')?.textContent).toBe("写入失败");
+  } finally {
+    await h.close();
+  }
+});
+it("adds and removes folders for every selected media in one edit while preserving individual folders", async () => {
+  const view = {
+    ...project,
+    media: [media, { ...media, id: "med_two", name: "风景.mov", organize: { folders: ["其他"] } }],
+  };
+  const h = await mount(false, false, view);
+  try {
+    await h.select();
+    await act(async () => {
+      h.container
+        .querySelectorAll(".zc-media-card")[1]
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true, metaKey: true }));
+    });
+    expect(h.state().selected).toEqual(["med_one", "med_two"]);
+    expect(h.container.querySelectorAll('.zc-media-card[aria-pressed="true"]')).toHaveLength(2);
+    expect(h.container.querySelector('[aria-label="删除文件夹 项目/原始"]')).not.toBeNull();
+    h.call.mockRejectedValueOnce(new Error("批量失败"));
+    await addFolder(h, "失败目录");
+    expect(h.container.querySelector('[role="alert"]')?.textContent).toBe("批量失败");
+    expect(h.container.querySelector('option[value="folder:失败目录"]')).toBeNull();
+    expect(h.container.querySelector('[aria-label="删除文件夹 项目/原始"]')).not.toBeNull();
+    expect(h.container.querySelector('[aria-label="删除文件夹 其他"]')).not.toBeNull();
+    await addFolder(h, "共同/精选");
+    expect(h.call).toHaveBeenLastCalledWith(
+      "edit",
+      expect.objectContaining({
+        label: "修改 2 个素材 的文件夹",
+        author: { kind: "human", name: "桌面用户" },
+        ops: [
+          { op: "update_media", media_id: "med_one", folders: ["项目/原始", "共同/精选"] },
+          { op: "update_media", media_id: "med_two", folders: ["其他", "共同/精选"] },
+        ],
+      }),
+    );
+    await scope(h, "folder:共同");
+    await h.click("删除文件夹 共同/精选");
+    expect(h.call).toHaveBeenLastCalledWith(
+      "edit",
+      expect.objectContaining({
+        ops: [
+          { op: "update_media", media_id: "med_one", folders: ["项目/原始"] },
+          { op: "update_media", media_id: "med_two", folders: ["其他"] },
+        ],
+      }),
+    );
+    expect(h.container.querySelectorAll(".zc-media-card")).toHaveLength(0);
+    await scope(h, "all");
+    await act(async () => {
+      h.container
+        .querySelectorAll(".zc-media-card")[1]
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true, ctrlKey: true }));
+    });
+    expect(h.state().selected).toEqual(["med_one"]);
+    await addFolder(h, "单选");
+    expect(h.call).toHaveBeenLastCalledWith(
+      "edit",
+      expect.objectContaining({ ops: [{ op: "update_media", media_id: "med_one", folders: ["项目/原始", "单选"] }] }),
+    );
+  } finally {
+    await h.close();
   }
 });
