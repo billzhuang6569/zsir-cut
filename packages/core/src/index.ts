@@ -27,5 +27,6 @@ export {
 export * from "./term-library.ts";
 export * from "./timecode.ts";
 export * from "./voice.ts";
+export * from "./voice-generate.ts";
 export * from "./voice-keychain.ts";
 export * from "./voice-storage.ts";

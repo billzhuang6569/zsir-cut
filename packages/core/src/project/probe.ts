@@ -1,8 +1,13 @@
 // biome-ignore-all lint/style/noNonNullAssertion: ffprobe fields are checked before use.
+
 import { spawn } from "node:child_process";
+import { stat } from "node:fs/promises";
+import { basename, relative, resolve } from "node:path";
 import { createInterface } from "node:readline";
+import { fingerprint } from "../fingerprint.ts";
 import { div, floor, mul, rational } from "../rational.ts";
 import { frameToTimecode } from "../timecode.ts";
+import { newId } from "./id.ts";
 import type { Media } from "./types.ts";
 
 interface PacketTime {
@@ -212,5 +217,31 @@ export function mediaFromProbe(path: string, data: ProbeData): Pick<Media, "kind
     ...(timecode ? { start_timecode: timecode } : wavTimecode ? { start_timecode: wavTimecode } : {}),
     ...(startSamples !== undefined ? { ext: { zsir: { start_samples: Number(startSamples) } } } : {}),
     ...(tags.reel_name ? { reel: tags.reel_name } : {}),
+  };
+}
+
+export async function probeMedia(
+  directory: string,
+  path: string,
+  probe: Probe = ffprobe,
+  id = newId("med_"),
+  existing: Media[] = [],
+): Promise<Media> {
+  const absolute = resolve(directory, path);
+  const info = await stat(absolute);
+  if (!info.isFile()) throw new Error(`Not a file: ${path}`);
+  const digest = await fingerprint(absolute);
+  const duplicate = existing.find(
+    (media) => media.size_bytes === info.size && media.fingerprint.value === digest.value,
+  );
+  if (duplicate) return duplicate;
+  return {
+    id,
+    name: basename(absolute),
+    path: relative(directory, absolute).split("\\").join("/"),
+    original_path: absolute,
+    size_bytes: info.size,
+    fingerprint: digest,
+    ...mediaFromProbe(absolute, await probe(absolute)),
   };
 }

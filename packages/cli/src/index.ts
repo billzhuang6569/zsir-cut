@@ -53,7 +53,7 @@ async function main(): Promise<void> {
   }
   if (
     (positionals[0] === "terms" && ["list", "edit"].includes(positionals[1] ?? "")) ||
-    (positionals[0] === "voice" && ["list", "edit", "clone"].includes(positionals[1] ?? "")) ||
+    (positionals[0] === "voice" && ["list", "edit", "clone", "generate"].includes(positionals[1] ?? "")) ||
     (positionals[0] === "settings" && ["get", "set"].includes(positionals[1] ?? ""))
   )
     positionals = [`${positionals[0]}_${positionals[1]}`, ...positionals.slice(2)];

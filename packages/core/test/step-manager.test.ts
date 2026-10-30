@@ -246,7 +246,7 @@ describe("step manager acceptance", () => {
 });
 
 it("validates labels, batch bounds and mutually exclusive undo targets", async () => {
-  expect(VERBS).toHaveLength(30);
+  expect(VERBS).toHaveLength(31);
   const { label: _label, ...missing } = input(1);
   expect((await dispatch("edit", missing)).error?.code).toBe("E_VALIDATION");
   expect((await dispatch("edit", { ...missing, author: { kind: "human", name: "CLI" } })).status).toBe("applied");

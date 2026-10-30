@@ -339,7 +339,7 @@ it("serves valid MCP schemas and no-UI failures without a network listener", asy
   }
 });
 
-it("authenticates Streamable HTTP, lists 36 tools and calls inspect using the SDK", async () => {
+it("authenticates Streamable HTTP, lists 37 tools and calls inspect using the SDK", async () => {
   const { StreamableHTTPClientTransport } = await import("@modelcontextprotocol/sdk/client/streamableHttp.js");
   host = await startHost({ project, appDataDir });
   const url = new URL(`http://127.0.0.1:${host.port}/mcp`);
@@ -353,7 +353,7 @@ it("authenticates Streamable HTTP, lists 36 tools and calls inspect using the SD
   // SDK callback declarations do not support exactOptionalPropertyTypes.
   await client.connect(transport as import("@modelcontextprotocol/sdk/shared/transport.js").Transport);
   try {
-    expect((await client.listTools()).tools).toHaveLength(36);
+    expect((await client.listTools()).tools).toHaveLength(37);
     expect(
       (await client.callTool({ name: "zcut_inspect", arguments: { project, view: "brief" } })).structuredContent,
     ).toMatchObject({ ok: true, verb: "inspect" });

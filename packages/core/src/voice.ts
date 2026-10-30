@@ -115,7 +115,13 @@ export async function editVoices(ops: VoiceEditOp[], options: VoiceOptions) {
 }
 export function safeVoiceError(error: unknown, key: string): VoiceError {
   return error instanceof VoiceError
-    ? new VoiceError(error.code, redactVoiceKey(error.message, key), error.retryable, error.status)
+    ? new VoiceError(
+        error.code,
+        redactVoiceKey(error.message, key),
+        error.retryable,
+        error.status,
+        error.upstream_status,
+      )
     : new VoiceError("E_VOICE_UPSTREAM", "fish.audio request failed", true);
 }
 const runFfmpeg = (args: string[]) =>

@@ -1,5 +1,5 @@
 import { readFile, stat } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   checkDirectFiles,
@@ -17,7 +17,6 @@ import {
   recordHandoffCheck,
   runExport,
 } from "./export-framework.ts";
-import { fingerprint } from "./fingerprint.ts";
 import { VoiceError } from "./fish-audio.ts";
 import { jobPath, readJob, startExportJob, startPreviewJob, startTranscribeJob } from "./jobs.ts";
 import { renderPreview, timelineFrames, viewTimeline } from "./preview.ts";
@@ -27,7 +26,7 @@ import { diffProjectEntities } from "./project/entities.ts";
 import { newId } from "./project/id.ts";
 import { parseProject } from "./project/io.ts";
 import { relinkMedia, validateProjectMedia } from "./project/media.ts";
-import { ffprobe, mediaFromProbe, type Probe } from "./project/probe.ts";
+import { ffprobe, type Probe, probeMedia } from "./project/probe.ts";
 import { type ValidationIssue, validateProjectSemantics } from "./project/semantics.ts";
 import { runSession } from "./project/session.ts";
 import {
@@ -54,6 +53,7 @@ import {
   type VoiceOptions,
   voiceConnection,
 } from "./voice.ts";
+import { generateVoiceMedia, prepareVoiceGenerate, type VoiceGenerateRequest } from "./voice-generate.ts";
 import { startVoiceJob, voiceJobPath } from "./voice-jobs.ts";
 import { readVoices } from "./voice-storage.ts";
 
@@ -63,6 +63,7 @@ export const VERBS = [
   "voice_list",
   "voice_edit",
   "voice_clone",
+  "voice_generate",
   "terms_list",
   "terms_edit",
   "create_project",
@@ -154,7 +155,7 @@ export function errorEnvelope(
 }
 
 function writeRequest(
-  verb: "export" | "edit" | "import_media" | "transcribe" | "undo" | "redo" | "restore",
+  verb: "voice_generate" | "export" | "edit" | "import_media" | "transcribe" | "undo" | "redo" | "restore",
   requestId: string,
   input: Request,
 ): WriteRequest {
@@ -165,25 +166,36 @@ function writeRequest(
     idempotency_key: input.idempotency_key as string,
     author: input.author as Author,
     ops:
-      verb === "transcribe"
+      verb === "voice_generate"
         ? [
             {
-              media_id: input.media_id,
-              source_channels: input.source_channels,
-              range: input.range,
-              language: input.language,
-              engine: input.engine,
-              hotwords: input.hotwords,
-              rules: input.rules,
+              voice_id: input.voice_id,
+              model: input.model,
+              items: input.items,
+              cues: input.cues,
+              params: input.params,
+              replaces: input.replaces,
             },
           ]
-        : verb === "import_media"
-          ? [{ paths: input.paths, relink: input.relink }]
-          : verb === "export"
-            ? [{ profile: input.profile, overlay_id: input.overlay_id }]
-            : verb === "edit"
-              ? (input.ops as unknown[])
-              : [],
+        : verb === "transcribe"
+          ? [
+              {
+                media_id: input.media_id,
+                source_channels: input.source_channels,
+                range: input.range,
+                language: input.language,
+                engine: input.engine,
+                hotwords: input.hotwords,
+                rules: input.rules,
+              },
+            ]
+          : verb === "import_media"
+            ? [{ paths: input.paths, relink: input.relink }]
+            : verb === "export"
+              ? [{ profile: input.profile, overlay_id: input.overlay_id }]
+              : verb === "edit"
+                ? (input.ops as unknown[])
+                : [],
     ...(typeof input.timeline_id === "string" ? { timeline_id: input.timeline_id } : {}),
     ...(typeof input.target === "string" ? { target: input.target } : {}),
     ...(typeof input.label === "string" ? { label: input.label } : {}),
@@ -223,26 +235,12 @@ async function importMedia(input: Request, requestId: string, probe: Probe): Pro
   const skipped: { media_id: string }[] = [];
   for (const path of input.paths as string[]) {
     const absolute = resolve(directory, path);
-    const info = await stat(absolute);
-    if (!info.isFile()) throw new Error(`Not a file: ${path}`);
-    const digest = await fingerprint(absolute);
+    const media = await probeMedia(directory, absolute, probe, undefined, [...parsed.project.media, ...created]);
     const existing = [...parsed.project.media, ...created].find(
-      (item) => item.size_bytes === info.size && item.fingerprint.value === digest.value,
+      (item) => item.size_bytes === media.size_bytes && item.fingerprint.value === media.fingerprint.value,
     );
-    if (existing) {
-      skipped.push({ media_id: existing.id });
-      continue;
-    }
-    const detected = mediaFromProbe(absolute, await probe(absolute));
-    created.push({
-      id: newId("med_"),
-      name: basename(absolute),
-      path: relative(directory, absolute).split("\\").join("/"),
-      original_path: absolute,
-      size_bytes: info.size,
-      fingerprint: digest,
-      ...detected,
-    });
+    if (existing) skipped.push({ media_id: existing.id });
+    else created.push(media);
   }
   return store.commitWrite(
     request,
@@ -360,6 +358,7 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
     verb !== "batch_status" &&
     verb !== "import_media" &&
     verb !== "transcribe" &&
+    verb !== "voice_generate" &&
     verb !== "edit" &&
     verb !== "render_preview" &&
     verb !== "view_timeline" &&
@@ -560,6 +559,56 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
       output.result = result;
       output.verification = { level: "L1", passed: true, issues };
       return output;
+    }
+    if (verb === "voice_generate") {
+      const parsed = parseProject(await readFile(projectPath, "utf8"));
+      if (!parsed.ok) return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Project file is invalid");
+      const store = openProject({ projectPath });
+      const write = writeRequest(verb, requestId, request);
+      const replay = await findIdempotentWrite(projectPath, parsed.project.id, write);
+      if (replay === "mismatch")
+        return errorEnvelope(
+          verb,
+          requestId,
+          "rejected",
+          "E_IDEMPOTENCY_MISMATCH",
+          "Idempotency key was used for another request",
+        );
+      if (replay) return replay;
+      const batch = await store.batchBlocker();
+      if (batch)
+        return errorEnvelope(verb, requestId, "failed", "E_BATCH_OPEN", "A batch is open on this target", true);
+      if (request.base_revision !== parsed.project.revision.id)
+        return errorEnvelope(verb, requestId, "conflict", "E_CONFLICT", "Base revision differs from current revision");
+      if (request.dry_run === true)
+        return errorEnvelope(verb, requestId, "rejected", "E_UNSUPPORTED", "Voice generation dry run is not supported");
+      const prepared = await prepareVoiceGenerate(parsed.project, request as unknown as VoiceGenerateRequest);
+      await voiceConnection(options);
+      if (!options.worker) {
+        const output = basic(verb, requestId);
+        output.status = "accepted";
+        output.result = {
+          job_id: await startVoiceJob(request, options.launchVoiceJob, { path: projectPath, id: parsed.project.id }),
+        };
+        return output;
+      }
+      const generated = await generateVoiceMedia(projectPath, prepared, options);
+      try {
+        const output = await store.commitWrite(
+          write,
+          (project) => {
+            project.media.push(...generated.media);
+          },
+          undefined,
+          { imported: generated.media.map((media) => ({ media_id: media.id })) },
+        );
+        if ((!output.receipt?.after || output.receipt.replayed) && output.status !== "committed_unverified")
+          await generated.cleanup();
+        return output;
+      } catch (error) {
+        await generated.cleanup();
+        throw error;
+      }
     }
     if (verb === "transcribe") {
       const parsed = parseProject(await readFile(request.project as string, "utf8"));
@@ -959,8 +1008,21 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
     output.result = {};
     return output;
   } catch (error) {
-    if (error instanceof VoiceError)
-      return errorEnvelope(verb, requestId, error.status, error.code, error.message, error.retryable);
+    if (error instanceof VoiceError) {
+      const output = errorEnvelope(verb, requestId, error.status, error.code, error.message, error.retryable);
+      if (output.error && error.item_index !== undefined)
+        output.error.details = { item_index: error.item_index, upstream_status: error.upstream_status ?? null };
+      return output;
+    }
+    if (verb === "voice_generate")
+      return errorEnvelope(
+        verb,
+        requestId,
+        "failed",
+        "E_IO",
+        "Voice generation storage or local service unavailable",
+        true,
+      );
     if (["settings_get", "settings_set", "voice_list", "voice_edit", "voice_clone"].includes(verb))
       return errorEnvelope(verb, requestId, "failed", "E_IO", "Voice storage or local service unavailable", true);
     if (error instanceof HistoryError) return errorEnvelope(verb, requestId, "rejected", error.code, error.message);

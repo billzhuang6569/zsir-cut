@@ -383,9 +383,9 @@ describe("request error diagnostics", () => {
   });
 });
 
-it("exposes every accepted field directly in MCP schemas for all 30 verbs", async () => {
+it("exposes every accepted field directly in MCP schemas for all 31 verbs", async () => {
   const { VERBS } = await import("../src/dispatch.js");
-  expect(VERBS).toHaveLength(30);
+  expect(VERBS).toHaveLength(31);
   for (const verb of VERBS) {
     const schema = commandSchemaForVerb(verb);
     const fields = (node: Record<string, unknown>): string[] => [
