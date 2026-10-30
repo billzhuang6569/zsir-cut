@@ -45,6 +45,7 @@ export function useTimelineGestures({
   dragging,
   scale,
   setScale,
+  clipDrag,
 }: {
   project: ProjectView | null;
   state: UiState;
@@ -52,6 +53,10 @@ export function useTimelineGestures({
   dragging: MutableRefObject<boolean>;
   scale: number;
   setScale: (scale: number) => void;
+  clipDrag?: (
+    event: PointerEvent<HTMLElement>,
+    element: HTMLElement,
+  ) => Pick<Session, "move" | "end" | "cancel"> | undefined;
 }) {
   const scroller = useRef<HTMLElement>(null);
   const session = useRef<Session | null>(null);
@@ -75,6 +80,16 @@ export function useTimelineGestures({
     else if (event) active.end?.(event, active.moved);
     if (active.element.hasPointerCapture?.(active.pointerId)) active.element.releasePointerCapture(active.pointerId);
   };
+  useEffect(() => {
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && session.current) {
+        event.preventDefault();
+        finish(true);
+      }
+    };
+    window.addEventListener("keydown", keydown);
+    return () => window.removeEventListener("keydown", keydown);
+  });
   const start = (
     event: PointerEvent<HTMLElement>,
     callbacks: Pick<Session, "move" | "end" | "cancel"> = {},
@@ -215,7 +230,7 @@ export function useTimelineGestures({
           return;
         const clip = target.closest<HTMLElement>(".zc-clip");
         if (clip) {
-          start(event, {}, clip);
+          start(event, clipDrag?.(event, clip) ?? {}, clip);
           return;
         }
         const origin = contentPoint(event);
@@ -253,7 +268,7 @@ export function useTimelineGestures({
       },
       onScroll() {
         const active = session.current;
-        if (active?.moved && active.element === scroller.current) active.move?.(active.last);
+        if (active?.moved) active.move?.(active.last);
       },
       onPointerUp: (event: PointerEvent<HTMLElement>) => finish(false, event),
       onPointerCancel: (event: PointerEvent<HTMLElement>) => finish(true, event),

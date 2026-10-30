@@ -71,9 +71,52 @@ Repository: https://github.com/Augani/openreel-video
 Commit: `367d7e90b61b5181f9861b852bb8b9d7a7d2954a`
 
 Referenced and adapted `apps/web/src/components/editor/Timeline.tsx` (marquee selection, suppressing its trailing background click) in `packages/desktop/src/useTimelineGestures.ts`. No runtime dependencies imported.
+
 MIT License
 
 Copyright (c) 2024-2026 Augustus Otu and Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+### R1.9 PR 2: clip move and snapping
+
+Additionally adapted `apps/web/src/timeline/controllers/element-interaction-controller.ts`
+(move group, grab offset, preview/commit) and `apps/web/src/timeline/snapping/resolve.ts`
+(nearest distance) from OpenCut-app/opencut-classic at
+`cf5e79e919144200294fb9fed22a222592a0aeea` in
+`packages/desktop/src/timelineMove.ts` and `packages/desktop/src/TimelinePreview.tsx`.
+The OpenCut copyright and MIT notice above apply. Core remains responsible for
+linked moves, cross-track validation, conflicts and persistence.
+
+## react-timeline-editor (MIT)
+
+Repository: https://github.com/xzdarcy/react-timeline-editor
+
+Commit: `4148f4a837dd767ea66807560d05bc7b65c7e578`
+
+Adapted `packages/timeline/src/components/row_rnd/row_rnd.tsx` (both-edge snapping)
+in `packages/desktop/src/timelineMove.ts`. The nearest distance is updated for
+every winning candidate; no floating point time model or runtime dependency imported.
+
+MIT License
+
+Copyright (c) 2021 zdarcy
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

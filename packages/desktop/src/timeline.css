@@ -309,3 +309,18 @@
   background: var(--scrim);
   box-sizing: border-box;
 }
+
+.zc-snap-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--attention);
+  pointer-events: none;
+  z-index: 5;
+}
+.zc-snap-line output {
+  color: var(--attention);
+  background: var(--bg-timeline);
+  white-space: nowrap;
+}

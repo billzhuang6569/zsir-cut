@@ -31,6 +31,7 @@ import {
   sub,
   timecode,
 } from "./timeline.js";
+import { moveGroup, moveOverlaps, moveTarget } from "./timelineMove.js";
 import { useTimelineGestures } from "./useTimelineGestures.js";
 import { Wave } from "./Wave.js";
 
@@ -113,8 +114,90 @@ export function TimelinePreview({
 }) {
   const [drop, setDrop] = useState<{ track: string; at: string } | null>(null);
   const [scale, setScale] = useState(48);
-  const gestures = useTimelineGestures({ project, state, update, dragging, scale, setScale });
+  const [movePreview, setMovePreview] = useState<{
+    ids: string[];
+    anchor: string;
+    blocked: boolean;
+    y: number;
+    target: ReturnType<typeof moveTarget>;
+  } | null>(null);
+  const gestures = useTimelineGestures({
+    project,
+    state,
+    update,
+    dragging,
+    scale,
+    setScale,
+    clipDrag: (event, element) => {
+      if (!project || busy || readOnly || tool !== "select") return;
+      const id = element.dataset.selectionId;
+      const track = project.tracks.find(
+        (track) => track.kind !== "subtitle" && track.clips.some((clip) => clip.id === id),
+      );
+      if (!id || !track) return;
+      const group = moveGroup(project, state.selected, id);
+      const origin = Math.round(event.clientX);
+      const scroll = gestures.scroller.current?.scrollLeft ?? 0;
+      const lane = element.closest<HTMLElement>(".zc-track-lane");
+      const calculate = (event: { clientX: number; clientY: number }) => {
+        const targetLane = [...(gestures.scroller.current?.querySelectorAll<HTMLElement>(".zc-track-lane") ?? [])].find(
+          (lane) => {
+            const rect = lane.getBoundingClientRect();
+            return event.clientY >= rect.top && event.clientY < rect.bottom;
+          },
+        );
+        const target = moveTarget(
+          project,
+          group,
+          Math.round(event.clientX) - origin + Math.round((gestures.scroller.current?.scrollLeft ?? 0) - scroll),
+          scale,
+          snapRef.current,
+          seekTarget(project, project.cues, latest.current.state.playhead),
+        );
+        const trackId = targetLane?.dataset.trackId ?? track.id;
+        return {
+          target,
+          blocked: moveOverlaps(latest.current.project ?? project, group, target.delta, id, trackId),
+          trackId,
+          y: targetLane && lane ? targetLane.getBoundingClientRect().top - lane.getBoundingClientRect().top : 0,
+        };
+      };
+      return {
+        move: (event) => {
+          const preview = calculate(event);
+          setMovePreview({
+            ids: group.moving.map((clip) => clip.id),
+            anchor: id,
+            blocked: preview.blocked,
+            y: preview.y,
+            target: preview.target,
+          });
+        },
+        end: (event, moved) => {
+          setMovePreview(null);
+          if (!moved) return;
+          const result = calculate(event);
+          if (result.blocked) {
+            setWriteError("这里放不下：会和其他片段重叠");
+            setWriteErrorDetail(undefined);
+            return;
+          }
+          void write("edit", "移动片段", [
+            {
+              op: "move",
+              clip_ids: group.requested.map((clip) => clip.id),
+              to: result.target.to,
+              ...(result.trackId !== track.id ? { track_id: result.trackId } : {}),
+            },
+          ]);
+        },
+        cancel: () => setMovePreview(null),
+      };
+    },
+  });
   const [snap, setSnap] = useState(true);
+  const snapRef = useRef(snap);
+  snapRef.current = snap;
   const [tool, setTool] = useState("select");
   const [writeError, setWriteError] = useState<string | null>(null);
   const [writeErrorDetail, setWriteErrorDetail] = useState<string | undefined>();
@@ -535,8 +618,21 @@ export function TimelinePreview({
               if (state.preview === "media") update({ ...state, preview: "timeline", playing: false });
             }}
           >
+            {hideViewer && (error || writeError) && (
+              <p role="alert" title={error ? errorDetail : writeErrorDetail}>
+                {error || writeError}
+              </p>
+            )}
             {project && (
               <div className="zc-timeline-content" style={{ width: `calc(var(--track-label-w) + ${width}px)` }}>
+                {snap && movePreview?.target.line != null && (
+                  <div
+                    className="zc-snap-line"
+                    style={{ left: `calc(var(--track-label-w) + ${pixelAt(movePreview.target.line, scale)}px)` }}
+                  >
+                    <output aria-label="吸附距离">{movePreview.target.distance?.toFixed(1)}px</output>
+                  </div>
+                )}
                 <div className="zc-ruler-row">
                   <span className="zc-track-name" />
                   <div
@@ -614,6 +710,7 @@ export function TimelinePreview({
                       role="group"
                       aria-label={`${track.name} 放置区域`}
                       className="zc-track-lane"
+                      data-track-id={track.id}
                       style={{ width }}
                       onDragOver={(event) => {
                         if (
@@ -660,7 +757,24 @@ export function TimelinePreview({
                               !item.enabled ||
                               (state.selected.length > 0 && !state.selected.includes(item.id))
                             }
-                            style={{ left: pixelAt(item.timeline_in.t, scale), width: clipWidth }}
+                            style={{
+                              left:
+                                pixelAt(item.timeline_in.t, scale) +
+                                (movePreview?.ids.includes(item.id)
+                                  ? numberOf(mul(movePreview.target.delta, rational(BigInt(scale))))
+                                  : 0),
+                              width: clipWidth,
+                              ...(movePreview?.ids.includes(item.id)
+                                ? {
+                                    opacity: 0.5,
+                                    outline: movePreview.blocked ? "2px solid var(--attention)" : undefined,
+                                    cursor: movePreview.blocked ? "not-allowed" : undefined,
+                                    zIndex: 4,
+                                    transform:
+                                      item.id === movePreview.anchor ? `translateY(${movePreview.y}px)` : undefined,
+                                  }
+                                : {}),
+                            }}
                             onClick={(event) => {
                               gestures.select([item.id], event);
                               if (tool === "blade") split();
