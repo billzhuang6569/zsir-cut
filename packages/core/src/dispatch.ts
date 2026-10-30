@@ -40,9 +40,12 @@ import type { Author, Media } from "./project/types.ts";
 import { add, compare, parseRational, rational } from "./rational.ts";
 import { inspect, readTranscript } from "./read-views.ts";
 import { normalizeCommand, validateCommand } from "./schema.ts";
+import { editTermLibrary, readTermLibrary, type TermOp } from "./term-library.ts";
 import { AsrError, applyTranscription, invokeAsr, type TranscribeRequest, workerMilliseconds } from "./transcribe.ts";
 
 export const VERBS = [
+  "terms_list",
+  "terms_edit",
   "create_project",
   "inspect",
   "read_transcript",
@@ -321,6 +324,8 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
     );
   const request = input as Request;
   if (
+    verb !== "terms_list" &&
+    verb !== "terms_edit" &&
     verb !== "validate" &&
     verb !== "inspect" &&
     verb !== "read_transcript" &&
@@ -342,6 +347,25 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
   )
     return errorEnvelope(verb, requestId, "rejected", "E_UNSUPPORTED", `Verb ${verb} is not implemented`);
   try {
+    if (verb === "terms_list" || verb === "terms_edit") {
+      const output = basic(verb, requestId);
+      if (verb === "terms_list") {
+        output.result = {
+          terms: (await readTermLibrary()).filter(
+            (term) =>
+              (!request.state || term.state === request.state) &&
+              (request.query === undefined || term.text.includes(request.query as string)),
+          ),
+        };
+      } else {
+        const ops = request.ops as TermOp[];
+        if (ops.some(({ text }) => !text.trim() || Array.from(text.trim()).length > 64))
+          return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Terms must contain 1 to 64 characters");
+        output.changes = await editTermLibrary(ops);
+        output.status = output.changes.length ? "applied" : "no_op";
+      }
+      return output;
+    }
     if (verb === "create_project") {
       const create = request as unknown as CreateProjectRequest;
       return await openProject({ projectPath: create.project }).createProject(
@@ -582,7 +606,7 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
           writeRequest("transcribe", requestId, request),
           (project) => applyTranscription(project, request as TranscribeRequest, result),
           {},
-          { warnings: result.warnings },
+          { warnings: result.warnings, hotwords: result.hotwords },
         );
       } catch (error) {
         if (error instanceof AsrError) {

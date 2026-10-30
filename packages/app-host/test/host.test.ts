@@ -269,7 +269,9 @@ it("serves valid MCP schemas and no-UI failures without a network listener", asy
       ui_play: ["range", "loop"],
       ui_pause: [],
     };
-    for (const tool of tools.tools.slice(0, VERBS.length).filter((tool) => tool.name !== "zcut_record_handoff_check"))
+    for (const tool of tools.tools
+      .slice(0, VERBS.length)
+      .filter((tool) => !["zcut_record_handoff_check", "zcut_terms_list", "zcut_terms_edit"].includes(tool.name)))
       expect(tool.inputSchema.properties?.author).toMatchObject({
         type: "object",
         properties: { kind: expect.any(Object), name: { type: "string", minLength: 1 } },
@@ -325,7 +327,7 @@ it("serves valid MCP schemas and no-UI failures without a network listener", asy
   }
 });
 
-it("authenticates Streamable HTTP, lists 29 tools and calls inspect using the SDK", async () => {
+it("authenticates Streamable HTTP, lists 31 tools and calls inspect using the SDK", async () => {
   const { StreamableHTTPClientTransport } = await import("@modelcontextprotocol/sdk/client/streamableHttp.js");
   host = await startHost({ project, appDataDir });
   const url = new URL(`http://127.0.0.1:${host.port}/mcp`);
@@ -339,7 +341,7 @@ it("authenticates Streamable HTTP, lists 29 tools and calls inspect using the SD
   // SDK callback declarations do not support exactOptionalPropertyTypes.
   await client.connect(transport as import("@modelcontextprotocol/sdk/shared/transport.js").Transport);
   try {
-    expect((await client.listTools()).tools).toHaveLength(29);
+    expect((await client.listTools()).tools).toHaveLength(31);
     expect(
       (await client.callTool({ name: "zcut_inspect", arguments: { project, view: "brief" } })).structuredContent,
     ).toMatchObject({ ok: true, verb: "inspect" });

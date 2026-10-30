@@ -3,8 +3,8 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, expect, it } from "vitest";
-import { dispatch, parseProject, validateCommand, validateEnvelope } from "../src/index.js";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { dispatch, editTermLibrary, parseProject, validateCommand, validateEnvelope } from "../src/index.js";
 
 import { jobPath, readJob } from "../src/jobs.ts";
 
@@ -46,6 +46,7 @@ const run = async (base_revision = "rev_example_1", key = "transcribe-1") => {
 
 beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), "zcut-asr-"));
+  vi.stubEnv("HOME", directory);
   path = join(directory, "project.zcut.json");
   const media = Buffer.from("synthetic media for ASR contract test");
   await writeFile(join(directory, "media.bin"), media);
@@ -109,6 +110,7 @@ process.exit(scenario.error ? 1 : 0);
   );
 });
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await rm(directory, { recursive: true, force: true });
 });
 
@@ -117,6 +119,7 @@ it("creates all transcript layers, segments cues, and undoes the single revision
   const job = await run();
   expect(job.state, JSON.stringify(job.envelope)).toBe("succeeded");
   expect(validateEnvelope(job.envelope).valid).toBe(true);
+  expect(job.envelope?.result?.hotwords).toEqual([]);
   const next = await project();
   expect(next.transcripts).toHaveLength(1);
   const transcript = next.transcripts[0]!;
@@ -327,15 +330,27 @@ it("merges recognition terms with file hotwords and changes their cache digest",
       { ...request((await project()).revision.id, key), hotwords: "hotwords.txt", ...(language ? { language } : {}) },
       { asrPython: python, asrWorkerDirectory: directory },
     );
-    expect((await finish((accepted.result as { job_id: string }).job_id)).state).toBe("succeeded");
+    const completed = await finish((accepted.result as { job_id: string }).job_id);
+    expect(completed.state).toBe("succeeded");
+    expect(validateEnvelope(completed.envelope)).toEqual({ valid: true, errors: [] });
+    const saved = JSON.parse(await readFile(path, "utf8"));
+    for (const transcript of saved.transcripts)
+      for (const run of transcript.raw_runs) expect(run).not.toHaveProperty("params.hotwords");
+    expect(completed.envelope?.result?.hotwords).toEqual(
+      (await readFile(join(directory, "worker-hotwords.txt"), "utf8")).split("\n"),
+    );
     return readFile(join(directory, "worker-hotwords.txt"), "utf8");
   };
+  await editTermLibrary([
+    { op: "add", text: "全局词" },
+    { op: "block", text: "屏蔽词" },
+  ]);
   const before = await execute("terms-1");
-  expect(before).toBe("飞书\n豆包工作\n其他");
+  expect(before).toBe("飞书\n豆包工作\n其他\n全局词");
   const args = JSON.parse(await readFile(join(directory, "worker-args.json"), "utf8"));
   expect(args[args.indexOf("--language") + 1]).toBe("zh");
   const changed = JSON.parse(await readFile(path, "utf8"));
-  changed.recognition.terms.push("新词");
+  await editTermLibrary([{ op: "add", text: "新词" }]);
   await writeFile(path, JSON.stringify(changed));
   const after = await execute("terms-2", "auto");
   expect(createHash("sha256").update(after).digest("hex")).not.toBe(createHash("sha256").update(before).digest("hex"));

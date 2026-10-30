@@ -23,4 +23,5 @@ export {
   validateManifest,
   validateProject,
 } from "./schema.ts";
+export * from "./term-library.ts";
 export * from "./timecode.ts";

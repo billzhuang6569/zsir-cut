@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   commandSchemaForVerb,
   flattenMcpSchema,
@@ -34,10 +34,12 @@ const withoutRequestId = (value: Record<string, unknown>) => ({ ...value, reques
 
 beforeEach(async () => {
   directory = await realpath(await mkdtemp(join(tmpdir(), "zcut-parity-")));
+  vi.stubEnv("HOME", directory);
   project = join(directory, "std-25.zcut.json");
   await copyFile(fixture, project);
 });
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
@@ -49,9 +51,9 @@ describe("CLI and MCP", () => {
     await Promise.all([server.connect(left), client.connect(right)]);
     try {
       const tools = await client.listTools();
-      expect(tools.tools).toHaveLength(23);
+      expect(tools.tools).toHaveLength(25);
       for (const tool of tools.tools) {
-        if (tool.name !== "zcut_record_handoff_check")
+        if (!["zcut_record_handoff_check", "zcut_terms_list", "zcut_terms_edit"].includes(tool.name))
           expect(tool.inputSchema.properties?.author).toMatchObject({
             type: "object",
             properties: { kind: { enum: ["human", "agent", "system"] }, name: { type: "string" } },
@@ -245,7 +247,7 @@ describe("CLI and MCP", () => {
     }
   });
 
-  it("registers all 23 protocol verbs and returns equivalent envelopes", async () => {
+  it("registers all protocol verbs and returns equivalent envelopes", async () => {
     const server = createServer();
     const client = new Client({ name: "test", version: "1" });
     const [left, right] = InMemoryTransport.createLinkedPair();
@@ -649,7 +651,7 @@ it("shares queued admission, batch status, undo, restore and historical reads be
   const [left, right] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(left), client.connect(right)]);
   try {
-    expect((await client.listTools()).tools).toHaveLength(23);
+    expect((await client.listTools()).tools).toHaveLength(25);
     const base = { base_revision: "rev_fixture_1", author, label: "Parity step" };
     const pair = async (verb: string, input: Record<string, unknown>, expectedStatus: string) => {
       const cliResult = invokeCli(verb, input);
@@ -763,6 +765,48 @@ it("shares overlay edit settings and export dry-run envelopes between CLI and MC
       expect(withoutRequestId(cliResult)).toEqual(withoutRequestId(mcpResult));
       expect(cliResult.status).toBe(overlay_id === "ovl_parity" ? "dry_run" : "rejected");
     }
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+it("shares global terms list/edit envelopes through CLI and MCP without project receipts", async () => {
+  const server = createServer();
+  const client = new Client({ name: "terms-parity", version: "1" });
+  const [left, right] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(left), client.connect(right)]);
+  try {
+    const tools = await client.listTools();
+    expect(tools.tools.find((tool) => tool.name === "zcut_terms_edit")?.inputSchema).not.toHaveProperty(
+      "properties.project",
+    );
+    for (const [action, input, status] of [
+      ["edit", { ops: [{ op: "add", text: "飞书" }] }, "applied"],
+      ["list", {}, "no_op"],
+      ["list", { state: "blocked", query: "飞" }, "no_op"],
+      ["edit", { ops: [{ op: "remove", text: "飞书" }] }, "applied"],
+      ["edit", { ops: [{ op: "add", text: " " }] }, "rejected"],
+    ] as const) {
+      // Reset before each write so both transports observe the same initial state.
+      const file = join(directory, "request.json");
+      await writeFile(file, JSON.stringify(input));
+      const cliRun = spawnSync(process.execPath, [cli, "terms", action, "--input", file], { encoding: "utf8" });
+      const cliEnvelope = JSON.parse(cliRun.stdout);
+      if (action === "edit" && status === "applied") {
+        const undo = { ops: [{ op: input.ops[0].op === "add" ? "remove" : "add", text: "飞书" }] };
+        await client.callTool({ name: "zcut_terms_edit", arguments: undo });
+      }
+      const mcp = (await client.callTool({ name: `zcut_terms_${action}`, arguments: input }))
+        .structuredContent as Record<string, unknown>;
+      expect(mcp.status).toBe(status);
+      expect(validateEnvelope(mcp)).toEqual({ valid: true, errors: [] });
+      expect(validateEnvelope(cliEnvelope)).toEqual({ valid: true, errors: [] });
+      expect(mcp.receipt).toBeNull();
+      expect(withoutRequestId(mcp)).toEqual(withoutRequestId(cliEnvelope));
+    }
+    const plain = spawnSync(process.execPath, [cli, "terms", "list"], { encoding: "utf8" });
+    expect(JSON.parse(plain.stdout).ok).toBe(true);
   } finally {
     await client.close();
     await server.close();

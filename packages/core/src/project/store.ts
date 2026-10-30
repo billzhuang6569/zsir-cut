@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { link, lstat, mkdir, open, readFile, realpath, rename, rm } from "node:fs/promises";
 import { hostname } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { collectProjectTerms } from "../term-library.ts";
 import { type Batch, type BatchStep, batchPath, batchView, readBatches, saveBatchFile } from "./batch.ts";
 import { applyEdit, EditError } from "./edit.ts";
 import { diffProjectEntities, type EntityChange, type EntitySnapshot, projectEntitySnapshots } from "./entities.ts";
@@ -757,6 +758,15 @@ export function openProject(options: OpenProjectOptions) {
         ...((request.target ?? target) ? { target: (request.target ?? target) as string } : {}),
       };
       await appendSynced(journalPath, entry);
+      if (!options.sessionId && (request.verb === "edit" || request.verb === "session_approve")) {
+        try {
+          await collectProjectTerms(current, candidate);
+        } catch (error) {
+          output.result ??= {};
+          const warnings = (output.result.warnings ?? []) as unknown[];
+          output.result.warnings = [...warnings, { code: "W_TERMS_LIBRARY", reason: String(error) }];
+        }
+      }
       const now = clock().getTime();
       const recentKeys = new Set(
         [...new Set([request.idempotency_key, ...records.toReversed().map((record) => record.idempotency_key)])].slice(
