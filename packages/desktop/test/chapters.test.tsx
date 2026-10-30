@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, useState } from "react";
+import { act, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import type { UiState } from "../../app-host/src/ui.js";
@@ -71,6 +71,7 @@ async function mount(view = project, timeline = false) {
   document.body.append(container);
   const root = createRoot(container);
   function Harness() {
+    const dragging = useRef(false);
     const [ui, update] = useState(state);
     state = ui;
     const panel = useChapterPanel({ project: view, state: ui, update, call, canGenerate: false, generate: vi.fn() });
@@ -86,7 +87,7 @@ async function mount(view = project, timeline = false) {
             update={update}
             call={call}
             error={null}
-            dragging={{ current: false }}
+            dragging={dragging}
           />
         )}
       </>

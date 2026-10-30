@@ -1,3 +1,5 @@
+// Gesture adaptations: OpenCut-app/opencut-classic, cf5e79e919144200294fb9fed22a222592a0aeea, MIT.
+// Copyright 2025-2026 OpenCut. See useTimelineGestures.ts and THIRD_PARTY_NOTICES.md.
 // biome-ignore-all lint/suspicious/noArrayIndexKey: Film cells, waveform bars and ruler ticks are fixed geometric slots.
 
 import { memo, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
@@ -29,6 +31,7 @@ import {
   sub,
   timecode,
 } from "./timeline.js";
+import { useTimelineGestures } from "./useTimelineGestures.js";
 import { Wave } from "./Wave.js";
 
 export { Wave } from "./Wave.js";
@@ -110,6 +113,7 @@ export function TimelinePreview({
 }) {
   const [drop, setDrop] = useState<{ track: string; at: string } | null>(null);
   const [scale, setScale] = useState(48);
+  const gestures = useTimelineGestures({ project, state, update, dragging, scale, setScale });
   const [snap, setSnap] = useState(true);
   const [tool, setTool] = useState("select");
   const [writeError, setWriteError] = useState<string | null>(null);
@@ -162,7 +166,7 @@ export function TimelinePreview({
   useEffect(() => {
     if (!project) return;
     const target = seekTarget(project, project.cues, state.playhead);
-    if (!("at" in state.playhead)) update({ ...state, playhead: { at: target } });
+    if (!("at" in state.playhead)) update({ ...latest.current.state, playhead: { at: target } });
     const head = playhead.current;
     const scroller = head?.closest(".zc-timeline");
     if (head && scroller) {
@@ -170,7 +174,7 @@ export function TimelinePreview({
       if (x < scroller.scrollLeft) scroller.scrollLeft = x;
       else if (x > scroller.scrollLeft + scroller.clientWidth) scroller.scrollLeft = x - scroller.clientWidth;
     }
-  }, [project, state.playhead, update, state]);
+  }, [project, state.playhead, update]);
   useEffect(() => {
     if (hideViewer || !state.playing || !project) return;
     let started = performance.now();
@@ -284,8 +288,6 @@ export function TimelinePreview({
     element.addEventListener("loadedmetadata", sync);
     return () => element.removeEventListener("loadedmetadata", sync);
   }, [clip, source, speed, state.playing, direction, hideViewer, at]);
-  const markerDrag = useRef<number | null>(null);
-  const markerMoved = useRef(false);
   const write = async (verb: string, label: string, ops?: unknown[]) => {
     if (!project || busy || readOnly) return;
     setBusy(true);
@@ -344,7 +346,7 @@ export function TimelinePreview({
       if (event.metaKey && ["+", "=", "-"].includes(key)) {
         event.preventDefault();
         if (state.panel === "media") return;
-        setScale((value) => Math.max(12, Math.min(192, value + (key === "-" ? -12 : 12))));
+        gestures.zoom(scale + (key === "-" ? -12 : 12));
         return;
       }
       if (!project || hideViewer) return;
@@ -513,20 +515,22 @@ export function TimelinePreview({
               <Icon name="subtitle" />
               {project?.cues.length ?? 0}
             </span>
-            <IconButton icon="search" label="缩放" onClick={() => setScale(48)} />
+            <IconButton icon="search" label="缩放" onClick={() => gestures.zoom(48)} />
             <input
               aria-label="时间线缩放"
               type="range"
               min={12}
               max={192}
-              step={12}
+              step={1}
               value={scale}
-              onChange={(event) => setScale(Number(event.target.value))}
+              onChange={(event) => gestures.zoom(Number(event.target.value))}
             />
           </section>
           <section
             aria-label="时间线"
             className="zc-timeline"
+            ref={gestures.scroller}
+            {...gestures.handlers}
             onPointerDownCapture={() => {
               if (state.preview === "media") update({ ...state, preview: "timeline", playing: false });
             }}
@@ -545,21 +549,9 @@ export function TimelinePreview({
                     aria-valuemax={Number(frameAt(project.duration.t, project.edit_rate))}
                     aria-valuenow={Number(frameAt(at, project.edit_rate))}
                     onPointerDown={(event) => {
-                      dragging.current = true;
-                      event.currentTarget.setPointerCapture?.(event.pointerId);
-                      point(event.clientX, event.currentTarget);
-                    }}
-                    onPointerMove={(event) => {
-                      if (dragging.current) point(event.clientX, event.currentTarget);
-                    }}
-                    onPointerUp={() => {
-                      dragging.current = false;
-                    }}
-                    onLostPointerCapture={() => {
-                      dragging.current = false;
-                    }}
-                    onPointerCancel={() => {
-                      dragging.current = false;
+                      const ruler = event.currentTarget;
+                      if (gestures.start(event, { move: (event) => point(event.clientX, ruler) }))
+                        point(event.clientX, ruler);
                     }}
                   >
                     {Array.from({ length: Math.ceil(width / 96) }, (_, index) => (
@@ -579,52 +571,33 @@ export function TimelinePreview({
                         aria-label={marker.text}
                         style={{ left: pixelAt(marker.at.t, scale) }}
                         onPointerDown={(event) => {
+                          event.stopPropagation();
                           if (marker.kind !== "chapter" || busy || readOnly) return;
-                          event.stopPropagation();
-                          markerMoved.current = false;
-                          markerDrag.current = event.clientX;
-                          dragging.current = true;
-                          event.currentTarget.setPointerCapture?.(event.pointerId);
-                        }}
-                        onPointerMove={(event) => {
-                          if (markerDrag.current === null) return;
-                          event.stopPropagation();
-                          const ruler = event.currentTarget.parentElement;
-                          if (ruler)
-                            event.currentTarget.style.left = `${pixelAt(seekTarget(project, project.cues, { at: dropPoint(event.clientX, ruler) ?? marker.at.t }), scale)}px`;
-                        }}
-                        onPointerUp={(event) => {
-                          if (markerDrag.current === null) return;
-                          event.stopPropagation();
-                          const moved = Math.abs(event.clientX - markerDrag.current) > 2;
-                          markerMoved.current = moved;
-                          markerDrag.current = null;
-                          dragging.current = false;
-                          event.currentTarget.style.left = `${pixelAt(marker.at.t, scale)}px`;
-                          const ruler = event.currentTarget.parentElement;
-                          if (!moved || !ruler) return;
-                          const target = seekTarget(project, project.cues, {
-                            at: dropPoint(event.clientX, ruler) ?? marker.at.t,
+                          const element = event.currentTarget;
+                          const ruler = element.parentElement;
+                          if (!ruler) return;
+                          const reset = () => {
+                            element.style.left = `${pixelAt(marker.at.t, scale)}px`;
+                          };
+                          gestures.start(event, {
+                            move: (event) => {
+                              element.style.left = `${pixelAt(seekTarget(project, project.cues, { at: dropPoint(event.clientX, ruler) ?? marker.at.t }), scale)}px`;
+                            },
+                            end: (event, moved) => {
+                              reset();
+                              if (!moved) return;
+                              const target = seekTarget(project, project.cues, {
+                                at: dropPoint(event.clientX, ruler) ?? marker.at.t,
+                              });
+                              if (target !== marker.at.t)
+                                void write("edit", `移动章节「${marker.text}」`, [
+                                  { op: "update_marker", marker_id: marker.id, at: target },
+                                ]);
+                            },
+                            cancel: reset,
                           });
-                          if (target !== marker.at.t)
-                            void write("edit", `移动章节「${marker.text}」`, [
-                              { op: "update_marker", marker_id: marker.id, at: target },
-                            ]);
                         }}
-                        onPointerCancel={(event) => {
-                          markerDrag.current = null;
-                          dragging.current = false;
-                          event.currentTarget.style.left = `${pixelAt(marker.at.t, scale)}px`;
-                        }}
-                        onLostPointerCapture={(event) => {
-                          markerDrag.current = null;
-                          dragging.current = false;
-                          event.currentTarget.style.left = `${pixelAt(marker.at.t, scale)}px`;
-                        }}
-                        onClick={() => {
-                          if (!markerMoved.current) seek(marker.at.t);
-                          markerMoved.current = false;
-                        }}
+                        onClick={() => seek(marker.at.t)}
                       >
                         ▼
                       </button>
@@ -674,6 +647,7 @@ export function TimelinePreview({
                         return (
                           <Clip
                             key={item.id}
+                            selectionId={item.id}
                             kind={track.kind}
                             label={
                               project.media.find((media) => media.id === item.media_id)?.name ??
@@ -687,8 +661,8 @@ export function TimelinePreview({
                               (state.selected.length > 0 && !state.selected.includes(item.id))
                             }
                             style={{ left: pixelAt(item.timeline_in.t, scale), width: clipWidth }}
-                            onClick={() => {
-                              update({ ...state, preview: "timeline", playing: false, selected: [item.id] });
+                            onClick={(event) => {
+                              gestures.select([item.id], event);
                               if (tool === "blade") split();
                             }}
                           >
@@ -714,6 +688,7 @@ export function TimelinePreview({
                           .map((cue) => (
                             <Clip
                               key={`${cue.cue_id}-${cue.piece}-${cue.start}`}
+                              selectionId={cue.cue_id}
                               kind="subtitle"
                               label={cue.text.replaceAll("\n", " ")}
                               selected={state.selected.includes(cue.cue_id)}
@@ -724,12 +699,13 @@ export function TimelinePreview({
                                 left: pixelAt(cue.start, scale),
                                 width: Math.max(1, pixelAt(cue.end, scale) - pixelAt(cue.start, scale)),
                               }}
-                              onClick={() => update({ ...state, selected: [cue.cue_id] })}
+                              onClick={(event) => gestures.select([cue.cue_id], event)}
                             />
                           ))}
                     </div>
                   </div>
                 ))}
+                {gestures.box && <div aria-hidden="true" className="zc-selection-box" style={gestures.box} />}
                 <div
                   ref={playhead}
                   className="zc-playhead"
@@ -739,23 +715,10 @@ export function TimelinePreview({
                     type="button"
                     aria-label="播放头"
                     onPointerDown={(event) => {
-                      dragging.current = true;
-                      event.currentTarget.setPointerCapture?.(event.pointerId);
-                    }}
-                    onPointerMove={(event) => {
                       const ruler = event.currentTarget
                         .closest(".zc-timeline-content")
                         ?.querySelector<HTMLElement>(".zc-ruler");
-                      if (dragging.current && ruler) point(event.clientX, ruler);
-                    }}
-                    onPointerUp={() => {
-                      dragging.current = false;
-                    }}
-                    onLostPointerCapture={() => {
-                      dragging.current = false;
-                    }}
-                    onPointerCancel={() => {
-                      dragging.current = false;
+                      if (ruler) gestures.start(event, { move: (event) => point(event.clientX, ruler) });
                     }}
                   >
                     ▼
