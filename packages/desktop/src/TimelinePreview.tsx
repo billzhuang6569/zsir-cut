@@ -32,7 +32,7 @@ import {
   sub,
   timecode,
 } from "./timeline.js";
-import { moveGroup, moveOverlaps, moveTarget } from "./timelineMove.js";
+import { moveClipPreview, moveGroup, moveInsert, moveTarget } from "./timelineMove.js";
 import { type TrimEdge, trimTarget } from "./timelineTrim.js";
 import { useTimelineGestures } from "./useTimelineGestures.js";
 import { Wave } from "./Wave.js";
@@ -121,7 +121,7 @@ export function TimelinePreview({
     anchor: string;
     blocked: boolean;
     y: number;
-    target: ReturnType<typeof moveTarget>;
+    target: ReturnType<typeof moveTarget> & { insert?: NonNullable<ReturnType<typeof moveInsert>>["insert"] };
   } | null>(null);
   const [trimPreview, setTrimPreview] = useState<(ReturnType<typeof trimTarget> & { edge: TrimEdge }) | null>(null);
   const gestures = useTimelineGestures({
@@ -196,9 +196,16 @@ export function TimelinePreview({
           seekTarget(project, project.cues, latest.current.state.playhead),
         );
         const trackId = targetLane?.dataset.trackId ?? track.id;
+        const pointer = div(
+          rational(BigInt(Math.round(event.clientX - ((targetLane ?? lane)?.getBoundingClientRect().left ?? 0)))),
+          rational(BigInt(scale)),
+        );
+        const insertion = moveInsert(project, group, target, id, trackId, pointer);
+        const blocked = !!insertion && new Set(group.moving.map((clip) => clip.occurrence_id ?? clip.id)).size !== 1;
         return {
-          target,
-          blocked: moveOverlaps(latest.current.project ?? project, group, target.delta, id, trackId),
+          target: blocked ? target : (insertion ?? target),
+          blocked,
+          insert: !!insertion && !blocked,
           trackId,
           y: targetLane && lane ? targetLane.getBoundingClientRect().top - lane.getBoundingClientRect().top : 0,
         };
@@ -219,7 +226,7 @@ export function TimelinePreview({
           if (!moved) return;
           const result = calculate(event);
           if (result.blocked) {
-            setWriteError("这里放不下：会和其他片段重叠");
+            setWriteError("一次只能插入一组片段");
             setWriteErrorDetail(undefined);
             return;
           }
@@ -228,6 +235,7 @@ export function TimelinePreview({
               op: "move",
               clip_ids: group.requested.map((clip) => clip.id),
               to: result.target.to,
+              ...(result.insert ? { mode: "insert" } : {}),
               ...(result.trackId !== track.id ? { track_id: result.trackId } : {}),
             },
           ]);
@@ -532,6 +540,14 @@ export function TimelinePreview({
   // Keep the canvas unchanged between caption boundaries.
   // biome-ignore lint/correctness/useExhaustiveDependencies: captionKey includes every rendered cue field.
   const captions = useMemo(() => visibleCues, [project, captionKey]);
+  const previewTracks = project?.tracks.map((track) => ({
+    ...track,
+    clips: track.clips.flatMap((clip) =>
+      movePreview
+        ? moveClipPreview(clip, movePreview.ids, movePreview.target.delta, movePreview.target.insert)
+        : [clip],
+    ),
+  }));
   return (
     <>
       {!hideViewer && (
@@ -667,6 +683,14 @@ export function TimelinePreview({
             )}
             {project && (
               <div className="zc-timeline-content" style={{ width: `calc(var(--track-label-w) + ${width}px)` }}>
+                {movePreview?.target.insert && (
+                  <div
+                    role="img"
+                    className="zc-insert-line"
+                    aria-label="插入位置"
+                    style={{ left: `calc(var(--track-label-w) + ${pixelAt(movePreview.target.to, scale)}px)` }}
+                  />
+                )}
                 {snap && snapPreview?.line != null && (
                   <div
                     className="zc-snap-line"
@@ -742,7 +766,7 @@ export function TimelinePreview({
                     ))}
                   </div>
                 </div>
-                {project.tracks.map((track) => (
+                {previewTracks?.map((track) => (
                   <div key={track.id} className={`zc-track zc-track-${track.kind}`}>
                     <span className="zc-track-name" title={track.name}>
                       {track.name}
@@ -828,11 +852,7 @@ export function TimelinePreview({
                               (state.selected.length > 0 && !state.selected.includes(item.id))
                             }
                             style={{
-                              left:
-                                pixelAt(item.timeline_in.t, scale) +
-                                (movePreview?.ids.includes(item.id)
-                                  ? numberOf(mul(movePreview.target.delta, rational(BigInt(scale))))
-                                  : 0),
+                              left: pixelAt(item.timeline_in.t, scale),
                               width: clipWidth,
                               ...(trimming
                                 ? {

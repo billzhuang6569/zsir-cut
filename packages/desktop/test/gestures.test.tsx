@@ -569,34 +569,75 @@ it("includes scroll displacement, freezes the gesture revision, and cancels on t
   expect(call).not.toHaveBeenCalled();
 });
 
-it("marks overlapping moves as blocked, skips the request on release, and allows touching edges", async () => {
+it.each([
+  { x: 480, to: "8s", line: "384px", moved: "384px" },
+  { x: 544, to: "10s", line: "480px", moved: "288px" },
+])("inserts at the nearest hovered edge and previews gap closure and pushing: $to", async ({ x, to, line, moved }) => {
   const clip = get('[data-selection-id="c1"]');
   await pointer(clip, "pointerdown", 192, 85);
-  await pointer(clip, "pointermove", 480, 85);
-  expect(clip.style.outline).toBe("2px solid var(--attention)");
-  expect(clip.style.cursor).toBe("not-allowed");
-  expect(clip.style.opacity).toBe("0.5");
-  expect(call).not.toHaveBeenCalled();
-  await pointer(clip, "pointerup", 480, 85);
-  expect(call).not.toHaveBeenCalled();
-  expect(clip.style.left).toBe("96px");
+  await pointer(clip, "pointermove", x, 85);
   expect(clip.style.outline).toBe("");
-  expect(host.querySelector('[role="alert"]')?.textContent).toBe("这里放不下：会和其他片段重叠");
-  await pointer(clip, "pointerdown", 192, 85);
-  await pointer(clip, "pointermove", 480, 85);
-  await pointer(clip, "pointermove", 384, 85);
-  expect(clip.style.outline).toBe("");
-  await pointer(clip, "pointerup", 384, 85);
+  expect(get('[aria-label="插入位置"]').style.left).toBe(`calc(var(--track-label-w) + ${line})`);
+  expect(get('[data-selection-id="c2"]').style.left).toBe(moved);
+  expect(call).not.toHaveBeenCalled();
+  await pointer(clip, "pointerup", x, 85);
   expect(call).toHaveBeenCalledTimes(1);
+  expect(call).toHaveBeenCalledWith(
+    "edit",
+    expect.objectContaining({
+      ops: [{ op: "move", clip_ids: ["c1"], to, mode: "insert" }],
+    }),
+  );
+  expect(clip.style.left).toBe("96px");
+  expect(host.querySelector('[aria-label="插入位置"]')).toBeNull();
 });
 
-it("checks the final release position even without a preceding blocked preview", async () => {
+it("checks the final release position even without a preceding insert preview", async () => {
   const clip = get('[data-selection-id="c1"]');
   await pointer(clip, "pointerdown", 192, 85);
   await pointer(clip, "pointermove", 240, 85);
   await pointer(clip, "pointerup", 480, 85);
+  expect(call).toHaveBeenCalledWith(
+    "edit",
+    expect.objectContaining({
+      ops: [{ op: "move", clip_ids: ["c1"], to: "8s", mode: "insert" }],
+    }),
+  );
+});
+
+it("blocks multiple occurrence groups with the insertion prompt", async () => {
+  const first = project.tracks[0]?.clips[0];
+  if (!first) throw new Error("fixture");
+  project.tracks[0]?.clips.push({ ...first, id: "c3", timeline_in: { t: "14s" }, timeline_out: { t: "16s" } });
+  state.selected = ["c1", "c2"];
+  await act(render);
+  const clip = get('[data-selection-id="c1"]');
+  await pointer(clip, "pointerdown", 192, 85);
+  await pointer(clip, "pointermove", 480, 85);
+  expect(clip.style.cursor).toBe("not-allowed");
+  expect(host.querySelector('[aria-label="插入位置"]')).toBeNull();
+  await pointer(clip, "pointerup", 480, 85);
   expect(call).not.toHaveBeenCalled();
-  expect(host.textContent).toContain("这里放不下：会和其他片段重叠");
+  expect(host.textContent).toContain("一次只能插入一组片段");
+});
+
+it("cancels an insertion preview on Escape and restores it after rejection", async () => {
+  const clip = get('[data-selection-id="c1"]');
+  await pointer(clip, "pointerdown", 192, 85);
+  await pointer(clip, "pointermove", 480, 85);
+  await act(() => {
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  });
+  expect(get('[data-selection-id="c2"]').style.left).toBe("384px");
+  expect(host.querySelector('[aria-label="插入位置"]')).toBeNull();
+  expect(call).not.toHaveBeenCalled();
+  call.mockRejectedValueOnce(new Error("工程刚被别处改过，已刷新，请重试"));
+  await pointer(clip, "pointerdown", 192, 85);
+  await pointer(clip, "pointermove", 480, 85);
+  await pointer(clip, "pointerup", 480, 85);
+  expect(clip.style.left).toBe("96px");
+  expect(get('[data-selection-id="c2"]').style.left).toBe("384px");
+  expect(host.textContent).toContain("工程刚被别处改过，已刷新，请重试");
 });
 
 async function prepareTrim(linked = false) {

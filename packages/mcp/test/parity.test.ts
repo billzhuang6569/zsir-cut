@@ -812,3 +812,47 @@ it("shares global terms list/edit envelopes through CLI and MCP without project 
     await server.close();
   }
 });
+
+it("shares insert move schema, dry-run changes, commit replay and multi-group rejection without sockets", async () => {
+  await copyFile(new URL("../../../fixtures/regressions/move-insert.zcut.json", import.meta.url), project);
+  const server = createServer();
+  const client = new Client({ name: "insert-move", version: "1" });
+  const [left, right] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(left), client.connect(right)]);
+  try {
+    const input = {
+      project,
+      author,
+      base_revision: "rev_example_1",
+      idempotency_key: "insert-move",
+      label: "插入移动",
+      ops: [{ op: "move", clip_ids: ["clp_v2"], to: "5s", mode: "insert" }],
+    };
+    for (const request of [
+      { ...input, dry_run: true },
+      input,
+      {
+        ...input,
+        idempotency_key: "multi",
+        ops: [{ op: "move", clip_ids: ["clp_v1", "clp_v2"], to: "0s", mode: "insert" }],
+        base_revision: undefined,
+      },
+    ]) {
+      if (request.idempotency_key === "multi")
+        request.base_revision = JSON.parse(await readFile(project, "utf8")).revision.id;
+      let cliResult = invokeCli("edit", request);
+      if (cliResult.envelope.status === "applied") cliResult = invokeCli("edit", request);
+      const mcpResult = (await client.callTool({ name: "zcut_edit", arguments: request })).structuredContent as Record<
+        string,
+        unknown
+      >;
+      expect(validateEnvelope(mcpResult).valid).toBe(true);
+      expect(withoutRequestId(cliResult.envelope)).toEqual(withoutRequestId(mcpResult));
+      if (request.idempotency_key === "multi") expect(mcpResult.error).toMatchObject({ code: "E_VALIDATION" });
+      else expect(cliResult.envelope.status).toBe(request.dry_run ? "dry_run" : "applied");
+    }
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});

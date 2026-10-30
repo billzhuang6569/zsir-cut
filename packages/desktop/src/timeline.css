@@ -328,3 +328,14 @@
   cursor: not-allowed;
   background: var(--attention);
 }
+
+.zc-insert-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--attention);
+  box-shadow: 0 0 6px var(--attention);
+  z-index: 8;
+  pointer-events: none;
+}
