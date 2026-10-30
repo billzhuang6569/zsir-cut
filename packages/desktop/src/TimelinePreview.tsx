@@ -1,4 +1,5 @@
 // Gesture adaptations: OpenCut-app/opencut-classic, cf5e79e919144200294fb9fed22a222592a0aeea, MIT.
+// Includes timeline/controllers/resize-controller.ts (trim preview/discard/commit).
 // Copyright 2025-2026 OpenCut. See useTimelineGestures.ts and THIRD_PARTY_NOTICES.md.
 // biome-ignore-all lint/suspicious/noArrayIndexKey: Film cells, waveform bars and ruler ticks are fixed geometric slots.
 
@@ -32,6 +33,7 @@ import {
   timecode,
 } from "./timeline.js";
 import { moveGroup, moveOverlaps, moveTarget } from "./timelineMove.js";
+import { type TrimEdge, trimTarget } from "./timelineTrim.js";
 import { useTimelineGestures } from "./useTimelineGestures.js";
 import { Wave } from "./Wave.js";
 
@@ -121,6 +123,7 @@ export function TimelinePreview({
     y: number;
     target: ReturnType<typeof moveTarget>;
   } | null>(null);
+  const [trimPreview, setTrimPreview] = useState<(ReturnType<typeof trimTarget> & { edge: TrimEdge }) | null>(null);
   const gestures = useTimelineGestures({
     project,
     state,
@@ -135,6 +138,44 @@ export function TimelinePreview({
         (track) => track.kind !== "subtitle" && track.clips.some((clip) => clip.id === id),
       );
       if (!id || !track) return;
+      const edge = (event.target as Element).closest<HTMLElement>("[data-trim-edge]")?.dataset.trimEdge as
+        | TrimEdge
+        | undefined;
+      if (edge) {
+        const anchor = track.clips.find((clip) => clip.id === id);
+        if (!anchor || anchor.time_map || anchor.speed === "map") return;
+        const origin = Math.round(event.clientX);
+        const scroll = gestures.scroller.current?.scrollLeft ?? 0;
+        const calculate = (point: { clientX: number; altKey: boolean }) =>
+          trimTarget(
+            project,
+            anchor,
+            edge,
+            !point.altKey,
+            Math.round(point.clientX) - origin + Math.round((gestures.scroller.current?.scrollLeft ?? 0) - scroll),
+            scale,
+            snapRef.current,
+            seekTarget(project, project.cues, latest.current.state.playhead),
+          );
+        return {
+          move: (point) => setTrimPreview({ ...calculate(point), edge }),
+          end: (point, moved) => {
+            setTrimPreview(null);
+            if (!moved) return;
+            const result = calculate(point);
+            if (result.blocked) {
+              setWriteError(result.reason);
+              setWriteErrorDetail(undefined);
+              return;
+            }
+            if (result.to === (edge === "in" ? anchor.timeline_in.t : anchor.timeline_out.t)) return;
+            void write("edit", edge === "in" ? "修剪片段入点" : "修剪片段出点", [
+              { op: "trim", clip_id: id, edge, to: result.to, ripple: false, linked: !point.altKey },
+            ]);
+          },
+          cancel: () => setTrimPreview(null),
+        };
+      }
       const group = moveGroup(project, state.selected, id);
       const origin = Math.round(event.clientX);
       const scroll = gestures.scroller.current?.scrollLeft ?? 0;
@@ -485,6 +526,7 @@ export function TimelinePreview({
     }
   };
   const width = project ? Math.max(800, pixelAt(project.duration.t, scale) + 100) : 800;
+  const snapPreview = trimPreview ?? movePreview?.target;
   const visibleCues = project?.cues.filter((cue) => contains(cue.start, cue.end, at)) ?? [];
   const captionKey = visibleCues.map((cue) => `${cue.cue_id}:${cue.piece}:${cue.text}:${cue.style_id}`).join("\0");
   // Keep the canvas unchanged between caption boundaries.
@@ -625,12 +667,12 @@ export function TimelinePreview({
             )}
             {project && (
               <div className="zc-timeline-content" style={{ width: `calc(var(--track-label-w) + ${width}px)` }}>
-                {snap && movePreview?.target.line != null && (
+                {snap && snapPreview?.line != null && (
                   <div
                     className="zc-snap-line"
-                    style={{ left: `calc(var(--track-label-w) + ${pixelAt(movePreview.target.line, scale)}px)` }}
+                    style={{ left: `calc(var(--track-label-w) + ${pixelAt(snapPreview.line, scale)}px)` }}
                   >
-                    <output aria-label="吸附距离">{movePreview.target.distance?.toFixed(1)}px</output>
+                    <output aria-label="吸附距离">{snapPreview.distance?.toFixed(1)}px</output>
                   </div>
                 )}
                 <div className="zc-ruler-row">
@@ -736,7 +778,35 @@ export function TimelinePreview({
                       {drop?.track === track.id && (
                         <span className="zc-drop-preview" style={{ left: pixelAt(drop.at, scale) }} />
                       )}
-                      {track.clips.map((item) => {
+                      {track.clips.map((original) => {
+                        const trimming = trimPreview?.clips.some((clip) => clip.id === original.id);
+                        const item =
+                          trimming && trimPreview
+                            ? {
+                                ...original,
+                                ...(trimPreview.edge === "in"
+                                  ? {
+                                      timeline_in: { t: trimPreview.to },
+                                      source_in: {
+                                        t:
+                                          project.media.find((media) => media.id === original.media_id)?.kind ===
+                                          "image"
+                                            ? "0s"
+                                            : printRational(
+                                                add(
+                                                  parseRational(original.source_in.t, true),
+                                                  sub(
+                                                    parseRational(trimPreview.to, true),
+                                                    parseRational(original.timeline_in.t, true),
+                                                  ),
+                                                ),
+                                                true,
+                                              ),
+                                      },
+                                    }
+                                  : { timeline_out: { t: trimPreview.to } }),
+                              }
+                            : original;
                         const clipWidth = Math.max(
                           1,
                           pixelAt(item.timeline_out.t, scale) - pixelAt(item.timeline_in.t, scale),
@@ -764,6 +834,14 @@ export function TimelinePreview({
                                   ? numberOf(mul(movePreview.target.delta, rational(BigInt(scale))))
                                   : 0),
                               width: clipWidth,
+                              ...(trimming
+                                ? {
+                                    opacity: 0.5,
+                                    outline: trimPreview?.blocked ? "2px solid var(--attention)" : undefined,
+                                    cursor: trimPreview?.blocked ? "not-allowed" : "ew-resize",
+                                    zIndex: 4,
+                                  }
+                                : {}),
                               ...(movePreview?.ids.includes(item.id)
                                 ? {
                                     opacity: 0.5,
@@ -780,6 +858,25 @@ export function TimelinePreview({
                               if (tool === "blade") split();
                             }}
                           >
+                            {track.kind !== "subtitle" &&
+                              tool === "select" &&
+                              !readOnly &&
+                              !busy &&
+                              !original.time_map &&
+                              original.speed !== "map" &&
+                              (["in", "out"] as const).map((edge) => (
+                                <span
+                                  key={edge}
+                                  aria-hidden="true"
+                                  data-trim-edge={edge}
+                                  className={`zc-trim-handle zc-trim-${edge}${trimming && trimPreview?.blocked ? " is-blocked" : ""}`}
+                                  title={
+                                    edge === "in"
+                                      ? "拖动修剪入点；Option/Alt 只修剪单轨"
+                                      : "拖动修剪出点；Option/Alt 只修剪单轨"
+                                  }
+                                />
+                              ))}
                             {track.kind === "video" ? (
                               <Film clip={item} width={clipWidth} scale={scale} config={config} />
                             ) : (

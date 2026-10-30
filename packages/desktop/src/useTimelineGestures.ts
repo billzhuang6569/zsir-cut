@@ -26,8 +26,8 @@ type Session = {
   element: HTMLElement;
   origin: Position;
   moved: boolean;
-  last: { clientX: number; clientY: number };
-  move?: (event: { clientX: number; clientY: number }) => void;
+  last: { clientX: number; clientY: number; altKey: boolean };
+  move?: (event: { clientX: number; clientY: number; altKey: boolean }) => void;
   end?: (event: PointerEvent<HTMLElement>, moved: boolean) => void;
   cancel?: () => void;
 };
@@ -100,7 +100,7 @@ export function useTimelineGestures({
     session.current = {
       pointerId: event.pointerId,
       element,
-      last: { clientX: event.clientX, clientY: event.clientY },
+      last: { clientX: event.clientX, clientY: event.clientY, altKey: event.altKey },
       origin: { x: event.clientX, y: event.clientY },
       moved: false,
       ...callbacks,
@@ -263,7 +263,7 @@ export function useTimelineGestures({
         const active = session.current;
         if (!active || active.pointerId !== event.pointerId) return;
         if (Math.hypot(event.clientX - active.origin.x, event.clientY - active.origin.y) >= 4) active.moved = true;
-        active.last = { clientX: event.clientX, clientY: event.clientY };
+        active.last = { clientX: event.clientX, clientY: event.clientY, altKey: event.altKey };
         if (active.moved) active.move?.(event);
       },
       onScroll() {

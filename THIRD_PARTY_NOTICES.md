@@ -135,3 +135,12 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+### R1.9 PR 3: clip trim
+
+Additionally adapted `apps/web/src/timeline/controllers/resize-controller.ts`
+(shared source/neighbor bounds, preview/discard/commit lifecycle) from
+OpenCut-app/opencut-classic at `cf5e79e919144200294fb9fed22a222592a0aeea`
+in `packages/desktop/src/timelineTrim.ts` and `packages/desktop/src/TimelinePreview.tsx`.
+The OpenCut copyright and MIT notice above apply. Existing rational snapping,
+overlap checks and gesture lifecycle are reused; no WASM or runtime dependency imported.
