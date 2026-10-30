@@ -1110,6 +1110,10 @@
             },
             "linked": {
               "type": "boolean"
+            },
+            "mode": {
+              "enum": ["place", "insert"],
+              "default": "place"
             }
           },
           "additionalProperties": false

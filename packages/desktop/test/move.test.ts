@@ -3,8 +3,8 @@ import { expect, it } from "vitest";
 import { parseProject, printRational } from "../../core/src/index.js";
 import { applyEdit } from "../../core/src/project/edit.js";
 import type { ProjectView } from "../src/connection.js";
-import { add, frameAt, frameTime, parseRational } from "../src/timeline.js";
-import { moveGroup, moveOverlaps, moveTarget } from "../src/timelineMove.js";
+import { add, frameAt, frameTime, parseRational, sourceAt } from "../src/timeline.js";
+import { moveClipPreview, moveGroup, moveInsert, moveOverlaps, moveTarget } from "../src/timelineMove.js";
 
 const bytes = readFileSync("fixtures/regressions/move-snap-ntsc.zcut.json", "utf8");
 function fixture() {
@@ -169,4 +169,116 @@ it("checks rational overlap on destination and linked tracks, including disabled
   expect(moveOverlaps(view, group, delta, first.id, video.id)).toBe(false);
   audio.clips.push({ ...firstAudio, id: "stationary-audio", timeline_in: { t: "2s" }, timeline_out: { t: "3s" } });
   expect(moveOverlaps(view, group, delta, first.id, video.id)).toBe(true);
+});
+
+it("keeps insert coordinates and split preview rational at NTSC, including occupied source spans", () => {
+  const { view } = fixture();
+  const video = view.tracks[0];
+  const audio = view.tracks.find((track) => track.kind === "audio");
+  const first = video?.clips[0];
+  const linked = audio?.clips[0];
+  if (!video || !audio || !first || !linked) throw new Error("fixture");
+  first.timeline_in.t = linked.timeline_in.t = "1001/500s";
+  first.timeline_out.t = linked.timeline_out.t = "1001/250s";
+  video.clips.push({
+    ...first,
+    id: "stationary",
+    occurrence_id: "other",
+    timeline_in: { t: "3003/500s" },
+    timeline_out: { t: "1001/100s" },
+  });
+  audio.clips.push({
+    ...linked,
+    id: "crossing",
+    occurrence_id: "crossing",
+    timeline_in: { t: "1001/200s" },
+    timeline_out: { t: "1001/125s" },
+  });
+  const group = moveGroup(view, [], first.id);
+  const target = moveTarget(view, group, 240, 48, false, "0s");
+  const insertion = moveInsert(view, group, target, first.id, video.id, parseRational("7007/1000s", true));
+  if (!insertion) throw new Error("insert target");
+  expect(insertion.to).toBe("3003/500s");
+  expect(insertion.insert.close).toBe(true);
+  const crossing = audio.clips[1];
+  if (!crossing) throw new Error("fixture crossing");
+  const pieces = moveClipPreview(
+    crossing,
+    group.moving.map((clip) => clip.id),
+    insertion.delta,
+    insertion.insert,
+  );
+  expect(pieces.map((clip) => [clip.timeline_in.t, clip.timeline_out.t])).toEqual([
+    ["3003/1000s", "1001/250s"],
+    ["3003/500s", "1001/125s"],
+  ]);
+  for (const clip of pieces) {
+    expect(frameTime(frameAt(clip.timeline_in.t, view.edit_rate), view.edit_rate)).toBe(clip.timeline_in.t);
+    expect(frameTime(frameAt(clip.timeline_out.t, view.edit_rate), view.edit_rate)).toBe(clip.timeline_out.t);
+  }
+  audio.clips.push({ ...linked, id: "occupant", occurrence_id: "occupant" });
+  expect(moveInsert(view, group, target, first.id, video.id, parseRational("7007/1000s", true))?.insert.close).toBe(
+    false,
+  );
+});
+
+it("preserves source sampling when moving or splitting time-mapped preview clips", () => {
+  const { view } = fixture();
+  const first = view.tracks[0]?.clips[0];
+  if (!first) throw new Error("fixture");
+  const clip = {
+    ...first,
+    timeline_in: { t: "2s" },
+    timeline_out: { t: "6s" },
+    source_in: { t: "0s" },
+    source_out: { t: "8s" },
+    time_map: [
+      { at: { t: "2s" }, source: { t: "0s" }, interp: "linear" },
+      { at: { t: "6s" }, source: { t: "8s" }, interp: "linear" },
+    ],
+  };
+  const moved = moveClipPreview(clip, [clip.id], parseRational("2s", true))[0];
+  if (!moved) throw new Error("moved");
+  expect(printRational(sourceAt(moved, "5s"), true)).toBe("2s");
+  const pieces = moveClipPreview(clip, [], parseRational("0s", true), {
+    at: parseRational("4s", true),
+    duration: parseRational("2s", true),
+    stop: parseRational("0s", true),
+    close: false,
+  });
+  const right = pieces[1];
+  if (!right) throw new Error("split");
+  expect(right.source_in.t).toBe("4s");
+  expect(right.source_out.t).toBe("8s");
+  expect(printRational(sourceAt(right, "7s"), true)).toBe("6s");
+});
+
+it("uses only colliding destination tracks when the pointer is in a gap", () => {
+  const { view } = fixture();
+  view.edit_rate = "25";
+  const video = view.tracks[0];
+  const audio = view.tracks.find((track) => track.kind === "audio");
+  const other = view.tracks.find((track) => track.id === "trk_v2");
+  const first = video?.clips[0];
+  const linked = audio?.clips[0];
+  if (!video || !first || !linked || !other) throw new Error("fixture");
+  first.timeline_in.t = linked.timeline_in.t = "2s";
+  first.timeline_out.t = linked.timeline_out.t = "4s";
+  video.clips.push({
+    ...first,
+    id: "target",
+    occurrence_id: "target",
+    timeline_in: { t: "8s" },
+    timeline_out: { t: "10s" },
+  });
+  other.clips.push({
+    ...first,
+    id: "unrelated",
+    occurrence_id: "unrelated",
+    timeline_in: { t: "15/2s" },
+    timeline_out: { t: "39/5s" },
+  });
+  const group = moveGroup(view, [], first.id);
+  const target = moveTarget(view, group, 240, 48, false, "0s");
+  expect(moveInsert(view, group, target, first.id, video.id, parseRational("15/2s", true))?.to).toBe("8s");
 });

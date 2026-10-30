@@ -547,9 +547,10 @@ function applyOne(project: Project, timeline: Timeline, op: Op, generate: (prefi
         (value, item) => min(value, item.timeline_start),
         requested[0]!.timeline_start,
       );
-      const to = t("to");
+      let to = t("to");
       onGrid(to, timeline);
-      const delta = sub(to, earliest);
+      if (op.mode === "insert" && new Set([...moving.values()].map((item) => item.occurrence_id)).size !== 1)
+        fail("E_VALIDATION", "Insert move requires a single occurrence");
       if (op.track_id) {
         if (requested.length !== 1) fail("E_VALIDATION", "Track change requires a single requested clip");
         const current = clip(timeline, requested[0]!.id).track;
@@ -560,6 +561,26 @@ function applyOne(project: Project, timeline: Timeline, op: Op, generate: (prefi
         current.clips = current.clips.filter((item) => item.id !== requested[0]!.id);
         (target as MediaTrack).clips.push(requested[0]!);
       }
+      if (op.mode === "insert") {
+        const stop = [...moving.values()].reduce((value, item) => (lt(value, end(item)) ? end(item) : value), earliest);
+        const duration = sub(stop, earliest);
+        const tracks = mediaTracks(timeline);
+        const owners = new Map([...moving.values()].map((item) => [item.id, clip(timeline, item.id).track]));
+        for (const owner of tracks) owner.clips = owner.clips.filter((item) => !moving.has(item.id));
+        const occupied = tracks.some((owner) =>
+          owner.clips.some((item) => lt(item.timeline_start, stop) && lt(earliest, end(item))),
+        );
+        if (!occupied) {
+          shift(timeline, stop, sub(zero, duration));
+          if (compare(to, stop) >= 0) to = sub(to, duration);
+          else if (lt(earliest, to)) to = earliest;
+        }
+        splitAcross(timeline, to, generate);
+        splitMetadata(timeline, to, generate);
+        shift(timeline, to, duration);
+        for (const item of moving.values()) owners.get(item.id)!.clips.push(item);
+      }
+      const delta = sub(to, earliest);
       for (const item of moving.values()) item.timeline_start = add(item.timeline_start, delta);
       cleanTransitions(timeline);
       break;

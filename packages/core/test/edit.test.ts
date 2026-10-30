@@ -9,6 +9,7 @@ import {
   dispatch,
   displayRanges,
   mapClipTimeToSource,
+  mul,
   type Project,
   parseProject,
   printRational,
@@ -1369,4 +1370,192 @@ it("handles non-overlapping repeated matches, partial tokens, empty replacement 
   expect((await edit([{ op: "replace_text", find: "尾", replace: "X", cue_ids: ["cue_missing"] }])).error?.code).toBe(
     "E_NOT_FOUND",
   );
+});
+
+describe("move insert", () => {
+  beforeEach(async () => {
+    await copyFile(new URL("../../../fixtures/regressions/move-insert.zcut.json", import.meta.url), path);
+  });
+  const move = (to: string, extra = {}) => edit([{ op: "move", clip_ids: ["clp_v2"], to, mode: "insert", ...extra }]);
+  const starts = async () =>
+    clips(await read(), "trk_v1").map((clip) => [clip.id, printRational(clip.timeline_start, true)]);
+
+  it("swaps the second and third linked groups in one revision, shifts metadata and restores bytes on undo", async () => {
+    const before = await read();
+    const result = await move("6s");
+    expect(result.status, JSON.stringify(result)).toBe("applied");
+    expect(await starts()).toEqual([
+      ["clp_v1", "0s"],
+      ["clp_v3", "2s"],
+      ["clp_v2", "4s"],
+    ]);
+    const after = await read();
+    expect(after.revision.seq).toBe(before.revision.seq + 1);
+    expect(clips(after, "trk_a1").map((clip) => printRational(clip.timeline_start, true))).toEqual(["0s", "2s", "4s"]);
+    expect(printRational(after.timelines[0]!.markers[0]!.at, true)).toBe("2s");
+    expect(result.changes.filter((change) => change.id === "clp_v3")).toHaveLength(1);
+    await validateAndUndo(before);
+  });
+
+  it("inserts before the first group and pushes all media tracks", async () => {
+    const result = await move("0s");
+    expect(result.status, JSON.stringify(result)).toBe("applied");
+    expect(await starts()).toEqual([
+      ["clp_v2", "0s"],
+      ["clp_v1", "2s"],
+      ["clp_v3", "4s"],
+    ]);
+  });
+
+  it.each(["2s", "3s", "4s"])(
+    "treats a destination within the original interval as the original position: %s",
+    async (to) => {
+      const before = await read();
+      const result = await move(to);
+      expect(["applied", "no_op"]).toContain(result.status);
+      expect(withoutRevision(await read())).toBe(withoutRevision(before));
+    },
+  );
+
+  it("keeps the gap when a different track occupies the original interval", async () => {
+    const project = await read();
+    const audio = project.timelines[0]!.tracks.find((track) => track.id === "trk_a1")!;
+    if (audio.kind === "subtitle") throw new Error("fixture");
+    audio.clips[1]!.occurrence_id = "occ_other";
+    await writeFile(path, serializeProject(project));
+    const result = await move("6s");
+    expect(result.status, JSON.stringify(result)).toBe("applied");
+    expect(await starts()).toEqual([
+      ["clp_v1", "0s"],
+      ["clp_v3", "4s"],
+      ["clp_v2", "6s"],
+    ]);
+    expect(printRational(clips(await read(), "trk_a1")[1]!.timeline_start, true)).toBe("2s");
+  });
+
+  it("splits every crossing track with new IDs and source offsets, with reversible change records", async () => {
+    const before = await read();
+    const result = await move("5s");
+    expect(result.status, JSON.stringify(result)).toBe("applied");
+    const after = await read();
+    for (const id of ["trk_v1", "trk_a1"]) {
+      const pieces = clips(after, id).filter((clip) => clip.occurrence_id === "occ_3");
+      expect(
+        pieces.map((clip) => [
+          printRational(clip.timeline_start, true),
+          printRational(clip.duration, true),
+          printRational(clip.source_start, true),
+        ]),
+      ).toEqual([
+        ["2s", "1s", "4s"],
+        ["5s", "1s", "5s"],
+      ]);
+      expect(pieces[0]!.id).not.toBe(pieces[1]!.id);
+      expect(result.changes.some((change) => change.id === pieces[1]!.id)).toBe(true);
+    }
+    await validateAndUndo(before);
+  });
+
+  it("rejects multiple occurrences atomically, including unlinked requests", async () => {
+    const before = await readFile(path, "utf8");
+    for (const linked of [true, false]) {
+      const result = await move("0s", { clip_ids: ["clp_v1", "clp_v2"], linked });
+      expect(result.error?.code).toBe("E_VALIDATION");
+      expect(await readFile(path, "utf8")).toBe(before);
+    }
+  });
+
+  it("shifts and splits markers and independent subtitles across insertion, preserving metadata in the original interval", async () => {
+    const project = await read();
+    const standard = parseProject(await readFile(fixture, "utf8"));
+    if (!standard.ok) throw new Error("fixture");
+    project.subtitle_styles = standard.project.subtitle_styles;
+    const subtitle = structuredClone(standard.project.timelines[0]!.tracks.find((track) => track.kind === "subtitle")!);
+    if (subtitle.kind !== "subtitle") throw new Error("fixture");
+    subtitle.overrides = [];
+    subtitle.carrier_tracks = ["trk_a1"];
+    subtitle.free_cues = [{ id: "cue_cross", timeline_start: rational(4n), duration: rational(2n), text: "Crossing" }];
+    const timeline = project.timelines[0]!;
+    timeline.tracks.push(subtitle);
+    timeline.markers = [
+      { id: "mrk_inside", at: rational(3n), duration: rational(0n), kind: "note", text: "Retained" },
+      { id: "mrk_cross", at: rational(4n), duration: rational(2n), kind: "note", text: "Crossing" },
+    ];
+    await writeFile(path, serializeProject(project));
+    const result = await move("5s");
+    expect(result.status, JSON.stringify(result)).toBe("applied");
+    const after = await read();
+    const track = after.timelines[0]!.tracks.find((item) => item.id === subtitle.id)!;
+    if (track.kind !== "subtitle") throw new Error("fixture");
+    expect(
+      track.free_cues.map((cue) => [printRational(cue.timeline_start, true), printRational(cue.duration, true)]),
+    ).toEqual([
+      ["2s", "1s"],
+      ["5s", "1s"],
+    ]);
+    expect(
+      after.timelines[0]!.markers.map((marker) => [
+        printRational(marker.at, true),
+        printRational(marker.duration, true),
+      ]),
+    ).toEqual([
+      ["2s", "1s"],
+      ["5s", "0s"],
+      ["5s", "1s"],
+    ]);
+    await validateAndUndo(project);
+  });
+
+  it("preserves rational frame boundaries at 30000/1001", async () => {
+    const project = await read();
+    const timeline = project.timelines[0]!;
+    timeline.edit_rate = rational(30000n, 1001n);
+    project.media[0]!.video!.rate = timeline.edit_rate;
+    for (const track of timeline.tracks)
+      if (track.kind !== "subtitle")
+        for (const clip of track.clips) {
+          clip.timeline_start = mul(clip.timeline_start, rational(1001n, 1000n));
+          clip.duration = mul(clip.duration, rational(1001n, 1000n));
+        }
+    timeline.markers = [];
+    await writeFile(path, serializeProject(project));
+    const result = await move("1001/200s");
+    expect(result.status, JSON.stringify(result)).toBe("applied");
+    for (const clip of clips(await read(), "trk_v1")) {
+      expect(mul(clip.timeline_start, timeline.edit_rate).denominator).toBe(1n);
+      expect(mul(clip.duration, timeline.edit_rate).denominator).toBe(1n);
+    }
+  });
+});
+
+it("keeps projected subtitles attached and cleans separated transitions after insert move", async () => {
+  const before = await read();
+  const timeline = before.timelines[0]!;
+  const moving = timeline.tracks
+    .flatMap((track) => (track.kind === "subtitle" ? [] : track.clips))
+    .filter((clip) => clip.occurrence_id === "occ_2");
+  const earliest = moving.reduce(
+    (start, clip) => (compare(start, clip.timeline_start) < 0 ? start : clip.timeline_start),
+    moving[0]!.timeline_start,
+  );
+  const cues = projectSubtitles(before, timeline.id).cues.filter((cue) => cue.occurrence_id === "occ_2");
+  expect(cues.length).toBeGreaterThan(0);
+  const result = await edit([{ op: "move", clip_ids: ["clp_v2"], to: "0s", mode: "insert" }]);
+  expect(result.status, JSON.stringify(result)).toBe("applied");
+  const after = await read();
+  const projected = projectSubtitles(after, timeline.id).cues.filter((cue) => cue.occurrence_id === "occ_2");
+  expect(projected.map((cue) => [cue.text, printRational(cue.start, true), printRational(cue.end, true)])).toEqual(
+    cues.map((cue) => [
+      cue.text,
+      printRational(sub(cue.start, earliest), true),
+      printRational(sub(cue.end, earliest), true),
+    ]),
+  );
+  expect(
+    after.timelines[0]!.tracks.flatMap((track) => (track.kind === "subtitle" ? [] : track.transitions)).some(
+      (transition) => transition.id === "trn_1",
+    ),
+  ).toBe(false);
+  expect(result.changes.some((change) => change.id === "trn_1" && change.op === "move")).toBe(true);
+  await validateAndUndo(before);
 });

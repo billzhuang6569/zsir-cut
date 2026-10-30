@@ -16,6 +16,7 @@ import {
   pixelAt,
   printRational,
   rational,
+  sourceAt,
   sub,
 } from "./timeline.js";
 
@@ -142,4 +143,116 @@ export function clipsOverlap(start: ReturnType<typeof rational>, end: ReturnType
     compare(start, parseRational(other.timeline_out.t, true)) < 0 &&
     compare(parseRational(other.timeline_in.t, true), end) < 0
   );
+}
+
+export function moveInsert(
+  project: ProjectView,
+  group: ReturnType<typeof moveGroup>,
+  target: ReturnType<typeof moveTarget>,
+  anchor: string,
+  trackId: string,
+  pointer: ReturnType<typeof rational>,
+) {
+  if (!moveOverlaps(project, group, target.delta, anchor, trackId)) return null;
+  const stationary = project.tracks
+    .filter((track) => track.kind !== "subtitle")
+    .flatMap((track) => track.clips)
+    .filter((clip) => !group.moving.some((item) => item.id === clip.id));
+  const lane = project.tracks.find((track) => track.id === trackId);
+  const under = lane?.clips.find(
+    (clip) =>
+      stationary.includes(clip) &&
+      compare(pointer, parseRational(clip.timeline_in.t, true)) >= 0 &&
+      compare(pointer, parseRational(clip.timeline_out.t, true)) <= 0,
+  );
+  const candidates = under
+    ? [under]
+    : stationary.filter((clip) =>
+        group.moving.some((item) => {
+          const destination =
+            item.id === anchor ? lane : project.tracks.find((track) => track.clips.some((clip) => clip.id === item.id));
+          return (
+            destination?.clips.includes(clip) &&
+            clipsOverlap(
+              add(parseRational(item.timeline_in.t, true), target.delta),
+              add(parseRational(item.timeline_out.t, true), target.delta),
+              clip,
+            )
+          );
+        }),
+      );
+  const edges = candidates.flatMap((clip) => [clip.timeline_in.t, clip.timeline_out.t]);
+  const abs = (value: ReturnType<typeof rational>) => (value.numerator < 0n ? sub(rational(0n), value) : value);
+  const boundary = edges.reduce<string | undefined>(
+    (best, edge) =>
+      best === undefined ||
+      compare(abs(sub(pointer, parseRational(edge, true))), abs(sub(pointer, parseRational(best, true)))) < 0
+        ? edge
+        : best,
+    undefined,
+  );
+  if (boundary === undefined) return null;
+  const stop = group.moving.reduce((end, clip) => {
+    const time = parseRational(clip.timeline_out.t, true);
+    return compare(time, end) > 0 ? time : end;
+  }, group.earliest);
+  const duration = sub(stop, group.earliest);
+  const close = !stationary.some((clip) => clipsOverlap(group.earliest, stop, clip));
+  const before = parseRational(boundary, true);
+  const at =
+    close && compare(before, stop) >= 0
+      ? sub(before, duration)
+      : close && compare(before, group.earliest) > 0
+        ? group.earliest
+        : before;
+  return {
+    ...target,
+    to: boundary,
+    delta: sub(at, group.earliest),
+    line: null,
+    distance: null,
+    insert: { at, duration, stop, close },
+  };
+}
+
+export function moveClipPreview(
+  clip: ClipView,
+  ids: string[],
+  delta: ReturnType<typeof rational>,
+  insert?: NonNullable<ReturnType<typeof moveInsert>>["insert"],
+): ClipView[] {
+  let start = parseRational(clip.timeline_in.t, true);
+  let end = parseRational(clip.timeline_out.t, true);
+  const originalStart = start;
+  const piece = (
+    a: ReturnType<typeof rational>,
+    b: ReturnType<typeof rational>,
+    shift: ReturnType<typeof rational>,
+  ) => ({
+    ...clip,
+    timeline_in: { t: printRational(add(a, shift), true) },
+    timeline_out: { t: printRational(add(b, shift), true) },
+    source_in: { t: printRational(sourceAt(clip, printRational(add(originalStart, sub(a, start)), true)), true) },
+    source_out: { t: printRational(sourceAt(clip, printRational(add(originalStart, sub(b, start)), true)), true) },
+    ...(clip.time_map
+      ? {
+          time_map: clip.time_map.map((point) => ({
+            ...point,
+            at: { t: printRational(add(parseRational(point.at.t, true), add(sub(start, originalStart), shift)), true) },
+          })),
+        }
+      : {}),
+  });
+  if (ids.includes(clip.id)) return [piece(start, end, delta)];
+  if (!insert) return [clip];
+  if (insert.close && compare(start, insert.stop) >= 0) {
+    start = sub(start, insert.duration);
+    end = sub(end, insert.duration);
+  }
+  if (compare(start, insert.at) < 0 && compare(insert.at, end) < 0)
+    return [
+      piece(start, insert.at, rational(0n)),
+      { ...piece(insert.at, end, insert.duration), id: `${clip.id}-insert-preview` },
+    ];
+  return [piece(start, end, compare(start, insert.at) >= 0 ? insert.duration : rational(0n))];
 }
