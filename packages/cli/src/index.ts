@@ -3,9 +3,13 @@ import { readFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import type { Verb } from "../../core/dist/index.js";
 
-const { dispatch, errorEnvelope, newId, VERBS }: typeof import("../../core/dist/index.js") = await import(
+const { dispatch, errorEnvelope, newId, parseProject, VERBS }: typeof import("../../core/dist/index.js") = await import(
   new URL(import.meta.url.endsWith(".ts") ? "../../core/src/index.ts" : "../../core/dist/index.js", import.meta.url)
     .href
+);
+
+const { jobPath, readJob }: typeof import("../../core/dist/jobs.js") = await import(
+  new URL(import.meta.url.endsWith(".ts") ? "../../core/src/jobs.ts" : "../../core/dist/jobs.js", import.meta.url).href
 );
 
 const codes: Record<string, number> = {
@@ -90,24 +94,25 @@ async function main(): Promise<void> {
   );
   if (process.argv.includes("--wait") && envelope.status === "accepted" && project) {
     const jobId = (envelope.result as { job_id: string }).job_id;
-    for (;;) {
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      const status = await dispatch("job_status", { project, job_id: jobId });
-      if (!status.ok) {
-        envelope = status;
-        break;
+    try {
+      const parsed = parseProject(await readFile(project as string, "utf8"));
+      if (!parsed.ok) throw new Error("Project file is invalid");
+      for (;;) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        const job = await readJob(jobPath(project as string, parsed.project.id, jobId));
+        if (job.state === "succeeded" || job.state === "failed") {
+          envelope = job.envelope ?? {
+            ...envelope,
+            ok: false,
+            status: "failed",
+            error: { code: "E_IO", message: "Export worker exited unexpectedly", retryable: true },
+            result: null,
+          };
+          break;
+        }
       }
-      const job = status.result as { state: string; envelope: typeof envelope | null };
-      if (job.state === "succeeded" || job.state === "failed") {
-        envelope = job.envelope ?? {
-          ...envelope,
-          ok: false,
-          status: "failed",
-          error: { code: "E_IO", message: "Export worker exited unexpectedly", retryable: true },
-          result: null,
-        };
-        break;
-      }
+    } catch (error) {
+      envelope = errorEnvelope("job_status", newId("req_"), "failed", "E_IO", String(error));
     }
   }
   process.stdout.write(`${JSON.stringify(envelope)}\n`);

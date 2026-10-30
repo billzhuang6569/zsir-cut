@@ -1,6 +1,6 @@
 // biome-ignore-all lint/suspicious/noArrayIndexKey: Film cells, waveform bars and ruler ticks are fixed geometric slots.
 
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { memo, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import type { UiState } from "../../app-host/src/ui.js";
 import { Clip, Icon, IconButton } from "./components.js";
 import { DESKTOP_AUTHOR, type ProjectView } from "./connection.js";
@@ -9,6 +9,7 @@ import { SubtitleCanvas } from "./SubtitleCanvas.js";
 import {
   add,
   type ClipView,
+  ceil,
   compare,
   contains,
   div,
@@ -25,6 +26,7 @@ import {
   seekTarget,
   sourceAt,
   sourceSpeed,
+  sub,
   timecode,
 } from "./timeline.js";
 import "./timeline.css";
@@ -34,7 +36,7 @@ export function mediaUrl(config: Config, endpoint: string, id: string, at?: stri
   const query = new URLSearchParams({ token: config.token, media_id: id, ...(at ? { at } : {}) });
   return `http://127.0.0.1:${config.port}/${endpoint}?${query}`;
 }
-function Film({
+const Film = memo(function Film({
   clip,
   width,
   scale,
@@ -71,8 +73,8 @@ function Film({
       })}
     </span>
   );
-}
-export function Wave({
+});
+export const Wave = memo(function Wave({
   clip,
   width,
   config,
@@ -112,7 +114,7 @@ export function Wave({
       })}
     </svg>
   );
-}
+});
 export function TimelinePreview({
   project,
   state,
@@ -154,6 +156,8 @@ export function TimelinePreview({
   const [direction, setDirection] = useState(1n);
   const video = useRef<HTMLVideoElement>(null);
   const playhead = useRef<HTMLDivElement>(null);
+  const clock = useRef<HTMLOutputElement>(null);
+  const playbackAt = useRef<string | null>(null);
   const lastClip = useRef<string | undefined>(undefined);
   const latest = useRef({ state, project });
   latest.current = { state, project };
@@ -167,6 +171,13 @@ export function TimelinePreview({
   const clip = top?.clips.find(
     (item) => item.enabled && (viewerOnly || contains(item.timeline_in.t, item.timeline_out.t, at)),
   );
+  const boundaries = useMemo(() => {
+    if (!project) return [];
+    return [
+      ...(top?.clips.flatMap((item) => [item.timeline_in.t, item.timeline_out.t]) ?? []),
+      ...project.cues.flatMap((cue) => [cue.start, cue.end]),
+    ].map((time) => ceil(mul(parseRational(time, true), parseRational(project.edit_rate))));
+  }, [project, top]);
   const media = project?.media.find((item) => item.id === clip?.media_id);
   const speed = clip ? sourceSpeed(clip, at) : 0;
   const source = clip ? sourceAt(clip, at) : rational(0n);
@@ -203,6 +214,7 @@ export function TimelinePreview({
     let started = performance.now();
     let previous = seekTarget(project, project.cues, latest.current.state.playhead);
     let start = frameAt(previous, project.edit_rate);
+    let published = performance.now();
     let animation = 0;
     const tick = (now: number) => {
       const current = latest.current;
@@ -213,8 +225,33 @@ export function TimelinePreview({
         start = frameAt(target, project.edit_rate);
       }
       const elapsed = rational(BigInt(Math.max(0, Math.round((now - started) * 1000))), 1_000_000n);
-      const frame = start + direction * floor(mul(elapsed, parseRational(project.edit_rate)));
+      let frame = start + direction * floor(mul(elapsed, parseRational(project.edit_rate)));
+      const active = top?.clips.find(
+        (item) => item.enabled && contains(item.timeline_in.t, item.timeline_out.t, target),
+      );
+      const element = video.current;
+      const native =
+        active &&
+        active.speed !== "map" &&
+        direction > 0n &&
+        sourceSpeed(active, target) >= 0.0625 &&
+        sourceSpeed(active, target) <= 16 &&
+        project.media.find((item) => item.id === active.media_id)?.kind !== "image";
+      // Let decoding/buffering drive forward playback instead of seeking to catch a wall clock.
+      if (native && element && element.readyState >= 2 && !element.seeking && lastClip.current === active.id) {
+        const decoded = rational(BigInt(Math.round(element.currentTime * 1_000_000)), 1_000_000n);
+        frame = floor(
+          mul(
+            add(
+              parseRational(active.timeline_in.t, true),
+              div(sub(decoded, parseRational(active.source_in.t, true)), parseRational(active.speed)),
+            ),
+            parseRational(project.edit_rate),
+          ),
+        );
+      } else if (native) frame = frameAt(target, project.edit_rate);
       let next = frameTime(frame, project.edit_rate);
+      let looped = false;
       const range = current.state.range;
       const end = range
         ? printRational(add(parseRational(range.start, true), parseRational(range.duration, true)), true)
@@ -234,16 +271,26 @@ export function TimelinePreview({
           update({ ...current.state, playing: false, playhead: { at: next } });
           return;
         }
+        looped = true;
         started = now;
         start = frameAt(next, project.edit_rate);
       }
-      previous = next;
-      update({ ...current.state, playhead: { at: next } });
+      if (playhead.current) playhead.current.style.left = `calc(var(--track-label-w) + ${pixelAt(next, scale)}px)`;
+      if (clock.current) clock.current.textContent = timecode(next, project);
+      const from = frameAt(target, project.edit_rate),
+        to = frameAt(next, project.edit_rate);
+      const boundary = boundaries.some((frame) => (frame > from && frame <= to) || (frame <= from && frame > to));
+      if (next !== target && (now - published >= 100 || boundary || looped)) {
+        playbackAt.current = looped ? null : next;
+        previous = next;
+        published = now;
+        update({ ...current.state, playhead: { at: next } });
+      }
       animation = requestAnimationFrame(tick);
     };
     animation = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(animation);
-  }, [state.playing, project, direction, update, hideViewer]);
+  }, [state.playing, project, direction, update, hideViewer, scale, top, boundaries]);
   useEffect(() => {
     const element = video.current;
     if (!element || hideViewer) return;
@@ -255,7 +302,8 @@ export function TimelinePreview({
       const seconds = numberOf(source);
       if (
         lastClip.current !== clip.id ||
-        Math.abs(element.currentTime - seconds) > (state.playing && clip.speed === "1" ? 0.12 : 0.001)
+        ((at !== playbackAt.current || clip.speed === "map" || direction < 0n) &&
+          Math.abs(element.currentTime - seconds) > 0.001)
       )
         element.currentTime = seconds;
       lastClip.current = clip.id;
@@ -266,13 +314,14 @@ export function TimelinePreview({
         element.playbackRate = rate;
         element.preservesPitch = true;
       }
-      if (state.playing && playable) void element.play().catch(() => setWriteError("预览无法播放，请检查素材格式"));
-      else element.pause();
+      if (state.playing && playable) {
+        if (element.paused) void element.play().catch(() => setWriteError("预览无法播放，请检查素材格式"));
+      } else element.pause();
     };
     if (element.readyState >= 1) sync();
     element.addEventListener("loadedmetadata", sync);
     return () => element.removeEventListener("loadedmetadata", sync);
-  }, [clip, source, speed, state.playing, direction, hideViewer]);
+  }, [clip, source, speed, state.playing, direction, hideViewer, at]);
   const markerDrag = useRef<number | null>(null);
   const markerMoved = useRef(false);
   const write = async (verb: string, label: string, ops?: unknown[]) => {
@@ -389,7 +438,11 @@ export function TimelinePreview({
     }
   };
   const width = project ? Math.max(800, pixelAt(project.duration.t, scale) + 100) : 800;
-  const captions = project?.cues.filter((cue) => contains(cue.start, cue.end, at)) ?? [];
+  const visibleCues = project?.cues.filter((cue) => contains(cue.start, cue.end, at)) ?? [];
+  const captionKey = visibleCues.map((cue) => `${cue.cue_id}:${cue.piece}:${cue.text}:${cue.style_id}`).join("\0");
+  // Keep the canvas unchanged between caption boundaries.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: captionKey includes every rendered cue field.
+  const captions = useMemo(() => visibleCues, [project, captionKey]);
   return (
     <>
       {!hideViewer && (
@@ -432,7 +485,9 @@ export function TimelinePreview({
               label={state.playing ? "暂停" : "播放"}
               onClick={() => update({ ...state, playing: !state.playing })}
             />
-            <output aria-label="播放时码">{project ? timecode(at, project) : "00:00:00:00"}</output>
+            <output ref={clock} aria-label="播放时码">
+              {project ? timecode(at, project) : "00:00:00:00"}
+            </output>
           </div>
           {viewerOnly && project && (
             <div className="zc-source-scrub">

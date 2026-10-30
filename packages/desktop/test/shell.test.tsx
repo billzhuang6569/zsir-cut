@@ -104,7 +104,7 @@ it("opens the project through inspect and receives UI commands", async () => {
     }),
   );
   vi.spyOn(performance, "now").mockReturnValue(0);
-  vi.spyOn(HTMLMediaElement.prototype, "readyState", "get").mockReturnValue(1);
+  vi.spyOn(HTMLMediaElement.prototype, "readyState", "get").mockReturnValue(2);
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
   vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => [0.1, 0.5] }));
@@ -257,9 +257,14 @@ it("opens the project through inspect and receives UI commands", async () => {
       });
     });
     expect(container.querySelector('[aria-label="播放时码"]')?.textContent).toBe("01:00:00;00");
+    const player = container.querySelector("video");
+    if (!player) throw new Error("Missing player");
+    const sourceStart = player.currentTime;
+    player.currentTime = sourceStart + 0.4;
     await act(() => scheduled?.(400));
     expect(container.querySelector('[aria-label="播放时码"]')?.textContent).toBe("01:00:00;11");
     expect(HTMLMediaElement.prototype.play).toHaveBeenCalled();
+    player.currentTime = sourceStart + 1.2;
     await act(() => scheduled?.(1200));
     expect(container.querySelector('[aria-label="播放时码"]')?.textContent).toBe("01:00:00;00");
     await act(async () => {

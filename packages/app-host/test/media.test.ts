@@ -82,6 +82,29 @@ describe("read-only media channel", () => {
       expect(partial.status).toBe(206);
       expect(partial.bytes.toString()).toBe("2345");
       expect(partial.headers["Content-Range"]).toBe("bytes 2-5/10");
+      expect(partial.headers["Accept-Ranges"]).toBe("bytes");
+      expect(partial.headers["Content-Length"]).toBe(4);
+      for (const [range, expected, contentRange] of [
+        ["bytes=7-", "789", "bytes 7-9/10"],
+        ["bytes=-3", "789", "bytes 7-9/10"],
+        ["bytes=8-99", "89", "bytes 8-9/10"],
+      ]) {
+        const response = await request(`/media?token=secret&media_id=${media.id}`, range);
+        expect(response.status).toBe(206);
+        expect(response.bytes.toString()).toBe(expected);
+        expect(response.headers["Content-Range"]).toBe(contentRange);
+      }
+      const head = await request(`/media?token=secret&media_id=${media.id}`, "bytes=2-5", "HEAD");
+      expect(head.status).toBe(206);
+      expect(head.bytes.length).toBe(0);
+      expect(head.headers["Content-Length"]).toBe(4);
+      const whole = await request(`/media?token=secret&media_id=${media.id}`);
+      expect(whole.status).toBe(200);
+      expect(whole.bytes.toString()).toBe("0123456789");
+      expect(whole.headers["Accept-Ranges"]).toBe("bytes");
+      const invalid = await request(`/media?token=secret&media_id=${media.id}`, "bytes=99-");
+      expect(invalid.headers["Content-Range"]).toBe("bytes */10");
+
       expect((await request(`/media?token=secret&media_id=${media.id}`, "bytes=99-")).status).toBe(416);
       expect((await request(`/media?token=secret&media_id=${media.id}`, undefined, "POST")).status).toBe(405);
       for (let i = 0; i < 2; i++) {

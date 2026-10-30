@@ -1,4 +1,5 @@
 // biome-ignore-all lint/style/noNonNullAssertion: Fixture indexes are fixed by each case.
+import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import {
   compare,
@@ -6,12 +7,15 @@ import {
   cueText,
   displayRanges,
   type Project,
+  parseProject,
   printRational,
   rational,
   segmentTokens,
+  serializeProject,
   subtitleRules,
   type Token,
   textWidth,
+  transcriptRules,
 } from "../src/index.js";
 
 const s = (n: bigint, d = 1n) => rational(n, d);
@@ -58,6 +62,23 @@ const ranges = (
 };
 
 describe("subtitle rules", () => {
+  it("defaults Chinese to one line and preserves persisted two-line rules against golden", async () => {
+    const parsed = parseProject(await readFile("fixtures/regressions/zh-talk-single-line.zcut.json", "utf8"));
+    if (!parsed.ok) throw new Error("Invalid regression fixture");
+    const before = serializeProject(parsed.project);
+    const transcript = parsed.project.transcripts[0]!;
+    expect(zh.max_lines).toBe(1);
+    expect(subtitleRules("en").max_lines).toBe(2);
+    const persisted = transcriptRules(transcript);
+    expect(persisted.max_lines).toBe(2);
+    const lines = (rules: typeof zh) =>
+      segmentTokens(transcript.tokens, rules).map((tokens) => cueText(tokens, rules, cueBreaks(tokens, rules)));
+    expect({ default: lines(zh), persisted: lines(persisted) }).toEqual(
+      JSON.parse(await readFile("fixtures/golden/zh-talk-single-line.json", "utf8")),
+    );
+    expect(cueBreaks(transcript.tokens, zh)).toEqual([]);
+    expect(serializeProject(parsed.project)).toBe(before);
+  });
   it("matches example one: one line, 15 wide, 0–3.30 and no warning", () => {
     const tokens = make(
       ["一条", "三", "分钟", "的", "采访", "大概", "要", "剪", "两", "小时"],
@@ -71,7 +92,8 @@ describe("subtitle rules", () => {
     const row = ranges(tokens, [{ first: 0, last: 9 }])[0]!;
     expect([printRational(row.start, true), printRational(row.end, true), row.warnings]).toEqual(["0s", "33/10s", []]);
   });
-  it("matches example two: 14/8 width and a break after 改，", () => {
+  it("keeps the two-line example when explicitly requested", () => {
+    const zh = subtitleRules("zh-Hans", { max_lines: 2 });
     const tokens = make(
       ["剪辑师", "拿到", "的", "工程", "还能", "继续", "改，", "这", "才", "叫", "真正", "的", "交接"],
       undefined,
@@ -110,13 +132,17 @@ describe("subtitle rules", () => {
       [1n, 1n, 1n, 1n, 1n],
       [0n, 0n, 3n, 0n, 0n],
     );
-    expect(segmentTokens(tokens, { ...zh, cpl: 8 })[0]!.map((token) => token.text)).toEqual(["甲甲甲甲", "乙乙乙乙，"]);
+    expect(segmentTokens(tokens, { ...zh, cpl: 8, max_lines: 2 })[0]!.map((token) => token.text)).toEqual([
+      "甲甲甲甲",
+      "乙乙乙乙，",
+    ]);
     const noPause = make(["甲甲甲甲", "乙乙乙乙，", "丙丙丙丙", "丁丁丁丁", "戊戊戊戊"]);
-    expect(segmentTokens(noPause, { ...zh, cpl: 8 })[0]!.at(-1)!.text).toBe("乙乙乙乙，");
+    expect(segmentTokens(noPause, { ...zh, cpl: 8, max_lines: 2 })[0]!.at(-1)!.text).toBe("乙乙乙乙，");
     const plain = make(["甲甲甲甲", "乙乙乙乙", "丙丙丙丙", "丁丁丁丁", "戊戊戊丁"]);
-    expect(segmentTokens(plain, { ...zh, cpl: 8 })[0]!.at(-1)!.text).toBe("丁丁丁丁");
+    expect(segmentTokens(plain, { ...zh, cpl: 8, max_lines: 2 })[0]!.at(-1)!.text).toBe("丁丁丁丁");
   });
-  it("chooses punctuation, then balanced width, then earlier boundary for line breaks", () => {
+  it("chooses punctuation, then balanced width, then earlier boundary for explicit two-line breaks", () => {
+    const zh = subtitleRules("zh-Hans", { max_lines: 2 });
     const punct = make(["甲甲甲甲", "乙乙乙乙，", "丙丙丙丙", "丁丁丁丁"]);
     expect(cueBreaks(punct, zh)).toEqual(["tok_1"]);
     const balanced = make(["甲甲甲甲", "乙乙乙乙", "丙丙丙丙", "丁丁丁丁"]);

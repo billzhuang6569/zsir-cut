@@ -20,7 +20,7 @@ export const subtitleRules = (language: string, override: Partial<SubtitleRules>
   return {
     name,
     cpl: name === "zh-talk" ? 16 : 42,
-    max_lines: 2,
+    max_lines: name === "zh-talk" ? 1 : 2,
     cps: name === "zh-talk" ? 9 : 20,
     min_duration: rational(1n),
     max_duration: rational(6n),
@@ -90,7 +90,7 @@ const widthLimit = (rules: SubtitleRules, lines = 1) => mul(rationalNumber(rules
 const validBoundary = (tokens: Token[], after: number) =>
   after < tokens.length - 1 && !punctOnly.test(tokens[after + 1]!.text);
 export function cueBreaks(tokens: Token[], rules: SubtitleRules): string[] {
-  if (compare(textWidth(tokens, rules), widthLimit(rules)) <= 0) return [];
+  if (rules.max_lines === 1 || compare(textWidth(tokens, rules), widthLimit(rules)) <= 0) return [];
   const candidates = tokens.slice(0, -1).flatMap((token, index) => {
     if (!validBoundary(tokens, index)) return [];
     const left = textWidth(tokens.slice(0, index + 1), rules);

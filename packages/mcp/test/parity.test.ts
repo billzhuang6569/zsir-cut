@@ -567,7 +567,23 @@ describe("CLI and MCP", () => {
           await new Promise((resolve) => setTimeout(resolve, 50));
         }
         expect(final).toBeDefined();
-        expect(withoutRequestId(cliResult)).toEqual(withoutRequestId(final as Record<string, unknown>));
+        const { changes, verification, ...cliSummary } = cliResult;
+        const { issues, ...verificationSummary } = verification;
+        expect(
+          withoutRequestId({
+            ...cliSummary,
+            changes_count: changes.length,
+            changes_sample: changes.slice(0, 10),
+            verification: {
+              ...verificationSummary,
+              issues_count: issues.length,
+              issues_sample: [
+                ...issues.filter((issue: { severity: string }) => issue.severity === "error"),
+                ...issues.filter((issue: { severity: string }) => issue.severity !== "error"),
+              ].slice(0, 10),
+            },
+          }),
+        ).toEqual(withoutRequestId(final as Record<string, unknown>));
         for (const file of cliResult.result.files)
           expect(await readFile(join(directory, "cli", file.name))).toEqual(
             await readFile(join(directory, "mcp", file.name)),
