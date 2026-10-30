@@ -8,9 +8,12 @@ import { cueBreaks, segmentTokens, transcriptRules } from "./project/subtitle-ru
 import type { Cue, Engine, Project, RawToken, Token, TranscriptSubtitleRules } from "./project/types.ts";
 import { compare, parseRational, rational, sub } from "./rational.ts";
 
+import { mergeHotwords, readTermLibrary } from "./term-library.ts";
+
 const execute = promisify(execFile);
 type WorkerToken = { text: string; start_ms: number; end_ms: number; conf: number | null };
 type WorkerResult = {
+  hotwords?: string[];
   schema: string;
   schema_version: string;
   input: { size_bytes: number; fingerprint: string; channels: number[]; start_ms: number; duration_ms: number };
@@ -111,19 +114,17 @@ export async function invokeAsr(
   if (request.range)
     args.push("--start", workerSeconds(request.range.start), "--duration", workerSeconds(request.range.duration));
   const hotwordsPath = `${out}.hotwords.txt`;
-  if (request.hotwords || project.recognition?.terms?.length) {
-    let fileTerms: string[] = [];
-    if (request.hotwords) {
-      try {
-        fileTerms = (await readFile(resolve(dirname(request.project), request.hotwords), "utf8")).split(/\r?\n/u);
-      } catch {
-        throw new AsrError("E_ASR_INPUT", "Cannot read hotwords file", false);
-      }
+  let fileTerms: string[] = [];
+  if (request.hotwords) {
+    try {
+      fileTerms = (await readFile(resolve(dirname(request.project), request.hotwords), "utf8")).split(/\r?\n/u);
+    } catch {
+      throw new AsrError("E_ASR_INPUT", "Cannot read hotwords file", false);
     }
-    const terms = [
-      ...new Set([...(project.recognition?.terms ?? []), ...fileTerms].map((term) => term.trim()).filter(Boolean)),
-    ];
-    await writeFile(hotwordsPath, terms.join("\n"));
+  }
+  const hotwords = mergeHotwords(project.recognition?.terms ?? [], fileTerms, await readTermLibrary());
+  if (hotwords.length) {
+    await writeFile(hotwordsPath, hotwords.join("\n"));
     args.push("--hotwords", hotwordsPath);
   }
   let failed = false;
@@ -201,6 +202,7 @@ export async function invokeAsr(
       (value.version !== null && typeof value.version !== "string")
     )
       throw new AsrError("E_ASR_INTERNAL", "Invalid ASR engine metadata", false);
+  output.hotwords = hotwords;
   return output;
 }
 

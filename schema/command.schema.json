@@ -86,6 +86,33 @@
       }
     },
     "requests": {
+      "terms_list": {
+        "type": "object",
+        "properties": {
+          "state": { "enum": ["active", "blocked"] },
+          "query": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "terms_edit": {
+        "type": "object",
+        "required": ["ops"],
+        "properties": {
+          "ops": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["op", "text"],
+              "properties": {
+                "op": { "enum": ["add", "remove", "block", "unblock"] },
+                "text": { "type": "string" }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      },
       "inspect": {
         "type": "object",
         "required": ["project", "view"],

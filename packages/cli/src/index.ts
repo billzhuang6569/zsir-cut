@@ -44,7 +44,10 @@ async function main(): Promise<void> {
     process.exitCode = codes[envelope.status];
     return;
   }
+  if (positionals[0] === "terms" && ["list", "edit"].includes(positionals[1] ?? ""))
+    positionals = [`terms_${positionals[1]}`, ...positionals.slice(2)];
   const [verb, positionalProject] = positionals;
+  const globalTerms = verb === "terms_list" || verb === "terms_edit";
   if (!VERBS.includes(verb as Verb)) throw new Error("Unknown verb");
   const reject = (message: string) => {
     const envelope = errorEnvelope(verb as Verb, newId("req_"), "rejected", "E_VALIDATION", message);
@@ -53,17 +56,20 @@ async function main(): Promise<void> {
   };
   let request: unknown;
   try {
-    const text = inputPath
-      ? await readFile(inputPath, "utf8")
-      : await new Promise<string>((resolve, reject) => {
-          let body = "";
-          process.stdin.setEncoding("utf8");
-          process.stdin.on("data", (chunk: string) => {
-            body += chunk;
-          });
-          process.stdin.on("end", () => resolve(body));
-          process.stdin.on("error", reject);
-        });
+    const text =
+      verb === "terms_list" && !inputPath
+        ? "{}"
+        : inputPath
+          ? await readFile(inputPath, "utf8")
+          : await new Promise<string>((resolve, reject) => {
+              let body = "";
+              process.stdin.setEncoding("utf8");
+              process.stdin.on("data", (chunk: string) => {
+                body += chunk;
+              });
+              process.stdin.on("end", () => resolve(body));
+              process.stdin.on("error", reject);
+            });
     request = JSON.parse(text);
   } catch (error) {
     reject(`无法读取请求${inputPath ? ` ${inputPath}` : ""}：${String(error)}`);
@@ -82,14 +88,18 @@ async function main(): Promise<void> {
     reject(`工程路径不一致：${positionalProject}；请求 project：${String(input.project)}`);
     return;
   }
+  if (globalTerms && positionalProject) {
+    reject("名词库动词不接受工程路径");
+    return;
+  }
   const project = positionalProject ?? input.project;
-  if (verb !== "record_handoff_check" && (project === undefined || project === "")) {
+  if (!globalTerms && verb !== "record_handoff_check" && (project === undefined || project === "")) {
     reject("缺少工程路径");
     return;
   }
   let envelope = await dispatch(
     verb as Verb,
-    verb === "record_handoff_check" && positionals.length === 1 ? input : { ...input, project },
+    globalTerms || (verb === "record_handoff_check" && positionals.length === 1) ? input : { ...input, project },
     process.env.ZSIR_CUT_EXPORTER_MODULE ? { exporterModule: process.env.ZSIR_CUT_EXPORTER_MODULE } : {},
   );
   if (process.argv.includes("--wait") && envelope.status === "accepted" && project) {
