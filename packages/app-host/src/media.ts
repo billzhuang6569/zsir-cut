@@ -37,41 +37,90 @@ export async function runFfmpeg(args: string[]): Promise<Buffer> {
     );
   });
 }
+// Shared by all media channels, including channels replaced when opening another project.
+let activeThumbnails = 0;
+const thumbnailQueue: (() => void)[] = [];
+async function thumbnailTask(run: () => Promise<Buffer>, signal: AbortSignal): Promise<Buffer> {
+  await new Promise<void>((resolve, reject) => {
+    const abort = () => {
+      const index = thumbnailQueue.indexOf(start);
+      if (index !== -1) thumbnailQueue.splice(index, 1);
+      reject(signal.reason);
+    };
+    const start = () => {
+      signal.removeEventListener("abort", abort);
+      activeThumbnails++;
+      resolve();
+    };
+    if (signal.aborted) return reject(signal.reason);
+    if (activeThumbnails < 2) start();
+    else {
+      thumbnailQueue.push(start);
+      signal.addEventListener("abort", abort, { once: true });
+    }
+  });
+  try {
+    signal.throwIfAborted();
+    return await run();
+  } finally {
+    activeThumbnails--;
+    thumbnailQueue.shift()?.();
+  }
+}
 export function mediaChannel(
   projectPath: string | undefined,
   token: string,
   load: () => Promise<Project>,
   run = runFfmpeg,
 ) {
-  const pending = new Map<string, Promise<Buffer>>();
-  async function cached(file: string, generate: () => Promise<Buffer>) {
+  const pending = new Map<string, { work: Promise<Buffer>; controller: AbortController; users: number }>();
+  async function cached(file: string, generate: (signal: AbortSignal) => Promise<Buffer>, signal: AbortSignal) {
     try {
       return await readFile(file);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
-    const active = pending.get(file);
-    if (active) return active;
-    const work = (async () => {
-      const bytes = await generate();
-      await mkdir(dirname(file), { recursive: true });
-      const temporary = `${file}.${randomUUID()}.tmp`;
-      try {
-        await writeFile(temporary, bytes);
-        await rename(temporary, file);
-      } finally {
-        await unlink(temporary).catch(() => {});
-      }
-      return bytes;
-    })();
-    pending.set(file, work);
+    signal.throwIfAborted();
+    let entry = pending.get(file);
+    if (!entry || entry.controller.signal.aborted) {
+      const controller = new AbortController();
+      const work = (async () => {
+        const bytes = await generate(controller.signal);
+        await mkdir(dirname(file), { recursive: true });
+        const temporary = `${file}.${randomUUID()}.tmp`;
+        try {
+          await writeFile(temporary, bytes);
+          await rename(temporary, file);
+        } finally {
+          await unlink(temporary).catch(() => {});
+        }
+        return bytes;
+      })();
+      entry = { work, controller, users: 0 };
+      pending.set(file, entry);
+    }
+    const active = entry;
+    active.users++;
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      if (--active.users === 0) active.controller.abort();
+    };
+    signal.addEventListener("abort", release, { once: true });
     try {
-      return await work;
+      return await active.work;
     } finally {
-      pending.delete(file);
+      signal.removeEventListener("abort", release);
+      release();
+      if (pending.get(file) === active) pending.delete(file);
     }
   }
   return async (request: IncomingMessage, response: ServerResponse) => {
+    const controller = new AbortController();
+    const disconnect = () => controller.abort();
+    response.on("close", disconnect);
+    if (response.destroyed) controller.abort();
     response.setHeader("Access-Control-Allow-Origin", "*");
     try {
       const url = new URL(request.url ?? "/", "http://127.0.0.1");
@@ -138,54 +187,65 @@ export function mediaChannel(
           palette ? "palettes" : thumb ? "thumbs" : "peaks",
           key + (thumb ? ".jpg" : ".json"),
         );
-        const bytes = await cached(file, async () => {
-          if (palette) {
-            const rgb = await run([
-              "-ss",
-              seconds,
-              "-i",
-              source,
-              "-frames:v",
-              "1",
-              "-vf",
-              "scale=3:3:flags=area",
-              "-pix_fmt",
-              "rgb24",
-              "-f",
-              "rawvideo",
-              "pipe:1",
-            ]);
-            if (rgb.length !== 27) throw new Error("Invalid palette frame");
-            return Buffer.from(
-              JSON.stringify(Array.from({ length: 9 }, (_, i) => `#${rgb.subarray(i * 3, i * 3 + 3).toString("hex")}`)),
-            );
-          }
-          if (thumb)
-            return run([
-              "-ss",
-              seconds,
-              "-i",
-              source,
-              "-frames:v",
-              "1",
-              "-vf",
-              "scale=160:-2",
-              "-f",
-              "image2pipe",
-              "-vcodec",
-              "mjpeg",
-              "pipe:1",
-            ]);
-          const pcm = await run(["-i", source, "-vn", "-ac", "1", "-ar", "10000", "-f", "s16le", "pipe:1"]);
-          const peaks: number[] = [];
-          for (let offset = 0; offset < pcm.length; offset += 200) {
-            let peak = 0;
-            for (let i = offset; i + 1 < Math.min(offset + 200, pcm.length); i += 2)
-              peak = Math.max(peak, Math.abs(pcm.readInt16LE(i)) / 32768);
-            peaks.push(peak);
-          }
-          return Buffer.from(JSON.stringify(peaks));
-        });
+        const bytes = await cached(
+          file,
+          async (signal) => {
+            if (palette) {
+              const rgb = await run([
+                "-ss",
+                seconds,
+                "-i",
+                source,
+                "-frames:v",
+                "1",
+                "-vf",
+                "scale=3:3:flags=area",
+                "-pix_fmt",
+                "rgb24",
+                "-f",
+                "rawvideo",
+                "pipe:1",
+              ]);
+              if (rgb.length !== 27) throw new Error("Invalid palette frame");
+              return Buffer.from(
+                JSON.stringify(
+                  Array.from({ length: 9 }, (_, i) => `#${rgb.subarray(i * 3, i * 3 + 3).toString("hex")}`),
+                ),
+              );
+            }
+            if (thumb)
+              return thumbnailTask(
+                () =>
+                  run([
+                    "-ss",
+                    seconds,
+                    "-i",
+                    source,
+                    "-frames:v",
+                    "1",
+                    "-vf",
+                    "scale=160:-2",
+                    "-f",
+                    "image2pipe",
+                    "-vcodec",
+                    "mjpeg",
+                    "pipe:1",
+                  ]),
+                signal,
+              );
+            const pcm = await run(["-i", source, "-vn", "-ac", "1", "-ar", "10000", "-f", "s16le", "pipe:1"]);
+            const peaks: number[] = [];
+            for (let offset = 0; offset < pcm.length; offset += 200) {
+              let peak = 0;
+              for (let i = offset; i + 1 < Math.min(offset + 200, pcm.length); i += 2)
+                peak = Math.max(peak, Math.abs(pcm.readInt16LE(i)) / 32768);
+              peaks.push(peak);
+            }
+            return Buffer.from(JSON.stringify(peaks));
+          },
+          controller.signal,
+        );
+        if (controller.signal.aborted) return;
         response
           .writeHead(200, { "Content-Type": thumb ? "image/jpeg" : "application/json", "Content-Length": bytes.length })
           .end(request.method === "HEAD" ? undefined : bytes);
@@ -221,9 +281,12 @@ export function mediaChannel(
       response.on("close", () => stream.destroy());
       stream.pipe(response);
     } catch (error) {
+      if (controller.signal.aborted) return;
       if (!response.headersSent)
         response.writeHead(error instanceof Error && /rational/.test(error.message) ? 400 : 500).end();
       else response.destroy();
+    } finally {
+      response.removeListener("close", disconnect);
     }
   };
 }
