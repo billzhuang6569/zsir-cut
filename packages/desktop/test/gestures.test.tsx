@@ -2,7 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { ProjectView } from "../src/connection.js";
+import { DESKTOP_AUTHOR, type ProjectView } from "../src/connection.js";
 import { applyUi, initialState } from "../src/state.js";
 import { TimelinePreview } from "../src/TimelinePreview.js";
 import { frameTime, pixelAt } from "../src/timeline.js";
@@ -12,6 +12,7 @@ let host: HTMLDivElement;
 let root: Root;
 let state = initialState();
 let project: ProjectView;
+let readOnly = false;
 const dragging = { current: false };
 const call = vi.fn(async () => ({}));
 const captures = new Map<number, HTMLElement>();
@@ -32,6 +33,7 @@ const render = () =>
       error={null}
       dragging={dragging}
       hideViewer
+      readOnly={readOnly}
     />,
   );
 function pointer(
@@ -66,6 +68,7 @@ async function slider(value: number) {
 }
 beforeEach(async () => {
   state = initialState();
+  readOnly = false;
   captures.clear();
   dragging.current = false;
   call.mockClear();
@@ -120,6 +123,12 @@ beforeEach(async () => {
       left = 80 - (scroller?.scrollLeft ?? 0);
       height = 28;
     }
+    if (this.classList.contains("zc-track-lane")) {
+      left = 80 - (scroller?.scrollLeft ?? 0);
+      const lanes = [...(host?.querySelectorAll(".zc-track-lane") ?? [])];
+      top = 78 + lanes.indexOf(this) * 40 - (scroller?.scrollTop ?? 0);
+      height = 40;
+    }
     if (this.dataset.selectionId) {
       left = 80 + Number.parseFloat(this.style.left) - (scroller?.scrollLeft ?? 0);
       top += (this.classList.contains("zc-clip-subtitle") ? 68 : 28) - (scroller?.scrollTop ?? 0);
@@ -171,6 +180,7 @@ it("distinguishes a click from a 4px drag and captures the clip, suppressing onl
   await pointer(clip, "pointerup", 183, 85);
   await click(clip);
   expect(state.selected).toEqual(["c1"]);
+  expect(call).not.toHaveBeenCalled();
   expect(dragging.current).toBe(false);
   expect(captures.size).toBe(0);
   await pointer(clip, "pointerdown", 180, 85);
@@ -180,7 +190,7 @@ it("distinguishes a click from a 4px drag and captures the clip, suppressing onl
   expect(state.selected).toEqual(["c1"]);
   await click(clip, { ctrlKey: true });
   expect(state.selected).toEqual([]);
-  expect(call).not.toHaveBeenCalled();
+  expect(call).toHaveBeenCalledTimes(1);
 });
 it.each(["pointercancel", "lostpointercapture"])("recovers from %s and ignores other pointers", async (cancel) => {
   state = { ...state, selected: ["c2"] };
@@ -373,4 +383,218 @@ it("cancels an active marquee when switching timelines and ignores non-primary s
   expect(get(".zc-selection-box")).toBeNull();
   expect(captures.size).toBe(0);
   expect(call).not.toHaveBeenCalled();
+});
+
+it("drags the selected media group from a later clip with grab offset and one labeled edit", async () => {
+  state = { ...state, selected: ["c1", "c2", "q"] };
+  await act(render);
+  const clip = get('[data-selection-id="c2"]');
+  await pointer(clip, "pointerdown", 489, 85); // c2 starts at 464; grab 25px inside.
+  await pointer(clip, "pointermove", 537, 85);
+  expect(get('[data-selection-id="c1"]').style.left).toBe("144px");
+  expect(clip.style.left).toBe("432px");
+  expect(clip.style.opacity).toBe("0.5");
+  expect(project.tracks[0]?.clips[0]?.timeline_in.t).toBe("2s");
+  expect(call).not.toHaveBeenCalled();
+  await pointer(clip, "pointerup", 585, 85); // Final release position must be used.
+  expect(call).toHaveBeenCalledTimes(1);
+  expect(call).toHaveBeenCalledWith(
+    "edit",
+    expect.objectContaining({
+      author: DESKTOP_AUTHOR,
+      label: "移动片段",
+      base_revision: "revision",
+      timeline_id: "timeline",
+      ops: [{ op: "move", clip_ids: ["c1", "c2"], to: "4s" }],
+    }),
+  );
+  expect(clip.style.opacity).toBe("");
+  expect(clip.style.left).toBe("384px");
+});
+
+it("previews linked audio at its relative offset and bases to on the earliest linked clip", async () => {
+  const video = project.tracks[0]?.clips[0];
+  if (!video) throw new Error("fixture");
+  video.occurrence_id = "linked";
+  project.tracks.push({
+    id: "a",
+    name: "音频",
+    kind: "audio",
+    enabled: true,
+    clips: [{ ...video, id: "audio", timeline_in: { t: "1s" }, timeline_out: { t: "3s" } }],
+  });
+  await act(render);
+  const clip = get('[data-selection-id="c1"]');
+  await pointer(clip, "pointerdown", 192, 85);
+  await pointer(clip, "pointermove", 240, 85);
+  expect(get('[data-selection-id="audio"]').style.left).toBe("96px");
+  expect(clip.style.left).toBe("144px");
+  await pointer(clip, "pointerup", 240, 85);
+  expect(call).toHaveBeenCalledWith(
+    "edit",
+    expect.objectContaining({
+      ops: [{ op: "move", clip_ids: ["c1"], to: "2s" }],
+    }),
+  );
+});
+
+it.each(["Escape", "pointercancel", "lostpointercapture"])(
+  "restores a leftward drag on %s without writing",
+  async (cancel) => {
+    const clip = get('[data-selection-id="c1"]');
+    await pointer(clip, "pointerdown", 192, 85);
+    await pointer(clip, "pointermove", 144, 85);
+    expect(clip.style.left).toBe("48px");
+    if (cancel === "Escape") await act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: cancel })));
+    else await pointer(clip, cancel, 144, 85);
+    expect(clip.style.left).toBe("96px");
+    expect(clip.style.opacity).toBe("");
+    expect(get(".zc-snap-line")).toBeNull();
+    expect(dragging.current).toBe(false);
+    await pointer(clip, "pointerup", 144, 85);
+    expect(call).not.toHaveBeenCalled();
+  },
+);
+
+it.each(["重叠 E_VALIDATION", "修订冲突 E_CONFLICT"])(
+  "restores rejected moves and shows the existing prompt: %s",
+  async (message) => {
+    call.mockRejectedValueOnce(new Error(message));
+    const clip = get('[data-selection-id="c1"]');
+    await pointer(clip, "pointerdown", 192, 85);
+    await pointer(clip, "pointermove", 240, 85);
+    await pointer(clip, "pointerup", 240, 85);
+    expect(clip.style.left).toBe("96px");
+    expect(clip.style.opacity).toBe("");
+    expect(host.textContent).toContain(message);
+    expect(call).toHaveBeenCalledTimes(1);
+  },
+);
+
+it("submits the target lane to core, including disallowed cross-track groups", async () => {
+  project.tracks.push({ id: "v2", name: "视频 B", kind: "video", enabled: true, clips: [] });
+  await act(render);
+  const clip = get('[data-selection-id="c1"]');
+  await pointer(clip, "pointerdown", 192, 85);
+  await pointer(clip, "pointermove", 240, 165);
+  expect(clip.style.transform).toBe("translateY(80px)");
+  await pointer(clip, "pointerup", 240, 165);
+  expect(call).toHaveBeenLastCalledWith(
+    "edit",
+    expect.objectContaining({
+      ops: [{ op: "move", clip_ids: ["c1"], to: "3s", track_id: "v2" }],
+    }),
+  );
+  state = { ...state, selected: ["c1", "c2"] };
+  await act(render);
+  call.mockRejectedValueOnce(new Error("Track change requires a single requested clip"));
+  await pointer(clip, "pointerdown", 192, 85);
+  await pointer(clip, "pointerup", 240, 165);
+  expect(call).toHaveBeenLastCalledWith(
+    "edit",
+    expect.objectContaining({
+      ops: [{ op: "move", clip_ids: ["c1", "c2"], to: "3s", track_id: "v2" }],
+    }),
+  );
+  expect(host.textContent).toContain("Track change requires a single requested clip");
+  expect(clip.style.transform).toBe("");
+});
+
+it("shows nearest edge snap distance/line and obeys the toggle during a drag", async () => {
+  project.markers = [
+    { id: "near", at: { t: "6s" }, text: "near", kind: "review" },
+    { id: "far", at: { t: "152/25s" }, text: "far", kind: "review" },
+  ];
+  await act(render);
+  const clip = get('[data-selection-id="c1"]');
+  await pointer(clip, "pointerdown", 192, 85);
+  await pointer(clip, "pointermove", 286, 85); // out edge ~5.96s; 6s wins over later 6.08s.
+  expect(get('[aria-label="吸附距离"]').textContent).toBe("1.9px");
+  expect(get(".zc-snap-line").style.left).toContain("288px");
+  expect(clip.style.left).toBe("192px");
+  await click(get('[aria-label="吸附"]'), { detail: 0 });
+  await pointer(clip, "pointermove", 286, 85);
+  expect(get(".zc-snap-line")).toBeNull();
+  await pointer(clip, "pointerup", 286, 85);
+  expect(call).toHaveBeenCalledWith(
+    "edit",
+    expect.objectContaining({ ops: [{ op: "move", clip_ids: ["c1"], to: "99/25s" }] }),
+  );
+});
+
+it("never moves subtitle bars and blocks writes in read-only or blade mode", async () => {
+  const cue = get('[data-selection-id="q"]');
+  await pointer(cue, "pointerdown", 240, 125);
+  await pointer(cue, "pointermove", 288, 125);
+  await pointer(cue, "pointerup", 288, 125);
+  expect(call).not.toHaveBeenCalled();
+  expect(cue.style.opacity).toBe("");
+  readOnly = true;
+  await act(render);
+  const clip = get('[data-selection-id="c1"]');
+  await pointer(clip, "pointerdown", 192, 85);
+  await pointer(clip, "pointerup", 240, 85);
+  expect(call).not.toHaveBeenCalled();
+  readOnly = false;
+  await act(render);
+  await click(get('[aria-label="切割 B"]'), { detail: 0 });
+  await pointer(clip, "pointerdown", 192, 85);
+  await pointer(clip, "pointerup", 240, 85);
+  expect(call).not.toHaveBeenCalled();
+});
+
+it("includes scroll displacement, freezes the gesture revision, and cancels on timeline switch", async () => {
+  const clip = get('[data-selection-id="c1"]');
+  await pointer(clip, "pointerdown", 192, 85);
+  await pointer(clip, "pointermove", 240, 85);
+  timeline().scrollLeft = 48;
+  await act(() => timeline().dispatchEvent(new Event("scroll")));
+  expect(clip.style.left).toBe("192px");
+  project = { ...project, revision: { id: "new-revision", seq: 1 } };
+  await act(render);
+  call.mockRejectedValueOnce(new Error("E_CONFLICT"));
+  await pointer(clip, "pointerup", 240, 85);
+  expect(call).toHaveBeenCalledWith(
+    "edit",
+    expect.objectContaining({ base_revision: "revision", ops: [{ op: "move", clip_ids: ["c1"], to: "3s" }] }),
+  );
+  expect(clip.style.left).toBe("96px");
+  call.mockClear();
+  await pointer(clip, "pointerdown", 192, 85);
+  await pointer(clip, "pointermove", 240, 85);
+  project = { ...project, id: "new-timeline" };
+  await act(render);
+  expect(clip.style.left).toBe("96px");
+  expect(dragging.current).toBe(false);
+  expect(call).not.toHaveBeenCalled();
+});
+
+it("marks overlapping moves as blocked, skips the request on release, and allows touching edges", async () => {
+  const clip = get('[data-selection-id="c1"]');
+  await pointer(clip, "pointerdown", 192, 85);
+  await pointer(clip, "pointermove", 480, 85);
+  expect(clip.style.outline).toBe("2px solid var(--attention)");
+  expect(clip.style.cursor).toBe("not-allowed");
+  expect(clip.style.opacity).toBe("0.5");
+  expect(call).not.toHaveBeenCalled();
+  await pointer(clip, "pointerup", 480, 85);
+  expect(call).not.toHaveBeenCalled();
+  expect(clip.style.left).toBe("96px");
+  expect(clip.style.outline).toBe("");
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe("这里放不下：会和其他片段重叠");
+  await pointer(clip, "pointerdown", 192, 85);
+  await pointer(clip, "pointermove", 480, 85);
+  await pointer(clip, "pointermove", 384, 85);
+  expect(clip.style.outline).toBe("");
+  await pointer(clip, "pointerup", 384, 85);
+  expect(call).toHaveBeenCalledTimes(1);
+});
+
+it("checks the final release position even without a preceding blocked preview", async () => {
+  const clip = get('[data-selection-id="c1"]');
+  await pointer(clip, "pointerdown", 192, 85);
+  await pointer(clip, "pointermove", 240, 85);
+  await pointer(clip, "pointerup", 480, 85);
+  expect(call).not.toHaveBeenCalled();
+  expect(host.textContent).toContain("这里放不下：会和其他片段重叠");
 });

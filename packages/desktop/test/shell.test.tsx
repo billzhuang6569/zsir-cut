@@ -464,3 +464,127 @@ it("preserves create and open rejection reasons instead of blaming the project f
     vi.unstubAllGlobals();
   }
 });
+
+it.each([
+  ["E_OVERLAP", "Clips overlap on one track", undefined, "会和其他片段重叠"],
+  [
+    "E_VALIDATION",
+    "Project failed L1 validation",
+    { issues: [{ code: "E_OVERLAP", severity: "error" }] },
+    "会和其他片段重叠",
+  ],
+  ["E_VALIDATION", "Destination track kind differs", undefined, "只能移到同类轨道"],
+  ["E_VALIDATION", "Track change requires a single requested clip", undefined, "跨轨移动时只能选择一个片段"],
+  [
+    "E_VALIDATION",
+    "Linked group has multiple clips of this track kind",
+    undefined,
+    "联动组中有多个同类片段，不能跨轨移动",
+  ],
+  ["E_CONFLICT", "Base revision differs from current revision", undefined, "工程刚被别处改过，已刷新，请重试"],
+  ["E_VALIDATION", "Unknown validation reason", undefined, "没能完成这次修改"],
+  ["E_FUTURE", "Technical details", undefined, "没能完成这次修改"],
+  [undefined, "Error: technical details", undefined, "没能完成这次修改"],
+])("translates host rejection %s / %s for every panel", async (code, message, verification, expected) => {
+  class FakeSocket {
+    onmessage: ((event: MessageEvent) => void) | null = null;
+    onclose = null;
+    send(raw: string) {
+      const request = JSON.parse(raw);
+      queueMicrotask(() =>
+        this.onmessage?.(
+          new MessageEvent("message", {
+            data: JSON.stringify({ id: request.id, envelope: { ok: false, error: { code, message }, verification } }),
+          }),
+        ),
+      );
+    }
+    close() {}
+  }
+  vi.stubGlobal("WebSocket", FakeSocket);
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  const disconnect = connectHost(
+    { port: 1, token: "test" },
+    {
+      ui: () => initialState(),
+      project: vi.fn(),
+      icon: vi.fn(),
+      error: vi.fn(),
+    },
+  );
+  try {
+    await expect(disconnect.call("edit", {})).rejects.toMatchObject({
+      message: expected,
+      cause: `${code ?? ""} ${message}`.trim(),
+    });
+    expect(log).toHaveBeenCalledWith("宿主请求失败", expect.stringContaining(message));
+  } finally {
+    disconnect();
+    vi.unstubAllGlobals();
+    log.mockRestore();
+  }
+});
+
+it.each([false, true])("refreshes a conflicting edit before reporting it (refresh fails: %s)", async (fails) => {
+  let socket: FakeSocket | undefined;
+  let conflict = false;
+  const requests: string[] = [];
+  class FakeSocket {
+    onmessage: ((event: MessageEvent) => void) | null = null;
+    onclose = null;
+    constructor() {
+      socket = this;
+    }
+    receive(message: unknown) {
+      this.onmessage?.(new MessageEvent("message", { data: JSON.stringify(message) }));
+    }
+    send(raw: string) {
+      const { id, verb, type, request } = JSON.parse(raw);
+      requests.push(verb ?? type);
+      const envelope =
+        verb === "edit"
+          ? { ok: false, error: { code: "E_CONFLICT", message: "Base revision differs from current revision" } }
+          : conflict && fails
+            ? { ok: false, error: { code: "E_IO", message: "Read failed" } }
+            : {
+                ok: true,
+                result:
+                  request?.view === "brief"
+                    ? { project: { name: "工程", revision: { id: conflict ? "r2" : "r1", seq: conflict ? 2 : 1 } } }
+                    : {},
+              };
+      queueMicrotask(() => this.receive({ id, envelope }));
+    }
+    close() {}
+  }
+  vi.stubGlobal("WebSocket", FakeSocket);
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  const project = vi.fn();
+  const disconnect = connectHost(
+    { port: 1, token: "test" },
+    {
+      ui: () => initialState(),
+      project,
+      icon: vi.fn(),
+      error: vi.fn(),
+    },
+  );
+  try {
+    socket?.receive({ type: "bootstrap", project: "/project" });
+    await vi.waitFor(() =>
+      expect(project).toHaveBeenLastCalledWith("/project", expect.objectContaining({ revision: { id: "r1", seq: 1 } })),
+    );
+    conflict = true;
+    requests.length = 0;
+    await expect(disconnect.call("edit", {})).rejects.toMatchObject({
+      message: fails ? "工程刚被别处改过，刷新失败，请重新打开工程" : "工程刚被别处改过，已刷新，请重试",
+    });
+    expect(requests).toEqual(fails ? ["edit", "inspect"] : ["edit", "inspect", "inspect", "preview_data"]);
+    if (!fails)
+      expect(project).toHaveBeenLastCalledWith("/project", expect.objectContaining({ revision: { id: "r2", seq: 2 } }));
+  } finally {
+    disconnect();
+    vi.unstubAllGlobals();
+    log.mockRestore();
+  }
+});

@@ -12,7 +12,34 @@ interface ResultEnvelope {
   ok: boolean;
   result: unknown;
   error: { message: string; code?: string } | null;
+  verification?: { issues: { code: string; severity: string }[] };
 }
+function requestError(envelope: ResultEnvelope) {
+  const code = envelope.error?.code;
+  const message = envelope.error?.message ?? "";
+  if (code === "E_CONFLICT") return "工程刚被别处改过，已刷新，请重试";
+  if (
+    code === "E_OVERLAP" ||
+    envelope.verification?.issues.some((issue) => issue.severity === "error" && issue.code === "E_OVERLAP")
+  )
+    return "会和其他片段重叠";
+  if (code === "E_VALIDATION") {
+    switch (message) {
+      case "Destination track kind differs":
+        return "只能移到同类轨道";
+      case "Track change requires a single requested clip":
+        return "跨轨移动时只能选择一个片段";
+      case "Linked group has multiple clips of this track kind":
+        return "联动组中有多个同类片段，不能跨轨移动";
+      case "Project file is invalid":
+        return "工程文件无效";
+    }
+    if (message.includes("/author") && message.includes("name")) return "操作发起人的姓名缺失，无法继续，请重试";
+  }
+  if (code === "E_NOT_FOUND") return "找不到工程文件";
+  return "没能完成这次修改";
+}
+
 export function connectHost(
   config: { port: number; token: string },
   handlers: {
@@ -91,23 +118,22 @@ export function connectHost(
       pending.delete(message.id);
       const envelope = message.envelope as ResultEnvelope;
       if (envelope.ok) item?.resolve(envelope.result);
-      else
-        item?.reject(
-          new Error(
-            !envelope.error?.code
-              ? (envelope.error?.message ?? "请求失败")
-              : envelope.error?.message === "Project file is invalid"
-                ? "工程文件无效"
-                : envelope.error?.code === "E_VALIDATION"
-                  ? envelope.error.message.includes("/author") && envelope.error.message.includes("name")
-                    ? "操作发起人的姓名缺失，无法继续，请重试"
-                    : `请求参数未通过校验：${envelope.error.message}`
-                  : envelope.error?.code === "E_NOT_FOUND"
-                    ? "找不到工程文件"
-                    : `请求失败：${envelope.error?.message ?? "请重试"}`,
-            { cause: `${envelope.error?.code ?? ""} ${envelope.error?.message ?? ""}`.trim() },
-          ),
-        );
+      else {
+        const detail = JSON.stringify({ error: envelope.error, verification: envelope.verification });
+        console.error("宿主请求失败", detail);
+        const error = new Error(requestError(envelope), {
+          cause: `${envelope.error?.code ?? ""} ${envelope.error?.message ?? ""}`.trim(),
+        });
+        if (envelope.error?.code === "E_CONFLICT") {
+          void refresh().then(
+            () => item?.reject(error),
+            (refreshError) => {
+              console.error("工程刷新失败", refreshError);
+              item?.reject(new Error("工程刚被别处改过，刷新失败，请重新打开工程", { cause: error.cause }));
+            },
+          );
+        } else item?.reject(error);
+      }
     }
   };
   socket.onerror = () => handlers.error("无法连接本机宿主进程");
