@@ -8,6 +8,7 @@ import { useMediaPanel } from "../src/MediaPanel.js";
 import { middle, placeMedia, sourceProject } from "../src/media.js";
 import { initialState } from "../src/state.js";
 import { TimelinePreview } from "../src/TimelinePreview.js";
+import { recordingCanvas } from "./canvas.js";
 
 const native = vi.hoisted(() => ({
   enabled: false,
@@ -467,10 +468,24 @@ it("renders cached peaks for audio cards and a single image thumbnail", async ()
       { ...media, id: "image", kind: "image" },
     ],
   };
+  const canvas = recordingCanvas();
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+    left: 0,
+    right: 240,
+    width: 240,
+    top: 0,
+    bottom: 48,
+    height: 48,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
+  });
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => canvas.context);
   const h = await mount(false, false, view, true);
   try {
     const cards = h.container.querySelectorAll(".zc-media-card");
-    expect(cards[0]?.querySelector(".zc-wave rect")?.getAttribute("height")).toBe("6.5");
+    expect(cards[0]?.querySelector(".zc-wave canvas")).not.toBeNull();
+    expect(canvas.calls.some((call) => call[0] === "fillRect" && call[4] === 26)).toBe(true);
     expect(cards[0]?.querySelector(".zc-media-used .zc-icon path")?.getAttribute("d")).toContain("M2 6");
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/peaks?token=test&media_id=audio"), expect.anything());
     expect(cards[1]?.querySelectorAll("img")).toHaveLength(1);

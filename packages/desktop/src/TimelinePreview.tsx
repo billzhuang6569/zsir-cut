@@ -29,6 +29,9 @@ import {
   sub,
   timecode,
 } from "./timeline.js";
+import { Wave } from "./Wave.js";
+
+export { Wave } from "./Wave.js";
 import "./timeline.css";
 
 type Config = { port: number; token: string };
@@ -72,47 +75,6 @@ const Film = memo(function Film({
         );
       })}
     </span>
-  );
-});
-export const Wave = memo(function Wave({
-  clip,
-  width,
-  config,
-  scale,
-}: {
-  clip: ClipView;
-  width: number;
-  scale: number | ReturnType<typeof rational>;
-  config: Config | undefined;
-}) {
-  const [peaks, setPeaks] = useState<number[]>([]);
-  useEffect(() => {
-    if (!config) return;
-    const controller = new AbortController();
-    void fetch(mediaUrl(config, "peaks", clip.media_id), { signal: controller.signal })
-      .then((response) => {
-        if (!response.ok) throw new Error("波形读取失败");
-        return response.json() as Promise<number[]>;
-      })
-      .then(setPeaks)
-      .catch(() => setPeaks([]));
-    return () => controller.abort();
-  }, [config, clip.media_id]);
-  return (
-    <svg className="zc-wave" width={width} height={48} viewBox={`0 0 ${width} 48`} aria-hidden="true">
-      {Array.from({ length: Math.max(1, Math.floor(width / 3)) }, (_, i) => {
-        const at = printRational(
-          add(
-            parseRational(clip.timeline_in.t, true),
-            div(rational(BigInt(i * 3)), typeof scale === "number" ? rational(BigInt(scale)) : scale),
-          ),
-          true,
-        );
-        const index = Number(floor(mul(sourceAt(clip, at), rational(100n))));
-        const height = Math.max(1, (peaks[index] ?? 0) * 26);
-        return <rect key={i} x={i * 3} y={30 - height / 2} width={2} height={height} rx={1} />;
-      })}
-    </svg>
   );
 });
 export function TimelinePreview({
@@ -733,7 +695,15 @@ export function TimelinePreview({
                             {track.kind === "video" ? (
                               <Film clip={item} width={clipWidth} scale={scale} config={config} />
                             ) : (
-                              <Wave clip={item} width={clipWidth} scale={scale} config={config} />
+                              <Wave
+                                clip={item}
+                                width={clipWidth}
+                                scale={scale}
+                                config={config}
+                                hasAudio={project.media.some(
+                                  (media) => media.id === item.media_id && (media.kind === "audio" || !!media.audio),
+                                )}
+                              />
                             )}
                           </Clip>
                         );
