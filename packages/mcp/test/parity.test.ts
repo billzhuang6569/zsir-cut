@@ -51,9 +51,20 @@ describe("CLI and MCP", () => {
     await Promise.all([server.connect(left), client.connect(right)]);
     try {
       const tools = await client.listTools();
-      expect(tools.tools).toHaveLength(25);
+      expect(tools.tools).toHaveLength(30);
       for (const tool of tools.tools) {
-        if (!["zcut_record_handoff_check", "zcut_terms_list", "zcut_terms_edit"].includes(tool.name))
+        if (
+          ![
+            "zcut_record_handoff_check",
+            "zcut_terms_list",
+            "zcut_terms_edit",
+            "zcut_settings_get",
+            "zcut_settings_set",
+            "zcut_voice_list",
+            "zcut_voice_edit",
+            "zcut_voice_clone",
+          ].includes(tool.name)
+        )
           expect(tool.inputSchema.properties?.author).toMatchObject({
             type: "object",
             properties: { kind: { enum: ["human", "agent", "system"] }, name: { type: "string" } },
@@ -651,7 +662,7 @@ it("shares queued admission, batch status, undo, restore and historical reads be
   const [left, right] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(left), client.connect(right)]);
   try {
-    expect((await client.listTools()).tools).toHaveLength(25);
+    expect((await client.listTools()).tools).toHaveLength(30);
     const base = { base_revision: "rev_fixture_1", author, label: "Parity step" };
     const pair = async (verb: string, input: Record<string, unknown>, expectedStatus: string) => {
       const cliResult = invokeCli(verb, input);
@@ -855,4 +866,71 @@ it("shares insert move schema, dry-run changes, commit replay and multi-group re
     await client.close();
     await server.close();
   }
+});
+
+it("shares global voice/settings envelopes without project fields or Keychain access", async () => {
+  vi.stubEnv("ZSIR_FISH_API_KEY", "parity-test-key");
+  const server = createServer();
+  const client = new Client({ name: "voice-parity", version: "1" });
+  const [left, right] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(left), client.connect(right)]);
+  try {
+    const settingsPath = join(directory, "Library/Application Support/zsir-cut/settings.json");
+    const cases: [string, Record<string, unknown>][] = [
+      ["settings_get", {}],
+      [
+        "settings_set",
+        { voice: { model: "drama-3" }, network: { proxy: "http://127.0.0.1:7897" }, voice_key: "ignored-key" },
+      ],
+      ["settings_set", { voice: { model: "invalid" } }],
+      ["voice_list", {}],
+      ["voice_edit", { ops: [] }],
+      ["voice_edit", { ops: [{ op: "rename", id: "voc_019a0000-0000-7000-8000-000000000001", name: " " }] }],
+      ["voice_edit", { ops: [{ op: "delete", id: "voc_019a0000-0000-7000-8000-000000000001" }] }],
+      ["voice_clone", { name: " ", file: "/unused.wav" }],
+      ["voice_clone", { name: "missing source" }],
+      ["job_status", { job_id: "job_019a0000-0000-7000-8000-000000000001" }],
+    ];
+    for (const [verb, input] of cases) {
+      if (verb === "settings_set") await rm(settingsPath, { force: true });
+      const file = join(directory, "voice-request.json");
+      await writeFile(file, JSON.stringify(input));
+      const args = verb === "job_status" ? [verb] : verb.split("_");
+      const run = spawnSync(process.execPath, [cli, ...args, "--input", file], { encoding: "utf8" });
+      expect(run.stdout, run.stderr).not.toBe("");
+      const cliOutput = JSON.parse(run.stdout);
+      if (verb === "settings_set") await rm(settingsPath, { force: true });
+      const mcp = (await client.callTool({ name: `zcut_${verb}`, arguments: input })).structuredContent as Record<
+        string,
+        unknown
+      >;
+      expect(validateEnvelope(mcp)).toEqual({ valid: true, errors: [] });
+      expect(validateEnvelope(cliOutput)).toEqual({ valid: true, errors: [] });
+      expect(withoutRequestId(cliOutput)).toEqual(withoutRequestId(mcp));
+      expect(mcp.receipt).toBeNull();
+      expect(JSON.stringify(mcp)).not.toContain("parity-test-key");
+      expect(run.status).toBe(mcp.status === "rejected" ? 2 : mcp.status === "failed" ? 1 : 0);
+    }
+    for (const [group, action] of [
+      ["settings", "get"],
+      ["voice", "list"],
+    ]) {
+      const run = spawnSync(process.execPath, [cli, group, action], { encoding: "utf8" });
+      expect(JSON.parse(run.stdout).status).toBe("no_op");
+    }
+  } finally {
+    await client.close();
+    await server.close();
+  }
+}, 15000);
+
+it("never reflects a malformed settings request containing a key in CLI errors", async () => {
+  const secret = "malformed-secret-must-not-leak";
+  const run = spawnSync(process.execPath, [cli, "settings", "set"], {
+    encoding: "utf8",
+    input: `{"voice_key": ${secret}}`,
+  });
+  expect(run.status).toBe(2);
+  expect(JSON.parse(run.stdout)).toMatchObject({ status: "rejected", error: { code: "E_VALIDATION" } });
+  expect(run.stdout + run.stderr).not.toContain(secret);
 });

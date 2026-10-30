@@ -18,6 +18,7 @@ import {
   runExport,
 } from "./export-framework.ts";
 import { fingerprint } from "./fingerprint.ts";
+import { VoiceError } from "./fish-audio.ts";
 import { jobPath, readJob, startExportJob, startPreviewJob, startTranscribeJob } from "./jobs.ts";
 import { renderPreview, timelineFrames, viewTimeline } from "./preview.ts";
 import { buildProject, type CreateProjectRequest } from "./project/create.ts";
@@ -42,8 +43,26 @@ import { inspect, readTranscript } from "./read-views.ts";
 import { normalizeCommand, validateCommand } from "./schema.ts";
 import { editTermLibrary, readTermLibrary, type TermOp } from "./term-library.ts";
 import { AsrError, applyTranscription, invokeAsr, type TranscribeRequest, workerMilliseconds } from "./transcribe.ts";
+import {
+  cloneVoice,
+  editVoices,
+  getVoiceSettings,
+  prepareVoiceClone,
+  setVoiceSettings,
+  type VoiceCloneRequest,
+  type VoiceEditOp,
+  type VoiceOptions,
+  voiceConnection,
+} from "./voice.ts";
+import { startVoiceJob, voiceJobPath } from "./voice-jobs.ts";
+import { readVoices } from "./voice-storage.ts";
 
 export const VERBS = [
+  "settings_get",
+  "settings_set",
+  "voice_list",
+  "voice_edit",
+  "voice_clone",
   "terms_list",
   "terms_edit",
   "create_project",
@@ -78,7 +97,8 @@ export type Envelope = Omit<WriteEnvelope, "verb" | "verification" | "status"> &
   verification: { level: "none" | "L0" | "L1" | "L2"; passed: boolean; issues: ValidationIssue[] };
 };
 
-export interface DispatchOptions {
+export interface DispatchOptions extends VoiceOptions {
+  launchVoiceJob?: (path: string) => Promise<void>;
   probe?: Probe;
   exporter?: Exporter;
   exporterModule?: string;
@@ -119,7 +139,10 @@ export function errorEnvelope(
     | "E_NOT_FOUND"
     | "E_CONFLICT"
     | "E_IDEMPOTENCY_MISMATCH"
-    | "E_BATCH_OPEN",
+    | "E_BATCH_OPEN"
+    | "E_VOICE_AUTH"
+    | "E_VOICE_PAYMENT"
+    | "E_VOICE_UPSTREAM",
   message: string,
   retryable = false,
 ): Envelope {
@@ -324,6 +347,7 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
     );
   const request = input as Request;
   if (
+    !["settings_get", "settings_set", "voice_list", "voice_edit", "voice_clone"].includes(verb) &&
     verb !== "terms_list" &&
     verb !== "terms_edit" &&
     verb !== "validate" &&
@@ -347,6 +371,28 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
   )
     return errorEnvelope(verb, requestId, "rejected", "E_UNSUPPORTED", `Verb ${verb} is not implemented`);
   try {
+    if (["settings_get", "settings_set", "voice_list", "voice_edit", "voice_clone"].includes(verb)) {
+      const output = basic(verb, requestId);
+      if (verb === "settings_get") output.result = await getVoiceSettings(options);
+      else if (verb === "settings_set") output.changes = await setVoiceSettings(request, options);
+      else if (verb === "voice_list") output.result = { voices: await readVoices() };
+      else if (verb === "voice_edit") output.changes = await editVoices(request.ops as VoiceEditOp[], options);
+      else {
+        const clone = request as unknown as VoiceCloneRequest;
+        if (!options.worker) {
+          await prepareVoiceClone(clone, options);
+          await voiceConnection(options);
+          output.status = "accepted";
+          output.result = { job_id: await startVoiceJob(request, options.launchVoiceJob) };
+          return output;
+        }
+        const result = await cloneVoice(clone, options);
+        output.result = result;
+        output.changes = [{ op: "voice_clone", entity: "voice", id: result.voice.id, action: "created" }];
+      }
+      output.status = output.changes.length ? "applied" : "no_op";
+      return output;
+    }
     if (verb === "terms_list" || verb === "terms_edit") {
       const output = basic(verb, requestId);
       if (verb === "terms_list") {
@@ -400,10 +446,14 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
       return output;
     }
     if (verb === "job_status") {
-      const parsed = parseProject(await readFile(request.project as string, "utf8"));
-      if (!parsed.ok) return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Project file is invalid");
+      let path = voiceJobPath(request.job_id as string);
+      if (request.project) {
+        const parsed = parseProject(await readFile(request.project as string, "utf8"));
+        if (!parsed.ok) return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Project file is invalid");
+        path = jobPath(request.project as string, parsed.project.id, request.job_id as string);
+      }
       const output = basic(verb, requestId);
-      const job = await readJob(jobPath(request.project as string, parsed.project.id, request.job_id as string));
+      const job = await readJob(path);
       const { changes, ...envelope } = job.envelope ?? { changes: [] };
       const { issues, ...verification } = job.envelope?.verification ?? { issues: [] };
       output.result = {
@@ -909,6 +959,10 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
     output.result = {};
     return output;
   } catch (error) {
+    if (error instanceof VoiceError)
+      return errorEnvelope(verb, requestId, error.status, error.code, error.message, error.retryable);
+    if (["settings_get", "settings_set", "voice_list", "voice_edit", "voice_clone"].includes(verb))
+      return errorEnvelope(verb, requestId, "failed", "E_IO", "Voice storage or local service unavailable", true);
     if (error instanceof HistoryError) return errorEnvelope(verb, requestId, "rejected", error.code, error.message);
     if (verb === "job_status" && (error as NodeJS.ErrnoException).code === "ENOENT")
       return errorEnvelope(verb, requestId, "rejected", "E_NOT_FOUND", "Job not found");

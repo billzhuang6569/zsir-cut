@@ -9,7 +9,7 @@ import type { Project } from "./project/types.ts";
 
 export interface Job {
   job_id: string;
-  verb: "export" | "transcribe" | "render_preview" | "view_timeline";
+  verb: "voice_clone" | "export" | "transcribe" | "render_preview" | "view_timeline";
   request: Record<string, unknown>;
   state: "queued" | "running" | "succeeded" | "failed";
   progress: number;

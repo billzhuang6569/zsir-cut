@@ -3,6 +3,7 @@ import type { Project, Transcript } from "./types.ts";
 
 const prefixes = new Set([
   "prj_",
+  "voc_",
   "tl_",
   "trk_",
   "med_",
