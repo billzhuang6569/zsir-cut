@@ -42,6 +42,15 @@ zcut() { node "$ZSIR_CUT_HOME/packages/cli/src/index.ts" "$@"; }
 7. **不批准你自己的工作。** 字词和字幕条的 `approved` 状态、编辑会话的批准，只在用户明确说「可以」之后执行，`author.kind` 写 `human`、`name` 写用户的称呼。
 8. **不确定就标出来。** 拿不准的剪点、听不清的字、疑似说错的数字，加一个 `review` 标记，写清楚要人看什么，不要假装确定。
 
+## 先后顺序
+
+1. `inspect` 看工程现状：有没有素材、有没有母稿、当前修订是多少。
+2. 没识别过的素材先 `transcribe`。识别**不能放进编辑会话**，带 `session_id` 会被拒绝。热词不要写进 `transcribe` 的 `hotwords`（那是热词文件的路径），先用 `set_recognition` 把名词写进工程的 `terms`。
+3. 识别是长任务：拿到 `job_id` 后用 `job_status` 查，`state` 变成 `succeeded` 或 `failed` 再往下走。查的间隔不要短于 5 秒。
+4. 识别成功后读文稿，按 `references/subtitles.md` 第 1 节抽专有名词，用 `set_recognition` 写进 `terms`。
+5. 最后才 `session_begin`，`base_revision` 用此刻的当前修订。会话开得比识别早，草稿里就没有文稿，之后的编辑会冲突。
+6. 会话里的写入用会话的 `base_revision`；`session_review`、`session_approve`、`session_reject` 的 `base_revision` 是**主工程**的当前修订。开错的空会话用 `session_reject` 关掉，不要留着。
+
 ## 每一步之后
 
 - 看结果信封的 `status`：`applied`、`drafted`、`no_op` 是成功；`rejected` 读 `error.message` 改请求；`conflict` 见硬规则 3；`failed` 报告给用户。

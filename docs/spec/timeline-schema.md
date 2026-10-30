@@ -99,7 +99,7 @@ Project
 - `recognition`（可选）：字幕识别设置，桌面版「字幕」面板左侧编辑的就是它。`transcribe` 读取它，见 `asr-worker.md` 第 6 节。
   - `language`：识别语言，例如 `"zh"`。
   - `reference_text`：用户贴进来的参考文本，例如提纲、文稿、人名表。原样保存，不参与识别。
-  - `terms`：专有名词数组，每项一个字符串，去重，按加入顺序。通常由 Agent 从 `reference_text` 里抽出，用户可以增删。识别时作为热词。
+  - `terms`：专有名词数组，每项一个字符串，去重，按加入顺序。通常由 Agent 从 `reference_text` 和识别出的文稿里抽出，用户可以增删。识别时和全局名词库一起作为热词，见 `term-library.md`。
   - `remove_fillers`：布尔，默认 false。为 true 时识别后自动隐藏水词。
   - `filler_words`：水词表，字符串数组。没写时用默认表：`嗯`、`啊`、`呃`、`额`、`哦`、`唉`、`哎`、`诶`。默认表只收纯语气词；「那个」「就是」这类也可能是正常用词，只有用户自己加进来才处理。
 - `subtitle_overlays`（可选）：字幕叠层的导出设置，见 `handoff-profile.md` 第 9 节。每项：

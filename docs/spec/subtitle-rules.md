@@ -10,7 +10,7 @@
 | 参数 | `zh-talk` | `en-talk` | 说明 |
 |---|---|---|---|
 | `cpl` | 16 | 42 | 每行宽度上限 |
-| `max_lines` | 2 | 2 | 每条最多行数，样式里有 `max_lines` 时取较小值 |
+| `max_lines` | 1 | 2 | 每条最多行数，样式里有 `max_lines` 时取较小值 |
 | `cps` | 9 | 20 | 每秒字数上限，超过只警告 |
 | `min_duration` | 1.0 s | 1.0 s | |
 | `max_duration` | 6.0 s | 6.0 s | |
@@ -18,6 +18,8 @@
 | `soft_pause` | 0.3 s | 0.3 s | 优先分条的停顿 |
 | `min_gap` | 0.08 s | 0.08 s | 相邻两条之间至少空出的时间 |
 | `strip_end_punct` | true | false | 显示时去掉每行末尾的标点 |
+
+`zh-talk` 的 `max_lines` 原为 2，2026-10-30 改为 1：Bill 走查时一条两行、最多 32 个字的字幕在短视频里太长。已经存了 `subtitle_rules` 的母稿不受影响。
 
 默认按母稿语言选：`zh*` 用 `zh-talk`，其余用 `en-talk`。`resegment` 请求的 `rules` 可以给一个配置名，再覆盖其中几项；带 `rules` 的 `resegment` 把它保存到母稿的 `subtitle_rules` 字段。之后的断句、显示时间计算和校验都按母稿的 `subtitle_rules`，没有这个字段时用语言默认配置。
 

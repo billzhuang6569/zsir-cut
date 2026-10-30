@@ -336,6 +336,7 @@
 | `create_project` | 写 | 新建工程文件和一条空时间线，见 9.4 |
 | `record_handoff_check` | 写交接包 | 把 `host_import` 或 `host_render_comparison` 的检查结果写进交接包的 `manifest.json`，不改工程。参数：`package`（交接包目录）、`check`（两者之一）、`status`、`host_version`、`by`、`notes`、`items`（逐项的 `check`、`status`、`notes`）。不需要 `base_revision`，不写工程日志；同一项检查再次记录时整体覆盖，所以天然幂等 |
 | `job_status` | 读 | 查长任务进度与结果 |
+| `terms_list` / `terms_edit` | 读 / 写 | 全局名词库，不属于工程，见 `term-library.md` 第 5 节 |
 
 共 23 个。新增动词要先改本文。另有只在桌面版运行时存在的界面动词，见 9.6，不计入这 21 个。
 
@@ -390,7 +391,7 @@
 
 1. 请求先按普通规则检查（`dry_run` 的 `export` 除外，它同步返回损失报告）。检查通过后，内核在 `.zcut/<project_id>/jobs/<job_id>/` 下建任务目录，写 `job.json`，启动一个独立的子进程执行，然后立即返回 `accepted`，`result` 含 `job_id`。`job_id` 格式为 `job_` 加小写 UUIDv7。
 2. `job.json` 字段：`job_id`、`verb`、`request`、`state`（`queued`、`running`、`succeeded`、`failed`）、`progress`（0 到 1）、`message`、`created_at`、`updated_at`、`envelope`（结束后的最终结果信封）。子进程每次更新都原子替换这个文件。
-3. `job_status`：参数 `job_id`，读动词，`result` 就是 `job.json` 的内容。子进程已不存在而状态仍是 `running` 时，状态改报 `failed`，`message` 写明进程意外退出。
+3. `job_status`：参数 `job_id`，读动词，`result` 是 `job.json` 的摘要，整个结果信封不超过 8 KB：`request` 只留 `verb`、`idempotency_key`、`label`；`envelope.changes` 换成 `changes_count`（条数）和 `changes_sample`（前 10 条），其余字段照抄。完整内容仍在 `job.json` 里。子进程已不存在而状态仍是 `running` 时，状态改报 `failed`，`message` 写明进程意外退出。（2026-10-30：桌面 Agent 查一次识别任务拿到 5.5 万字，超过读取上限。）
 4. 长任务产生的工程写入（例如 `transcribe` 写母稿）在子进程里走第 5 节的写入流程，`base_revision` 用请求里的值，幂等键用请求里的键。
 5. CLI 加 `--wait` 时，提交后每 500 毫秒查一次 `job_status`，结束后输出最终结果信封，退出码按最终状态。MCP 不等待，由 Agent 调用 `zcut_job_status`。
 
@@ -512,7 +513,7 @@
 | `add_free_cue` / `remove_free_cue` | | |
 | `add_style` / `update_style` | | 样式改动时 `version` 加一 |
 | `replace_text` | `find`、`replace`、`transcript_ids`、`cue_ids`、`match_case` | 查找替换，每处按 `edit_text` 执行 |
-| `set_recognition` | `recognition` 的字段 | 改字幕识别设置，不重新识别 |
+| `set_recognition` | `recognition` 的字段 | 改字幕识别设置，不重新识别。`terms` 变了时按 `term-library.md` 第 3 节更新全局名词库 |
 
 每个操作的精确语义见 `docs/spec/edit-ops.md`。完整参数 schema 在第 1 步由实现按那份文档补进 `schema/command.schema.json`，有出入先改规格。
 
@@ -536,7 +537,7 @@
 | `E_BATCH_SEQ_TAKEN` | `rejected` | 同一批次的这个序号已经收到过另一个不同的请求（6.1） |
 | `E_BATCH_CLOSED` | `rejected` | 批次已经完成、失败或超时，不再收步骤（6.1） |
 
-警告码（写在结果信封的 `result.warnings` 数组里，每项 `{code, …}`，不改变 `status`；信封顶层没有 `warnings` 字段）：`W_FONT_FALLBACK`、`W_SUB_OVERFLOW` 见 `handoff-profile.md` 第 9 节；本文新增的还有 `W_DECISIONS_PENDING`（批准时还有没回答的决定，7.4）、`W_REPLACE_SKIPPED_LOCKED`（查找替换跳过了锁定的字幕条，见 `edit-ops.md`）、`W_FILLERS_HIDDEN`（识别后自动隐藏了水词，附个数，见 `asr-worker.md` 第 6 节）。校验类警告见 `timeline-schema.md` 第 8 节。
+警告码（写在结果信封的 `result.warnings` 数组里，每项 `{code, …}`，不改变 `status`；信封顶层没有 `warnings` 字段）：`W_FONT_FALLBACK`、`W_SUB_OVERFLOW` 见 `handoff-profile.md` 第 9 节；本文新增的还有 `W_DECISIONS_PENDING`（批准时还有没回答的决定，7.4）、`W_REPLACE_SKIPPED_LOCKED`（查找替换跳过了锁定的字幕条，见 `edit-ops.md`）、`W_FILLERS_HIDDEN`（识别后自动隐藏了水词，附个数，见 `asr-worker.md` 第 6 节）、`W_TERMS_LIBRARY`（工程名词没能更新到全局名词库，附原因，见 `term-library.md` 第 3 节）。校验类警告见 `timeline-schema.md` 第 8 节。
 
 ## 12. 一期不做
 
