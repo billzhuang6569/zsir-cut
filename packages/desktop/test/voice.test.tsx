@@ -81,6 +81,72 @@ it("exposes all voice sub-pages through UI state and defaults to clone", () => {
   }
   expect(applyUi(initialState(), "ui_show_panel", { panel: "voice" }).sub).toBe("clone");
 });
+it("marks only the current voice sub-tab selected using the subtitle tab style", async () => {
+  const h = await mount(respond);
+  const tabs = () => [...h.container.querySelectorAll<HTMLButtonElement>('[role="tablist"] [role="tab"]')];
+  for (const label of ["克隆", "生成", "结果", "克隆"]) {
+    await h.click(label);
+    expect(
+      tabs()
+        .filter((tab) => tab.getAttribute("aria-selected") === "true")
+        .map((tab) => tab.textContent),
+    ).toEqual([label]);
+    expect(tabs().every((tab) => tab.classList.contains("zc-tab"))).toBe(true);
+  }
+});
+it("explains missing clone inputs and enables cloning only with a file and nonblank name", async () => {
+  const h = await mount(respond);
+  const button = h.container.querySelector<HTMLButtonElement>('button[type="submit"]');
+  if (!button) throw new Error("Missing primary action");
+  expect(button.disabled).toBe(true);
+  expect(button.title).toBe("请选择参考音频");
+  expect(document.getElementById(button.getAttribute("aria-describedby") ?? "")?.textContent).toBe(button.title);
+  await h.click("克隆音色");
+  expect(h.call).not.toHaveBeenCalledWith("voice_clone", expect.anything());
+  await h.input("参考音频路径", "/sample.wav");
+  await h.input("音色名称", "   ");
+  expect(button.disabled).toBe(true);
+  expect(button.title).toBe("请输入音色名称");
+  await h.input("音色名称", "新音色");
+  expect(button.disabled).toBe(false);
+  expect(button.classList.contains("zc-btn-primary")).toBe(true);
+  expect(button.hasAttribute("aria-describedby")).toBe(false);
+  expect(button.title).toBe("");
+  await h.input("参考音频路径", "");
+  expect(button.disabled).toBe(true);
+  expect(button.title).toBe("请选择参考音频");
+});
+it("explains an empty voice library and blocks generation even when text is provided", async () => {
+  const h = await mount((verb) => (verb === "voice_list" ? { voices: [] } : {}));
+  await h.click("生成");
+  await h.input("配音文字 1", "需要一个音色");
+  const button = h.container.querySelector<HTMLButtonElement>('button[type="submit"]');
+  if (!button) throw new Error("Missing primary action");
+  expect(button.disabled).toBe(true);
+  expect(button.title).toBe("请先克隆并选择音色");
+  expect(document.getElementById(button.getAttribute("aria-describedby") ?? "")?.textContent).toBe(button.title);
+  await h.click("生成配音");
+  expect(h.call).not.toHaveBeenCalledWith("voice_generate", expect.anything());
+});
+it("requires nonblank text in every item and updates the generation hint when items are removed", async () => {
+  const h = await mount(respond);
+  await h.click("生成");
+  const button = h.container.querySelector<HTMLButtonElement>('button[type="submit"]');
+  if (!button) throw new Error("Missing primary action");
+  expect(button.disabled).toBe(true);
+  expect(button.title).toBe("请填写每段配音文字");
+  await h.input("配音文字 1", "   ");
+  expect(button.disabled).toBe(true);
+  await h.input("配音文字 1", "第一段");
+  expect(button.disabled).toBe(false);
+  expect(button.classList.contains("zc-btn-primary")).toBe(true);
+  expect(button.hasAttribute("aria-describedby")).toBe(false);
+  await h.click("添加文字");
+  expect(button.disabled).toBe(true);
+  expect(button.title).toBe("请填写每段配音文字");
+  await h.click("删除文字 2");
+  expect(button.disabled).toBe(false);
+});
 it("clones through a global job, refreshes voices, and exposes only the authenticated sample URL", async () => {
   const h = await mount((verb) => {
     if (verb === "voice_clone") return { job_id: "job_clone" };
@@ -173,6 +239,10 @@ it("renders long-job progress and safe failure text without displaying upstream 
   await h.input("参考音频路径", "/sample.wav");
   await h.click("克隆音色");
   expect(h.container.querySelector("progress")).not.toBeNull();
+  const button = h.container.querySelector<HTMLButtonElement>('button[type="submit"]');
+  if (!button) throw new Error("Missing primary action");
+  expect(button.disabled).toBe(true);
+  expect(button.title).toBe("语音任务进行中，请稍候");
   await act(async () =>
     finish({
       state: "failed",
@@ -183,6 +253,8 @@ it("renders long-job progress and safe failure text without displaying upstream 
   expect(h.container.textContent).toContain("请在设置中");
   expect(h.container.textContent).not.toContain("unsafe upstream text");
   expect(h.container.querySelector("progress")).toBeNull();
+  expect(button.disabled).toBe(false);
+  expect(button.title).toBe("");
 });
 it("stores a password, clears the draft, and shows only the saved status with replace/clear actions", async () => {
   let keySet = false;

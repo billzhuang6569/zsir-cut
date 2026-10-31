@@ -153,7 +153,9 @@
   background: currentColor;
 }
 .zc-sub-controls .zc-input,
-.zc-sub-parameters .zc-input {
+.zc-sub-parameters .zc-input,
+.zc-voice-form .zc-input,
+.zc-voice-dialog .zc-input {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
@@ -166,16 +168,21 @@
   font: inherit;
 }
 .zc-sub-controls .zc-input::placeholder,
-.zc-sub-parameters .zc-input::placeholder {
+.zc-sub-parameters .zc-input::placeholder,
+.zc-voice-form .zc-input::placeholder,
+.zc-voice-dialog .zc-input::placeholder {
   color: var(--text-4);
 }
 .zc-sub-controls .zc-input:focus,
-.zc-sub-parameters .zc-input:focus {
+.zc-sub-parameters .zc-input:focus,
+.zc-voice-form .zc-input:focus,
+.zc-voice-dialog .zc-input:focus {
   outline: none;
   border-color: var(--text);
 }
 .zc-sub-controls textarea.zc-input,
-.zc-sub-parameters textarea.zc-input {
+.zc-sub-parameters textarea.zc-input,
+.zc-voice-form textarea.zc-input {
   height: auto;
   padding: var(--space-4);
 }

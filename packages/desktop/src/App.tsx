@@ -224,6 +224,9 @@ export function App({ config }: { config?: { port: number; token: string } }) {
                 {state.panel === "media" && media.parameters}
                 {state.panel === "chapters" && chapters.outline}
                 {state.panel === "subtitles" && subtitles.parameters}
+                {state.panel === "voice" && (
+                  <p className="zc-muted">在左侧克隆音色或生成配音，生成后可在「素材」中查看。</p>
+                )}
               </>
             )}
           </section>

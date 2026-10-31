@@ -1,11 +1,12 @@
 import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
 import type { UiState } from "../../app-host/src/ui.js";
 import type { Voice, VoiceSettings } from "../../core/src/voice-storage.js";
-import { IconButton } from "./components.js";
+import { Icon, IconButton } from "./components.js";
 import { DESKTOP_AUTHOR, type ProjectView, requestError } from "./connection.js";
+import "./subtitles.css";
 import "./voice.css";
 
 type Call = (verb: string, request: Record<string, unknown>) => Promise<unknown>;
@@ -122,21 +123,24 @@ export function SettingsPage({ call, close }: { call: Call; close: () => void })
             </div>
             <label>
               默认模型
-              <select
-                className="zc-input"
-                aria-label="默认模型"
-                value={settings.voice.model}
-                onChange={(e) =>
-                  setSettings({
-                    ...settings,
-                    voice: { ...settings.voice, model: e.target.value as VoiceSettings["voice"]["model"] },
-                  })
-                }
-              >
-                {models.map((model) => (
-                  <option key={model}>{model}</option>
-                ))}
-              </select>
+              <span className="zc-sub-select">
+                <select
+                  className="zc-input"
+                  aria-label="默认模型"
+                  value={settings.voice.model}
+                  onChange={(e) =>
+                    setSettings({
+                      ...settings,
+                      voice: { ...settings.voice, model: e.target.value as VoiceSettings["voice"]["model"] },
+                    })
+                  }
+                >
+                  {models.map((model) => (
+                    <option key={model}>{model}</option>
+                  ))}
+                </select>
+                <Icon name="down" />
+              </span>
             </label>
             <label>
               代理地址
@@ -149,9 +153,12 @@ export function SettingsPage({ call, close }: { call: Call; close: () => void })
                 onChange={(e) => setSettings({ ...settings, network: { proxy: e.target.value || null } })}
               />
             </label>
-            <button className="zc-btn zc-btn-primary" type="submit">
-              {busy ? "保存中…" : "保存"}
-            </button>
+            <div className="zc-voice-actions">
+              <button className="zc-btn zc-btn-primary" type="submit">
+                <Icon name="check" />
+                {busy ? "保存中…" : "保存"}
+              </button>
+            </div>
           </fieldset>
         </form>
       )}
@@ -172,6 +179,7 @@ export function useVoicePanel({
   project: ProjectView | null;
   config?: { port: number; token: string } | undefined;
 }) {
+  const hintId = useId();
   const [voices, setVoices] = useState<Voice[]>([]);
   const [voiceId, setVoiceId] = useState("");
   const [file, setFile] = useState("");
@@ -297,9 +305,19 @@ export function useVoicePanel({
       }
     }
   };
+  const cloneHint = busy ? "语音任务进行中，请稍候" : !file ? "请选择参考音频" : !name.trim() ? "请输入音色名称" : "";
+  const generateHint = busy
+    ? "语音任务进行中，请稍候"
+    : !project || !state.project
+      ? "请先打开工程"
+      : !voiceId
+        ? "请先克隆并选择音色"
+        : items.some(({ text }) => !text.trim())
+          ? "请填写每段配音文字"
+          : "";
   const controls = (
     <div className="zc-voice-form">
-      <div className="zc-seg" role="tablist" aria-label="语音子页">
+      <div className="zc-tabs" role="tablist" aria-label="语音子页">
         {[
           ["clone", "克隆"],
           ["generate", "生成"],
@@ -307,7 +325,7 @@ export function useVoicePanel({
         ].map(([value, label]) => (
           <button
             key={value}
-            className="zc-btn"
+            className="zc-tab"
             type="button"
             role="tab"
             aria-selected={sub === value}
@@ -370,6 +388,7 @@ export function useVoicePanel({
           <form
             onSubmit={(e) => {
               e.preventDefault();
+              if (cloneHint) return;
               void run("voice_clone", { name, file }, "音色已加入音色库");
             }}
           >
@@ -384,9 +403,21 @@ export function useVoicePanel({
                 onChange={(e) => setName(e.target.value)}
               />
             </label>
-            <button className="zc-btn zc-btn-primary" type="submit" disabled={busy || !file || !name.trim()}>
+            <button
+              className="zc-btn zc-btn-primary"
+              type="submit"
+              disabled={!!cloneHint}
+              title={cloneHint || undefined}
+              aria-describedby={cloneHint ? `${hintId}-clone` : undefined}
+            >
+              <Icon name="audio" />
               克隆音色
             </button>
+            {cloneHint && (
+              <p className="zc-muted" id={`${hintId}-clone`}>
+                {cloneHint}
+              </p>
+            )}
           </form>
           <h3>音色库</h3>
           {voices.length === 0 && <p className="zc-muted">还没有音色，先克隆一个吧</p>}
@@ -429,7 +460,7 @@ export function useVoicePanel({
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            if (!project || !state.project) return;
+            if (generateHint || !project || !state.project) return;
             void run(
               "voice_generate",
               {
@@ -450,21 +481,24 @@ export function useVoicePanel({
           <fieldset disabled={busy}>
             <label>
               音色
-              <select
-                className="zc-input"
-                aria-label="音色"
-                value={voiceId}
-                onChange={(e) => setVoiceId(e.target.value)}
-              >
-                <option value="" disabled>
-                  请选择音色
-                </option>
-                {voices.map((voice) => (
-                  <option key={voice.id} value={voice.id}>
-                    {voice.name}
+              <span className="zc-sub-select">
+                <select
+                  className="zc-input"
+                  aria-label="音色"
+                  value={voiceId}
+                  onChange={(e) => setVoiceId(e.target.value)}
+                >
+                  <option value="" disabled>
+                    请选择音色
                   </option>
-                ))}
-              </select>
+                  {voices.map((voice) => (
+                    <option key={voice.id} value={voice.id}>
+                      {voice.name}
+                    </option>
+                  ))}
+                </select>
+                <Icon name="down" />
+              </span>
             </label>
             {items.map((item, index) => (
               <div key={item.id}>
@@ -500,12 +534,20 @@ export function useVoicePanel({
               <summary>细调</summary>
               <label>
                 模型
-                <select className="zc-input" aria-label="模型" value={model} onChange={(e) => setModel(e.target.value)}>
-                  <option value="">使用设置中的默认模型</option>
-                  {models.map((value) => (
-                    <option key={value}>{value}</option>
-                  ))}
-                </select>
+                <span className="zc-sub-select">
+                  <select
+                    className="zc-input"
+                    aria-label="模型"
+                    value={model}
+                    onChange={(e) => setModel(e.target.value)}
+                  >
+                    <option value="">使用设置中的默认模型</option>
+                    {models.map((value) => (
+                      <option key={value}>{value}</option>
+                    ))}
+                  </select>
+                  <Icon name="down" />
+                </span>
               </label>
               {[
                 ["speed", "语速", 0.5, 2, 1],
@@ -537,32 +579,43 @@ export function useVoicePanel({
               ))}
               <label>
                 响度归一化
-                <select
-                  className="zc-input"
-                  aria-label="响度归一化"
-                  value={params.normalize_loudness === undefined ? "" : String(params.normalize_loudness)}
-                  onChange={(e) =>
-                    setParams((old) => {
-                      const next = { ...old };
-                      if (e.target.value === "") delete next.normalize_loudness;
-                      else next.normalize_loudness = e.target.value === "true";
-                      return next;
-                    })
-                  }
-                >
-                  <option value="">默认（开启）</option>
-                  <option value="true">开启</option>
-                  <option value="false">关闭</option>
-                </select>
+                <span className="zc-sub-select">
+                  <select
+                    className="zc-input"
+                    aria-label="响度归一化"
+                    value={params.normalize_loudness === undefined ? "" : String(params.normalize_loudness)}
+                    onChange={(e) =>
+                      setParams((old) => {
+                        const next = { ...old };
+                        if (e.target.value === "") delete next.normalize_loudness;
+                        else next.normalize_loudness = e.target.value === "true";
+                        return next;
+                      })
+                    }
+                  >
+                    <option value="">默认（开启）</option>
+                    <option value="true">开启</option>
+                    <option value="false">关闭</option>
+                  </select>
+                  <Icon name="down" />
+                </span>
               </label>
             </details>
             <button
               className="zc-btn zc-btn-primary"
               type="submit"
-              disabled={!project || !voiceId || items.some(({ text }) => !text.trim())}
+              disabled={!!generateHint}
+              title={generateHint || undefined}
+              aria-describedby={generateHint ? `${hintId}-generate` : undefined}
             >
+              <Icon name="audio" />
               生成配音
             </button>
+            {generateHint && (
+              <p className="zc-muted" id={`${hintId}-generate`}>
+                {generateHint}
+              </p>
+            )}
           </fieldset>
         </form>
       )}

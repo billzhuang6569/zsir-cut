@@ -12,14 +12,12 @@
   margin: 0;
 }
 .zc-voice-form label {
-  display: block;
-  color: var(--text-2);
+  display: grid;
+  gap: var(--space-3);
+  color: var(--text-3);
 }
-.zc-voice-form .zc-input {
-  width: 100%;
-}
-.zc-voice-form textarea {
-  height: 120px;
+.zc-voice-form textarea.zc-input {
+  min-height: calc(var(--input-h) * 3);
   resize: vertical;
 }
 .zc-voice-form details > label {
@@ -55,4 +53,26 @@
 }
 .zc-voice-dialog > .zc-voice-row {
   margin-bottom: var(--space-8);
+}
+
+.zc-voice-form .zc-muted,
+.zc-parameters[data-panel="voice"] .zc-muted {
+  font-family: var(--font-sans);
+}
+.zc-voice-form .zc-muted {
+  margin: 0;
+}
+.zc-voice-form .zc-btn.zc-btn-primary:disabled {
+  background: transparent;
+  color: var(--text-off);
+  border: 1px solid var(--line);
+  cursor: not-allowed;
+}
+.zc-voice-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.zc-tab:focus:not(:focus-visible),
+.zc-voice-dialog .zc-ibtn:focus:not(:focus-visible) {
+  outline: none;
 }
