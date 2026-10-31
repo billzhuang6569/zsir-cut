@@ -11,6 +11,7 @@ import { App } from "../src/App.js";
 import type { ProjectView } from "../src/connection.js";
 import { connectHost } from "../src/connection.js";
 import { applyUi, initialState } from "../src/state.js";
+import { caretOffset } from "../src/subtitles.js";
 import { TimelinePreview } from "../src/TimelinePreview.js";
 import { tokenCss } from "../src/tokens.js";
 import { recordingCanvas } from "./canvas.js";
@@ -339,12 +340,13 @@ it("opens the project through inspect and receives UI commands", async () => {
       const clip = container.querySelector<HTMLButtonElement>(".zc-clip-subtitle");
       if (!clip) throw new Error("Missing subtitle clip");
       await act(() => clip.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
-      const editor = container.querySelector<HTMLTextAreaElement>('[aria-label="编辑字幕"]');
+      const editor = container.querySelector<HTMLElement>('[aria-label="编辑字幕"]');
       if (!editor) throw new Error("Missing subtitle editor");
-      expect(editor.value).toBe(cues[0].text);
+      expect(editor.getAttribute("contenteditable")).toBe("true");
+      expect(editor.textContent).toBe(cues[0].text);
       expect(document.activeElement).toBe(editor);
-      expect(editor.selectionStart).toBe(editor.value.length);
-      expect(editor.selectionEnd).toBe(editor.value.length);
+      expect(caretOffset(editor)).toBe(cues[0].text.length);
+      expect(window.getSelection()?.isCollapsed).toBe(true);
       expect(scroll).toHaveBeenCalledWith({ block: "nearest" });
       expect(container.querySelector('[role="tab"][id$="-subtitles"]')?.getAttribute("aria-selected")).toBe("true");
     } finally {

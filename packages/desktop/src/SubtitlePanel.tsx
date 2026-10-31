@@ -1,10 +1,24 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { UiState } from "../../app-host/src/ui.js";
 import { Icon, IconButton } from "./components.js";
 import type { ProjectView } from "./connection.js";
 import { DESKTOP_AUTHOR } from "./connection.js";
 import { SubtitleCanvas } from "./SubtitleCanvas.js";
-import { alignment, defaultStyle, subtitleStyleOps, textEdit } from "./subtitles.js";
+import {
+  alignment,
+  canMerge,
+  caretLine,
+  caretOffset,
+  cueEdit,
+  cueKey,
+  cueLocked,
+  defaultStyle,
+  editorText,
+  placeCaret,
+  type SubtitleOp,
+  subtitleStyleOps,
+  tokenSpans,
+} from "./subtitles.js";
 import { mediaUrl } from "./TimelinePreview.js";
 import {
   type CueView,
@@ -20,6 +34,7 @@ import {
   seekTarget,
   sourceAt,
   sub,
+  timecode,
 } from "./timeline.js";
 import "./subtitles.css";
 
@@ -218,6 +233,219 @@ function NumberSetting({
     </label>
   );
 }
+function SubtitleRow({
+  cue,
+  active,
+  busy,
+  match,
+  register,
+  begin,
+  end,
+  commit,
+  navigate,
+  merge,
+  undo,
+  context,
+}: {
+  cue: CueView;
+  active: boolean;
+  busy: boolean;
+  match?: { start: number; end: number } | undefined;
+  register: (node: HTMLDivElement | null) => void;
+  begin: () => void;
+  end: () => void;
+  commit: (text: string, splitAt?: number) => Promise<boolean>;
+  navigate: (direction: number, offset: number) => void;
+  merge: (direction: number, text: string) => Promise<boolean>;
+  undo: (redo: boolean) => void;
+  context: (event: React.MouseEvent, offset: number, token?: string) => void;
+}) {
+  const node = useRef<HTMLDivElement | null>(null);
+  const draft = useRef(cue.text);
+  const committed = useRef(cue.text);
+  const history = useRef([{ text: cue.text, offset: 0 }]);
+  const historyAt = useRef(0);
+  const skipBlur = useRef(false);
+  const readonly = !!cueLocked(cue);
+  const escapeHtml = (text: string) =>
+    text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+  let spans: ReturnType<typeof tokenSpans> = [];
+  try {
+    spans = tokenSpans(cue);
+  } catch {
+    /* Overrides have no source-token mapping. */
+  }
+  const boundaries = [
+    ...new Set([
+      0,
+      cue.text.length,
+      ...spans.flatMap((span) => [span.start, span.end]),
+      ...(match ? [match.start, match.end] : []),
+    ]),
+  ].sort((a, b) => a - b);
+  const html = boundaries
+    .slice(0, -1)
+    .map((start, index) => {
+      const stop = boundaries[index + 1] ?? cue.text.length;
+      const span = spans.find((span) => span.start <= start && span.end >= stop && span.token.text);
+      const changed =
+        span?.token.state === "edited" && span.token.heard !== undefined && span.token.heard !== span.token.text;
+      const text = escapeHtml(cue.text.slice(start, stop));
+      const marked = match && start >= match.start && stop <= match.end ? `<mark>${text}</mark>` : text;
+      return span
+        ? `<span data-token="${escapeHtml(span.token.id)}"${changed ? ` class="zc-sub-edited" title="原来：${escapeHtml(span.token.heard ?? "")}"` : ""}>${marked}</span>`
+        : marked;
+    })
+    .join("");
+  useEffect(() => {
+    if (!node.current) return;
+    // Keep the browser's caret and input DOM intact while typing.
+    if (document.activeElement !== node.current || draft.current === cue.text) node.current.innerHTML = html;
+  }, [html, cue.text]);
+  useEffect(() => {
+    committed.current = cue.text;
+    draft.current = cue.text;
+    history.current = [{ text: cue.text, offset: 0 }];
+    historyAt.current = 0;
+  }, [cue.text]);
+  const record = () => {
+    if (!node.current) return;
+    draft.current = editorText(node.current);
+    history.current = history.current.slice(0, historyAt.current + 1);
+    history.current.push({ text: draft.current, offset: caretOffset(node.current) });
+    historyAt.current++;
+  };
+  const leave = async (text: string, splitAt?: number) => {
+    skipBlur.current = true;
+    const ok = await commit(text, splitAt);
+    if (ok) {
+      committed.current = text;
+      history.current = [{ text, offset: node.current ? caretOffset(node.current) : 0 }];
+      historyAt.current = 0;
+    }
+    skipBlur.current = false;
+    return ok;
+  };
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: Inline rich text editing requires contentEditable.
+    <div
+      className="zc-sub-text"
+      role="textbox"
+      aria-label={active ? "编辑字幕" : cue.text}
+      aria-multiline="true"
+      aria-readonly={readonly}
+      contentEditable={!readonly && !busy}
+      suppressContentEditableWarning
+      tabIndex={0}
+      ref={(element) => {
+        node.current = element;
+        register(element);
+      }}
+      onFocus={() => {
+        skipBlur.current = false;
+        if (!readonly) begin();
+      }}
+      onClick={() => {
+        if (!active) begin();
+      }}
+      onInput={record}
+      onPaste={(event) => {
+        if (readonly) return;
+        event.preventDefault();
+        const range = window.getSelection()?.rangeCount ? window.getSelection()?.getRangeAt(0) : null;
+        if (!range || !node.current?.contains(range.commonAncestorContainer)) return;
+        range.deleteContents();
+        const text = document.createTextNode(event.clipboardData.getData("text/plain").replace(/\r\n?/g, "\n"));
+        range.insertNode(text);
+        range.setStartAfter(text);
+        range.collapse(true);
+        window.getSelection()?.removeAllRanges();
+        window.getSelection()?.addRange(range);
+        record();
+      }}
+      onBlur={() => {
+        if (skipBlur.current || readonly) return;
+        if (draft.current !== committed.current) void leave(draft.current);
+        else end();
+      }}
+      onContextMenu={(event) =>
+        context(
+          event,
+          node.current ? caretOffset(node.current) : 0,
+          (event.target as HTMLElement).closest<HTMLElement>("[data-token]")?.dataset.token,
+        )
+      }
+      onKeyDown={(event) => {
+        if (event.nativeEvent.isComposing || readonly || !node.current) return;
+        const element = node.current;
+        const text = editorText(element),
+          offset = caretOffset(element);
+        const selected = !window.getSelection()?.isCollapsed;
+        const line = event.key === "ArrowUp" || event.key === "ArrowDown" ? caretLine(element, text, offset) : null;
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
+          event.preventDefault();
+          event.stopPropagation();
+          if (text !== committed.current) {
+            const next = historyAt.current + (event.shiftKey ? 1 : -1);
+            const snapshot = history.current[next];
+            if (snapshot) {
+              historyAt.current = next;
+              draft.current = snapshot.text;
+              element.textContent = snapshot.text;
+              placeCaret(element, snapshot.offset);
+            }
+          } else undo(event.shiftKey);
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          skipBlur.current = true;
+          element.innerHTML = html;
+          draft.current = cue.text;
+          history.current = [{ text: cue.text, offset: 0 }];
+          historyAt.current = 0;
+          element.blur();
+          end();
+        } else if (event.key === "Enter") {
+          event.preventDefault();
+          event.stopPropagation();
+          if (event.shiftKey) {
+            const range = window.getSelection()?.rangeCount ? window.getSelection()?.getRangeAt(0) : null;
+            if (!range) return;
+            range.deleteContents();
+            const line = document.createTextNode("\n");
+            range.insertNode(line);
+            range.setStartAfter(line);
+            range.collapse(true);
+            window.getSelection()?.removeAllRanges();
+            window.getSelection()?.addRange(range);
+            record();
+          } else if (offset === text.length) {
+            void leave(text).then((ok) => {
+              if (ok) navigate(1, 0);
+            });
+          } else if (offset > 0 && cue.transcript_id && !cue.text_override) void leave(text, offset);
+        } else if (
+          ((event.key === "Backspace" && offset === 0) || (event.key === "Delete" && offset === text.length)) &&
+          !selected
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+          skipBlur.current = true;
+          void merge(event.key === "Backspace" ? -1 : 1, text).then(() => {
+            skipBlur.current = false;
+          });
+        } else if ((event.key === "ArrowUp" && line?.first) || (event.key === "ArrowDown" && line?.last)) {
+          event.preventDefault();
+          event.stopPropagation();
+          void leave(text).then((ok) => {
+            if (ok) navigate(event.key === "ArrowUp" ? -1 : 1, line?.column ?? 0);
+          });
+        }
+      }}
+    />
+  );
+}
+
 export function useSubtitlePanel({
   project,
   state,
@@ -242,16 +470,31 @@ export function useSubtitlePanel({
     };
   }, []);
   const [error, setError] = useState("");
-  const [editing, setEditing] = useState<string | null>(null),
-    [draft, setDraft] = useState("");
-  const editInput = useRef<HTMLTextAreaElement>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const rowRefs = useRef(new Map<string, HTMLDivElement>());
+  const scrollAt = useRef(-Infinity);
+  const followScroll = useRef(false);
+  const pendingFocus = useRef<{ id: string; offset: number } | null>(null);
+  const anchor = useRef<string | null>(null);
+  const [menu, setMenu] = useState<{ cue: CueView; offset: number; token?: string; x: number; y: number } | null>(null);
   useEffect(() => {
-    if (!editing || !editInput.current) return;
-    const input = editInput.current;
-    input.focus();
-    input.setSelectionRange(input.value.length, input.value.length);
-    input.closest(".zc-sub-row")?.scrollIntoView?.({ block: "nearest" });
-  }, [editing]);
+    if (!menu) return;
+    const dismiss = (event: PointerEvent) => {
+      if (!(event.target as HTMLElement).closest('[aria-label="字幕菜单"]')) setMenu(null);
+    };
+    window.addEventListener("pointerdown", dismiss);
+    return () => window.removeEventListener("pointerdown", dismiss);
+  }, [menu]);
+  const [more, setMore] = useState(false);
+  const [stylePicker, setStylePicker] = useState(false);
+  const [ai, setAi] = useState<{ verb: string; cue_ids?: string[] } | null>(null);
+  const [aiRequest, setAiRequest] = useState("");
+  const lastAi = useRef<{ verb: string; cue_ids?: string[]; request?: string } | null>(null);
+  const [aiRows, setAiRows] = useState<string[] | null>(null);
+  const [aiStarting, setAiStarting] = useState(false);
+  const [matchIndex, setMatchIndex] = useState(0);
   const [skipped, setSkipped] = useState<string[]>([]);
   const [fillersOpen, setFillersOpen] = useState(false);
   const [replaceOpen, setReplaceOpen] = useState(false);
@@ -269,6 +512,13 @@ export function useSubtitlePanel({
   const cues = project?.cues ?? [];
   const at = project ? seekTarget(project, cues, state.playhead) : "0s";
   const subtitleTracks = project?.subtitleTracks ?? project?.tracks.filter((track) => track.kind === "subtitle") ?? [];
+  useEffect(() => {
+    const ids = [...new Set(state.selected.filter((id) => cues.some((cue) => cue.cue_id === id)))];
+    const active = editing ? (cues.find((cue) => cueKey(cue) === editing)?.cue_id ?? null) : null;
+    const reported = state.subtitle_selection;
+    if (!reported || reported.editing !== active || JSON.stringify(reported.cue_ids) !== JSON.stringify(ids))
+      update({ ...state, subtitle_selection: { cue_ids: ids, editing: active } });
+  }, [state, cues, editing, update]);
   const styleTrack = subtitleTracks.find((track) => track.id === styleTrackId) ?? subtitleTracks[0];
   const trackCues = cues.filter((cue) => cue.track_id === styleTrack?.id);
   const sample = selectedOnly
@@ -279,13 +529,6 @@ export function useSubtitlePanel({
   const style = project?.styles.find((item) => item.id === (selectedOnly ? selectedCue?.style_id : styleId));
   const [styleDraft, setStyleDraft] = useState<StyleView>(style ?? defaultStyle);
   useEffect(() => setStyleDraft({ ...(style ?? defaultStyle), ...pendingStyle.current?.fields }), [style]);
-  useEffect(() => {
-    const cue = cues.find((cue) => cue.cue_id === state.subtitle_selection?.editing);
-    if (cue) {
-      setEditing(`${cue.track_id}:${cue.cue_id}:${cue.piece}:${cue.start}`);
-      setDraft(cue.text);
-    }
-  }, [cues, state.subtitle_selection?.editing]);
   const write = async (ops: Record<string, unknown>[], label: string) => {
     if (!project || locked.current || !ops.length) return false;
     locked.current = true;
@@ -364,49 +607,82 @@ export function useSubtitlePanel({
       setProgress(null);
     }
   };
-  const choose = (cue: CueView) =>
-    update({ ...state, selected: [cue.cue_id], playhead: { at: cue.start }, preview: "timeline", playing: false });
-  const begin = (cue: CueView) => {
-    setEditing(`${cue.track_id}:${cue.cue_id}:${cue.piece}:${cue.start}`);
-    setDraft(cue.text);
+  const selection = (ids: string[], active: string | null = null, cue?: CueView) => {
+    setEditing(active);
+    update({
+      ...stateRef.current,
+      selected: ids,
+      subtitle_selection: { cue_ids: ids, editing: active ? (cue?.cue_id ?? null) : null },
+      ...(cue ? { playhead: { at: cue.start }, preview: "timeline" as const, playing: false } : {}),
+    });
   };
-  const saveText = async (cue: CueView) => {
-    if (draft === cue.text) {
-      setEditing(null);
-      return;
+  const focusRow = useCallback((id: string, offset: number) => {
+    pendingFocus.current = { id, offset };
+    const node = rowRefs.current.get(id);
+    if (node) {
+      placeCaret(node, offset);
+      node.closest(".zc-sub-row")?.scrollIntoView?.({ block: "nearest" });
+      pendingFocus.current = null;
     }
-    const op = textEdit(cue, draft);
-    if (cue.transcript_id && !cue.text_override && !op) {
-      setError("字幕内容已变化，请刷新工程后重试");
-      return;
+  }, []);
+  useEffect(() => {
+    const target = pendingFocus.current;
+    if (target) focusRow(target.id, target.offset);
+  });
+  const begin = (cue: CueView) => {
+    setEditing(cueLocked(cue) ? null : cueKey(cue));
+    pendingFocus.current = { id: cueKey(cue), offset: cue.text.length };
+  };
+  const rowOps = (cue: CueView, text: string): SubtitleOp[] => {
+    if (text === cue.text) return [];
+    if (cue.text_override)
+      return [
+        { op: "set_override", track_id: cue.track_id, occurrence_id: cue.occurrence_id, cue_id: cue.cue_id, text },
+      ];
+    if (cue.transcript_id) return cueEdit(cue, text).ops;
+    return [
+      { op: "remove_free_cue", track_id: cue.track_id, id: cue.cue_id },
+      {
+        op: "add_free_cue",
+        track_id: cue.track_id,
+        id: cue.cue_id,
+        timeline_start: cue.start,
+        duration: printRational(sub(parseRational(cue.end, true), parseRational(cue.start, true)), true),
+        text,
+        style_id: cue.style_id,
+      },
+    ];
+  };
+  const commitRow = async (cue: CueView, text: string, splitAt?: number) => {
+    try {
+      const plan =
+        splitAt !== undefined && cue.transcript_id && !cue.text_override
+          ? cueEdit(cue, text, splitAt)
+          : { ops: rowOps(cue, text), newCue: undefined };
+      const ok = !plan.ops.length || (await write(plan.ops, splitAt !== undefined ? "拆分字幕" : "修改字幕"));
+      if (ok) {
+        if (stateRef.current.subtitle_selection?.editing === cue.cue_id) selection(stateRef.current.selected);
+        if (plan.newCue) focusRow(plan.newCue, 0);
+      }
+      return ok;
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "字幕修改失败");
+      return false;
     }
-    const ops = cue.text_override
-      ? [
-          {
-            op: "set_override",
-            track_id: cue.track_id,
-            occurrence_id: cue.occurrence_id,
-            cue_id: cue.cue_id,
-            text: draft,
-          },
-        ]
-      : cue.transcript_id
-        ? op
-          ? [op]
-          : []
-        : [
-            { op: "remove_free_cue", track_id: cue.track_id, id: cue.cue_id },
-            {
-              op: "add_free_cue",
-              track_id: cue.track_id,
-              id: cue.cue_id,
-              timeline_start: cue.start,
-              duration: printRational(sub(parseRational(cue.end, true), parseRational(cue.start, true)), true),
-              text: draft,
-              style_id: cue.style_id,
-            },
-          ];
-    if (await write(ops, "编辑字幕文字")) setEditing(null);
+  };
+  const projectUndo = async (redo: boolean) => {
+    if (!project || locked.current) return;
+    try {
+      await call(redo ? "redo" : "undo", {
+        project: state.project,
+        base_revision: project.revision.id,
+        idempotency_key: crypto.randomUUID(),
+        author: DESKTOP_AUTHOR,
+        label: redo ? "重做" : "撤销",
+      });
+    } catch {
+      setError("撤销或重做失败，请重试");
+    }
   };
   const styleContext = useRef({ project, state, write, selectedOnly });
   styleContext.current = { project, state, write, selectedOnly };
@@ -618,6 +894,156 @@ export function useSubtitlePanel({
   const visible = cues
     .filter((cue) => cue.text.toLocaleLowerCase().includes(browser.search.toLocaleLowerCase()))
     .sort((a, b) => compare(parseRational(a.start, true), parseRational(b.start, true)));
+  const ordered = useMemo(
+    () => [...cues].sort((a, b) => compare(parseRational(a.start, true), parseRational(b.start, true))),
+    [cues],
+  );
+  const selected = ordered.filter(
+    (cue, index) =>
+      state.selected.includes(cue.cue_id) && ordered.findIndex((row) => row.cue_id === cue.cue_id) === index,
+  );
+  const contiguous = (rows: CueView[]) =>
+    canMerge(rows) &&
+    rows.every((cue, index) => !index || ordered.indexOf(cue) === ordered.indexOf(rows[index - 1] as CueView) + 1);
+  const mergeRows = async (rows: CueView[], pending?: { cue: CueView; text: string }) => {
+    if (!contiguous(rows)) {
+      setError("这两条不能合并");
+      return false;
+    }
+    try {
+      const first = rows[0];
+      if (!first) return false;
+      const ops = rows.flatMap((cue) => {
+        const node = rowRefs.current.get(cueKey(cue));
+        return rowOps(cue, pending?.cue.cue_id === cue.cue_id ? pending.text : node ? editorText(node) : cue.text);
+      });
+      ops.push({ op: "merge_cues", cue_ids: rows.map((cue) => cue.cue_id) });
+      if (!(await write(ops, "合并字幕"))) return false;
+      selection([first.cue_id], cueKey(first), first);
+      focusRow(first.cue_id, first.text.length);
+      return true;
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "这两条不能合并");
+      return false;
+    }
+  };
+  const deleteRows = (rows: CueView[]) =>
+    void write(
+      rows.flatMap((cue): SubtitleOp[] => {
+        if (cueLocked(cue)) return [];
+        return cue.transcript_id
+          ? [
+              {
+                op: "hide_tokens",
+                transcript_id: cue.transcript_id,
+                tokens: cue.tokens?.filter((token) => token.text).map((token) => token.id) ?? [],
+              },
+            ]
+          : [{ op: "remove_free_cue", track_id: cue.track_id, id: cue.cue_id }];
+      }),
+      "删除字幕",
+    );
+  const selectRow = (cue: CueView, event: React.MouseEvent) => {
+    const ids = stateRef.current.selected;
+    if (event.shiftKey && anchor.current) {
+      const a = visible.findIndex((row) => row.cue_id === anchor.current),
+        b = visible.indexOf(cue);
+      selection(visible.slice(Math.min(a < 0 ? b : a, b), Math.max(a, b) + 1).map((row) => row.cue_id));
+    } else {
+      anchor.current = cue.cue_id;
+      selection(
+        event.metaKey || event.ctrlKey
+          ? ids.includes(cue.cue_id)
+            ? ids.filter((id) => id !== cue.cue_id)
+            : [...ids, cue.cue_id]
+          : [cue.cue_id],
+      );
+    }
+  };
+  const openAi = (verb: string, rows?: CueView[]) => {
+    setMenu(null);
+    setMore(false);
+    setAiRequest("");
+    setAi(rows ? { verb, cue_ids: [...new Set(rows.map((cue) => cue.cue_id))] } : { verb });
+  };
+  const runAi = async (input: { verb: string; cue_ids?: string[]; request?: string }) => {
+    if (aiStarting) return;
+    setAiStarting(true);
+    setError("");
+    lastAi.current = input;
+    try {
+      const { verb, ...request } = input;
+      await call(verb, request);
+      setAiRows(input.cue_ids ?? cues.map((cue) => cue.cue_id));
+      setAi(null);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "AI 字幕处理失败");
+    } finally {
+      setAiStarting(false);
+    }
+  };
+  const manualPass = project?.subtitle_pass;
+  useEffect(() => {
+    if (manualPass && manualPass.state !== "running") setAiRows(null);
+  }, [manualPass]);
+  const matches = visible.flatMap((cue) => {
+    if (!browser.find) return [];
+    const fold = (text: string) =>
+      browser.matchCase
+        ? text
+        : text.replace(/\p{Script=Latin}/gu, (char) => {
+            const lower = char.toLowerCase();
+            return lower.length === char.length ? lower : char;
+          });
+    const text = fold(cue.text),
+      find = fold(browser.find);
+    const found: { cue: CueView; start: number; end: number }[] = [];
+    let start = text.indexOf(find);
+    while (start >= 0) {
+      found.push({ cue, start, end: start + find.length });
+      start = text.indexOf(find, start + find.length);
+    }
+    return found;
+  });
+  const currentMatch = matches.length
+    ? matches[((matchIndex % matches.length) + matches.length) % matches.length]
+    : undefined;
+  const reveal = useCallback((cue: CueView) => {
+    followScroll.current = true;
+    rowRefs.current.get(cueKey(cue))?.closest(".zc-sub-row")?.scrollIntoView?.({ block: "nearest" });
+    setTimeout(() => {
+      followScroll.current = false;
+    }, 100);
+  }, []);
+  useEffect(() => {
+    if (currentMatch) reveal(currentMatch.cue);
+  }, [currentMatch, reveal]);
+  useEffect(() => {
+    if (!state.playing || Date.now() - scrollAt.current < 3000) return;
+    const current = ordered.find((cue) => contains(cue.start, cue.end, at));
+    if (current) reveal(current);
+  }, [at, state.playing, ordered, reveal]);
+  const contextRows =
+    menu && selected.length > 1 && selected.some((cue) => cue.cue_id === menu.cue.cue_id)
+      ? selected
+      : menu
+        ? [menu.cue]
+        : [];
+  const menuAction = (label: string, action: () => void, disabled = false) => (
+    <button
+      key={label}
+      type="button"
+      role="menuitem"
+      disabled={disabled}
+      onClick={() => {
+        setMenu(null);
+        setMore(false);
+        action();
+      }}
+    >
+      {label}
+    </button>
+  );
   const parameters = (
     <div className="zc-sub-parameters">
       <div className="zc-tabs" role="tablist" aria-label="字幕参数">
@@ -642,16 +1068,67 @@ export function useSubtitlePanel({
           )}
         </p>
       )}
-      {breaking ? (
+      <div className="zc-sub-heading">
+        <span>字幕</span>
+        <IconButton icon="down" label="更多字幕操作" aria-expanded={more} onClick={() => setMore(!more)} />
+        {more && (
+          <div role="menu" aria-label="更多字幕操作">
+            {menuAction("全部重新分行", () => openAi("subtitle_tidy"))}
+            {menuAction("全部校对", () => openAi("subtitle_proofread"))}
+          </div>
+        )}
+      </div>
+      {ai && (
+        <form
+          className="zc-sub-ai"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void runAi({ ...ai, ...(aiRequest.trim() ? { request: aiRequest.trim() } : {}) });
+          }}
+        >
+          <input
+            className="zc-input"
+            aria-label="有什么要求？（可以不填）"
+            placeholder="有什么要求？（可以不填）"
+            maxLength={200}
+            value={aiRequest}
+            onChange={(event) => setAiRequest(event.target.value)}
+          />
+          <button type="submit" className="zc-btn zc-btn-primary" disabled={aiStarting}>
+            开始
+          </button>
+          <IconButton icon="close" label="取消 AI 操作" onClick={() => setAi(null)} />
+        </form>
+      )}
+      {manualPass?.state === "running" && (
+        <output>
+          {manualPass.kind === "tidy" ? "AI 重新分行" : "AI 校对"} · {manualPass.done}/{manualPass.total}
+        </output>
+      )}
+      {(error || manualPass?.state === "failed") && (
+        <p role="alert">
+          {error || manualPass?.reason}
+          {lastAi.current && (
+            <IconButton
+              icon="refresh"
+              label="重试 AI 操作"
+              onClick={() => {
+                if (lastAi.current) void runAi(lastAi.current);
+              }}
+            />
+          )}
+        </p>
+      )}
+      {breaking && !manualPass ? (
         <p className="zc-muted">
           识别完成，AI 正在按意思断句，大约还要 {Math.max(1, Math.ceil((total - done) / 6))} 分钟
         </p>
-      ) : failed.length ? (
+      ) : failed.length && !manualPass ? (
         <p role="alert">
           {failed.map((warning) => warning.reason).join("；")}{" "}
           <IconButton icon="refresh" label="重新整理" onClick={() => void call("chat_subtitle_retry", {})} />
         </p>
-      ) : pending ? (
+      ) : pending && !manualPass ? (
         <p className="zc-muted">识别完成，AI 正在按意思断句</p>
       ) : state.sub !== "style" ? (
         <>
@@ -679,7 +1156,10 @@ export function useSubtitlePanel({
                 className="zc-input"
                 aria-label="查找"
                 value={browser.find}
-                onChange={(e) => setBrowser({ find: e.target.value })}
+                onChange={(e) => {
+                  setMatchIndex(0);
+                  setBrowser({ find: e.target.value });
+                }}
               />
               <input
                 className="zc-input"
@@ -699,6 +1179,30 @@ export function useSubtitlePanel({
                 />
                 区分大小写
               </label>
+              <IconButton
+                icon="prev"
+                label="上一个"
+                disabled={!matches.length}
+                onClick={() => setMatchIndex((matchIndex + matches.length - 1) % matches.length)}
+              />
+              <IconButton
+                icon="next"
+                label="下一个"
+                disabled={!matches.length}
+                onClick={() => setMatchIndex((matchIndex + 1) % matches.length)}
+              />
+              <button
+                type="button"
+                className="zc-btn zc-btn-secondary"
+                disabled={busy || !currentMatch || !!cueLocked(currentMatch.cue)}
+                onClick={() => {
+                  if (!currentMatch) return;
+                  const { cue, start, end } = currentMatch;
+                  void commitRow(cue, cue.text.slice(0, start) + browser.replace + cue.text.slice(end));
+                }}
+              >
+                替换
+              </button>
               <button
                 className="zc-btn zc-btn-secondary"
                 type="button"
@@ -723,71 +1227,163 @@ export function useSubtitlePanel({
           )}
           {!!skipped.length && <output className="zc-sub-attention">跳过 {skipped.length} 条锁定字幕</output>}
           {!visible.length && <p className="zc-muted">暂无字幕</p>}
-          <div className="zc-sub-list">
+          {selected.length > 1 && (
+            <div className="zc-sub-toolbar" role="toolbar" aria-label="字幕批量操作">
+              <span>已选 {selected.length} 条</span>
+              <IconButton
+                icon="replace"
+                label="合并"
+                disabled={busy || !contiguous(selected)}
+                onClick={() => void mergeRows(selected)}
+              />
+              <IconButton
+                icon="trash"
+                label="删除选中字幕"
+                disabled={busy || selected.some(cueLocked)}
+                onClick={() => deleteRows(selected)}
+              />
+              <IconButton icon="subtitle" label="样式" onClick={() => setStylePicker(!stylePicker)} />
+              <IconButton icon="spark" label="AI 重新分行" onClick={() => openAi("subtitle_tidy", selected)} />
+              <IconButton icon="check" label="AI 校对" onClick={() => openAi("subtitle_proofread", selected)} />
+              <IconButton icon="close" label="取消选择" onClick={() => selection([])} />
+            </div>
+          )}
+          {stylePicker && (
+            <div role="menu" aria-label="字幕样式">
+              {project?.styles.map((style) =>
+                menuAction(
+                  style.name ?? style.id,
+                  () => {
+                    setStylePicker(false);
+                    void write(
+                      selected.flatMap((cue): SubtitleOp[] =>
+                        cue.transcript_id
+                          ? [{ op: "set_cue", cue_id: cue.cue_id, style_id: style.id }]
+                          : [
+                              { op: "remove_free_cue", track_id: cue.track_id, id: cue.cue_id },
+                              {
+                                op: "add_free_cue",
+                                track_id: cue.track_id,
+                                id: cue.cue_id,
+                                timeline_start: cue.start,
+                                duration: printRational(
+                                  sub(parseRational(cue.end, true), parseRational(cue.start, true)),
+                                  true,
+                                ),
+                                text: cue.text,
+                                style_id: style.id,
+                              },
+                            ],
+                      ),
+                      "修改字幕样式",
+                    );
+                  },
+                  busy || selected.some(cueLocked),
+                ),
+              )}
+            </div>
+          )}
+          <fieldset
+            className="zc-sub-list"
+            aria-label="字幕列表"
+            // biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard selection needs a focusable list outside editing.
+            tabIndex={0}
+            onScrollCapture={() => {
+              if (!followScroll.current) scrollAt.current = Date.now();
+            }}
+            onPointerDown={(event) => {
+              if (event.target === event.currentTarget) scrollAt.current = Date.now();
+            }}
+            onWheel={() => {
+              scrollAt.current = Date.now();
+            }}
+            onTouchMove={() => {
+              scrollAt.current = Date.now();
+            }}
+            onKeyDown={(event) => {
+              if (
+                (event.metaKey || event.ctrlKey) &&
+                event.key.toLowerCase() === "a" &&
+                !(event.target as HTMLElement).isContentEditable &&
+                (event.target as HTMLElement).getAttribute("contenteditable") !== "true"
+              ) {
+                event.preventDefault();
+                selection([...new Set(visible.map((cue) => cue.cue_id))]);
+              }
+            }}
+          >
             {visible.map((cue, index) => {
-              const key = `${cue.track_id}:${cue.cue_id}:${cue.piece}:${cue.start}`;
-              const warnings = project?.subtitleWarnings?.filter((w) => w.ids.includes(cue.cue_id)) ?? [];
-              const reasons = warnings.map((w) =>
-                w.code === "W_SUB_SHORT"
-                  ? "字幕显示时间过短"
-                  : w.code === "W_SUB_TOO_WIDE" || w.code === "W_SUB_OVERFLOW"
-                    ? "字幕超出宽度或行数"
-                    : "字幕投影需要检查",
+              const key = cueKey(cue);
+              const warnings = project?.subtitleWarnings?.filter((warning) => warning.ids.includes(cue.cue_id)) ?? [];
+              const reasons = warnings.map((warning) =>
+                warning.code === "W_SUB_SHORT" ? "字幕显示时间过短" : "字幕超出宽度或行数",
               );
+              const running = !!aiRows?.includes(cue.cue_id) && (!manualPass || manualPass.state === "running");
+              const nextTo = (direction: number) => ordered[ordered.indexOf(cue) + direction];
               return (
                 <div
-                  className={`zc-sub-row${state.selected.includes(cue.cue_id) ? " is-selected" : ""}${skipped.includes(cue.cue_id) ? " is-skipped" : ""}`}
+                  className={`zc-sub-row${state.selected.includes(cue.cue_id) ? " is-selected" : ""}${contains(cue.start, cue.end, at) ? " is-current" : ""}${skipped.includes(cue.cue_id) ? " is-skipped" : ""}${running ? " is-running" : ""}`}
                   key={key}
                 >
-                  <span className={warnings.length ? "zc-sub-attention" : "zc-muted"} title={reasons.join("；")}>
-                    {index + 1}
-                  </span>
-                  {editing === key ? (
-                    <textarea
-                      aria-label="编辑字幕"
-                      className="zc-input"
-                      value={draft}
-                      disabled={busy}
-                      ref={editInput}
-                      onChange={(e) => setDraft(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Escape") {
-                          e.preventDefault();
-                          setEditing(null);
-                        }
-                        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                          e.preventDefault();
-                          void saveText(cue);
-                        }
-                      }}
-                    />
-                  ) : (
-                    <button
-                      type="button"
-                      className="zc-sub-text"
-                      onClick={() => choose(cue)}
-                      onDoubleClick={() => begin(cue)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          begin(cue);
-                        }
-                        if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-                          e.preventDefault();
-                          const next = visible[index + (e.key === "ArrowUp" ? -1 : 1)];
-                          if (next) {
-                            choose(next);
-                            const row = e.currentTarget.closest(".zc-sub-row");
-                            (e.key === "ArrowUp" ? row?.previousElementSibling : row?.nextElementSibling)
-                              ?.querySelector<HTMLButtonElement>(".zc-sub-text")
-                              ?.focus();
-                          }
-                        }
-                      }}
-                    >
-                      {cue.text}
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    className="zc-sub-time"
+                    aria-label={`选择字幕 ${index + 1}`}
+                    title={reasons.join("；")}
+                    aria-pressed={state.selected.includes(cue.cue_id)}
+                    onClick={(event) => selectRow(cue, event)}
+                  >
+                    <time>{project ? timecode(cue.start, project) : cue.start}</time>
+                    {cueLocked(cue) && (
+                      <span role="img" aria-label="已锁定">
+                        <Icon name="lock" />
+                      </span>
+                    )}
+                  </button>
+                  <SubtitleRow
+                    cue={cue}
+                    active={editing === key}
+                    busy={busy}
+                    match={currentMatch?.cue === cue ? currentMatch : undefined}
+                    register={(node) => {
+                      if (node) {
+                        rowRefs.current.set(key, node);
+                        rowRefs.current.set(cue.cue_id, node);
+                      } else {
+                        rowRefs.current.delete(key);
+                        rowRefs.current.delete(cue.cue_id);
+                      }
+                    }}
+                    begin={() => {
+                      anchor.current = cue.cue_id;
+                      selection([cue.cue_id], cueLocked(cue) ? null : key, cue);
+                    }}
+                    end={() => {
+                      if (editing === key) selection(stateRef.current.selected);
+                    }}
+                    commit={(text, splitAt) => commitRow(cue, text, splitAt)}
+                    undo={(redo) => void projectUndo(redo)}
+                    navigate={(direction, offset) => {
+                      const next = visible[index + direction];
+                      if (next) {
+                        selection([next.cue_id], cueLocked(next) ? null : cueKey(next), next);
+                        const line =
+                          direction < 0 ? (next.text.split("\n").at(-1) ?? "") : (next.text.split("\n")[0] ?? "");
+                        const start = direction < 0 ? next.text.length - line.length : 0;
+                        focusRow(next.cue_id, start + Array.from(line).slice(0, offset).join("").length);
+                      }
+                    }}
+                    merge={async (direction, text) => {
+                      const next = nextTo(direction);
+                      if (!next) return false;
+                      return mergeRows(direction < 0 ? [next, cue] : [cue, next], { cue, text });
+                    }}
+                    context={(event, offset, token) => {
+                      event.preventDefault();
+                      if (!state.selected.includes(cue.cue_id)) selection([cue.cue_id]);
+                      setMenu({ cue, offset, ...(token ? { token } : {}), x: event.clientX, y: event.clientY });
+                    }}
+                  />
                   <span className="zc-sub-actions">
                     <IconButton
                       icon="plus"
@@ -818,27 +1414,81 @@ export function useSubtitlePanel({
                     <IconButton
                       icon="trash"
                       label="删除字幕"
-                      disabled={busy}
-                      onClick={() =>
-                        void write(
-                          [
-                            cue.transcript_id
-                              ? {
-                                  op: "hide_tokens",
-                                  transcript_id: cue.transcript_id,
-                                  tokens: cue.tokens?.map((token) => token.id) ?? [],
-                                }
-                              : { op: "remove_free_cue", track_id: cue.track_id, id: cue.cue_id },
-                          ],
-                          "删除字幕",
-                        )
-                      }
+                      disabled={busy || !!cueLocked(cue)}
+                      onClick={() => deleteRows([cue])}
                     />
                   </span>
                 </div>
               );
             })}
-          </div>
+          </fieldset>
+          {menu && (
+            <div
+              className="zc-sub-menu"
+              role="menu"
+              aria-label="字幕菜单"
+              onMouseDown={(event) => event.preventDefault()}
+              style={{ left: menu.x, top: menu.y }}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") setMenu(null);
+              }}
+            >
+              {menu.token &&
+                menu.cue.tokens?.some(
+                  (token) =>
+                    token.id === menu.token &&
+                    token.state === "edited" &&
+                    token.heard !== undefined &&
+                    token.heard !== token.text,
+                ) &&
+                menuAction(
+                  "还原",
+                  () => {
+                    const token = menu.cue.tokens?.find((token) => token.id === menu.token);
+                    if (token)
+                      void write(
+                        [
+                          {
+                            op: "edit_text",
+                            transcript_id: menu.cue.transcript_id,
+                            from_token: token.id,
+                            to_token: token.id,
+                            text: token.heard,
+                          },
+                        ],
+                        "修改字幕",
+                      );
+                  },
+                  !!cueLocked(menu.cue),
+                )}
+              {menuAction(
+                "在光标处拆分",
+                () => {
+                  const node = rowRefs.current.get(cueKey(menu.cue));
+                  void commitRow(menu.cue, node ? editorText(node) : menu.cue.text, menu.offset);
+                },
+                !!cueLocked(menu.cue) || !menu.cue.transcript_id || contextRows.length > 1,
+              )}
+              {menuAction("与上一条合并", () => {
+                const previous = ordered[ordered.indexOf(contextRows[0] as CueView) - 1];
+                void mergeRows(previous ? [previous, ...contextRows] : contextRows);
+              })}
+              {menuAction("与下一条合并", () => {
+                const next = ordered[ordered.indexOf(contextRows.at(-1) as CueView) + 1];
+                void mergeRows(next ? [...contextRows, next] : contextRows);
+              })}
+              {menuAction("删除", () => deleteRows(contextRows), contextRows.some(cueLocked))}
+              {menuAction("AI 重新分行", () => openAi("subtitle_tidy", contextRows))}
+              {menuAction("AI 校对", () => openAi("subtitle_proofread", contextRows))}
+              {menuAction("复制文字", () => {
+                if (!navigator.clipboard) setError("当前环境不支持复制");
+                else
+                  void navigator.clipboard
+                    .writeText(contextRows.map((cue) => cue.text).join("\n"))
+                    .catch(() => setError("复制失败"));
+              })}
+            </div>
+          )}
         </>
       ) : (
         <>

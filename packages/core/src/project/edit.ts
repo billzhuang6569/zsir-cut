@@ -784,6 +784,7 @@ export const SUBTITLE_OPS = new Set([
   "set_token_state",
   "resegment",
   "set_cue",
+  "split_token",
   "split_cue",
   "merge_cues",
   "set_override",

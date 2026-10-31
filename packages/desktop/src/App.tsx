@@ -69,6 +69,14 @@ export function App({ config }: { config?: { port: number; token: string } }) {
         const view = projectRef.current;
         const next = applyUi(current.current, verb, request);
         if (view && verb === "ui_select") {
+          const cueIds = [...new Set(next.selected.filter((id) => view.cues.some((cue) => cue.cue_id === id)))];
+          next.subtitle_selection = {
+            cue_ids: cueIds,
+            editing:
+              next.subtitle_selection?.editing && cueIds.includes(next.subtitle_selection.editing)
+                ? next.subtitle_selection.editing
+                : null,
+          };
           const selected = view.media.find((m) => next.selected.includes(m.id));
           if (selected) {
             next.preview = "media";
