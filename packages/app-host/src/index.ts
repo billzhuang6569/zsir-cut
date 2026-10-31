@@ -544,6 +544,9 @@ export async function startHost(
                         default_style_id: track.default_style_id,
                       })) ?? [],
                   subtitlePass: subtitlePass?.state,
+                  unprocessedTranscripts: project.transcripts
+                    .filter((t) => t.cues.length && t.ext?.["zsir.subtitle_pass"] === undefined)
+                    .map((t) => t.id),
                   recognition: project.recognition,
                   recognized: project.transcripts.some((item) => item.raw_runs.some((run) => run.kind === "asr")),
                   recognitionRevision: lastRecognition?.seq,
@@ -569,7 +572,12 @@ export async function startHost(
             let result: unknown;
             if (message.verb === "chat_select") {
               if (!["claude", "codex"].includes(request.agent)) throw new Error("Invalid Agent");
+              const changedAgent = agents.selected !== request.agent;
               agents.selected = request.agent;
+              if (changedAgent) void subtitlePass?.retryFailed().catch(() => {});
+              result = {};
+            } else if (message.verb === "chat_subtitle_retry") {
+              void subtitlePass?.retryFailed().catch(() => {});
               result = {};
             } else if (message.verb === "chat_agents") result = await agents.detect();
             else if (message.verb === "chat_list") result = await agents.list();

@@ -535,7 +535,12 @@ export function TimelinePreview({
   };
   const width = project ? Math.max(800, pixelAt(project.duration.t, scale) + 100) : 800;
   const snapPreview = trimPreview ?? movePreview?.target;
-  const organizing = new Set(project?.subtitlePass?.progress?.map((item) => item.transcript_id) ?? []);
+  const organizing = new Set([
+    ...(project?.unprocessedTranscripts ?? []),
+    ...(project?.subtitlePass?.progress?.map((item) => item.transcript_id) ?? []),
+    ...(project?.subtitlePass?.warnings.map((item) => item.transcript_id).filter((id): id is string => Boolean(id)) ??
+      []),
+  ]);
   const visibleCues =
     project?.cues.filter((cue) => contains(cue.start, cue.end, at) && !organizing.has(cue.transcript_id ?? "")) ?? [];
   const captionKey = visibleCues.map((cue) => `${cue.cue_id}:${cue.piece}:${cue.text}:${cue.style_id}`).join("\0");
