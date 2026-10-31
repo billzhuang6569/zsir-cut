@@ -3,6 +3,7 @@ export type UiVerb = (typeof UI_VERBS)[number];
 export const PANELS = ["ai", "media", "chapters", "subtitles", "voice"] as const;
 export type Panel = (typeof PANELS)[number];
 export interface UiState {
+  subtitlePass?: import("./subtitle-pass.js").PassState | undefined;
   project: string | null;
   panel: Panel;
   sub: string | null;

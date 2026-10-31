@@ -422,9 +422,21 @@ export function useSubtitlePanel({
     <div className="zc-sub-controls">
       <p className={`zc-sub-status${project?.recognized ? " is-recognized" : ""}`}>
         <span className="zc-dot" aria-hidden="true" />
-        {project?.recognized
-          ? `已识别${project.recognitionRevision !== undefined ? ` · 第 ${project.recognitionRevision} 版` : ""} · ${cues.length} 条字幕`
-          : "还没有识别"}
+        {project?.subtitlePass?.running
+          ? "整理字幕…"
+          : project?.recognized
+            ? `已识别${project.recognitionRevision !== undefined ? ` · 第 ${project.recognitionRevision} 版` : ""} · ${cues.length} 条字幕`
+            : "还没有识别"}
+        {!!project?.subtitlePass?.warnings.length && !project.subtitlePass.running && (
+          <span
+            className="zc-sub-attention"
+            role="img"
+            aria-label="字幕整理退回规则断句"
+            title={project.subtitlePass.warnings.map((warning) => warning.reason).join("；")}
+          >
+            ⚠
+          </span>
+        )}
       </p>
       <fieldset disabled={!project || busy}>
         <SelectSetting

@@ -17,6 +17,7 @@ const skill = fileURLToPath(new URL("../../../skills/zsir-cut/SKILL.md", import.
 export class Agents {
   private active: { child: ChildProcess; done: Promise<void> } | undefined;
   private busy = false;
+  selected: AgentKind | undefined;
   private cancelRequested = false;
   private writes = Promise.resolve();
   constructor(
@@ -91,6 +92,7 @@ export class Agents {
     if (this.busy) throw new Error("Agent 正在回复");
     if (!["claude", "codex"].includes(agent) || !text.trim() || text.length > 100000)
       throw new Error("Invalid message");
+    this.selected = agent;
     this.busy = true;
     this.cancelRequested = false;
     let directory: string | undefined;
@@ -118,7 +120,7 @@ export class Agents {
         }),
         { mode: 0o600 },
       );
-      const desktopInstructions = `所有输出都必须使用用户使用的语言，包括调用工具前后的说明、过渡句、进度说明和最终回复；用户用中文时全部用中文，不夹用英文过渡句；未明确语言时默认中文。桌面模式：只通过 mcp__zsir-cut__* 工具操作工程，不使用 CLI、shell 或文件写入。当前工程：${this.options.project}。写入 author.kind=agent，edit 必须带 label；使用 manual 编辑会话，交出草稿用 session_review，不能自行批准。`;
+      const desktopInstructions = `所有输出都必须使用用户使用的语言，包括调用工具前后的说明、过渡句、进度说明和最终回复；用户用中文时全部用中文，不夹用英文过渡句；未明确语言时默认中文。桌面模式下，应用会在 transcribe 完成后自动整理字幕，Agent 必须等待整理完成，不得自行再跑语义断句。桌面模式：只通过 mcp__zsir-cut__* 工具操作工程，不使用 CLI、shell 或文件写入。当前工程：${this.options.project}。写入 author.kind=agent，edit 必须带 label；使用 manual 编辑会话，交出草稿用 session_review，不能自行批准。`;
       const instructions = `${await readFile(skill, "utf8")}\n${desktopInstructions}`;
       let ended = false;
       const emit = (event: ChatEvent) => {
@@ -214,6 +216,118 @@ export class Agents {
       this.busy = false;
       if (directory) await rm(directory, { recursive: true, force: true });
       throw error;
+    }
+  }
+  async subtitlePass(agent: AgentKind, prompt: string, signal: AbortSignal): Promise<string> {
+    const directory = await mkdtemp(join(tmpdir(), "zcut-subtitle-pass-"));
+    try {
+      if (signal.aborted) throw new Error("整理已停止");
+      const args =
+        agent === "claude"
+          ? [
+              "-p",
+              "--output-format",
+              "json",
+              "--tools",
+              "",
+              "--strict-mcp-config",
+              "--mcp-config",
+              '{"mcpServers":{}}',
+              "--disable-slash-commands",
+              "--no-session-persistence",
+              "--settings",
+              '{"disableAllHooks":true}',
+            ]
+          : [
+              "exec",
+              "--sandbox",
+              "read-only",
+              "--ignore-user-config",
+              "--skip-git-repo-check",
+              "--ephemeral",
+              "-c",
+              'web_search="disabled"',
+              "-c",
+              "features.shell_tool=false",
+              "-c",
+              "features.apps=false",
+              "-c",
+              "features.plugins=false",
+              "-c",
+              "features.multi_agent=false",
+              "-c",
+              "features.hooks=false",
+              ...[
+                "browser_use",
+                "computer_use",
+                "image_generation",
+                "memories",
+                "skill_search",
+                "goals",
+                "sleep_tool",
+                "code_mode_host",
+              ].flatMap((feature) => ["-c", `features.${feature}=false`]),
+              "-c",
+              "tools.update_plan=false",
+              "-c",
+              "mcp_servers={}",
+              "--output-last-message",
+              join(directory, "output.json"),
+              "-",
+            ];
+      const output = await new Promise<string>((resolve, reject) => {
+        const child = spawn(this.command(agent), args, {
+          cwd: directory,
+          stdio: ["pipe", "pipe", "pipe"],
+          detached: process.platform !== "win32",
+        });
+        // CLI launchers can spawn another process; kill the whole group on timeout.
+        const kill = () => {
+          if (process.platform === "win32" || !child.pid) child.kill("SIGKILL");
+          else {
+            try {
+              process.kill(-child.pid, "SIGKILL");
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code !== "ESRCH") child.kill("SIGKILL");
+            }
+          }
+        };
+        let stdout = "";
+        let failure: Error | undefined;
+        const abort = () => {
+          failure = new Error("字幕整理 Agent 已停止");
+          kill();
+        };
+        signal.addEventListener("abort", abort, { once: true });
+        if (signal.aborted) abort();
+        child.stdout.on("data", (data: Buffer) => {
+          if (stdout.length + data.length > 1024 * 1024) {
+            failure = new Error("Agent 输出过大");
+            kill();
+          } else stdout += data.toString();
+        });
+        child.stderr.resume();
+        child.once("error", () => {
+          failure = new Error("无法启动字幕整理 Agent");
+        });
+        child.once("close", (code) => {
+          signal.removeEventListener("abort", abort);
+          if (failure || code !== 0) reject(failure ?? new Error(`Agent 退出（${code}），请检查登录状态和 CLI 版本`));
+          else resolve(stdout);
+        });
+        child.stdin.on("error", () => {});
+        child.stdin.end(prompt);
+      });
+      if (agent === "codex") {
+        const output = join(directory, "output.json");
+        if ((await stat(output)).size > 1024 * 1024) throw new Error("Agent 输出过大");
+        return await readFile(output, "utf8");
+      }
+      const result = JSON.parse(output);
+      if (result.is_error || typeof result.result !== "string") throw new Error("Agent 未返回文字结果");
+      return result.result;
+    } finally {
+      await rm(directory, { recursive: true, force: true });
     }
   }
   async stop() {

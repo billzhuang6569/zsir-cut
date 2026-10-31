@@ -116,6 +116,10 @@ export function useAiPanel({
       disposed = true;
     };
   }, [path, call, refresh]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Reconnect restores the panel selection in the new host.
+  useEffect(() => {
+    if (path && agents.length) void call("chat_select", { agent }).catch((e: Error) => setError(e.message));
+  }, [agent, agents.length, path, call, connectionEpoch]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: A new host connection must restore persisted history.
   useEffect(() => {
     setGenerating(false);
