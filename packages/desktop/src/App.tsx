@@ -251,6 +251,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
             project={history.view}
             historyBanner={history.banner}
             onHistory={history.toggle}
+            onEditSubtitle={subtitles.editCue}
             readOnly={history.viewing}
             state={state}
             update={update}

@@ -12,6 +12,7 @@ import { SubtitleCanvas } from "./SubtitleCanvas.js";
 import {
   add,
   type ClipView,
+  type CueView,
   ceil,
   compare,
   contains,
@@ -33,12 +34,14 @@ import {
   timecode,
 } from "./timeline.js";
 import { moveClipPreview, moveGroup, moveInsert, moveTarget } from "./timelineMove.js";
-import { type TrimEdge, trimTarget } from "./timelineTrim.js";
+import { cueTrimTarget, type TrimEdge, trimTarget } from "./timelineTrim.js";
 import { useTimelineGestures } from "./useTimelineGestures.js";
 import { Wave } from "./Wave.js";
 
 export { Wave } from "./Wave.js";
 import "./timeline.css";
+
+const cueKey = (cue: CueView) => `${cue.track_id}:${cue.cue_id}:${cue.piece}:${cue.start}`;
 
 type Config = { port: number; token: string };
 export function mediaUrl(config: Config, endpoint: string, id: string, at?: string) {
@@ -98,7 +101,9 @@ export function TimelinePreview({
   viewerOnly = false,
   hideViewer = false,
   onMediaDrop,
+  onEditSubtitle,
 }: {
+  onEditSubtitle?: (cue: CueView) => void;
   readOnly?: boolean;
   historyBanner?: ReactNode;
   onHistory?: () => void;
@@ -124,6 +129,31 @@ export function TimelinePreview({
     target: ReturnType<typeof moveTarget> & { insert?: NonNullable<ReturnType<typeof moveInsert>>["insert"] };
   } | null>(null);
   const [trimPreview, setTrimPreview] = useState<(ReturnType<typeof trimTarget> & { edge: TrimEdge }) | null>(null);
+  const [cuePreview, setCuePreview] = useState<{
+    cue: CueView;
+    edge: TrimEdge;
+    target: NonNullable<ReturnType<typeof cueTrimTarget>>;
+  } | null>(null);
+  const [cueMenu, setCueMenu] = useState<{ cue: CueView; x: number; y: number; element: HTMLElement } | null>(null);
+  useEffect(() => {
+    if (!cueMenu) return;
+    const dismiss = (event: Event) => {
+      if (event instanceof KeyboardEvent && event.key !== "Escape") return;
+      if (event.type === "pointerdown" && (event.target as Element).closest(".zc-cue-menu")) return;
+      setCueMenu(null);
+      if (event instanceof KeyboardEvent) cueMenu.element.focus();
+    };
+    window.addEventListener("pointerdown", dismiss);
+    window.addEventListener("keydown", dismiss);
+    return () => {
+      window.removeEventListener("pointerdown", dismiss);
+      window.removeEventListener("keydown", dismiss);
+    };
+  }, [cueMenu]);
+  const cueMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (cueMenu) cueMenuRef.current?.querySelector("button")?.focus();
+  }, [cueMenu]);
   const gestures = useTimelineGestures({
     project,
     state,
@@ -134,13 +164,43 @@ export function TimelinePreview({
     clipDrag: (event, element) => {
       if (!project || busy || readOnly || tool !== "select") return;
       const id = element.dataset.selectionId;
+      const edge = (event.target as Element).closest<HTMLElement>("[data-trim-edge]")?.dataset.trimEdge as
+        | TrimEdge
+        | undefined;
+      if (element.dataset.cueKey) {
+        const cue = project.cues.find((cue) => cueKey(cue) === element.dataset.cueKey);
+        if (!cue || !edge) return;
+        const origin = Math.round(event.clientX);
+        const scroll = gestures.scroller.current?.scrollLeft ?? 0;
+        const calculate = (point: { clientX: number }) =>
+          cueTrimTarget(
+            project,
+            cue,
+            edge,
+            Math.round(point.clientX) - origin + Math.round((gestures.scroller.current?.scrollLeft ?? 0) - scroll),
+            scale,
+            snapRef.current,
+            seekTarget(project, project.cues, latest.current.state.playhead),
+          );
+        return {
+          move: (point) => {
+            const target = calculate(point);
+            if (target) setCuePreview({ cue, edge, target });
+          },
+          end: (point, moved) => {
+            setCuePreview(null);
+            if (!moved) return;
+            const target = calculate(point);
+            if (target && target.to !== (edge === "in" ? cue.start : cue.end))
+              void write("edit", "调整字幕时间", [target.op]);
+          },
+          cancel: () => setCuePreview(null),
+        };
+      }
       const track = project.tracks.find(
         (track) => track.kind !== "subtitle" && track.clips.some((clip) => clip.id === id),
       );
       if (!id || !track) return;
-      const edge = (event.target as Element).closest<HTMLElement>("[data-trim-edge]")?.dataset.trimEdge as
-        | TrimEdge
-        | undefined;
       if (edge) {
         const anchor = track.clips.find((clip) => clip.id === id);
         if (!anchor || anchor.time_map || anchor.speed === "map") return;
@@ -534,7 +594,21 @@ export function TimelinePreview({
     }
   };
   const width = project ? Math.max(800, pixelAt(project.duration.t, scale) + 100) : 800;
-  const snapPreview = trimPreview ?? movePreview?.target;
+  const cueEndpoints = useMemo(() => {
+    const endpoints = new Map<string, { in: string | undefined; out: string | undefined }>();
+    for (const transcript of project?.transcripts ?? []) {
+      const indexes = new Map(transcript.tokens.map((token, index) => [token.id, index]));
+      for (const cue of transcript.cues) {
+        const first = indexes.get(cue.first_token),
+          last = indexes.get(cue.last_token);
+        if (first === undefined || last === undefined) continue;
+        const visible = transcript.tokens.slice(first, last + 1).filter((token) => token.text);
+        endpoints.set(cue.id, { in: visible[0]?.id, out: visible.at(-1)?.id });
+      }
+    }
+    return endpoints;
+  }, [project?.transcripts]);
+  const snapPreview = cuePreview?.target ?? trimPreview ?? movePreview?.target;
   const organizing = new Set([
     ...(project?.unprocessedTranscripts ?? []),
     ...(project?.subtitlePass?.progress?.map((item) => item.transcript_id) ?? []),
@@ -557,6 +631,31 @@ export function TimelinePreview({
   }));
   return (
     <>
+      {cueMenu && (
+        <div
+          ref={cueMenuRef}
+          role="menu"
+          aria-label="字幕片段"
+          className="zc-cue-menu"
+          style={{ left: cueMenu.x, top: cueMenu.y }}
+        >
+          <IconButton
+            icon="refresh"
+            label="恢复自动时间"
+            role="menuitem"
+            disabled={
+              busy ||
+              readOnly ||
+              !project?.transcripts?.some((item) => item.cues.some((cue) => cue.id === cueMenu.cue.cue_id))
+            }
+            onClick={() => {
+              setCueMenu(null);
+              cueMenu.element.focus();
+              void write("edit", "恢复自动时间", [{ op: "set_cue", cue_id: cueMenu.cue.cue_id, timing: null }]);
+            }}
+          />
+        </div>
+      )}
       {!hideViewer && (
         <section aria-label="预览" className="zc-viewer">
           {(error || writeError) && (
@@ -923,23 +1022,81 @@ export function TimelinePreview({
                       {track.kind === "subtitle" &&
                         project.cues
                           .filter((cue) => cue.track_id === track.id)
-                          .map((cue) => (
-                            <Clip
-                              key={`${cue.cue_id}-${cue.piece}-${cue.start}`}
-                              selectionId={cue.cue_id}
-                              kind="subtitle"
-                              label={organizing.has(cue.transcript_id ?? "") ? "" : cue.text.replaceAll("\n", " ")}
-                              selected={state.selected.includes(cue.cue_id)}
-                              dimmed={
-                                !track.enabled || (state.selected.length > 0 && !state.selected.includes(cue.cue_id))
-                              }
-                              style={{
-                                left: pixelAt(cue.start, scale),
-                                width: Math.max(1, pixelAt(cue.end, scale) - pixelAt(cue.start, scale)),
-                              }}
-                              onClick={(event) => gestures.select([cue.cue_id], event)}
-                            />
-                          ))}
+                          .map((cue) => {
+                            const trimming = cuePreview?.cue === cue;
+                            const endpoints = cueEndpoints.get(cue.cue_id);
+                            const shown = cue.tokens?.map((token) => token.id) ?? cue.token_ids;
+                            const start = trimming && cuePreview.edge === "in" ? cuePreview.target.to : cue.start;
+                            const end = trimming && cuePreview.edge === "out" ? cuePreview.target.to : cue.end;
+                            return (
+                              <Clip
+                                key={cueKey(cue)}
+                                cueKey={cueKey(cue)}
+                                selectionId={cue.cue_id}
+                                kind="subtitle"
+                                label={organizing.has(cue.transcript_id ?? "") ? "" : cue.text.replaceAll("\n", " ")}
+                                selected={state.selected.includes(cue.cue_id)}
+                                dimmed={
+                                  !track.enabled || (state.selected.length > 0 && !state.selected.includes(cue.cue_id))
+                                }
+                                style={{
+                                  left: pixelAt(start, scale),
+                                  width: Math.max(1, pixelAt(end, scale) - pixelAt(start, scale)),
+                                  cursor: "not-allowed",
+                                  ...(trimming ? { opacity: 0.5, zIndex: 4 } : {}),
+                                }}
+                                onClick={(event) => gestures.select([cue.cue_id], event)}
+                                onDoubleClick={() => {
+                                  if (readOnly) return;
+                                  update({
+                                    ...latest.current.state,
+                                    panel: "subtitles",
+                                    sub: "subtitles",
+                                    preview: "timeline",
+                                    playing: false,
+                                    selected: [cue.cue_id],
+                                    playhead: { at: cue.start },
+                                    subtitleBrowser: {
+                                      ...state.subtitleBrowser,
+                                      search: "",
+                                      find: state.subtitleBrowser?.find ?? "",
+                                      replace: state.subtitleBrowser?.replace ?? "",
+                                      matchCase: state.subtitleBrowser?.matchCase ?? false,
+                                    },
+                                    history: { open: false, revision: null, label: null },
+                                  });
+                                  onEditSubtitle?.(cue);
+                                }}
+                                onContextMenu={(event) => {
+                                  event.preventDefault();
+                                  if (!readOnly)
+                                    setCueMenu({
+                                      cue,
+                                      x: event.clientX,
+                                      y: event.clientY,
+                                      element: event.currentTarget,
+                                    });
+                                }}
+                              >
+                                {!readOnly &&
+                                  !busy &&
+                                  tool === "select" &&
+                                  (["in", "out"] as const).map(
+                                    (edge) =>
+                                      endpoints?.[edge] &&
+                                      (!shown || (edge === "in" ? shown[0] : shown.at(-1)) === endpoints[edge]) && (
+                                        <span
+                                          key={edge}
+                                          aria-hidden="true"
+                                          data-trim-edge={edge}
+                                          className={`zc-trim-handle zc-trim-${edge}`}
+                                          title={edge === "in" ? "调整字幕开始时间" : "调整字幕结束时间"}
+                                        />
+                                      ),
+                                  )}
+                              </Clip>
+                            );
+                          })}
                     </div>
                   </div>
                 ))}

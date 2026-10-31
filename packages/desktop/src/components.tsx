@@ -80,6 +80,9 @@ export function Clip({
   children,
   onClick,
   selectionId,
+  onDoubleClick,
+  onContextMenu,
+  cueKey,
 }: {
   kind: string;
   label: string;
@@ -89,14 +92,20 @@ export function Clip({
   children?: ReactNode;
   onClick: React.MouseEventHandler<HTMLButtonElement>;
   selectionId?: string;
+  cueKey?: string;
+  onDoubleClick?: React.MouseEventHandler<HTMLButtonElement>;
+  onContextMenu?: React.MouseEventHandler<HTMLButtonElement>;
 }) {
   return (
     <button
       type="button"
       data-selection-id={selectionId}
+      data-cue-key={cueKey}
       title={label}
       aria-label={label}
       onClick={onClick}
+      onDoubleClick={onDoubleClick}
+      onContextMenu={onContextMenu}
       className={`zc-clip zc-clip-${kind}${selected ? " is-selected" : ""}${dimmed ? " is-dimmed" : ""}`}
       style={style}
     >

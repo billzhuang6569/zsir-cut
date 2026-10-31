@@ -49,9 +49,12 @@ export interface TimelineView {
 }
 export interface CueView {
   occurrence_id?: string | null;
+  clip_id?: string | null;
+  clip_ids?: string[];
   text_override?: boolean;
   transcript_id?: string;
   tokens?: { id: string; text: string }[];
+  token_ids?: string[];
   cue_id: string;
   track_id: string;
   start: string;
@@ -59,6 +62,17 @@ export interface CueView {
   text: string;
   style_id: string;
   piece: number;
+}
+export interface TranscriptView {
+  id: string;
+  media_id: string;
+  tokens: { id: string; text: string; align: { start: string; end: string } }[];
+  cues: {
+    id: string;
+    first_token: string;
+    last_token: string;
+    timing?: { start?: string; end?: string; locked?: boolean };
+  }[];
 }
 export interface StyleView extends RenderStyle {
   id: string;
@@ -95,6 +109,7 @@ export interface OverlayView {
   last_export: { created_at: string; revision_id: string; size_bytes: number } | null;
 }
 export interface PreviewData {
+  transcripts?: TranscriptView[];
   unprocessedTranscripts?: string[];
   subtitlePass?: {
     running: boolean;
