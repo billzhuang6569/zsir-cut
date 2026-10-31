@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { UiState } from "../../app-host/src/ui.js";
 import { Icon, IconButton } from "./components.js";
 import type { ProjectView } from "./connection.js";
@@ -263,6 +263,7 @@ function SubtitleRow({
   const node = useRef<HTMLDivElement | null>(null);
   const draft = useRef(cue.text);
   const committed = useRef(cue.text);
+  const rendered = useRef(cue.text);
   const history = useRef([{ text: cue.text, offset: 0 }]);
   const historyAt = useRef(0);
   const skipBlur = useRef(false);
@@ -297,17 +298,25 @@ function SubtitleRow({
         : marked;
     })
     .join("");
-  useEffect(() => {
-    if (!node.current) return;
-    // Keep the browser's caret and input DOM intact while typing.
-    if (document.activeElement !== node.current || draft.current === cue.text) node.current.innerHTML = html;
+  useLayoutEffect(() => {
+    const element = node.current;
+    if (!element) return;
+    const changed = rendered.current !== cue.text;
+    const focused = document.activeElement === element;
+    // A committed cue replaces browser-owned content even while this row has focus.
+    if (changed || !focused || draft.current === cue.text) {
+      const offset = focused ? caretOffset(element) : 0;
+      element.innerHTML = html;
+      if (focused) placeCaret(element, offset);
+    }
+    if (changed) {
+      rendered.current = cue.text;
+      committed.current = cue.text;
+      draft.current = cue.text;
+      history.current = [{ text: cue.text, offset: 0 }];
+      historyAt.current = 0;
+    }
   }, [html, cue.text]);
-  useEffect(() => {
-    committed.current = cue.text;
-    draft.current = cue.text;
-    history.current = [{ text: cue.text, offset: 0 }];
-    historyAt.current = 0;
-  }, [cue.text]);
   const record = () => {
     if (!node.current) return;
     draft.current = editorText(node.current);
@@ -319,8 +328,8 @@ function SubtitleRow({
     skipBlur.current = true;
     const ok = await commit(text, splitAt);
     if (ok) {
-      committed.current = text;
-      history.current = [{ text, offset: node.current ? caretOffset(node.current) : 0 }];
+      committed.current = rendered.current === cue.text ? text : rendered.current;
+      history.current = [{ text: committed.current, offset: node.current ? caretOffset(node.current) : 0 }];
       historyAt.current = 0;
     }
     skipBlur.current = false;
@@ -639,7 +648,7 @@ export function useSubtitlePanel({
       return [
         { op: "set_override", track_id: cue.track_id, occurrence_id: cue.occurrence_id, cue_id: cue.cue_id, text },
       ];
-    if (cue.transcript_id) return cueEdit(cue, text).ops;
+    if (cue.transcript_id) return cueEdit(cue, text, undefined, project?.transcripts).ops;
     return [
       { op: "remove_free_cue", track_id: cue.track_id, id: cue.cue_id },
       {
@@ -657,7 +666,7 @@ export function useSubtitlePanel({
     try {
       const plan =
         splitAt !== undefined && cue.transcript_id && !cue.text_override
-          ? cueEdit(cue, text, splitAt)
+          ? cueEdit(cue, text, splitAt, project?.transcripts)
           : { ops: rowOps(cue, text), newCue: undefined };
       const ok = !plan.ops.length || (await write(plan.ops, splitAt !== undefined ? "拆分字幕" : "修改字幕"));
       if (ok) {

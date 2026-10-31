@@ -9,6 +9,7 @@ import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { UiState } from "../../app-host/src/ui.js";
+import { transcriptIds } from "../../core/src/project/id.ts";
 import { renderSubtitle as exportRenderer } from "../../exporters/src/subtitle-render.ts";
 import type { ProjectView } from "../src/connection.js";
 import { renderSubtitle, SubtitleCanvas } from "../src/SubtitleCanvas.js";
@@ -16,6 +17,7 @@ import { useSubtitlePanel } from "../src/SubtitlePanel.js";
 import { initialState } from "../src/state.js";
 import { alignment, caretOffset, cueEdit, defaultStyle, placeCaret, textEdit, textEdits } from "../src/subtitles.js";
 import { TimelinePreview } from "../src/TimelinePreview.js";
+import type { TranscriptView } from "../src/timeline.js";
 import { recordingCanvas } from "./canvas.js";
 
 const cue = {
@@ -46,6 +48,15 @@ const project: ProjectView = {
   cues: [
     cue,
     { cue_id: "cue_free", track_id: "trk_s", start: "3s", end: "5s", text: "自由字幕", piece: 0, style_id: "sty_1" },
+  ],
+  transcripts: [
+    {
+      id: cue.transcript_id,
+      media_id: "med_1",
+      ext: { zsir: { id_tag: "stored" } },
+      tokens: cue.tokens.map((token) => ({ ...token, align: { start: "0s", end: "3s" } })),
+      cues: [{ id: cue.cue_id, first_token: "tok_1", last_token: "tok_2" }],
+    },
   ],
   styles: [{ ...defaultStyle, id: "sty_1", name: "正文", version: 3 }],
   subtitleTracks: [{ id: "trk_s", name: "字幕 A", default_style_id: "sty_1" }],
@@ -250,7 +261,6 @@ it("seeks on a single click, edits in place on blur, and Esc discards", async ()
         from_token: "tok_2",
         to_token: "tok_2",
         text: "朋友",
-        new_ids: [expect.any(String)],
       },
     ],
   });
@@ -875,6 +885,15 @@ it.each(["bottom", "middle"] as const)(
   async (anchor) => {
     const h = await previewHarness({
       ...project,
+      transcripts: [
+        {
+          id: cue.transcript_id,
+          media_id: "med_1",
+          ext: { zsir: { id_tag: "stored" } },
+          tokens: cue.tokens.map((token) => ({ ...token, align: { start: "0s", end: "3s" } })),
+          cues: [{ id: cue.cue_id, first_token: "tok_1", last_token: "tok_2" }],
+        },
+      ],
       styles: [{ ...defaultStyle, id: "sty_1", position: { ...defaultStyle.position, margin_v: 0.08, anchor } }],
     });
     const hit = h.hit();
@@ -963,9 +982,17 @@ const nextCue = {
   ],
   next_cue_id: null,
 };
-const listProject = { ...project, cues: [{ ...cue, next_cue_id: "cue_2" }, nextCue] };
+const listProject = {
+  ...project,
+  cues: [{ ...cue, next_cue_id: "cue_2" }, nextCue],
+  transcripts: (project.transcripts ?? []).map((transcript) => ({
+    ...transcript,
+    tokens: [...transcript.tokens, ...nextCue.tokens.map((token) => ({ ...token, align: { start: "3s", end: "5s" } }))],
+    cues: [...transcript.cues, { id: nextCue.cue_id, first_token: "tok_3", last_token: "tok_4" }],
+  })),
+};
 
-it.each([1, 2])("splits at character %i in one edit batch with explicit IDs", async (offset) => {
+it.each([1, 2])("splits at character %i in one edit batch and refreshes both row DOM texts", async (offset) => {
   const h = await mount(listProject);
   await h.focus(cue.text, offset);
   expect(caretOffset(h.find("编辑字幕"))).toBe(offset);
@@ -974,15 +1001,16 @@ it.each([1, 2])("splits at character %i in one edit batch with explicit IDs", as
   expect(request?.label).toBe("拆分字幕");
   const ops = request?.ops as Record<string, unknown>[];
   expect(ops.map((op) => op.op)).toEqual(offset === 1 ? ["split_token", "split_cue"] : ["split_cue"]);
-  if (offset === 1) expect(ops[0]).toMatchObject({ token_id: "tok_1", at: 1, new_id: expect.stringMatching(/^tok_/) });
+  if (offset === 1)
+    expect(ops[0]).toEqual({ op: "split_token", transcript_id: cue.transcript_id, token_id: "tok_1", at: 1 });
   expect(ops.at(-1)).toMatchObject({
     op: "split_cue",
     cue_id: "cue_1",
     after_token: "tok_1",
-    new_id: expect.stringMatching(/^cue_/),
   });
   expect(h.call).toHaveBeenCalledTimes(1);
-  const id = ops.at(-1)?.new_id as string;
+  expect(ops.at(-1)).not.toHaveProperty("new_id");
+  const id = cueEdit(cue, cue.text, offset, listProject.transcripts).newCue as string;
   await h.view({
     ...listProject,
     revision: { id: "rev_2", seq: 8 },
@@ -992,6 +1020,11 @@ it.each([1, 2])("splits at character %i in one edit batch with explicit IDs", as
       nextCue,
     ],
   });
+  expect([...h.container.querySelectorAll(".zc-sub-text")].map((row) => row.textContent)).toEqual([
+    offset === 1 ? "你" : "你好",
+    "后半条",
+    nextCue.text,
+  ]);
   expect(h.state().subtitle_selection?.editing).toBe(id);
   expect(caretOffset(h.find("编辑字幕"))).toBe(0);
 });
@@ -1049,7 +1082,17 @@ it.each([
     ops: [{ op: "merge_cues", cue_ids: ["cue_1", "cue_2"] }],
   });
   expect(h.state().subtitle_selection?.editing).toBe("cue_1");
+  await h.view({
+    ...listProject,
+    revision: { id: "rev_2", seq: 8 },
+    cues: [{ ...cue, text: cue.text + nextCue.text, tokens: [...cue.tokens, ...nextCue.tokens] }],
+  });
+  expect([...h.container.querySelectorAll(".zc-sub-text")].map((row) => row.textContent)).toEqual([
+    cue.text + nextCue.text,
+  ]);
   expect(caretOffset(h.find("编辑字幕"))).toBe(4);
+  await h.key(h.find("编辑字幕"), "Escape");
+  expect(h.container.querySelector(".zc-sub-text")?.textContent).toBe(cue.text + nextCue.text);
 });
 it.each(["locked", "other-transcript", "non-adjacent"])("refuses merging %s with a readable status", async (kind) => {
   const next = {
@@ -1274,7 +1317,9 @@ it("plans separate whole-token edits and preserves hidden-token boundaries", () 
       cue.tokens[1] as { id: string; text: string },
     ],
   };
-  expect(cueEdit(hidden, cue.text, 2).ops).toMatchObject([{ op: "split_cue", after_token: "tok_1" }]);
+  expect(cueEdit(hidden, cue.text, 2, listProject.transcripts).ops).toMatchObject([
+    { op: "split_cue", after_token: "tok_1" },
+  ]);
   expect(() => cueEdit(hidden, "新的字幕")).toThrow("隐藏字词");
 });
 it.each([false, true])(
@@ -1289,11 +1334,7 @@ it.each([false, true])(
     const load = async () =>
       JSON.parse(await readFile(path, "utf8")) as {
         revision: { id: string; seq: number };
-        transcripts: {
-          id: string;
-          cues: { id: string; first_token: string; last_token: string }[];
-          tokens: { id: string; text: string }[];
-        }[];
+        transcripts: TranscriptView[];
       };
     const before = await load();
     const item = before.transcripts.find((item) => item.id === "trs_A_zh");
@@ -1307,6 +1348,7 @@ it.each([false, true])(
       ...project,
       id: "tl_std",
       revision: { id: before.revision.id, seq: before.revision.seq },
+      transcripts: before.transcripts,
       cues: [
         {
           ...cue,
@@ -1353,7 +1395,9 @@ it("maps edits of generated English spaces to the complete neighboring tokens", 
   };
   expect(textEdits(english, "helloworld")).toMatchObject([{ from_token: "a", to_token: "b", text: "helloworld" }]);
   expect(textEdits(english, "hello! world")).toMatchObject([{ from_token: "a", to_token: "a", text: "hello!" }]);
-  expect(cueEdit({ ...cue, breaks: ["offscreen"] }, "你好\n世界").ops.at(-1)).toEqual({
+  expect(
+    cueEdit({ ...cue, breaks: ["offscreen"] }, "你好\n世界", undefined, listProject.transcripts).ops.at(-1),
+  ).toEqual({
     op: "set_cue",
     cue_id: cue.cue_id,
     breaks: ["offscreen", "tok_1"],
@@ -1418,4 +1462,103 @@ it("keeps pending inline edits in the same batch when merging from the context m
       { op: "merge_cues", cue_ids: ["cue_1", "cue_2"] },
     ],
   });
+});
+
+it.each([false, true])("readbacks split/merge DOM and core's next short IDs (pending text: %s)", async (pending) => {
+  const directory = await mkdtemp(join(tmpdir(), "subtitle-list-"));
+  const path = join(directory, "project.zcut.json");
+  cleanups.push(async () => {
+    await rm(directory, { recursive: true, force: true });
+  });
+  await copyFile("fixtures/regressions/subtitle-list-short-ids.zcut.json", path);
+  const load = async () =>
+    JSON.parse(await readFile(path, "utf8")) as {
+      revision: ProjectView["revision"];
+      transcripts: TranscriptView[];
+    };
+  const before = await load();
+  const transcript = before.transcripts[0] as TranscriptView;
+  const source = transcript.cues[0] as TranscriptView["cues"][number];
+  const original = transcript.tokens[0]?.text ?? "";
+  const view = (data: typeof before): ProjectView => ({
+    ...project,
+    revision: data.revision,
+    transcripts: data.transcripts,
+    cues: data.transcripts.flatMap((item) =>
+      item.cues.slice(0, -1).map((entry) => {
+        const tokens = item.tokens.slice(
+          item.tokens.findIndex((token) => token.id === entry.first_token),
+          item.tokens.findIndex((token) => token.id === entry.last_token) + 1,
+        );
+        return { ...cue, cue_id: entry.id, transcript_id: item.id, tokens, text: tokens.map((t) => t.text).join("") };
+      }),
+    ),
+  });
+  const tokenId = transcriptIds(before, transcript, "tok_");
+  const replacementId = pending ? tokenId() : undefined;
+  const splitId = tokenId();
+  const cueId = transcriptIds(before, transcript, "cue_")();
+  expect(splitId).toBe(pending ? "tok_stored_11" : "tok_stored_10");
+  expect(cueId).toBe("cue_stored_10");
+  const h = await mount(view(before), "subtitles", async (verb, request) => {
+    const run = spawnSync(process.execPath, ["packages/cli/src/index.ts", verb, path], {
+      encoding: "utf8",
+      input: JSON.stringify({ ...request, project: path }),
+    });
+    const result = JSON.parse(run.stdout);
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    return result.result;
+  });
+  await h.focus(original, 4);
+  if (pending) {
+    await h.input("编辑字幕", "可能约有两万多个");
+    await h.focus("编辑字幕", 5);
+  }
+  await h.key(h.find("编辑字幕"), "Enter");
+  const ops = h.call.mock.lastCall?.[1].ops as Record<string, unknown>[];
+  if (pending) expect(ops[0]?.new_ids).toEqual([replacementId]);
+  expect(ops.find((op) => op.op === "split_token")).not.toHaveProperty("new_id");
+  expect(ops.at(-1)).not.toHaveProperty("new_id");
+  const split = await load();
+  expect(split.transcripts[0]?.tokens.map((token) => token.id)).toEqual([
+    replacementId ?? "tok_stored_0",
+    splitId,
+    "tok_stored_z",
+  ]);
+  expect(split.transcripts[0]?.cues.map((entry) => entry.id)).toEqual([source.id, cueId, "cue_stored_z"]);
+  await h.view(view(split));
+  const left = pending ? "可能约有两" : "可能有两";
+  const texts = () => [...h.container.querySelectorAll(".zc-sub-text")].map((row) => row.textContent);
+  expect(texts()).toEqual([left, "万多个"]);
+  expect(h.state().subtitle_selection?.editing).toBe(cueId);
+  expect(caretOffset(h.find("编辑字幕"))).toBe(0);
+  await h.key(h.find("编辑字幕"), "Backspace");
+  await h.view(view(await load()));
+  expect(texts()).toEqual([`${left}万多个`]);
+  expect(caretOffset(h.find("编辑字幕"))).toBe(left.length);
+  await h.key(h.find("编辑字幕"), "Escape");
+  expect(texts()).toEqual([`${left}万多个`]);
+});
+
+it("preassigns only referenced IDs and shares core's stored-tag and collision rules without mutating the view", () => {
+  const transcripts = structuredClone(listProject.transcripts);
+  const transcript = transcripts[0] as TranscriptView;
+  transcript.tokens.push({ id: "tok_stored_z", text: "未显示", align: { start: "10s", end: "11s" } });
+  const before = JSON.stringify(transcripts);
+  const expected = transcriptIds({ transcripts }, transcript, "tok_");
+  const plan = cueEdit(cue, "你好新世界", 3, transcripts);
+  expect(plan.ops[0]?.new_ids).toEqual([expected()]);
+  expect(plan.ops[1]).not.toHaveProperty("new_id");
+  expect(cueEdit(cue, "你好新世界", undefined, transcripts).ops[0]).not.toHaveProperty("new_ids");
+  expect(JSON.stringify(transcripts)).toBe(before);
+
+  transcript.id = "trs_123456abcdef";
+  delete transcript.ext;
+  transcripts.push({ ...transcript, id: "trs_654321abcdef", tokens: [], cues: [] });
+  const collisionCue = { ...cue, transcript_id: transcript.id };
+  const copies = structuredClone(transcripts);
+  const coreCue = transcriptIds({ transcripts: copies }, copies[0] as TranscriptView, "cue_")();
+  expect(cueEdit(collisionCue, cue.text, 1, transcripts).newCue).toBe(coreCue);
+  expect(coreCue).toBe("cue_56abcdef_0");
+  expect(transcript.ext).toBeUndefined();
 });

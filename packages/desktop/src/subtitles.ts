@@ -1,5 +1,6 @@
+import { transcriptIds } from "../../core/src/project/transcript-id.ts";
 import type { ProjectView } from "./connection.js";
-import type { CueView, StyleView } from "./timeline.js";
+import type { CueView, StyleView, TranscriptView } from "./timeline.js";
 
 export const defaultStyle: StyleView = {
   id: "",
@@ -224,20 +225,20 @@ const textPieces = (text: string) =>
       : (text.match(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]+|[A-Za-z0-9]+|[^\s]/gu) ??
         []);
 
-export function cueEdit(
-  cue: CueView,
-  draft: string,
-  splitAt?: number,
-  allocate = (prefix: string) => `${prefix}${crypto.randomUUID()}`,
-) {
+export function cueEdit(cue: CueView, draft: string, splitAt?: number, transcripts: TranscriptView[] = []) {
   const flat = draft.replaceAll("\n", "");
   const base = { ...cue, text: cue.text.replaceAll("\n", "") };
   const ops = textEdits(base, flat);
+  if (splitAt === undefined && !draft.includes("\n") && !cue.text.includes("\n")) return { ops, newCue: undefined };
+  const copies = transcripts.map((item) => ({ ...item }));
+  const transcript = copies.find((item) => item.id === cue.transcript_id);
+  if (!transcript) throw new Error("找不到字幕母稿，请刷新工程后重试");
+  const tokenId = transcriptIds({ transcripts: copies }, transcript, "tok_");
   const tokens = [...(cue.tokens ?? [])];
   for (const op of ops) {
     const first = tokens.findIndex((token) => token.id === op.from_token);
     const last = tokens.findIndex((token) => token.id === op.to_token);
-    const next = textPieces(op.text as string).map((text) => ({ id: allocate("tok_"), text }));
+    const next = textPieces(op.text as string).map((text) => ({ id: tokenId(), text }));
     op.new_ids = next.map((token) => token.id);
     tokens.splice(first, last - first + 1, ...next);
   }
@@ -247,7 +248,7 @@ export function cueEdit(
     if (inside) {
       const token = inside.token;
       const at = Array.from(inside.text.slice(0, offset - inside.start)).length;
-      const id = allocate("tok_");
+      const id = tokenId();
       ops.push({ op: "split_token", transcript_id: cue.transcript_id, token_id: token.id, at, new_id: id });
       const chars = Array.from(token.text);
       tokens.splice(
@@ -275,9 +276,22 @@ export function cueEdit(
     const at = draft.slice(0, splitAt).replaceAll("\n", "").length;
     const after = boundary(at);
     if (after && at > 0 && at < flat.length) {
-      newCue = allocate("cue_");
-      ops.push({ op: "split_cue", cue_id: cue.cue_id, after_token: after, new_id: newCue });
+      newCue = transcriptIds({ transcripts: copies }, transcript, "cue_")();
+      ops.push({ op: "split_cue", cue_id: cue.cue_id, after_token: after });
     }
+  }
+  for (const [index, op] of ops.entries()) {
+    const references = ops
+      .slice(index + 1)
+      .flatMap((later) => [
+        later.from_token,
+        later.to_token,
+        later.token_id,
+        later.after_token,
+        ...((later.breaks as string[] | undefined) ?? []),
+      ]);
+    if (op.new_ids && !(op.new_ids as string[]).some((id) => references.includes(id))) delete op.new_ids;
+    if (op.new_id && !references.includes(op.new_id)) delete op.new_id;
   }
   return { ops, newCue };
 }
