@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url";
 import type { Clip, CutRow, Exporter, LossItem, Media, Rational, Timeline } from "../../core/dist/index.js";
 
 const {
+  unrepresentableStyleFields,
   add,
   clipTimeMap,
   compare,
@@ -531,7 +532,7 @@ export const xmemlExporter: Exporter & { validationNotes?: string } = {
           "approximated",
           "warning",
           "R_STYLE_NOT_REPRESENTABLE",
-          "字幕样式需在 Premiere 中调整",
+          `字幕样式需在 Premiere 中调整${unrepresentableStyleFields(style).length ? `；无法表达：${unrepresentableStyleFields(style).join("、")}` : ""}`,
         ),
       );
     const projected = projectSubtitles(project, timeline.id);

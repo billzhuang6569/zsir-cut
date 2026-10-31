@@ -305,6 +305,12 @@ export interface StylePosition {
   max_width?: number;
 }
 
+export interface StyleAnimation<T = Rational> {
+  in?: { type: "fade" | "rise" | "pop" | "typewriter"; duration: T };
+  out?: { type: "fade" | "sink" | "pop"; duration: T };
+  word?: "none" | "highlight" | "fill" | "jump";
+}
+
 export interface SubtitleStyle {
   id: string;
   name: string;
@@ -313,6 +319,15 @@ export interface SubtitleStyle {
   font_weight?: number;
   font_size: number;
   color: string;
+  italic?: boolean;
+  underline?: boolean;
+  letter_spacing?: number;
+  align?: "left" | "center" | "right";
+  outlines?: StyleOutline[];
+  shadow?: { color: string; blur: number; distance: number; angle: number };
+  glow?: { color: string; blur: number };
+  highlight?: { color: string };
+  animation?: StyleAnimation;
   outline?: StyleOutline;
   box?: StyleBox;
   position?: StylePosition;

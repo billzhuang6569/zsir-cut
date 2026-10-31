@@ -371,6 +371,15 @@ export function applySubtitleEdit(
       break;
     }
     case "set_cue": {
+      const free = timeline.tracks
+        .flatMap((track) => (track.kind === "subtitle" ? track.free_cues : []))
+        .find((cue) => cue.id === op.cue_id);
+      if (free) {
+        if (Object.keys(op).some((key) => !["op", "cue_id", "style_id", "force"].includes(key)))
+          fail("E_VALIDATION", "Free cues only support style assignment with set_cue");
+        setFields(free as unknown as Record<string, unknown>, op, ["style_id"]);
+        break;
+      }
       const { transcript: item, cue } = cueOwner(project, op.cue_id);
       const [a, b] = cueSpan(item, cue);
       protect(item, a, b, force);
@@ -535,6 +544,12 @@ export function applySubtitleEdit(
       delete style.force;
       style.id ??= generate("sty_");
       style.version = 1;
+      if (style.animation) {
+        const animation = structuredClone(style.animation) as NonNullable<SubtitleStyle["animation"]>;
+        for (const edge of [animation.in, animation.out])
+          if (edge) edge.duration = parseRational(edge.duration as unknown as string, true, false);
+        style.animation = animation;
+      }
       project.subtitle_styles.push(style as unknown as SubtitleStyle);
       break;
     }
@@ -551,7 +566,21 @@ export function applySubtitleEdit(
         "position",
         "max_lines",
         "line_spacing",
+        "italic",
+        "underline",
+        "letter_spacing",
+        "align",
+        "outlines",
+        "shadow",
+        "glow",
+        "highlight",
+        "animation",
       ]);
+      if (op.animation && style.animation) {
+        style.animation = structuredClone(style.animation);
+        for (const edge of [style.animation.in, style.animation.out])
+          if (edge) edge.duration = parseRational(edge.duration as unknown as string, true, false);
+      }
       style.version++;
       break;
     }

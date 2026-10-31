@@ -4,7 +4,7 @@ import { Icon, IconButton } from "./components.js";
 import type { ProjectView } from "./connection.js";
 import { DESKTOP_AUTHOR } from "./connection.js";
 import { SubtitleCanvas } from "./SubtitleCanvas.js";
-import { alignment, defaultStyle, textEdit } from "./subtitles.js";
+import { alignment, defaultStyle, subtitleStyleOps, textEdit } from "./subtitles.js";
 import { mediaUrl } from "./TimelinePreview.js";
 import {
   type CueView,
@@ -117,6 +117,7 @@ function TextSetting({
   multiline = false,
   placeholder,
   color = false,
+  preview,
 }: {
   label: string;
   value: string;
@@ -124,6 +125,7 @@ function TextSetting({
   multiline?: boolean;
   placeholder?: string;
   color?: boolean;
+  preview?: (value: string) => void;
 }) {
   const id = useId();
   const props = {
@@ -139,7 +141,18 @@ function TextSetting({
   return (
     <label className={`zc-sub-setting${color ? " zc-sub-color" : ""}`} htmlFor={id}>
       <span>{label}</span>
-      {color && <span className="zc-sub-swatch" style={{ backgroundColor: value }} aria-hidden="true" />}
+      {color && (
+        <input
+          type="color"
+          className="zc-sub-swatch"
+          aria-label={`${label}取色`}
+          value={value.slice(0, 7)}
+          onChange={(e) => preview?.(e.target.value + value.slice(7))}
+          onPointerUp={(e) => save(e.currentTarget.value + value.slice(7))}
+          onKeyUp={(e) => save(e.currentTarget.value + value.slice(7))}
+          onBlur={(e) => save(e.currentTarget.value + value.slice(7))}
+        />
+      )}
       {multiline ? (
         <textarea key={value} {...props} rows={4} />
       ) : (
@@ -231,10 +244,21 @@ export function useSubtitlePanel({
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<string | null>(null),
     [draft, setDraft] = useState("");
+  const editInput = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (!editing || !editInput.current) return;
+    const input = editInput.current;
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+    input.closest(".zc-sub-row")?.scrollIntoView?.({ block: "nearest" });
+  }, [editing]);
   const [skipped, setSkipped] = useState<string[]>([]);
   const [fillersOpen, setFillersOpen] = useState(false);
   const [replaceOpen, setReplaceOpen] = useState(false);
   const [styleTrackId, setStyleTrackId] = useState("");
+  const [selectedOnly, setSelectedOnly] = useState(false);
+  const [styleTab, setStyleTab] = useState("style");
+  const [previewPatch, setPreviewPatch] = useState<{ fields: Partial<StyleView>; ids: string[] } | null>(null);
   const [customFont, setCustomFont] = useState(false);
   const browser = state.subtitleBrowser ?? { search: "", find: "", replace: "", matchCase: false };
   const setBrowser = (patch: Partial<typeof browser>) =>
@@ -247,15 +271,21 @@ export function useSubtitlePanel({
   const subtitleTracks = project?.subtitleTracks ?? project?.tracks.filter((track) => track.kind === "subtitle") ?? [];
   const styleTrack = subtitleTracks.find((track) => track.id === styleTrackId) ?? subtitleTracks[0];
   const trackCues = cues.filter((cue) => cue.track_id === styleTrack?.id);
-  const sample = trackCues.find((cue) => contains(cue.start, cue.end, at)) ?? trackCues[0];
+  const sample = selectedOnly
+    ? cues.find((cue) => state.selected.includes(cue.cue_id))
+    : (trackCues.find((cue) => contains(cue.start, cue.end, at)) ?? trackCues[0]);
   const styleId = styleTrack && "default_style_id" in styleTrack ? styleTrack.default_style_id : trackCues[0]?.style_id;
-  const style = project?.styles.find((item) => item.id === styleId);
+  const selectedCue = cues.find((cue) => state.selected.includes(cue.cue_id));
+  const style = project?.styles.find((item) => item.id === (selectedOnly ? selectedCue?.style_id : styleId));
   const [styleDraft, setStyleDraft] = useState<StyleView>(style ?? defaultStyle);
-  useEffect(() => setStyleDraft(style ?? defaultStyle), [style]);
-  const committedStyle = useRef(style);
+  useEffect(() => setStyleDraft({ ...(style ?? defaultStyle), ...pendingStyle.current?.fields }), [style]);
   useEffect(() => {
-    committedStyle.current = style;
-  }, [style]);
+    const cue = cues.find((cue) => cue.cue_id === state.subtitle_selection?.editing);
+    if (cue) {
+      setEditing(`${cue.track_id}:${cue.cue_id}:${cue.piece}:${cue.start}`);
+      setDraft(cue.text);
+    }
+  }, [cues, state.subtitle_selection?.editing]);
   const write = async (ops: Record<string, unknown>[], label: string) => {
     if (!project || locked.current || !ops.length) return false;
     locked.current = true;
@@ -378,19 +408,75 @@ export function useSubtitlePanel({
           ];
     if (await write(ops, "编辑字幕文字")) setEditing(null);
   };
-  const changeStyle = (patch: Partial<StyleView>, commit: boolean) => {
+  const styleContext = useRef({ project, state, write, selectedOnly });
+  styleContext.current = { project, state, write, selectedOnly };
+  const pendingStyle = useRef<{
+    control: string;
+    fields: Partial<StyleView>;
+    ids: string[];
+    selectedOnly: boolean;
+    project: ProjectView;
+    state: UiState;
+    write: typeof write;
+  } | null>(null);
+  const styleQueue = useRef(Promise.resolve());
+  const styleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flushStyle = () => {
+    if (styleTimer.current) clearTimeout(styleTimer.current);
+    const pending = pendingStyle.current;
+    pendingStyle.current = null;
+    if (!pending) return;
+    styleQueue.current = styleQueue.current.then(async () => {
+      const context = styleContext.current;
+      const view =
+        context.state.project === pending.state.project ? (context.project ?? pending.project) : pending.project;
+      const ops = subtitleStyleOps(view, pending.ids, pending.fields, pending.selectedOnly);
+      if (ops.length && !(await pending.write(ops, "修改字幕样式"))) setError("字幕样式未保存，请重试");
+    });
+  };
+  const flushRef = useRef(flushStyle);
+  flushRef.current = flushStyle;
+  useEffect(() => () => flushRef.current(), []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: A committed revision replaces the transient preview.
+  useEffect(() => {
+    setPreviewPatch(
+      pendingStyle.current ? { fields: pendingStyle.current.fields, ids: pendingStyle.current.ids } : null,
+    );
+  }, [project?.revision.id]);
+  const changeStyle = (
+    patch: Partial<StyleView>,
+    commit: boolean,
+    control = Object.keys(patch).join(","),
+    ids = state.selected,
+  ) => {
     const next = { ...styleDraft, ...patch };
     setStyleDraft(next);
-    if (!commit || !style || locked.current) return;
-    const changed = Object.fromEntries(
-      Object.entries(patch).filter(
-        ([key, value]) => JSON.stringify(value) !== JSON.stringify(committedStyle.current?.[key as keyof StyleView]),
-      ),
-    );
-    if (!Object.keys(changed).length) return;
-    void write([{ op: "update_style", style_id: style.id, ...changed }], "修改字幕样式").then((ok) => {
-      if (ok) committedStyle.current = next;
-    });
+    setPreviewPatch({ fields: { ...previewPatch?.fields, ...patch }, ids });
+    if (!commit || !project) return;
+    if (
+      pendingStyle.current &&
+      (pendingStyle.current.control !== control ||
+        pendingStyle.current.selectedOnly !== selectedOnly ||
+        pendingStyle.current.ids.join() !== ids.join())
+    )
+      flushStyle();
+    const context = styleContext.current;
+    pendingStyle.current = {
+      control,
+      fields: { ...pendingStyle.current?.fields, ...patch },
+      ids,
+      selectedOnly,
+      project,
+      state,
+      write: (ops, label) =>
+        (styleContext.current.state.project === context.state.project ? styleContext.current.write : context.write)(
+          ops,
+          label,
+        ),
+    };
+    if (styleTimer.current) clearTimeout(styleTimer.current);
+    // The protocol has immutable revisions, so the release window commits as one edit.
+    styleTimer.current = setTimeout(flushStyle, 1000);
   };
   const number = (
     label: string,
@@ -406,13 +492,22 @@ export function useSubtitlePanel({
       min={min}
       max={max}
       step={step}
-      preview={(n) => changeStyle(patch(n), false)}
-      save={(n) => changeStyle(patch(n), true)}
+      preview={(n) => changeStyle(patch(n), false, label)}
+      save={(n) => changeStyle(patch(n), true, label)}
     />
   );
   const position = styleDraft.position ?? defaultStyle.position;
   const box = styleDraft.box ?? { color: "#00000000", padding: 0, radius: 0 };
-  const outline = styleDraft.outline ?? { color: "#000000", width: 0 };
+  const outlines = styleDraft.outlines ?? (styleDraft.outline ? [styleDraft.outline] : []);
+  const color = (label: string, value: string, patch: (value: string) => Partial<StyleView>) => (
+    <TextSetting
+      color
+      label={label}
+      value={value}
+      preview={(v) => changeStyle(patch(v), false, label)}
+      save={(v) => changeStyle(patch(v), true, label)}
+    />
+  );
   const clip = project?.tracks
     .find((track) => track.kind === "video" && track.enabled)
     ?.clips.find((clip) => clip.enabled && contains(clip.timeline_in.t, clip.timeline_out.t, at));
@@ -633,12 +728,7 @@ export function useSubtitlePanel({
                       className="zc-input"
                       value={draft}
                       disabled={busy}
-                      ref={(input) => {
-                        if (!input || document.activeElement === input) return;
-                        input.focus();
-                        input.setSelectionRange(input.value.length, input.value.length);
-                        input.scrollIntoView?.({ block: "nearest" });
-                      }}
+                      ref={editInput}
                       onChange={(e) => setDraft(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === "Escape") {
@@ -768,165 +858,262 @@ export function useSubtitlePanel({
               format={project?.format}
             />
           </div>
-          <fieldset className="zc-sub-style" disabled={!style || busy}>
-            <h3>预设</h3>
-            <div className="zc-sub-presets">
-              {["描边白字", "黑底白字", "黄字"].map((name, index) => (
-                <button
-                  type="button"
-                  className={`zc-sub-preset zc-sub-preset-${index}`}
-                  aria-label={name}
-                  title={name}
-                  aria-pressed={
-                    styleDraft.color.toUpperCase() === (index === 2 ? "#FFD84A" : "#FFFFFF") &&
-                    (index === 1
-                      ? box.color === "#000000CC" && outline.width === 0
-                      : box.color === "#00000000" && outline.width === 0.06)
+          <SelectSetting
+            label="应用到"
+            value={selectedOnly ? "selected" : "all"}
+            options={[
+              ["all", "全部字幕"],
+              ["selected", "选中的字幕"],
+            ]}
+            save={(v) => {
+              flushStyle();
+              setPreviewPatch(null);
+              setSelectedOnly(v === "selected");
+            }}
+          />
+          <div className="zc-tabs" role="tablist" aria-label="字幕样式设置">
+            {[
+              ["style", "样式"],
+              ["animation", "动画"],
+            ].map(([id, name]) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                className="zc-tab"
+                aria-selected={styleTab === id}
+                onClick={() => setStyleTab(id ?? "style")}
+              >
+                {name}
+              </button>
+            ))}
+          </div>
+          {styleTab === "animation" ? (
+            <div className="zc-sub-animation" />
+          ) : (
+            <fieldset className="zc-sub-style" disabled={!style || busy || (selectedOnly && !selectedCue)}>
+              <div className="zc-sub-presets" />
+              <details open>
+                <summary>文字</summary>
+                <SelectSetting
+                  label="字体族"
+                  value={
+                    customFont || !fonts.some(([value]) => value === styleDraft.font_family)
+                      ? "other"
+                      : styleDraft.font_family
                   }
-                  key={name}
-                  onClick={() =>
-                    changeStyle(
-                      {
-                        color: index === 2 ? "#FFD84A" : "#FFFFFF",
-                        outline: { color: "#000000", width: index === 1 ? 0 : 0.06 },
-                        box: {
-                          color: index === 1 ? "#000000CC" : "#00000000",
-                          padding: index === 1 ? 0.3 : 0,
-                          radius: 0.15,
-                        },
-                      },
-                      true,
-                    )
-                  }
-                >
-                  <span>字幕</span>
-                </button>
-              ))}
-            </div>
-            <h3>字体</h3>
-            <SelectSetting
-              label="字体族"
-              value={
-                customFont || !fonts.some(([value]) => value === styleDraft.font_family)
-                  ? "other"
-                  : styleDraft.font_family
-              }
-              options={[...fonts, ["other", "其他…"]]}
-              save={(font_family) => {
-                setCustomFont(font_family === "other");
-                if (font_family !== "other") changeStyle({ font_family }, true);
-              }}
-            />
-            {(customFont || !fonts.some(([value]) => value === styleDraft.font_family)) && (
-              <TextSetting
-                label="其他字体"
-                value={styleDraft.font_family}
-                save={(font_family) => changeStyle({ font_family }, true)}
-              />
-            )}
-            <SelectSetting
-              label="字重"
-              value={String(styleDraft.font_weight ?? 400)}
-              options={Array.from({ length: 9 }, (_, i) => [String((i + 1) * 100), String((i + 1) * 100)])}
-              save={(value) => changeStyle({ font_weight: Number(value) }, true)}
-            />
-            {number("字号", styleDraft.font_size, 0.01, 0.2, 0.001, (font_size) => ({ font_size }))}
-            <h3>颜色</h3>
-            <TextSetting
-              color
-              label="文字颜色"
-              value={styleDraft.color}
-              save={(color) => changeStyle({ color }, true)}
-            />
-            <h3>描边</h3>
-            <TextSetting
-              color
-              label="描边颜色"
-              value={outline.color}
-              save={(color) => changeStyle({ outline: { ...outline, color } }, true)}
-            />
-            {number("描边宽度", outline.width, 0, 0.3, 0.01, (width) => ({ outline: { ...outline, width } }))}
-            <h3>底板</h3>
-            <TextSetting
-              color
-              label="底板颜色"
-              value={box.color}
-              save={(color) => changeStyle({ box: { ...box, color } }, true)}
-            />
-            {number("内边距", box.padding ?? 0, 0, 2, 0.05, (padding) => ({ box: { ...box, padding } }))}
-            {number("圆角", box.radius ?? 0, 0, 2, 0.05, (radius) => ({ box: { ...box, radius } }))}
-            <h3>位置</h3>
-            <fieldset className="zc-sub-align" aria-label="字幕对齐">
-              {[0, 1, 2].flatMap((row) =>
-                [0, 1, 2].map((column) => {
-                  const mapped = alignment(row, column, position?.max_width ?? 0.8);
-                  const label = `${["上", "中", "下"][row]}${["左", "中", "右"][column]}`;
+                  options={[...fonts, ["other", "其他…"]]}
+                  save={(font_family) => {
+                    setCustomFont(font_family === "other");
+                    if (font_family !== "other") changeStyle({ font_family }, true);
+                  }}
+                />
+                {(customFont || !fonts.some(([value]) => value === styleDraft.font_family)) && (
+                  <TextSetting
+                    label="其他字体"
+                    value={styleDraft.font_family}
+                    save={(font_family) => changeStyle({ font_family }, true)}
+                  />
+                )}
+                <SelectSetting
+                  label="字重"
+                  value={String(styleDraft.font_weight ?? 400)}
+                  options={Array.from({ length: 9 }, (_, i) => [String((i + 1) * 100), String((i + 1) * 100)])}
+                  save={(value) => changeStyle({ font_weight: Number(value) }, true)}
+                />
+                {number("字号", styleDraft.font_size, 0.01, 0.2, 0.001, (font_size) => ({ font_size }))}
+                <div className="zc-sub-inline">
+                  <button
+                    type="button"
+                    className="zc-ibtn"
+                    title="斜体"
+                    aria-label="斜体"
+                    aria-pressed={!!styleDraft.italic}
+                    onClick={() => changeStyle({ italic: !styleDraft.italic }, true)}
+                  >
+                    <i>I</i>
+                  </button>
+                  <button
+                    type="button"
+                    className="zc-ibtn"
+                    title="下划线"
+                    aria-label="下划线"
+                    aria-pressed={!!styleDraft.underline}
+                    onClick={() => changeStyle({ underline: !styleDraft.underline }, true)}
+                  >
+                    <u>U</u>
+                  </button>
+                </div>
+                {color("文字颜色", styleDraft.color, (color) => ({ color }))}
+                {number("字间距", styleDraft.letter_spacing ?? 0, -0.2, 1, 0.01, (letter_spacing) => ({
+                  letter_spacing,
+                }))}
+                {number("行距", styleDraft.line_spacing ?? 1.2, 0.5, 3, 0.1, (line_spacing) => ({ line_spacing }))}
+                <SelectSetting
+                  label="对齐"
+                  value={styleDraft.align ?? "center"}
+                  options={[
+                    ["left", "左对齐"],
+                    ["center", "居中"],
+                    ["right", "右对齐"],
+                  ]}
+                  save={(align) => changeStyle({ align: align as NonNullable<StyleView["align"]> }, true)}
+                />
+                {number("最多行数", styleDraft.max_lines ?? 2, 1, 3, 1, (max_lines) => ({ max_lines }))}
+              </details>
+              <details>
+                <summary>描边</summary>
+                {outlines.map((outline, index) => {
+                  const patch = (fields: Partial<typeof outline>) => ({
+                    outlines: outlines.map((edge, i) => (i === index ? { ...edge, ...fields } : edge)),
+                  });
                   return (
-                    <button
-                      type="button"
-                      key={label}
-                      aria-label={label}
-                      aria-pressed={position?.anchor === mapped.anchor && (position.offset_x ?? 0) === mapped.offset_x}
-                      onClick={() =>
-                        changeStyle(
-                          { position: { ...position, margin_v: position?.margin_v ?? 0.08, ...mapped } },
-                          true,
-                        )
-                      }
-                    >
-                      ·
-                    </button>
+                    // biome-ignore lint/suspicious/noArrayIndexKey: Outline controls are numbered layer slots, with no row state.
+                    <div key={index} className="zc-sub-outline">
+                      {color(`描边 ${index + 1} 颜色`, outline.color, (color) => patch({ color }))}
+                      {number(`描边 ${index + 1} 宽度`, outline.width, 0, 0.3, 0.01, (width) => patch({ width }))}
+                      <IconButton
+                        icon="trash"
+                        label={`删除描边 ${index + 1}`}
+                        onClick={() => {
+                          const next = outlines.filter((_, i) => i !== index);
+                          if (next.length) changeStyle({ outlines: next }, true);
+                          else changeStyle({ outlines: undefined, outline: { color: "#000000", width: 0 } }, true);
+                        }}
+                      />
+                    </div>
                   );
-                }),
-              )}
-            </fieldset>
-            {number("上下边距", position?.margin_v ?? 0.08, 0, 0.5, 0.01, (margin_v) => ({
-              position: { anchor: "bottom", ...position, margin_v },
-            }))}
-            {number("最大宽度", position?.max_width ?? 0.8, 0.1, 1, 0.01, (max_width) => {
-              const old = position?.offset_x ?? 0;
-              return {
-                position: {
-                  anchor: "bottom",
-                  margin_v: 0.08,
-                  ...position,
-                  max_width,
-                  offset_x: old === 0 ? 0 : (Math.sign(old) * (1 - max_width)) / 2,
-                },
-              };
-            })}
-            {number("行距", styleDraft.line_spacing ?? 1.2, 0.5, 3, 0.1, (line_spacing) => ({ line_spacing }))}
-            {number("最多行数", styleDraft.max_lines ?? 2, 1, 3, 1, (max_lines) => ({ max_lines }))}
-            <button
-              className="zc-btn zc-btn-primary"
-              type="button"
-              disabled={!project?.styles.length}
-              onClick={() => {
-                const { font_family, font_size, color, font_weight, outline, box, position, max_lines, line_spacing } =
-                  styleDraft;
-                const fields = {
-                  font_family,
-                  font_size,
-                  color,
-                  font_weight: font_weight ?? null,
-                  outline: outline ?? null,
-                  box: box ?? null,
-                  position: position ?? null,
-                  max_lines: max_lines ?? null,
-                  line_spacing: line_spacing ?? null,
-                };
-                void write(
-                  (project?.styles ?? []).map((item) => ({ op: "update_style", style_id: item.id, ...fields })),
-                  "应用样式到所有字幕",
+                })}
+                <IconButton
+                  icon="plus"
+                  label="添加描边"
+                  disabled={outlines.length >= 3}
+                  onClick={() => changeStyle({ outlines: [...outlines, { color: "#000000", width: 0.06 }] }, true)}
+                />
+              </details>
+              {(
+                [
+                  ["shadow", "阴影"],
+                  ["glow", "发光"],
+                ] as const
+              ).map(([key, label]) => {
+                const effect = styleDraft[key];
+                return (
+                  <details key={key}>
+                    <summary>{label}</summary>
+                    <label className="zc-switch-row">
+                      {label}
+                      <input
+                        type="checkbox"
+                        role="switch"
+                        className="zc-switch"
+                        aria-label={`启用${label}`}
+                        aria-checked={!!effect}
+                        checked={!!effect}
+                        onChange={(e) =>
+                          changeStyle(
+                            {
+                              [key]: e.target.checked
+                                ? key === "shadow"
+                                  ? { color: "#00000099", blur: 0.1, distance: 0.1, angle: 90 }
+                                  : { color: "#FFFFFF", blur: 0.2 }
+                                : undefined,
+                            },
+                            true,
+                          )
+                        }
+                      />
+                    </label>
+                    {effect && (
+                      <>
+                        {color(`${label}颜色`, effect.color, (color) => ({ [key]: { ...effect, color } }))}
+                        {number(`${label}模糊`, effect.blur, 0, 2, 0.01, (blur) => ({ [key]: { ...effect, blur } }))}
+                        {key === "shadow" && styleDraft.shadow && (
+                          <>
+                            {number("阴影距离", styleDraft.shadow.distance, 0, 2, 0.01, (distance) => ({
+                              shadow: {
+                                color: "#00000099",
+                                blur: 0.1,
+                                angle: 90,
+                                ...styleDraft.shadow,
+                                distance,
+                              },
+                            }))}
+                            {number("阴影角度", styleDraft.shadow.angle, 0, 359, 1, (angle) => ({
+                              shadow: {
+                                color: "#00000099",
+                                blur: 0.1,
+                                distance: 0.1,
+                                ...styleDraft.shadow,
+                                angle,
+                              },
+                            }))}
+                          </>
+                        )}
+                      </>
+                    )}
+                  </details>
                 );
-              }}
-            >
-              应用到所有字幕
-            </button>
-          </fieldset>
+              })}
+              <details>
+                <summary>底板</summary>
+                {color("底板颜色", box.color, (color) => ({ box: { ...box, color } }))}
+                {number("内边距", box.padding ?? 0, 0, 2, 0.05, (padding) => ({ box: { ...box, padding } }))}
+                {number("圆角", box.radius ?? 0, 0, 2, 0.05, (radius) => ({ box: { ...box, radius } }))}
+              </details>
+              <details>
+                <summary>位置</summary>
+                <fieldset className="zc-sub-align" aria-label="字幕对齐">
+                  {[0, 1, 2].flatMap((row) =>
+                    [0, 1, 2].map((column) => {
+                      const mapped = alignment(row, column, position?.max_width ?? 0.8);
+                      const label = `${["上", "中", "下"][row]}${["左", "中", "右"][column]}`;
+                      return (
+                        <button
+                          type="button"
+                          key={label}
+                          aria-label={label}
+                          title={label}
+                          aria-pressed={
+                            position?.anchor === mapped.anchor && (position.offset_x ?? 0) === mapped.offset_x
+                          }
+                          onClick={() =>
+                            changeStyle(
+                              { position: { ...position, margin_v: position?.margin_v ?? 0.08, ...mapped } },
+                              true,
+                            )
+                          }
+                        >
+                          ·
+                        </button>
+                      );
+                    }),
+                  )}
+                </fieldset>
+                {number("上下边距", position?.margin_v ?? 0.08, 0, 1, 0.01, (margin_v) => ({
+                  position: { anchor: "bottom", ...position, margin_v },
+                }))}
+                {number("水平位置", position?.offset_x ?? 0, -0.5, 0.5, 0.01, (offset_x) => ({
+                  position: { anchor: "bottom", margin_v: 0.08, ...position, offset_x },
+                }))}
+                {number("最大宽度", position?.max_width ?? 0.8, 0.1, 1, 0.01, (max_width) => ({
+                  position: { anchor: "bottom", margin_v: 0.08, ...position, max_width },
+                }))}
+              </details>
+            </fieldset>
+          )}
         </>
       )}
     </div>
   );
-  return { controls, parameters, editCue: begin };
+  return {
+    controls,
+    parameters,
+    editCue: begin,
+    stylePreview: previewPatch
+      ? { fields: previewPatch.fields, cue_ids: selectedOnly ? previewPatch.ids : undefined }
+      : undefined,
+    previewStyle: (cue: CueView, patch: Partial<StyleView>, commit: boolean) =>
+      changeStyle(patch, commit, "预览字幕", [cue.cue_id]),
+  };
 }

@@ -255,6 +255,8 @@ export function App({ config }: { config?: { port: number; token: string } }) {
             readOnly={history.viewing}
             state={state}
             update={update}
+            subtitlePreview={subtitles.stylePreview}
+            onSubtitleStyle={subtitles.previewStyle}
             config={config}
             error={error}
             errorDetail={errorDetail}

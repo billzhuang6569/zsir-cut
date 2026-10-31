@@ -1,3 +1,4 @@
+import type { ProjectView } from "./connection.js";
 import type { CueView, StyleView } from "./timeline.js";
 
 export const defaultStyle: StyleView = {
@@ -64,4 +65,37 @@ export function textEdit(cue: CueView, text: string) {
       text.slice(prefix, text.length - suffix) +
       last.token.text.slice(Math.max(0, cue.text.length - suffix - last.start)),
   };
+}
+
+export function subtitleStyleOps(
+  project: ProjectView,
+  selected: string[],
+  patch: Record<string, unknown>,
+  selectedOnly: boolean,
+) {
+  const targets = selectedOnly ? project.cues.filter((cue) => selected.includes(cue.cue_id)) : project.cues;
+  const used = new Set(targets.map((cue) => cue.style_id));
+  const ops: Record<string, unknown>[] = [];
+  for (const style of project.styles) {
+    if (selectedOnly && !used.has(style.id)) continue;
+    const changed = Object.fromEntries(
+      Object.entries(patch)
+        .filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(style[key as keyof StyleView]))
+        .map(([key, value]) => [key, value ?? null]),
+    );
+    if (!Object.keys(changed).length) continue;
+    if (selectedOnly && project.cues.some((cue) => cue.style_id === style.id && !selected.includes(cue.cue_id))) {
+      const { id: _id, version: _version, ext: _ext, ...fields } = style as StyleView & { ext?: unknown };
+      const id = `sty_${crypto.randomUUID().replaceAll("-", "")}`;
+      ops.push({
+        op: "add_style",
+        ...Object.fromEntries(Object.entries({ ...fields, ...changed }).filter(([, value]) => value != null)),
+        name: style.name ?? "字幕样式",
+        id,
+      });
+      for (const cueId of new Set(targets.filter((cue) => cue.style_id === style.id).map((cue) => cue.cue_id)))
+        ops.push({ op: "set_cue", cue_id: cueId, style_id: id });
+    } else ops.push({ op: "update_style", style_id: style.id, ...changed });
+  }
+  return ops;
 }

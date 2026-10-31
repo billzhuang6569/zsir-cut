@@ -6,6 +6,7 @@ import {
   DirectExportExists,
   type DirectProfile,
   directFiles,
+  directStyleLosses,
   runDirectExport,
 } from "./direct-export.ts";
 import {
@@ -800,7 +801,8 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
           const output = basic(verb, requestId);
           if (request.dry_run) {
             output.status = "dry_run";
-            output.result = { files: files.map((file) => ({ name: file.name })) };
+            const losses = profile === "direct-srt" ? directStyleLosses(project) : [];
+            output.result = { files: files.map((file) => ({ name: file.name })), ...(losses.length ? { losses } : {}) };
           } else if (!options.worker) {
             const jobId = await startExportJob(request.project as string, project.id, request, "direct");
             output.status = "accepted";

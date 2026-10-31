@@ -11,7 +11,7 @@ import { WebSocket } from "ws";
 import type { Envelope } from "../../core/src/index.ts";
 import { dispatch, VERBS } from "../../core/src/index.ts";
 import { Agents } from "../src/agents.js";
-import { createMcpServer, readAiState, readHistoryBatches, startHost } from "../src/index.js";
+import { createMcpServer, readAiState, readHistoryBatches, startHost, subtitleStylesForPreview } from "../src/index.js";
 import { DESKTOP_VERBS, SUBTITLE_VERBS, UI_VERBS } from "../src/ui.js";
 
 let appDataDir: string;
@@ -499,4 +499,33 @@ it("rebinds MCP and bootstrap, stops the old Agent and preserves binding on inva
     socket.terminate();
     await client.close();
   }
+});
+
+it("serializes stored animation durations in preview data without bigint or changing the model", () => {
+  const duration = { numerator: 1n, denominator: 2n };
+  const styles = [
+    {
+      id: "sty_test",
+      name: "Test",
+      version: 1,
+      font_family: "Arial",
+      font_size: 0.05,
+      color: "#FFFFFF",
+      highlight: { color: "#FF0000" },
+      animation: {
+        in: { type: "fade" as const, duration },
+        out: { type: "sink" as const, duration },
+        word: "jump" as const,
+      },
+    },
+  ];
+  const wire = JSON.parse(JSON.stringify(subtitleStylesForPreview(styles)));
+  expect(wire[0].animation).toEqual({
+    in: { type: "fade", duration: "1/2s" },
+    out: { type: "sink", duration: "1/2s" },
+    word: "jump",
+  });
+  expect(styles[0]?.animation.in.duration).toBe(duration);
+  const { animation: _animation, ...plain } = styles[0] ?? {};
+  expect(subtitleStylesForPreview([plain as (typeof styles)[number]])[0]).toEqual(plain);
 });

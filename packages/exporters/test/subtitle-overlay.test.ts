@@ -1,16 +1,27 @@
 // biome-ignore-all lint/style/noNonNullAssertion: Synthetic fixture and probe assertions guard indexed entries.
+
 import { execFile } from "node:child_process";
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { createCanvas, GlobalFonts } from "@napi-rs/canvas";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { dispatch, parseProject, rational as q, serializeProject, validateEnvelope } from "../../core/src/index.ts";
 import type { Project } from "../../core/src/project/types.ts";
 import { checkSubtitleFont } from "../src/subtitle-fonts.ts";
 import { renderSubtitleOverlay } from "../src/subtitle-overlay.ts";
+import * as subtitleRenderer from "../src/subtitle-render.ts";
 import { renderSubtitle } from "../src/subtitle-render.ts";
+import { renderSubtitle as renderLegacySubtitle } from "./legacy-subtitle-render.ts";
+
+expect(
+  GlobalFonts.registerFromPath(
+    fileURLToPath(new URL("../../../fixtures/fonts/Roboto-Regular.ttf", import.meta.url)),
+    "ZcutTestRoboto",
+  ),
+).not.toBeNull();
 
 const run = promisify(execFile);
 let dir: string, path: string, project: Project;
@@ -296,4 +307,25 @@ it("merges missing glyphs into the existing font warning even for a registered f
       missing_glyphs: ["\u{10ffff}", "\u{10fffe}"],
     },
   ]);
+}, 30000);
+
+it("keeps every decoded legacy overlay pixel identical to the pre-S4.5 export", async () => {
+  project.subtitle_styles[0]!.font_family = "ZcutTestRoboto";
+  const subtitles = timeline().tracks[1]!;
+  if (subtitles.kind !== "subtitle") throw new Error("Missing subtitle track");
+  subtitles.free_cues[0]!.text = "Alpha";
+  await renderSubtitleOverlay(project, overlay(), path);
+  const current = await decode();
+  const reference = vi.spyOn(subtitleRenderer, "renderSubtitle").mockImplementation((...args) => {
+    const result = renderLegacySubtitle(...args);
+    // The overlay consumes only lines and warnings; the frozen renderer predates selection bounds.
+    return { ...result, bounds: { x: 0, y: 0, width: 0, height: 0 } };
+  });
+  try {
+    await renderSubtitleOverlay(project, overlay(), path);
+    expect(reference).toHaveBeenCalled();
+    expect((await decode()).equals(current)).toBe(true);
+  } finally {
+    reference.mockRestore();
+  }
 }, 30000);
