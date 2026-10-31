@@ -1639,9 +1639,9 @@ describe("semantic subtitle resegment", () => {
   });
 
   it("§10.4 never merges short AI segments and retains display extension and warnings", async () => {
-    expect((await resegment({ cut_after: ["tok_mantic_0", "tok_mantic_1"] })).status).toBe("applied");
+    expect((await resegment({ cut_after: ["tok_mantic_2", "tok_mantic_3", "tok_mantic_t"] })).status).toBe("applied");
     const item = (await read()).transcripts[0]!;
-    expect(texts(item).slice(0, 2)).toEqual(["所有", "的"]);
+    expect(texts(item).slice(0, 2)).toEqual(["所有的点位", "加"]);
     const ranges = displayRanges(item);
     expect(ranges[0]!.warnings).toContain("W_SUB_SHORT");
     expect(compare(ranges.at(-1)!.end, item.tokens.at(-1)!.align.end)).toBeGreaterThan(0);
@@ -1662,7 +1662,7 @@ describe("semantic subtitle resegment", () => {
     expect((await resegment({ cut_after: item.tokens.map((token) => token.id) })).status).toBe("applied");
     const after = (await read()).transcripts[0]!;
     expect(after.cues.slice(0, 3)).toEqual(item.cues.slice(0, 3));
-    expect(after.cues.slice(3)).toHaveLength(item.tokens.length - 6);
+    expect(after.cues.slice(3)).toHaveLength(19);
     expect((await resegment({ cut_after: item.tokens.map((token) => token.id) })).status).toBe("no_op");
     await validateAndUndo(value);
   });
@@ -1679,7 +1679,7 @@ describe("semantic subtitle resegment", () => {
     expect(texts((await read()).transcripts[0]!).slice(0, 3)).toEqual([
       "所有的点位加起来可能有两万多个",
       "很多的脏活全部让豆包工作去做了",
-      "是",
+      "是你",
     ]);
   });
 

@@ -59,6 +59,8 @@ const noBreakBefore = new Set(
   "的、地、得、了、着、过、吗、呢、吧、啊、呀、嘛、啦、们、上、下、里、中、后、前、时、似的、一样".split("、"),
 );
 const stripPunctuation = (text: string) => text.replace(/^\p{P}+|\p{P}+$/gu, "");
+const badBoundary = (before: Token, after: Token) =>
+  noBreakAfter.has(stripPunctuation(before.text)) || noBreakBefore.has(stripPunctuation(after.text));
 const ascii = /[A-Za-z0-9]/;
 const visible = (tokens: Token[]) => tokens.filter((token) => token.text !== "");
 const joinSpace = (a: string, b: string) =>
@@ -117,6 +119,49 @@ export function cueBreaks(tokens: Token[], rules: SubtitleRules): string[] {
 }
 
 export function segmentTokens(tokens: Token[], rules: SubtitleRules, cutAfter?: ReadonlySet<string>): Token[][] {
+  if (cutAfter && rules.name === "zh-talk") {
+    const corrected = new Set(cutAfter);
+    const correct = (chunk: Token[]) => {
+      const entries = visible(chunk);
+      const cuts = entries.flatMap((token, index) =>
+        index < entries.length - 1 && corrected.has(token.id) ? [index] : [],
+      );
+      const fits = (start: number, end: number) =>
+        compare(textWidth(entries.slice(start, end + 1), rules), widthLimit(rules, rules.max_lines)) <= 0 &&
+        compare(sub(entries[end]!.align.end, entries[start]!.align.start), rules.max_duration) <= 0;
+      for (let i = 0; i < cuts.length; i++) {
+        const cut = cuts[i]!;
+        if (!badBoundary(entries[cut]!, entries[cut + 1]!)) continue;
+        const start = (cuts[i - 1] ?? -1) + 1;
+        const end = cuts[i + 1] ?? entries.length - 1;
+        const candidates = Array.from({ length: end - start }, (_, offset) => start + offset)
+          .filter((index) => Math.abs(index - cut) <= 3 && validBoundary(entries, index))
+          .filter((index) => !badBoundary(entries[index]!, entries[index + 1]!))
+          .sort((a, b) => Math.abs(a - cut) - Math.abs(b - cut) || b - a);
+        const nearest = candidates[0];
+        if (nearest !== undefined && fits(start, nearest) && fits(nearest + 1, end)) {
+          corrected.delete(entries[cut]!.id);
+          corrected.add(entries[nearest]!.id);
+          cuts[i] = nearest;
+        } else if (fits(start, end)) {
+          corrected.delete(entries[cut]!.id);
+          cuts.splice(i--, 1);
+        }
+      }
+    };
+    let start = 0;
+    for (let i = 0; i < tokens.length - 1; i++) {
+      if (
+        !punctOnly.test(tokens[i + 1]!.text) &&
+        compare(sub(tokens[i + 1]!.align.start, tokens[i]!.align.end), rules.hard_pause) >= 0
+      ) {
+        correct(tokens.slice(start, i + 1));
+        start = i + 1;
+      }
+    }
+    correct(tokens.slice(start));
+    cutAfter = corrected;
+  }
   const result: Token[][] = [];
   let sentence: Token[] = [];
   const splitSentence = () => {
@@ -135,9 +180,7 @@ export function segmentTokens(tokens: Token[], rules: SubtitleRules, cutAfter?: 
             return [];
           const pause = sub(following.align.start, entry.align.end);
           const priority = compare(pause, rules.soft_pause) >= 0 ? 0 : innerPunct.test(entry.text) ? 1 : 2;
-          const bad =
-            rules.name === "zh-talk" &&
-            (noBreakAfter.has(stripPunctuation(entry.text)) || noBreakBefore.has(stripPunctuation(following.text)));
+          const bad = rules.name === "zh-talk" && badBoundary(entry, following);
           return [{ index, priority, bad }];
         });
         choices.sort((a, b) => Number(a.bad) - Number(b.bad) || a.priority - b.priority || b.index - a.index);

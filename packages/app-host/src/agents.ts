@@ -226,8 +226,6 @@ export class Agents {
         agent === "claude"
           ? [
               "-p",
-              "--model",
-              "sonnet",
               "--output-format",
               "json",
               "--tools",

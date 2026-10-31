@@ -62,6 +62,55 @@ const ranges = (
 };
 
 describe("subtitle rules", () => {
+  it.each([
+    ["move forward", ["甲", "的", "是", "乙", "丙"], [2], [3]],
+    ["move backward", ["甲", "乙", "是", "的", "丙"], [2], [1]],
+    ["prefer later on a tie", ["甲", "是", "乙", "丙"], [1], [2]],
+    ["drop without a nearby good boundary", ["是", "是", "的", "和", "是", "把", "是", "乙"], [3], []],
+    ["process corrections sequentially", ["甲", "是", "乙", "是", "丙", "丁"], [1, 3], [2, 4]],
+    ["ignore hidden tokens as boundaries", ["甲", "是", "", "乙", "丙"], [1, 2], [3]],
+  ])("corrects AI cuts: %s", (_name, words, cuts, expected) => {
+    const tokens = make(words as string[]);
+    const groups = segmentTokens(tokens, zh, new Set((cuts as number[]).map((i) => tokens[i]!.id)));
+    expect(groups.slice(0, -1).map((group) => tokens.indexOf(group.at(-1)!))).toEqual(expected);
+  });
+
+  it("keeps a bad cut when moving and merging exceed the duration limit", () => {
+    const tokens = make(["甲", "是", "乙", "丙"], [4n, 4n, 4n, 4n]);
+    const groups = segmentTokens(tokens, { ...zh, max_duration: s(8n, 10n) }, new Set([tokens[1]!.id]));
+    expect(groups.map((group) => group.map((token) => token.text))).toEqual([
+      ["甲", "是"],
+      ["乙", "丙"],
+    ]);
+  });
+
+  it("keeps a bad cut when moving and merging exceed the width limit", () => {
+    const tokens = make(["甲甲", "是", "乙乙", "丙丙"]);
+    const groups = segmentTokens(tokens, { ...zh, cpl: 4 }, new Set([tokens[1]!.id]));
+    expect(groups.map((group) => group.map((token) => token.text))).toEqual([
+      ["甲甲", "是"],
+      ["乙乙", "丙丙"],
+    ]);
+  });
+
+  it("leaves English AI cuts unchanged", () => {
+    const tokens = make(["甲", "是", "乙", "丙"]);
+    const groups = segmentTokens(tokens, subtitleRules("en"), new Set([tokens[1]!.id]));
+    expect(groups[0]!.at(-1)!.text).toBe("是");
+  });
+
+  it("corrects real-case AI boundaries in the regression project", async () => {
+    const parsed = parseProject(await readFile("fixtures/regressions/subtitle-boundary-correction.zcut.json", "utf8"));
+    if (!parsed.ok) throw new Error("Invalid regression fixture");
+    const tokens = parsed.project.transcripts[0]!.tokens;
+    const groups = segmentTokens(tokens, zh, new Set([tokens[7]!.id, tokens[19]!.id]));
+    expect(groups.map((group) => group.map((token) => token.text).join(""))).toEqual([
+      "运营老师现在只需要非常专注的我",
+      "做好我脚本的打磨",
+      "我是目前所在的是凯迪仕",
+      "智能锁",
+    ]);
+  });
   it.each(["的", "是", "和", "「是」，"])("avoids a width split after the whole token %s", (word) => {
     const tokens = make(["甲甲甲甲", "乙", "丙", "丁", word, "戊戊"]);
     const rules = { ...zh, cpl: 7 + Number(textWidth([tokens[4]!], zh).numerator) };
