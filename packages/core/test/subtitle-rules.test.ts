@@ -140,11 +140,41 @@ describe("subtitle rules", () => {
     const tokens = parsed.project.transcripts[0]!.tokens;
     const groups = segmentTokens(tokens, zh, new Set([tokens[7]!.id, tokens[19]!.id]));
     expect(groups.map((group) => group.map((token) => token.text).join(""))).toEqual([
-      "运营老师现在只需要非常专注的我",
-      "做好我脚本的打磨",
+      "运营老师现在只需要非常专注的",
+      "我做好我脚本的打磨",
       "我是目前所在的是凯迪仕",
       "智能锁",
     ]);
+  });
+  it("respects real-case pauses and avoids splitting the project term", async () => {
+    const parsed = parseProject(await readFile("fixtures/regressions/subtitle-correction-pause.zcut.json", "utf8"));
+    if (!parsed.ok) throw new Error("Invalid regression fixture");
+    const tokens = parsed.project.transcripts[0]!.tokens;
+    const terms = parsed.project.recognition!.terms!;
+    for (const [start, end, cut, expected] of [
+      [0, 9, 7, "以前是由我们人工去操作的"],
+      [9, 16, 14, "其实普遍是偏大的"],
+      [16, 26, 21, "我是目前所在的是"],
+      [26, 36, 31, "我是目前所在的是凯迪仕"],
+    ] as const) {
+      const groups = segmentTokens(tokens.slice(start, end), zh, new Set([tokens[cut]!.id]), terms);
+      expect(groups.map((group) => group.map((token) => token.text).join(""))[0]).toBe(expected);
+    }
+  });
+
+  it.each(["的", "地", "得"])("exempts %s only as a trigger, not as a replacement or other bad boundary", (word) => {
+    const tokens = make(["甲", word, "是", "乙", "丙"]);
+    expect(segmentTokens(tokens, zh, new Set([tokens[1]!.id]))[0]!.at(-1)!.text).toBe(word);
+    expect(segmentTokens(tokens, zh, new Set([tokens[2]!.id]))[0]!.at(-1)!.text).toBe("乙");
+    const term = make(["甲", word, "乙", "丙"]);
+    expect(segmentTokens(term, zh, new Set([term[1]!.id]), [`${word}乙`])[0]!.at(-1)!.text).toBe("乙");
+    const before = make(["甲", word, "了", "乙"]);
+    expect(segmentTokens(before, zh, new Set([before[1]!.id]))[0]!.at(-1)!.text).toBe("了");
+  });
+
+  it.each([29n, 30n, 31n])("compares the pause against soft_pause exactly: %s/100s", (gap) => {
+    const tokens = make(["甲", "是", "乙", "丙"], [10n, 10n, 10n, 10n], [0n, 0n, gap], 100n);
+    expect(segmentTokens(tokens, zh, new Set([tokens[1]!.id]))[0]!.at(-1)!.text).toBe(gap < 30n ? "乙" : "是");
   });
   it.each(["的", "是", "和", "「是」，"])("avoids a width split after the whole token %s", (word) => {
     const tokens = make(["甲甲甲甲", "乙", "丙", "丁", word, "戊戊"]);

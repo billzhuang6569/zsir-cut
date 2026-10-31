@@ -59,8 +59,6 @@ const noBreakBefore = new Set(
   "的、地、得、了、着、过、吗、呢、吧、啊、呀、嘛、啦、们、上、下、里、中、后、前、时、似的、一样".split("、"),
 );
 const stripPunctuation = (text: string) => text.replace(/^\p{P}+|\p{P}+$/gu, "");
-const badBoundary = (before: Token, after: Token) =>
-  noBreakAfter.has(stripPunctuation(before.text)) || noBreakBefore.has(stripPunctuation(after.text));
 const ascii = /[A-Za-z0-9]/;
 const visible = (tokens: Token[]) => tokens.filter((token) => token.text !== "");
 const joinSpace = (a: string, b: string) =>
@@ -133,6 +131,7 @@ export function segmentTokens(
   const text = fold(entries.map((token) => token.text).join(""));
   const foldedTerms = terms.filter(Boolean).map(fold);
   const bad = new Set<string>();
+  const correctionBad = new Set<string>();
   let offset = 0;
   for (let i = 0; i < entries.length - 1; i++) {
     const before = entries[i]!;
@@ -143,13 +142,15 @@ export function segmentTokens(
       const start = text.slice(begin, offset + term.length - 1).indexOf(term);
       return start >= 0 && begin + start < offset && begin + start + term.length > offset;
     });
-    if (
-      badBoundary(before, after) ||
+    const beforeWord = stripPunctuation(before.text);
+    const afterBad = noBreakAfter.has(beforeWord);
+    const otherBad =
+      noBreakBefore.has(stripPunctuation(after.text)) ||
       splitsTerm ||
       (/[0-9零一二三四五六七八九十百千万亿两几半]$/u.test(before.text) &&
-        /^[0-9零一二三四五六七八九十百千万亿两几半个位家条年月日天号点分秒岁元块倍次小时%]/u.test(after.text))
-    )
-      bad.add(before.id);
+        /^[0-9零一二三四五六七八九十百千万亿两几半个位家条年月日天号点分秒岁元块倍次小时%]/u.test(after.text));
+    if (afterBad || otherBad) bad.add(before.id);
+    if (otherBad || (afterBad && !["的", "地", "得"].includes(beforeWord))) correctionBad.add(before.id);
   }
   const isBad = (before: Token) => bad.has(before.id);
   if (cutAfter && rules.name === "zh-talk") {
@@ -164,7 +165,11 @@ export function segmentTokens(
         compare(sub(entries[end]!.align.end, entries[start]!.align.start), rules.max_duration) <= 0;
       for (let i = 0; i < cuts.length; i++) {
         const cut = cuts[i]!;
-        if (!isBad(entries[cut]!)) continue;
+        if (
+          !correctionBad.has(entries[cut]!.id) ||
+          compare(sub(entries[cut + 1]!.align.start, entries[cut]!.align.end), rules.soft_pause) >= 0
+        )
+          continue;
         const start = (cuts[i - 1] ?? -1) + 1;
         const end = cuts[i + 1] ?? entries.length - 1;
         const candidates = Array.from({ length: end - start }, (_, offset) => start + offset)

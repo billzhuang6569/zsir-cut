@@ -1584,7 +1584,7 @@ describe("semantic subtitle resegment", () => {
     );
     const result = await resegment({ cut_after: ["tok_boundary_2", "tok_boundary_7"] });
     expect(result.status, JSON.stringify(result)).toBe("applied");
-    expect(texts((await read()).transcripts[0]!)).toEqual(["感受", "到的豆包工作", "十几家", "二十几家的"]);
+    expect(texts((await read()).transcripts[0]!)).toEqual(["感受到的", "豆包工作", "十几家", "二十几家的"]);
   });
 
   it("§10.1 ignores sentence punctuation with cut_after, including empty arrays, but keeps hard pauses", async () => {
@@ -1672,7 +1672,7 @@ describe("semantic subtitle resegment", () => {
     expect((await resegment({ cut_after: item.tokens.map((token) => token.id) })).status).toBe("applied");
     const after = (await read()).transcripts[0]!;
     expect(after.cues.slice(0, 3)).toEqual(item.cues.slice(0, 3));
-    expect(after.cues.slice(3)).toHaveLength(19);
+    expect(after.cues.slice(3)).toHaveLength(20);
     expect((await resegment({ cut_after: item.tokens.map((token) => token.id) })).status).toBe("no_op");
     await validateAndUndo(value);
   });
