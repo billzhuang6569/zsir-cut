@@ -52,7 +52,10 @@ def main():
             if dur > 6: issues["too_long"].append(row)
             last = clean(vis[-1]["text"])
             shi_de = last == "的" and any(clean(t["text"]).endswith("是") or clean(t["text"]) == "是" for t in vis[:-1])
-            if last in NO_END and not shi_de: issues["bad_end"].append(row)
+            nxt = tokens[b + 1] if b + 1 < len(tokens) else None
+            # A break where the speaker really stopped (pause >= 0.3 s, or a hidden filler next) follows the speech, not a wording mistake.
+            speaker_pause = nxt is not None and (not nxt["text"] or sec(nxt["align"]["start"]) - sec(vis[-1]["align"]["end"]) >= Fraction(3, 10))
+            if last in NO_END and not shi_de and not speaker_pause: issues["bad_end"].append(row)
             if clean(vis[0]["text"]) in NO_START: issues["bad_start"].append(row)
             if width(text) < 3: issues["short"].append(row)
             if prev_last is not None:
