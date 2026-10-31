@@ -236,7 +236,7 @@ FCP 12.4 实测与此一致：25 帧倒放段从源 44 秒倒放到 40 秒，片
 | 4 字幕编排 | `transcripts[].cues[]` | 断句、分组、换行、显示时长覆盖值 |
 | 5 视觉样式 | `subtitle_styles[]` | 字体、字号、颜色、描边、底板、位置、模板版本 |
 
-第 5 层字幕样式 `subtitle_styles[]` 的字段：`id`、`name`、`version`、`font_family`、`font_weight`（100–900）、`font_size`（时间线高度的比例）、`color`（`#RRGGBB` 或带透明度的 `#RRGGBBAA`）、`outline`（`color`，`width` 为字号的比例）、`box`（底板：`color` 可带透明度，`padding` 为字号的比例，`radius` 为字号的比例，默认 0）、`position`（`anchor` 取 `bottom`、`top`、`middle`；`margin_v` 为时间线高度的比例；`offset_x` 为时间线宽度的比例，默认 0，正数向右；`max_width` 为时间线宽度的比例，默认 0.8）、`line_spacing`（行距倍数，默认 1.2）、`max_lines`。0.3 新增 `box.radius`、`position.offset_x`、`position.max_width`、`line_spacing`，都是可选的。
+第 5 层字幕样式 `subtitle_styles[]` 的字段：`id`、`name`、`version`、`font_family`、`font_weight`（100–900）、`font_size`（时间线高度的比例）、`color`（`#RRGGBB` 或带透明度的 `#RRGGBBAA`）、`outline`（`color`，`width` 为字号的比例）、`box`（底板：`color` 可带透明度，`padding` 为字号的比例，`radius` 为字号的比例，默认 0）、`position`（`anchor` 取 `bottom`、`top`、`middle`；`margin_v` 为时间线高度的比例；`offset_x` 为时间线宽度的比例，默认 0，正数向右；`max_width` 为时间线宽度的比例，默认 0.8）、`line_spacing`（行距倍数，默认 1.2）、`max_lines`。0.3 新增 `box.radius`、`position.offset_x`、`position.max_width`、`line_spacing`，都是可选的。0.4 新增 `italic`、`underline`、`letter_spacing`、`align`、`outlines`、`shadow`、`glow`、`highlight`、`animation`，都是可选的，含义见 `subtitle-editing.md` 第 6 节。
 
 ### 5.1 转写母稿 `transcripts[]`
 
@@ -256,6 +256,8 @@ FCP 12.4 实测与此一致：25 帧倒放段从源 44 秒倒放到 40 秒，片
 - `breaks`：在哪些 token 之后换行。
 - `timing`：可选的人工覆盖值 `start`、`end`（源时间），以及 `locked`。`locked` 为 true 时，自动重新断句不得修改这条。没有覆盖值时，显示时间从 token 对齐时间推出。
 - `style_id`、`state`。
+
+母稿的 `ext["zsir.proofread"]` 表示整份母稿已经过 AI 校对，见 `subtitle-editing.md` 第 1 节。
 
 ### 5.2 字幕轨与投影
 
