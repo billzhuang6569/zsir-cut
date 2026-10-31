@@ -442,14 +442,15 @@ export async function startHost(
       }
       try {
         if (message.type === "ui_ready") {
+          const fcpIcon = await readFcpIcon();
           if (ui && ui !== client) {
             client.close(1008, "UI already connected");
             return;
           }
+          if (client.readyState !== WebSocket.OPEN) return;
+          // Publish the UI only after bootstrap so background notifications cannot overtake it.
+          client.send(JSON.stringify({ type: "bootstrap", project: options.project ?? null, fcpIcon }));
           ui = client;
-          client.send(
-            JSON.stringify({ type: "bootstrap", project: options.project ?? null, fcpIcon: await readFcpIcon() }),
-          );
           return;
         }
         if (
