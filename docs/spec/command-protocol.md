@@ -543,7 +543,7 @@
 | `E_VOICE_PAYMENT` | `failed` | fish.audio 余额不足 |
 | `E_VOICE_UPSTREAM` | `failed` | fish.audio 出错或连不上，`retryable` 说明能否重试 |
 
-警告码（写在结果信封的 `result.warnings` 数组里，每项 `{code, …}`，不改变 `status`；信封顶层没有 `warnings` 字段）：`W_FONT_FALLBACK`、`W_SUB_OVERFLOW` 见 `handoff-profile.md` 第 9 节；本文新增的还有 `W_DECISIONS_PENDING`（批准时还有没回答的决定，7.4）、`W_REPLACE_SKIPPED_LOCKED`（查找替换跳过了锁定的字幕条，见 `edit-ops.md`）、`W_FILLERS_HIDDEN`（识别后自动隐藏了水词，附个数，见 `asr-worker.md` 第 6 节）、`W_SUB_PASS_FALLBACK`（字幕整理有块退回规则断句，附原因，见 `subtitle-rules.md` 11.1）、`W_TERMS_LIBRARY`（工程名词没能更新到全局名词库，附原因，见 `term-library.md` 第 3 节）、`W_VOICE_SAMPLE_TRIMMED`（克隆参考音频超过 60 秒，只用了前 60 秒，见 `voice.md` 第 3 节）。校验类警告见 `timeline-schema.md` 第 8 节。
+警告码（写在结果信封的 `result.warnings` 数组里，每项 `{code, …}`，不改变 `status`；信封顶层没有 `warnings` 字段）：`W_FONT_FALLBACK`、`W_SUB_OVERFLOW` 见 `handoff-profile.md` 第 9 节；本文新增的还有 `W_DECISIONS_PENDING`（批准时还有没回答的决定，7.4）、`W_REPLACE_SKIPPED_LOCKED`（查找替换跳过了锁定的字幕条，见 `edit-ops.md`）、`W_FILLERS_HIDDEN`（识别后自动隐藏了水词，附个数，见 `asr-worker.md` 第 6 节）、`W_SUB_PASS_FALLBACK`（AI 字幕整理失败、这次没有写入，附原因，见 `subtitle-rules.md` 11.1）、`W_TERMS_LIBRARY`（工程名词没能更新到全局名词库，附原因，见 `term-library.md` 第 3 节）、`W_VOICE_SAMPLE_TRIMMED`（克隆参考音频超过 60 秒，只用了前 60 秒，见 `voice.md` 第 3 节）。校验类警告见 `timeline-schema.md` 第 8 节。
 
 ## 12. 一期不做
 
