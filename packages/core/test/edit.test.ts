@@ -1559,3 +1559,182 @@ it("keeps projected subtitles attached and cleans separated transitions after in
   expect(result.changes.some((change) => change.id === "trn_1" && change.op === "move")).toBe(true);
   await validateAndUndo(before);
 });
+
+describe("semantic subtitle resegment", () => {
+  beforeEach(async () => {
+    await copyFile(new URL("../../../fixtures/regressions/subtitle-cut-after.zcut.json", import.meta.url), path);
+  });
+  const resegment = (fields: Record<string, unknown> = {}) =>
+    edit([{ op: "resegment", transcript_id: "trs_semantic", ...fields }]);
+  const texts = (item: Project["transcripts"][number]) =>
+    item.cues.map((cue) =>
+      item.tokens
+        .slice(
+          item.tokens.findIndex((token) => token.id === cue.first_token),
+          item.tokens.findIndex((token) => token.id === cue.last_token) + 1,
+        )
+        .map((token) => token.text)
+        .join(""),
+    );
+
+  it("§10.1 ignores sentence punctuation with cut_after, including empty arrays, but keeps hard pauses", async () => {
+    const value = await read();
+    const item = value.transcripts[0]!;
+    item.tokens[0]!.text += "。";
+    for (const token of item.tokens.slice(4)) {
+      token.align.start = add(token.align.start, rational(7n, 10n));
+      token.align.end = add(token.align.end, rational(7n, 10n));
+    }
+    await writeFile(path, serializeProject(value));
+    expect((await resegment({ cut_after: [], rules: { cpl: 100, max_duration: "20s" } })).status).toBe("applied");
+    expect(texts((await read()).transcripts[0]!)).toEqual([
+      "所有。的点位加",
+      "起来可能有两万多个很多的脏活全部让豆包工作去做了是你要真正去使用之后你才能够去感受到",
+    ]);
+  });
+
+  it("§10.2 cuts at listed visible tokens and ignores hidden, unknown and out-of-range IDs", async () => {
+    const before = await read();
+    const item = before.transcripts[0]!;
+    const result = await edit([
+      { op: "hide_tokens", transcript_id: item.id, tokens: [item.tokens[2]!.id] },
+      {
+        op: "resegment",
+        transcript_id: item.id,
+        range: { from_token: item.tokens[1]!.id, to_token: item.tokens[7]!.id },
+        cut_after: [item.tokens[0]!.id, item.tokens[2]!.id, item.tokens[4]!.id, item.tokens[8]!.id, "tok_unknown"],
+      },
+    ]);
+    expect(result.status, JSON.stringify(result)).toBe("applied");
+    const after = (await read()).transcripts[0]!;
+    expect(texts(after)).toEqual([
+      "所有",
+      "的加起来",
+      "可能有两万多个",
+      "很多的脏活全部让豆包工作去做了是你要真正去使用之后你才能够去感受到",
+    ]);
+    expect(after.ext).toEqual(item.ext);
+    await validateAndUndo(before);
+  });
+
+  it("§10.3 keeps fitting segments whole and splits oversized segments within width and duration limits", async () => {
+    const before = await read();
+    const item = before.transcripts[0]!;
+    expect((await resegment({ cut_after: [item.tokens[7]!.id, item.tokens[17]!.id] })).status).toBe("applied");
+    expect(texts((await read()).transcripts[0]!)).toEqual([
+      "所有的点位加起来可能有两万多个",
+      "很多的脏活全部让豆包工作去做了",
+      "是你要真正去使用之后你才能够去",
+      "感受到",
+    ]);
+    // A wide budget isolates the duration limit, with no pause or punctuation to split on.
+    expect((await resegment({ cut_after: [], rules: { cpl: 100, max_duration: "1s" } })).status).toBe("applied");
+    const timed = (await read()).transcripts[0]!;
+    expect(timed.cues.length).toBeGreaterThan(1);
+    for (const cue of timed.cues) {
+      const first = timed.tokens.find((token) => token.id === cue.first_token)!;
+      const last = timed.tokens.find((token) => token.id === cue.last_token)!;
+      expect(compare(sub(last.align.end, first.align.start), rational(1n))).toBeLessThanOrEqual(0);
+    }
+  });
+
+  it("§10.4 never merges short AI segments and retains display extension and warnings", async () => {
+    expect((await resegment({ cut_after: ["tok_mantic_0", "tok_mantic_1"] })).status).toBe("applied");
+    const item = (await read()).transcripts[0]!;
+    expect(texts(item).slice(0, 2)).toEqual(["所有", "的"]);
+    const ranges = displayRanges(item);
+    expect(ranges[0]!.warnings).toContain("W_SUB_SHORT");
+    expect(compare(ranges.at(-1)!.end, item.tokens.at(-1)!.align.end)).toBeGreaterThan(0);
+  });
+
+  it("§10.5 skips locked cues, approved cues and cues containing approved tokens, reusing matching IDs", async () => {
+    const value = await read();
+    const item = value.transcripts[0]!;
+    item.cues = [0, 2, 4, 6].map((first, index) => ({
+      id: `cue_mantic_${index}`,
+      first_token: item.tokens[first]!.id,
+      last_token: item.tokens[index === 3 ? item.tokens.length - 1 : first + 1]!.id,
+      state: index === 1 ? "approved" : "auto",
+      ...(index === 0 ? { timing: { locked: true } } : {}),
+    }));
+    item.tokens[4]!.state = "approved";
+    await writeFile(path, serializeProject(value));
+    expect((await resegment({ cut_after: item.tokens.map((token) => token.id) })).status).toBe("applied");
+    const after = (await read()).transcripts[0]!;
+    expect(after.cues.slice(0, 3)).toEqual(item.cues.slice(0, 3));
+    expect(after.cues.slice(3)).toHaveLength(item.tokens.length - 6);
+    expect((await resegment({ cut_after: item.tokens.map((token) => token.id) })).status).toBe("no_op");
+    await validateAndUndo(value);
+  });
+
+  it("regresses unpunctuated Chinese rule-only boundaries and honors explicit AI boundaries", async () => {
+    expect((await resegment()).status).toBe("applied");
+    const item = (await read()).transcripts[0]!;
+    for (const cue of item.cues.slice(0, -1))
+      expect(["的", "是"]).not.toContain(item.tokens.find((token) => token.id === cue.last_token)!.text);
+    for (const cue of item.cues.slice(1))
+      expect(item.tokens.find((token) => token.id === cue.first_token)!.text).not.toBe("了");
+    expect(texts(item).join("")).toBe(item.tokens.map((token) => token.text).join(""));
+    expect((await resegment({ cut_after: ["tok_mantic_7", "tok_mantic_h", "tok_mantic_i"] })).status).toBe("applied");
+    expect(texts((await read()).transcripts[0]!).slice(0, 3)).toEqual([
+      "所有的点位加起来可能有两万多个",
+      "很多的脏活全部让豆包工作去做了",
+      "是",
+    ]);
+  });
+
+  it("writes the requesting author, preserves other ext keys, replays idempotently and undoes the mark", async () => {
+    const before = await read();
+    const input = request([{ op: "resegment", transcript_id: "trs_semantic", cut_after: [] }], before.revision.id);
+    const preview = await dispatch("edit", { ...input, dry_run: true });
+    expect(preview.status).toBe("dry_run");
+    expect(withoutRevision(await read())).toBe(withoutRevision(before));
+    const result = await dispatch("edit", input);
+    expect(result.status).toBe("applied");
+    expect(result.changes).toEqual(preview.changes);
+    expect((await read()).transcripts[0]!.ext).toEqual({
+      ...before.transcripts[0]!.ext,
+      "zsir.subtitle_pass": { by: author.name },
+    });
+    expect((await dispatch("edit", input)).receipt?.replayed).toBe(true);
+    await validateAndUndo(before);
+  });
+
+  it.each([false, true])(
+    "clears the mark for rule-only whole-transcript resegment (explicit range: %s)",
+    async (explicitRange) => {
+      await resegment({ cut_after: [] });
+      const before = await read();
+      const tokens = before.transcripts[0]!.tokens;
+      expect(
+        (await resegment(explicitRange ? { range: { from_token: tokens[0]!.id, to_token: tokens.at(-1)!.id } } : {}))
+          .status,
+      ).toBe("applied");
+      expect((await read()).transcripts[0]!.ext).toEqual({
+        zsir: { id_tag: "mantic" },
+        "fixture.keep": { value: "untouched" },
+      });
+      await validateAndUndo(before);
+    },
+  );
+
+  it("leaves the mark unchanged on partial operations and does not mark an explicit full-range AI pass", async () => {
+    const item = (await read()).transcripts[0]!;
+    const full = { from_token: item.tokens[0]!.id, to_token: item.tokens.at(-1)!.id };
+    await resegment({ range: full, cut_after: [] });
+    expect((await read()).transcripts[0]!.ext?.["zsir.subtitle_pass"]).toBeUndefined();
+    await resegment({ cut_after: [] });
+    for (const fields of [{}, { cut_after: [] }]) {
+      await resegment({ range: { from_token: item.tokens[0]!.id, to_token: item.tokens[7]!.id }, ...fields });
+      expect((await read()).transcripts[0]!.ext?.["zsir.subtitle_pass"]).toEqual({ by: author.name });
+    }
+  });
+
+  it.each(
+    [["tok_mantic_0", "tok_mantic_0"], ["cue_mantic_0"], ["tok_"], [123], null].map((cut_after) => ({ cut_after })),
+  )("rejects invalid cut_after atomically: %j", async ({ cut_after }) => {
+    const before = await readFile(path, "utf8");
+    expect((await resegment({ cut_after })).error?.code).toBe("E_VALIDATION");
+    expect(await readFile(path, "utf8")).toBe(before);
+  });
+});

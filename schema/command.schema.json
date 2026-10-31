@@ -2012,6 +2012,14 @@
             "transcript_id": {
               "$ref": "#/$defs/id"
             },
+            "cut_after": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^tok_[A-Za-z0-9_-]{1,64}$"
+              }
+            },
             "range": {
               "type": "object",
               "required": [

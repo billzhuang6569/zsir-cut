@@ -560,6 +560,7 @@ export function openProject(options: OpenProjectOptions) {
                   options.manualApproval ?? false,
                   undefined,
                   stepResult,
+                  step.request.author.name,
                 ),
               "write",
               undefined,

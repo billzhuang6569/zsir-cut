@@ -62,6 +62,56 @@ const ranges = (
 };
 
 describe("subtitle rules", () => {
+  it.each(["的", "是", "和", "「是」，"])("avoids a width split after the whole token %s", (word) => {
+    const tokens = make(["甲甲甲甲", "乙", "丙", "丁", word, "戊戊"]);
+    const rules = { ...zh, cpl: 7 + Number(textWidth([tokens[4]!], zh).numerator) };
+    expect(segmentTokens(tokens, rules)[0]!.at(-1)!.text).not.toBe(word);
+  });
+  it.each(["了", "吗", "呢", "「了」，"])("avoids a width split before the whole token %s", (word) => {
+    expect(segmentTokens(make(["甲", "乙", "丙", "丁", word, "戊"]), { ...zh, cpl: 4 })[0]!.at(-1)!.text).toBe("丙");
+  });
+  it("matches whole tokens only and limits bad boundaries to zh-talk", () => {
+    for (const word of ["目的", "是的", "和好"])
+      expect(segmentTokens(make(["甲甲", "乙乙", word, "丙丙"]), { ...zh, cpl: 6 })[0]!.at(-1)!.text).toBe(word);
+    expect(
+      segmentTokens(make(["甲", "乙", "丙", "丁", "了"]), subtitleRules("en", { cpl: 8, max_lines: 1 }))[0]!.at(-1)!
+        .text,
+    ).toBe("丁");
+  });
+  it("ranks a normal boundary before bad soft-pause and punctuation boundaries", () => {
+    const tokens = make(["甲甲", "乙乙", "是，", "丙丙"], undefined, [0n, 0n, 0n, 3n]);
+    expect(segmentTokens(tokens, { ...zh, cpl: 6 })[0]!.at(-1)!.text).toBe("乙乙");
+  });
+  it("keeps soft-pause, punctuation and latest priority when every candidate is bad", () => {
+    const words = ["甲甲", "的，", "和", "是", "把", "丁丁"];
+    for (const [gaps, end] of [
+      [[], "的，"],
+      [[0n, 0n, 0n, 3n], "和"],
+      [[0n, 0n, 3n, 3n], "和"],
+    ] as const)
+      expect(segmentTokens(make(words, undefined, [...gaps]), { ...zh, cpl: 7 })[0]!.at(-1)!.text).toBe(end);
+    expect(segmentTokens(make(["甲甲", "的", "和", "是", "把", "丁丁"]), { ...zh, cpl: 6 })[0]!.at(-1)!.text).toBe(
+      "把",
+    );
+  });
+  it("does not weaken sentence punctuation or hard pauses at bad boundaries", () => {
+    expect(
+      segmentTokens(make(["是。", "了", "的", "吗"], undefined, [0n, 0n, 0n, 7n]), zh).map((group) =>
+        group.map((token) => token.text),
+      ),
+    ).toEqual([["是。"], ["了", "的"], ["吗"]]);
+  });
+  it("rechecks width and duration after an earlier preferred boundary", () => {
+    const tokens = make(["甲甲", "乙乙", "丙", "丁丁丁丁丁丁"], undefined, [0n, 0n, 3n]);
+    const rules = { ...zh, cpl: 6 };
+    const groups = segmentTokens(tokens, rules, new Set());
+    expect(groups.map((group) => group.map((token) => token.text))).toEqual([
+      ["甲甲", "乙乙"],
+      ["丙"],
+      ["丁丁丁丁丁丁"],
+    ]);
+    for (const group of groups) expect(compare(textWidth(group, rules), s(6n))).toBeLessThanOrEqual(0);
+  });
   it("defaults Chinese to one line and preserves persisted two-line rules against golden", async () => {
     const parsed = parseProject(await readFile("fixtures/regressions/zh-talk-single-line.zcut.json", "utf8"));
     if (!parsed.ok) throw new Error("Invalid regression fixture");

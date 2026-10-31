@@ -322,6 +322,7 @@ describe("CLI and MCP", () => {
           },
         },
         ...[
+          [{ op: "resegment", transcript_id: "trs_A_zh", cut_after: ["tok_020", "tok_024"] }],
           [{ op: "set_recognition", terms: [" 飞书 ", "飞书", ""], remove_fillers: true }],
           [{ op: "replace_text", find: "今天", replace: "现在" }],
           [{ op: "replace_text", find: "先", replace: "首先" }],
@@ -366,6 +367,12 @@ describe("CLI and MCP", () => {
         const cliResult = invokeCli(verb, input);
         const mcpResult = await client.callTool({ name: `zcut_${verb}`, arguments: request });
         const envelope = mcpResult.structuredContent as Record<string, unknown>;
+        if ("ops" in input && input.ops[0]?.op === "resegment") {
+          expect(cliResult.envelope.status).toBe("dry_run");
+          expect(cliResult.envelope.changes).toEqual(
+            expect.arrayContaining([expect.objectContaining({ entity: "transcript", id: "trs_A_zh" })]),
+          );
+        }
         if ("idempotency_key" in input && input.idempotency_key === "place-tokens-parity") {
           expect(cliResult.envelope.status).toBe("dry_run");
           expect(cliResult.envelope.changes).toHaveLength(3);
