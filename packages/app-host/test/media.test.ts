@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -219,6 +219,79 @@ it("caps thumbnails globally, merges queued keys, cancels disconnected waiters a
     expect(retry.response.bytes.toString()).toBe("retry");
   } finally {
     for (const job of jobs) job.resolve(Buffer.from("cleanup"));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("serves only registered voice samples with token, range, HEAD and symlink checks without a project", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "zcut-voice-sample-"));
+  vi.stubEnv("HOME", directory);
+  try {
+    const data = join(directory, "Library/Application Support/zsir-cut");
+    const id = "voc_00000000-0000-7000-8000-000000000001";
+    const sample = `voices/${id}.wav`;
+    await mkdir(join(data, "voices"), { recursive: true });
+    await writeFile(
+      join(data, "voices.json"),
+      JSON.stringify({
+        schema: "zsir-cut/voices",
+        version: 1,
+        voices: [
+          {
+            id,
+            name: "示例",
+            fish_model_id: "remote",
+            source: { kind: "file", name: "sample.wav" },
+            sample,
+            created_at: "2026-10-30T00:00:00Z",
+          },
+        ],
+      }),
+    );
+    await writeFile(join(data, sample), "0123456789");
+    const load = vi.fn(async () => {
+      throw new Error("Must not load a project");
+    });
+    const serve = mediaChannel(undefined, "secret", load);
+    const request = async (query: string, range?: string, method = "GET") => {
+      const response = new Response();
+      const finished = new Promise<void>((done, reject) => {
+        response.on("finish", done);
+        response.on("error", reject);
+      });
+      await serve(
+        { url: query, method, headers: range ? { range } : {} } as IncomingMessage,
+        response as unknown as ServerResponse,
+      );
+      await finished;
+      return response;
+    };
+    const url = `/voice-sample?token=secret&voice_id=${id}`;
+    expect((await request(`/voice-sample?voice_id=${id}`)).status).toBe(401);
+    expect((await request("/voice-sample?token=wrong")).status).toBe(401);
+    expect((await request("/voice-sample?token=secret&voice_id=/etc/passwd")).status).toBe(404);
+    expect((await request(`${url}&path=/etc/passwd`)).status).toBe(404);
+    const full = await request(url);
+    expect(full.bytes.toString()).toBe("0123456789");
+    expect(full.headers["Content-Type"]).toBe("audio/wav");
+    const partial = await request(url, "bytes=2-5");
+    expect(partial.status).toBe(206);
+    expect(partial.bytes.toString()).toBe("2345");
+    expect(partial.headers["Content-Range"]).toBe("bytes 2-5/10");
+    const head = await request(url, undefined, "HEAD");
+    expect(head.status).toBe(200);
+    expect(head.bytes.length).toBe(0);
+    expect(head.headers["Content-Length"]).toBe(10);
+    expect((await request(url, "bytes=99-")).status).toBe(416);
+    expect((await request(url, undefined, "POST")).status).toBe(405);
+    await rm(join(data, sample));
+    expect((await request(url)).status).toBe(404);
+    await writeFile(join(directory, "outside.wav"), "private");
+    await symlink(join(directory, "outside.wav"), join(data, sample));
+    expect((await request(url)).status).toBe(404);
+    expect(load).not.toHaveBeenCalled();
+  } finally {
+    vi.unstubAllEnvs();
     await rm(directory, { recursive: true, force: true });
   }
 });

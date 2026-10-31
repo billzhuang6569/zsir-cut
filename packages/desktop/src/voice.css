@@ -1,0 +1,78 @@
+.zc-voice-form,
+.zc-voice-form form,
+.zc-voice-form fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+.zc-voice-form fieldset {
+  border: 0;
+  padding: 0;
+  min-width: 0;
+  margin: 0;
+}
+.zc-voice-form label {
+  display: grid;
+  gap: var(--space-3);
+  color: var(--text-3);
+}
+.zc-voice-form textarea.zc-input {
+  min-height: calc(var(--input-h) * 3);
+  resize: vertical;
+}
+.zc-voice-form details > label {
+  margin-top: var(--space-4);
+}
+.zc-voice-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+.zc-voice-drop,
+.zc-voice-card {
+  padding: var(--space-6);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel-2);
+}
+.zc-voice-card audio {
+  width: 100%;
+  margin-top: var(--space-4);
+}
+.zc-voice-dialog {
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  padding: var(--space-10);
+  width: 420px;
+  max-width: calc(100vw - 48px);
+}
+.zc-voice-dialog::backdrop {
+  background: var(--scrim);
+}
+.zc-voice-dialog > .zc-voice-row {
+  margin-bottom: var(--space-8);
+}
+
+.zc-voice-form .zc-muted,
+.zc-parameters[data-panel="voice"] .zc-muted {
+  font-family: var(--font-sans);
+}
+.zc-voice-form .zc-muted {
+  margin: 0;
+}
+.zc-voice-form .zc-btn.zc-btn-primary:disabled {
+  background: transparent;
+  color: var(--text-off);
+  border: 1px solid var(--line);
+  cursor: not-allowed;
+}
+.zc-voice-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.zc-tab:focus:not(:focus-visible),
+.zc-voice-dialog .zc-ibtn:focus:not(:focus-visible) {
+  outline: none;
+}

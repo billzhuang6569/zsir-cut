@@ -34,7 +34,9 @@ export function applyUi(state: UiState, verb: UiVerb, request: Record<string, un
       return {
         ...state,
         panel: request.panel as UiState["panel"],
-        sub: (request.sub as string | undefined) ?? (request.panel === "chapters" ? "outline" : null),
+        sub:
+          (request.sub as string | undefined) ??
+          (request.panel === "chapters" ? "outline" : request.panel === "voice" ? "clone" : null),
       };
     case "ui_seek":
       return { ...state, playhead: typeof request.at === "string" ? { at: request.at } : { id: request.id as string } };

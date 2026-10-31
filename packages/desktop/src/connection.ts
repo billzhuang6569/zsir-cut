@@ -14,9 +14,12 @@ interface ResultEnvelope {
   error: { message: string; code?: string } | null;
   verification?: { issues: { code: string; severity: string }[] };
 }
-function requestError(envelope: ResultEnvelope) {
+export function requestError(envelope: ResultEnvelope) {
   const code = envelope.error?.code;
   const message = envelope.error?.message ?? "";
+  if (code === "E_VOICE_AUTH") return "请在设置中添加或更换 fish.audio API Key";
+  if (code === "E_VOICE_PAYMENT") return "fish.audio 余额不足，请充值后重试";
+  if (code === "E_VOICE_UPSTREAM") return "暂时无法连接 fish.audio，请稍后重试或检查代理设置";
   if (code === "E_CONFLICT") return "工程刚被别处改过，已刷新，请重试";
   if (
     code === "E_OVERLAP" ||
@@ -55,7 +58,10 @@ export function connectHost(
   let sequence = 0;
   let project: string | null = null;
   let generation = 0;
-  const pending = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
+  const pending = new Map<
+    string,
+    { resolve: (value: unknown) => void; reject: (error: Error) => void; verb: string }
+  >();
   const call = (verb: string, request: Record<string, unknown>) =>
     new Promise<unknown>((resolve, reject) => {
       if (socket.readyState === 0) {
@@ -63,7 +69,7 @@ export function connectHost(
         return;
       }
       const id = String(++sequence);
-      pending.set(id, { resolve, reject });
+      pending.set(id, { resolve, reject, verb });
       socket.send(
         JSON.stringify(
           verb === "preview_data"
@@ -119,10 +125,18 @@ export function connectHost(
       const envelope = message.envelope as ResultEnvelope;
       if (envelope.ok) item?.resolve(envelope.result);
       else {
-        const detail = JSON.stringify({ error: envelope.error, verification: envelope.verification });
+        const sensitive =
+          item?.verb.startsWith("voice_") ||
+          item?.verb.startsWith("settings_") ||
+          envelope.error?.code?.startsWith("E_VOICE_");
+        const detail = sensitive
+          ? requestError(envelope)
+          : JSON.stringify({ error: envelope.error, verification: envelope.verification });
         console.error("宿主请求失败", detail);
         const error = new Error(requestError(envelope), {
-          cause: `${envelope.error?.code ?? ""} ${envelope.error?.message ?? ""}`.trim(),
+          cause: sensitive
+            ? requestError(envelope)
+            : `${envelope.error?.code ?? ""} ${envelope.error?.message ?? ""}`.trim(),
         });
         if (envelope.error?.code === "E_CONFLICT") {
           void refresh().then(

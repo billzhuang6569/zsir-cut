@@ -153,6 +153,8 @@ it("opens the project through inspect and receives UI commands", async () => {
             envelope: { ok: true, result: { media: fixture.media, cues, styles: fixture.subtitle_styles } },
           }),
         );
+      } else if (message.verb === "voice_list") {
+        queueMicrotask(() => this.receive({ id: message.id, envelope: { ok: true, result: { voices: [] } } }));
       } else {
         writes.push(message);
         queueMicrotask(() => this.receive({ id: message.id, envelope: { ok: true, result: {} } }));
@@ -196,6 +198,12 @@ it("opens the project through inspect and receives UI commands", async () => {
     } finally {
       style.remove();
     }
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[role="tab"][id$="-voice"]')?.click();
+    });
+    expect(container.querySelector('[aria-label="参数区"] .zc-muted')?.textContent).toBe(
+      "在左侧克隆音色或生成配音，生成后可在「素材」中查看。",
+    );
     await act(async () => {
       socket?.receive({
         type: "ui_request",

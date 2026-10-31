@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { PANELS, type Panel, type UiState } from "../../app-host/src/ui.js";
 import { type AiNotice, useAiPanel } from "./AiPanel.js";
 import { useChapterPanel } from "./ChapterPanel.js";
+import { IconButton } from "./components.js";
 import { connectHost, type ProjectView } from "./connection.js";
 import { ExportPanel } from "./ExportPanel.js";
 import { useHistoryPanel } from "./HistoryPanel.js";
@@ -12,11 +13,19 @@ import { useSubtitlePanel } from "./SubtitlePanel.js";
 import { applyUi, initialState } from "./state.js";
 import { TimelinePreview } from "./TimelinePreview.js";
 import { seekTarget } from "./timeline.js";
+import { SettingsPage, useVoicePanel } from "./VoicePanel.js";
 
-const labels: Record<Panel, string> = { ai: "AI", media: "素材", chapters: "章节", subtitles: "字幕" };
-const parameters: Record<Panel, string> = { ai: "决定", media: "素材信息", chapters: "章节大纲", subtitles: "字幕" };
+const labels: Record<Panel, string> = { ai: "AI", media: "素材", chapters: "章节", subtitles: "字幕", voice: "语音" };
+const parameters: Record<Panel, string> = {
+  ai: "决定",
+  media: "素材信息",
+  chapters: "章节大纲",
+  subtitles: "字幕",
+  voice: "语音",
+};
 export function App({ config }: { config?: { port: number; token: string } }) {
   const uniqueId = useId();
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [state, setState] = useState<UiState>(initialState);
   const current = useRef(state);
   const [project, setProject] = useState<ProjectView | null>(null);
@@ -116,6 +125,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
     },
   });
   const subtitles = useSubtitlePanel({ project, state, update, call, config });
+  const voice = useVoicePanel({ call, state, update, project, config });
   const source = useMemo(
     () =>
       project && media.selected && state.preview === "media" && !state.history?.revision
@@ -152,6 +162,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
         />
         {project && <span className="zc-muted">r{project.revision.seq}</span>}
         <span className="zc-grow" />
+        <IconButton icon="settings" label="设置" onClick={() => setSettingsOpen(true)} />
         <button
           type="button"
           className="zc-btn"
@@ -190,6 +201,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
               }}
             >
               <h2>{labels[state.panel]}</h2>
+              <div hidden={state.panel !== "voice"}>{voice}</div>
               {state.panel === "media" && media.library}
               {state.panel === "chapters" && chapters.controls}
               {state.panel === "subtitles" && subtitles.controls}
@@ -212,6 +224,9 @@ export function App({ config }: { config?: { port: number; token: string } }) {
                 {state.panel === "media" && media.parameters}
                 {state.panel === "chapters" && chapters.outline}
                 {state.panel === "subtitles" && subtitles.parameters}
+                {state.panel === "voice" && (
+                  <p className="zc-muted">在左侧克隆音色或生成配音，生成后可在「素材」中查看。</p>
+                )}
               </>
             )}
           </section>
@@ -247,6 +262,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
           />
         </>
       )}
+      {settingsOpen && <SettingsPage call={rawCall} close={() => setSettingsOpen(false)} />}
       {project && (
         <ExportPanel project={project} state={state} update={update} call={call} config={config} fcpIcon={fcpIcon} />
       )}

@@ -1,10 +1,10 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { dirname, extname, join, resolve } from "node:path";
-import type { Project } from "../../core/dist/index.js";
+import { type Project, readVoices, voiceDataPath } from "../../core/dist/index.js";
 
 export const authorized = (supplied: string, token: string) => {
   const a = Buffer.from(supplied),
@@ -132,34 +132,62 @@ export function mediaChannel(
         response.writeHead(405).end();
         return;
       }
-      if (
-        !projectPath ||
-        !["/media", "/thumb", "/peaks", "/palette"].includes(url.pathname) ||
-        [...url.searchParams.keys()].some((key) => !["token", "media_id", "at"].includes(key))
-      ) {
-        response.writeHead(404).end();
-        return;
-      }
-      const project = await load();
-      const media = project.media.find((item) => item.id === url.searchParams.get("media_id"));
-      if (!media) {
-        response.writeHead(404).end();
-        return;
-      }
-      let source = resolve(dirname(projectPath), media.path);
-      let fingerprint = media.fingerprint.value;
-      if (media.proxy) {
-        const proxy = resolve(dirname(projectPath), media.proxy.path);
+      const sample = url.pathname === "/voice-sample";
+      let source: string;
+      let fingerprint = "";
+      let projectId = "";
+      let media: Project["media"][number] | undefined;
+      if (sample) {
+        if ([...url.searchParams.keys()].some((key) => !["token", "voice_id"].includes(key))) {
+          response.writeHead(404).end();
+          return;
+        }
+        const voice = (await readVoices()).find((item) => item.id === url.searchParams.get("voice_id"));
+        if (!voice || !/^voc_[a-zA-Z0-9_-]+$/.test(voice.id) || voice.sample !== `voices/${voice.id}.wav`) {
+          response.writeHead(404).end();
+          return;
+        }
         try {
-          await stat(proxy);
-          source = proxy;
-          fingerprint = media.proxy.fingerprint.value;
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          source = await realpath(voiceDataPath(voice.sample));
+          if (dirname(source) !== (await realpath(voiceDataPath("voices")))) {
+            response.writeHead(404).end();
+            return;
+          }
+        } catch {
+          response.writeHead(404).end();
+          return;
+        }
+      } else {
+        if (
+          !projectPath ||
+          !["/media", "/thumb", "/peaks", "/palette"].includes(url.pathname) ||
+          [...url.searchParams.keys()].some((key) => !["token", "media_id", "at"].includes(key))
+        ) {
+          response.writeHead(404).end();
+          return;
+        }
+        const project = await load();
+        projectId = project.id;
+        media = project.media.find((item) => item.id === url.searchParams.get("media_id"));
+        if (!media) {
+          response.writeHead(404).end();
+          return;
+        }
+        source = resolve(dirname(projectPath), media.path);
+        fingerprint = media.fingerprint.value;
+        if (media.proxy) {
+          const proxy = resolve(dirname(projectPath), media.proxy.path);
+          try {
+            await stat(proxy);
+            source = proxy;
+            fingerprint = media.proxy.fingerprint.value;
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          }
         }
       }
       response.setHeader("Cache-Control", "private, no-cache");
-      if (url.pathname !== "/media") {
+      if (!sample && media && projectPath && url.pathname !== "/media") {
         const at = url.searchParams.get("at") ?? "0s";
         const { parseRational, floor, mul, rational, compare } = (await import(
           new URL(
@@ -182,7 +210,7 @@ export function mediaChannel(
         const file = join(
           dirname(projectPath),
           ".zcut",
-          project.id,
+          projectId,
           "cache",
           palette ? "palettes" : thumb ? "thumbs" : "peaks",
           key + (thumb ? ".jpg" : ".json"),
