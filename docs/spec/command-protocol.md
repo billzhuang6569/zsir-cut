@@ -481,7 +481,11 @@
 | `ui_play` | `range`（可选）、`loop`（可选） | 播放一段；不带 `range` 从播放头开始 |
 | `ui_pause` | 无 | 暂停 |
 
-这些动词不写日志、不需要 `base_revision` 和幂等键，返回结果信封，`status` 为 `no_op`。用户正在操作时（例如正在拖动），`ui_seek`、`ui_select` 等用户松手后再执行。
+这些动词不写日志、不需要 `base_revision` 和幂等键，返回结果信封，`status` 为 `no_op`。
+
+`ui_state` 还返回 `subtitle_pass`（正在跑或刚跑完的字幕整理、校对）和 `subtitle_selection`（字幕列表的选中条和正在编辑的条），见 `subtitle-editing.md` 第 2、10 节。
+
+桌面版还提供两个会写工程的字幕动词 `subtitle_tidy`（AI 重新分行）和 `subtitle_proofread`（AI 校对），同样只在桌面版有，见 `subtitle-editing.md` 第 2 节。用户正在操作时（例如正在拖动），`ui_seek`、`ui_select` 等用户松手后再执行。
 
 ## 10. `edit` 的操作
 
@@ -536,6 +540,7 @@
 | `E_IO` | `failed` | 读写文件失败，`retryable` 说明能否重试 |
 | `E_INTERNAL` | `failed` | 内核错误 |
 | `E_APP_NOT_RUNNING` | `failed` | 调用了界面动词（9.6），但桌面版没在运行；`retryable` 为 true |
+| `E_SUB_PASS_RUNNING` | `failed` | 同一份母稿上已有 AI 整理或校对在跑；`retryable` 为 true（`subtitle-editing.md` 第 2 节） |
 | `E_BATCH_OPEN` | `failed` | 同一目标上有一个批次还没执行完，这次写入要等；`retryable` 为 true（6.1） |
 | `E_BATCH_SEQ_TAKEN` | `rejected` | 同一批次的这个序号已经收到过另一个不同的请求（6.1） |
 | `E_BATCH_CLOSED` | `rejected` | 批次已经完成、失败或超时，不再收步骤（6.1） |
@@ -543,7 +548,7 @@
 | `E_VOICE_PAYMENT` | `failed` | fish.audio 余额不足 |
 | `E_VOICE_UPSTREAM` | `failed` | fish.audio 出错或连不上，`retryable` 说明能否重试 |
 
-警告码（写在结果信封的 `result.warnings` 数组里，每项 `{code, …}`，不改变 `status`；信封顶层没有 `warnings` 字段）：`W_FONT_FALLBACK`、`W_SUB_OVERFLOW` 见 `handoff-profile.md` 第 9 节；本文新增的还有 `W_DECISIONS_PENDING`（批准时还有没回答的决定，7.4）、`W_REPLACE_SKIPPED_LOCKED`（查找替换跳过了锁定的字幕条，见 `edit-ops.md`）、`W_FILLERS_HIDDEN`（识别后自动隐藏了水词，附个数，见 `asr-worker.md` 第 6 节）、`W_SUB_PASS_FALLBACK`（AI 字幕整理失败、这次没有写入，附原因，见 `subtitle-rules.md` 11.1）、`W_TERMS_LIBRARY`（工程名词没能更新到全局名词库，附原因，见 `term-library.md` 第 3 节）、`W_VOICE_SAMPLE_TRIMMED`（克隆参考音频超过 60 秒，只用了前 60 秒，见 `voice.md` 第 3 节）。校验类警告见 `timeline-schema.md` 第 8 节。
+警告码（写在结果信封的 `result.warnings` 数组里，每项 `{code, …}`，不改变 `status`；信封顶层没有 `warnings` 字段）：`W_FONT_FALLBACK`、`W_SUB_OVERFLOW` 见 `handoff-profile.md` 第 9 节；本文新增的还有 `W_DECISIONS_PENDING`（批准时还有没回答的决定，7.4）、`W_REPLACE_SKIPPED_LOCKED`（查找替换跳过了锁定的字幕条，见 `edit-ops.md`）、`W_FILLERS_HIDDEN`（识别后自动隐藏了水词，附个数，见 `asr-worker.md` 第 6 节）、`W_SUB_PASS_FALLBACK`（AI 字幕整理失败、这次没有写入，附原因，见 `subtitle-rules.md` 11.1）、`W_SUB_PROOFREAD_FAILED`（AI 校对失败、这次没有写入，附原因）、`W_SUB_PROOFREAD_SKIPPED`（AI 校对有几条改动没通过检查、没有采用，附条数），见 `subtitle-editing.md` 第 1、2 节；`W_TERMS_LIBRARY`（工程名词没能更新到全局名词库，附原因，见 `term-library.md` 第 3 节）、`W_VOICE_SAMPLE_TRIMMED`（克隆参考音频超过 60 秒，只用了前 60 秒，见 `voice.md` 第 3 节）。校验类警告见 `timeline-schema.md` 第 8 节。
 
 ## 12. 一期不做
 
