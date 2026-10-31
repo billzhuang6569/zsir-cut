@@ -1,5 +1,6 @@
 // biome-ignore-all lint/style/noNonNullAssertion: Synthetic fixture indices are fixed in each test.
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -517,7 +518,7 @@ it.each(["manual-fix", "manual-no-fix", "automatic-no-fix"])(
   "writes one undoable real core history step and skips proofread on reopen (%s)",
   async (mode) => {
     const fix = mode === "manual-fix";
-    const directory = await mkdtemp(join(process.cwd(), ".tmp/proofread-core-"));
+    const directory = await mkdtemp(join(tmpdir(), "proofread-core-"));
     const path = join(directory, "project.zcut.json");
     try {
       const parsed = parseProject(await readFile("examples/interview.zcut.json", "utf8"));
