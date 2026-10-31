@@ -132,6 +132,12 @@ it("opens the project through inspect and receives UI commands", async () => {
   const fixture = JSON.parse(
     readFileSync(new NodeURL("../../../examples/interview.zcut.json", import.meta.url), "utf8"),
   );
+  for (const cue of cues) {
+    cue.transcript_id = fixture.transcripts.find((item: { cues: { id: string }[] }) =>
+      item.cues.some((row) => row.id === cue.cue_id),
+    )?.id;
+  }
+  const inspectedTranscripts: string[] = [];
   const writes: Record<string, unknown>[] = [];
   const replies: { id: string; result: unknown }[] = [];
   let socket: FakeSocket | undefined;
@@ -154,6 +160,7 @@ it("opens the project through inspect and receives UI commands", async () => {
       } else if (message.type === "ui_result") replies.push(message);
       else if (message.verb === "inspect") {
         expect(message.request.project).toBe("/interview.zcut.json");
+        if (message.request.view === "entity") inspectedTranscripts.push(message.request.id);
         queueMicrotask(() =>
           this.receive({
             id: message.id,
@@ -163,7 +170,12 @@ it("opens the project through inspect and receives UI commands", async () => {
               result:
                 message.request.view === "brief"
                   ? { project: { name: fixture.name, revision: fixture.revision } }
-                  : data.timeline,
+                  : message.request.view === "entity"
+                    ? {
+                        parent_id: fixture.id,
+                        entity: fixture.transcripts.find((item: { id: string }) => item.id === message.request.id),
+                      }
+                    : data.timeline,
             },
           }),
         );
@@ -315,6 +327,30 @@ it("opens the project through inspect and receives UI commands", async () => {
       await new Promise((resolve) => setTimeout(resolve, 25));
     });
     expect(replies.at(-1)).toMatchObject({ id: "deferred", result: { playhead: { at: "3s" } } });
+    expect(inspectedTranscripts).toEqual([
+      ...new Set(cues.map((cue: { transcript_id?: string }) => cue.transcript_id).filter(Boolean)),
+    ]);
+    await act(() => container.querySelector<HTMLButtonElement>('[aria-label="选择 A"]')?.click());
+    expect(container.querySelector(".zc-clip-subtitle [data-trim-edge]")).not.toBeNull();
+    const scroll = vi.fn();
+    const previousScroll = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollIntoView");
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: scroll });
+    try {
+      const clip = container.querySelector<HTMLButtonElement>(".zc-clip-subtitle");
+      if (!clip) throw new Error("Missing subtitle clip");
+      await act(() => clip.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
+      const editor = container.querySelector<HTMLTextAreaElement>('[aria-label="编辑字幕"]');
+      if (!editor) throw new Error("Missing subtitle editor");
+      expect(editor.value).toBe(cues[0].text);
+      expect(document.activeElement).toBe(editor);
+      expect(editor.selectionStart).toBe(editor.value.length);
+      expect(editor.selectionEnd).toBe(editor.value.length);
+      expect(scroll).toHaveBeenCalledWith({ block: "nearest" });
+      expect(container.querySelector('[role="tab"][id$="-subtitles"]')?.getAttribute("aria-selected")).toBe("true");
+    } finally {
+      if (previousScroll) Object.defineProperty(HTMLElement.prototype, "scrollIntoView", previousScroll);
+      else Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
+    }
   } finally {
     await act(() => root.unmount());
     container.remove();

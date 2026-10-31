@@ -816,3 +816,166 @@ it("uses scroll displacement, freezes the starting revision and cancels trim on 
   expect(dragging.current).toBe(false);
   expect(call).not.toHaveBeenCalled();
 });
+
+async function subtitleSetup() {
+  project.tracks.push({
+    id: "a",
+    name: "声音 A",
+    kind: "audio",
+    enabled: true,
+    clips: [
+      {
+        id: "carrier",
+        occurrence_id: "occ",
+        media_id: "media",
+        label: null,
+        enabled: true,
+        speed: "1",
+        timeline_in: { t: "0s" },
+        timeline_out: { t: "10s" },
+        source_in: { t: "20s" },
+        source_out: { t: "30s" },
+      },
+    ],
+  });
+  const sample = project.cues[0];
+  if (!sample) throw new Error("subtitle fixture");
+  project.cues = [
+    { ...sample, cue_id: "before", start: "1s", end: "2s" },
+    { ...sample, cue_id: "q", transcript_id: "tr", clip_ids: ["carrier"], start: "3s", end: "4s" },
+    { ...sample, cue_id: "next", start: "6s", end: "7s" },
+  ];
+  project.transcripts = [
+    {
+      id: "tr",
+      media_id: "media",
+      tokens: [
+        { id: "p", text: "前", align: { start: "21s", end: "22s" } },
+        { id: "t1", text: "字", align: { start: "23s", end: "47/2s" } },
+        { id: "t2", text: "幕", align: { start: "47/2s", end: "24s" } },
+        { id: "n", text: "后", align: { start: "26s", end: "27s" } },
+      ],
+      cues: [{ id: "q", first_token: "t1", last_token: "t2", timing: { start: "23s", end: "24s" } }],
+    },
+  ];
+  await act(render);
+  return get('[data-selection-id="q"]');
+}
+
+it("previews subtitle word snapping then submits just one source-time edit on release", async () => {
+  const cue = await subtitleSetup();
+  const handle = get('[data-selection-id="q"] [data-trim-edge="out"]');
+  await pointer(handle, "pointerdown", 192, 125);
+  await pointer(handle, "pointermove", 180, 125);
+  await pointer(handle, "pointermove", 169, 125);
+  expect(cue.style.width).toBe("24px");
+  expect(get(".zc-snap-line").style.left).toContain("168px");
+  expect(call).not.toHaveBeenCalled();
+  await pointer(handle, "pointerup", 169, 125);
+  expect(call).toHaveBeenCalledTimes(1);
+  expect(call).toHaveBeenCalledWith(
+    "edit",
+    expect.objectContaining({
+      label: "调整字幕时间",
+      author: DESKTOP_AUTHOR,
+      base_revision: "revision",
+      timeline_id: "timeline",
+      ops: [{ op: "set_cue", cue_id: "q", timing: { start: "23s", end: "47/2s" } }],
+    }),
+  );
+  expect(cue.style.width).toBe("48px");
+  expect(get(".zc-snap-line")).toBeNull();
+});
+
+it.each(["in", "out"])("stops subtitle %s at the neighbor and commits the clamped edge", async (edge) => {
+  const cue = await subtitleSetup();
+  const handle = get(`[data-selection-id="q"] [data-trim-edge="${edge}"]`);
+  await pointer(handle, "pointerdown", 192, 125);
+  await pointer(handle, "pointermove", edge === "in" ? -900 : 1500, 125);
+  expect(cue.style.left).toBe(edge === "in" ? "96px" : "144px");
+  expect(cue.style.width).toBe(edge === "in" ? "96px" : "144px");
+  await pointer(handle, "pointerup", edge === "in" ? -900 : 1500, 125);
+  expect(call).toHaveBeenCalledWith(
+    "edit",
+    expect.objectContaining({
+      ops: [
+        {
+          op: "set_cue",
+          cue_id: "q",
+          timing: edge === "in" ? { start: "22s", end: "24s" } : { start: "23s", end: "26s" },
+        },
+      ],
+    }),
+  );
+});
+
+it.each(["Escape", "pointercancel", "lostpointercapture"])(
+  "cancels subtitle timing on %s without writing",
+  async (cancel) => {
+    const cue = await subtitleSetup();
+    const handle = get('[data-selection-id="q"] [data-trim-edge="out"]');
+    await pointer(handle, "pointerdown", 192, 125);
+    await pointer(handle, "pointermove", 169, 125);
+    if (cancel === "Escape") await act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: cancel })));
+    else await pointer(handle, cancel, 169, 125);
+    expect(cue.style.width).toBe("48px");
+    expect(call).not.toHaveBeenCalled();
+  },
+);
+
+it("keeps subtitle bodies immovable, restores automatic timing by menu, and respects history read-only", async () => {
+  const cue = await subtitleSetup();
+  expect(cue.style.cursor).toBe("not-allowed");
+  await pointer(cue, "pointerdown", 165, 125);
+  await pointer(cue, "pointerup", 250, 125);
+  expect(call).not.toHaveBeenCalled();
+  await act(() => cue.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 165, clientY: 125 })));
+  await click(get('[aria-label="恢复自动时间"]'));
+  expect(call).toHaveBeenCalledTimes(1);
+  expect(call).toHaveBeenCalledWith(
+    "edit",
+    expect.objectContaining({
+      label: "恢复自动时间",
+      ops: [{ op: "set_cue", cue_id: "q", timing: null }],
+    }),
+  );
+  call.mockClear();
+  readOnly = true;
+  await act(render);
+  expect(cue.querySelector("[data-trim-edge]")).toBeNull();
+  await act(() => cue.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true })));
+  expect(get('[aria-label="恢复自动时间"]')).toBeNull();
+  expect(call).not.toHaveBeenCalled();
+});
+
+it("opens the subtitle tab and reveals the exact cue on double click", async () => {
+  const cue = await subtitleSetup();
+  state = {
+    ...state,
+    panel: "media",
+    sub: "style",
+    subtitleBrowser: { search: "不存在", find: "", replace: "", matchCase: false },
+  };
+  await act(render);
+  await act(() => cue.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
+  expect(state).toMatchObject({
+    panel: "subtitles",
+    sub: "subtitles",
+    selected: ["q"],
+    playhead: { at: "3s" },
+    preview: "timeline",
+    playing: false,
+    subtitleBrowser: { search: "" },
+  });
+  expect(call).not.toHaveBeenCalled();
+});
+
+it("has no trim handle on an internal cue edge created by cutting the carrier", async () => {
+  await subtitleSetup();
+  const cue = project.cues.find((cue) => cue.cue_id === "q");
+  if (!cue) throw new Error("subtitle fixture");
+  cue.tokens = [{ id: "t2", text: "幕" }];
+  await act(render);
+  expect(get('[data-selection-id="q"] [data-trim-edge="in"]')).toBeNull();
+  expect(get('[data-selection-id="q"] [data-trim-edge="out"]')).not.toBeNull();
+});

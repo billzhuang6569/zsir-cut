@@ -20,6 +20,8 @@ import {
   sub,
 } from "./timeline.js";
 
+export const SNAP_DISTANCE = 8;
+
 export function moveGroup(project: ProjectView, selected: string[], anchor: string) {
   const clips = project.tracks.filter((track) => track.kind !== "subtitle").flatMap((track) => track.clips);
   const requested = clips.filter((clip) =>
@@ -94,7 +96,7 @@ export function snapEdges(
         const candidate = sub(parseRational(point, true), offset);
         if (candidate.numerator < 0n) continue;
         const distance = Math.abs(pixelAt(printRational(add(to, offset), true), scale) - pixelAt(point, scale));
-        if (distance <= 8 && distance < nearest) {
+        if (distance <= SNAP_DISTANCE && distance < nearest) {
           nearest = distance;
           line = point;
           snapped = grid(candidate);

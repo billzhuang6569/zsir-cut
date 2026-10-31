@@ -633,7 +633,12 @@ export function useSubtitlePanel({
                       className="zc-input"
                       value={draft}
                       disabled={busy}
-                      ref={(input) => input?.focus()}
+                      ref={(input) => {
+                        if (!input || document.activeElement === input) return;
+                        input.focus();
+                        input.setSelectionRange(input.value.length, input.value.length);
+                        input.scrollIntoView?.({ block: "nearest" });
+                      }}
                       onChange={(e) => setDraft(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === "Escape") {
@@ -923,5 +928,5 @@ export function useSubtitlePanel({
       )}
     </div>
   );
-  return { controls, parameters };
+  return { controls, parameters, editCue: begin };
 }

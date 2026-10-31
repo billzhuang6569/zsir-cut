@@ -1,6 +1,6 @@
 import type { UiState, UiVerb } from "../../app-host/src/ui.js";
 
-import type { PreviewData, TimelineView } from "./timeline.js";
+import type { PreviewData, TimelineView, TranscriptView } from "./timeline.js";
 export interface ProjectView extends TimelineView, PreviewData {
   historyBatches?: string[];
   name: string;
@@ -90,7 +90,24 @@ export function connectHost(
     if (epoch !== generation) return;
     const preview = (await call("preview_data", {})) as PreviewData;
     if (epoch !== generation) return;
-    handlers.project(path, { ...timeline, ...preview, name: brief.project.name, revision: brief.project.revision });
+    const transcripts = await Promise.all(
+      [...new Set((preview.cues ?? []).map((cue) => cue.transcript_id).filter((id): id is string => !!id))].map(
+        async (id) => {
+          const { entity } = (await call("inspect", { project: path, view: "entity", id })) as {
+            entity: TranscriptView;
+          };
+          return { id: entity.id, media_id: entity.media_id, tokens: entity.tokens, cues: entity.cues };
+        },
+      ),
+    );
+    if (epoch !== generation) return;
+    handlers.project(path, {
+      ...timeline,
+      ...preview,
+      transcripts,
+      name: brief.project.name,
+      revision: brief.project.revision,
+    });
   }
   socket.onopen = () => socket.send(JSON.stringify({ type: "ui_ready" }));
   let uiQueue = Promise.resolve();
