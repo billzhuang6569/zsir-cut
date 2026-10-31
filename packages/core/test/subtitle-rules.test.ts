@@ -63,6 +63,41 @@ const ranges = (
 
 describe("subtitle rules", () => {
   it.each([
+    [["甲甲甲", "豆包", "工作", "乙乙"], ["豆包工作"], "甲甲甲", 5],
+    [["甲甲", "二", "十几家", "乙乙"], [], "甲甲", 4],
+    [["甲甲", "三", "小时", "乙乙"], [], "甲甲", 4],
+    [["甲甲", "aB", "Cd", "乙乙"], ["ABCD"], "甲甲", 4],
+    [["甲甲甲", "豆包", "", "工作", "乙乙"], ["豆包工作"], "甲甲甲", 5],
+  ])("avoids splitting terms and numbers during rule segmentation", (words, terms, expected, cpl) => {
+    const tokens = make(words);
+    expect(
+      segmentTokens(tokens, { ...zh, cpl }, undefined, terms)[0]!
+        .map((token) => token.text)
+        .join(""),
+    ).toBe(expected);
+  });
+
+  it.each([
+    [["甲", "是", "豆包", "工作", "乙"], ["豆包工作"], 1, 0],
+    [["甲", "二", "十几家", "的", "乙"], [], 2, 0],
+    [["甲", "是", "aB", "", "Cd", "乙"], ["ABCD"], 1, 0],
+  ])("does not move AI cuts into terms or numbers", (words, terms, cut, expected) => {
+    const tokens = make(words);
+    const groups = segmentTokens(tokens, zh, new Set([tokens[cut]!.id]), terms);
+    expect(tokens.indexOf(groups[0]!.at(-1)!)).toBe(expected);
+  });
+
+  it.each([
+    [["甲", "豆", "包", "工作", "乙"], ["豆包工作"], 2, 3],
+    [["甲", "二", "十几家", "乙"], [], 1, 2],
+    [["甲", "三", "", "小时", "乙"], [], 1, 3],
+  ])("corrects cuts already inside a term or number", (words, terms, cut, expected) => {
+    const tokens = make(words);
+    const groups = segmentTokens(tokens, zh, new Set([tokens[cut]!.id]), terms);
+    expect(tokens.indexOf(groups[0]!.at(-1)!)).toBe(expected);
+  });
+
+  it.each([
     ["move forward", ["甲", "的", "是", "乙", "丙"], [2], [3]],
     ["move backward", ["甲", "乙", "是", "的", "丙"], [2], [1]],
     ["prefer later on a tie", ["甲", "是", "乙", "丙"], [1], [2]],

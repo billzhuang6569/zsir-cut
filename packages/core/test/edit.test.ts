@@ -1577,6 +1577,16 @@ describe("semantic subtitle resegment", () => {
         .join(""),
     );
 
+  it("corrects real noun and number boundaries using project recognition terms", async () => {
+    await copyFile(
+      new URL("../../../fixtures/regressions/subtitle-term-number-boundary.zcut.json", import.meta.url),
+      path,
+    );
+    const result = await resegment({ cut_after: ["tok_boundary_2", "tok_boundary_7"] });
+    expect(result.status, JSON.stringify(result)).toBe("applied");
+    expect(texts((await read()).transcripts[0]!)).toEqual(["感受", "到的豆包工作", "十几家", "二十几家的"]);
+  });
+
   it("§10.1 ignores sentence punctuation with cut_after, including empty arrays, but keeps hard pauses", async () => {
     const value = await read();
     const item = value.transcripts[0]!;

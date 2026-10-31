@@ -118,7 +118,40 @@ export function cueBreaks(tokens: Token[], rules: SubtitleRules): string[] {
   return candidates[0] ? [candidates[0].id] : [];
 }
 
-export function segmentTokens(tokens: Token[], rules: SubtitleRules, cutAfter?: ReadonlySet<string>): Token[][] {
+export function segmentTokens(
+  tokens: Token[],
+  rules: SubtitleRules,
+  cutAfter?: ReadonlySet<string>,
+  terms: readonly string[] = [],
+): Token[][] {
+  const entries = visible(tokens);
+  const fold = (text: string) =>
+    text.replace(/\p{Script=Latin}/gu, (letter) => {
+      const lower = letter.toLowerCase();
+      return lower.length === letter.length ? lower : letter;
+    });
+  const text = fold(entries.map((token) => token.text).join(""));
+  const foldedTerms = terms.filter(Boolean).map(fold);
+  const bad = new Set<string>();
+  let offset = 0;
+  for (let i = 0; i < entries.length - 1; i++) {
+    const before = entries[i]!;
+    const after = entries[i + 1]!;
+    offset += before.text.length;
+    const splitsTerm = foldedTerms.some((term) => {
+      const begin = Math.max(0, offset - term.length + 1);
+      const start = text.slice(begin, offset + term.length - 1).indexOf(term);
+      return start >= 0 && begin + start < offset && begin + start + term.length > offset;
+    });
+    if (
+      badBoundary(before, after) ||
+      splitsTerm ||
+      (/[0-9零一二三四五六七八九十百千万亿两几半]$/u.test(before.text) &&
+        /^[0-9零一二三四五六七八九十百千万亿两几半个位家条年月日天号点分秒岁元块倍次小时%]/u.test(after.text))
+    )
+      bad.add(before.id);
+  }
+  const isBad = (before: Token) => bad.has(before.id);
   if (cutAfter && rules.name === "zh-talk") {
     const corrected = new Set(cutAfter);
     const correct = (chunk: Token[]) => {
@@ -131,12 +164,12 @@ export function segmentTokens(tokens: Token[], rules: SubtitleRules, cutAfter?: 
         compare(sub(entries[end]!.align.end, entries[start]!.align.start), rules.max_duration) <= 0;
       for (let i = 0; i < cuts.length; i++) {
         const cut = cuts[i]!;
-        if (!badBoundary(entries[cut]!, entries[cut + 1]!)) continue;
+        if (!isBad(entries[cut]!)) continue;
         const start = (cuts[i - 1] ?? -1) + 1;
         const end = cuts[i + 1] ?? entries.length - 1;
         const candidates = Array.from({ length: end - start }, (_, offset) => start + offset)
           .filter((index) => Math.abs(index - cut) <= 3 && validBoundary(entries, index))
-          .filter((index) => !badBoundary(entries[index]!, entries[index + 1]!))
+          .filter((index) => !isBad(entries[index]!))
           .sort((a, b) => Math.abs(a - cut) - Math.abs(b - cut) || b - a);
         const nearest = candidates[0];
         if (nearest !== undefined && fits(start, nearest) && fits(nearest + 1, end)) {
@@ -180,8 +213,9 @@ export function segmentTokens(tokens: Token[], rules: SubtitleRules, cutAfter?: 
             return [];
           const pause = sub(following.align.start, entry.align.end);
           const priority = compare(pause, rules.soft_pause) >= 0 ? 0 : innerPunct.test(entry.text) ? 1 : 2;
-          const bad = rules.name === "zh-talk" && badBoundary(entry, following);
-          return [{ index, priority, bad }];
+          const preceding = [...current.slice(0, index + 1)].reverse().find((item) => item.text !== "");
+          const isBadChoice = rules.name === "zh-talk" && preceding !== undefined && isBad(preceding);
+          return [{ index, priority, bad: isBadChoice }];
         });
         choices.sort((a, b) => Number(a.bad) - Number(b.bad) || a.priority - b.priority || b.index - a.index);
         const cut = choices[0]?.index ?? current.length - 1;

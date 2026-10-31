@@ -312,7 +312,12 @@ export function applySubtitleEdit(
         }
         let stop = cursor;
         while (stop < last && !blocked.has(stop + 1)) stop++;
-        for (const group of segmentTokens(item.tokens.slice(cursor, stop + 1), rules, cutAfter)) {
+        for (const group of segmentTokens(
+          item.tokens.slice(cursor, stop + 1),
+          rules,
+          cutAfter,
+          project.recognition?.terms,
+        )) {
           const firstId = group[0]!.id,
             lastId = group.at(-1)!.id;
           const previous = old.find((cue) => cue.first_token === firstId && cue.last_token === lastId);

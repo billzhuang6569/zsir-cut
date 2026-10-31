@@ -327,7 +327,7 @@ export function applyTranscription(project: Project, request: TranscribeRequest,
   const cues: Cue[] = [];
   let group: Token[] = [];
   const flush = () => {
-    for (const segment of segmentTokens(group, rules))
+    for (const segment of segmentTokens(group, rules, undefined, project.recognition?.terms))
       cues.push({
         id: cueId(),
         first_token: segment[0]!.id,
