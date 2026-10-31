@@ -1,5 +1,5 @@
 // biome-ignore-all lint/style/noNonNullAssertion: Synthetic fixture indexes are fixed by each test.
-import { copyFile, mkdtemp, readFile, rm } from "node:fs/promises";
+import { copyFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -9,6 +9,7 @@ import {
   type Project,
   parseProject,
   rational,
+  serializeProject,
   type Transcript,
   validateCommand,
 } from "../../core/src/index.ts";
@@ -442,6 +443,234 @@ describe("subtitle pass", () => {
     await task;
     expect(f.kernel).not.toHaveBeenCalled();
   });
+});
+
+describe("manual subtitle verbs", () => {
+  const finished = async (f: Awaited<ReturnType<typeof setup>>) => {
+    await vi.waitFor(() => expect(f.manager.latest?.state).not.toBe("running"));
+  };
+  it("tidies only the span of three selected cues and appends the request", async () => {
+    const t = transcript(50);
+    t.cues = Array.from({ length: 5 }, (_, i) => ({
+      id: `cue_${i}`,
+      first_token: `tok_${i * 10}`,
+      last_token: `tok_${i * 10 + 9}`,
+      state: "auto",
+    }));
+    const f = await setup(t, async () => JSON.stringify({ lines: Array(6).fill("字".repeat(5)) }));
+    const accepted = await f.manager.start("subtitle_tidy", {
+      transcript_id: "trs_ignored_when_cues_supplied",
+      cue_ids: ["cue_3", "cue_1", "cue_2"],
+      request: "每行再短一点",
+    });
+    expect(accepted).toEqual({ pass_id: expect.stringMatching(/^job_/) });
+    await finished(f);
+    expect(f.run.mock.calls[0]![1]).toContain(`"text":"${"字".repeat(30)}"`);
+    expect(f.run.mock.calls[0]![1]).toContain("用户的额外要求：每行再短一点");
+    expect(f.kernel).toHaveBeenCalledExactlyOnceWith(
+      "edit",
+      expect.objectContaining({
+        label: "AI 重新分行",
+        ops: [
+          {
+            op: "resegment",
+            transcript_id: t.id,
+            range: { from_token: "tok_10", to_token: "tok_39" },
+            cut_after: ["tok_14", "tok_19", "tok_24", "tok_29", "tok_34", "tok_39"],
+          },
+        ],
+      }),
+    );
+    expect(f.manager.latest).toMatchObject({
+      ...accepted,
+      kind: "tidy",
+      state: "done",
+      done: 1,
+      total: 1,
+      reason: null,
+    });
+  });
+  it("rejects a second tidy or proofread on the same transcript while accepting a different transcript", async () => {
+    let release!: (value: string) => void;
+    const f = await setup(
+      transcript(),
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    f.project.transcripts.push({
+      ...transcript(),
+      id: "trs_other",
+      cues: [{ ...transcript().cues[0]!, id: "cue_other" }],
+    });
+    await f.manager.start("subtitle_tidy", { transcript_id: "trs_test" });
+    await vi.waitFor(() => expect(f.run).toHaveBeenCalledTimes(1));
+    for (const verb of ["subtitle_tidy", "subtitle_proofread"] as const) {
+      expect(await f.manager.start(verb, { cue_ids: ["cue_test"] })).toMatchObject({
+        code: "E_SUB_PASS_RUNNING",
+        retryable: true,
+      });
+      expect(await f.manager.start(verb, {})).toMatchObject({ code: "E_SUB_PASS_RUNNING" });
+    }
+    const other = await f.manager.start("subtitle_proofread", { transcript_id: "trs_other" });
+    expect(other).toHaveProperty("pass_id");
+    release('{"lines":["字字字字","字字字字字字"]}');
+    await f.manager.run("trs_test");
+    expect(f.kernel).toHaveBeenCalledTimes(1);
+  });
+  it("also reports busy while an automatic pass runs", async () => {
+    const f = await setup(transcript(), async () => new Promise(() => {}));
+    void f.manager.run("trs_test");
+    expect(await f.manager.start("subtitle_tidy", {})).toMatchObject({ code: "E_SUB_PASS_RUNNING", retryable: true });
+  });
+  it("validates missing, mixed and empty selections before invoking an agent", async () => {
+    const f = await setup();
+    f.project.transcripts.push({
+      ...transcript(),
+      id: "trs_other",
+      cues: [{ ...transcript().cues[0]!, id: "cue_other" }],
+    });
+    for (const params of [
+      { cue_ids: [] },
+      { cue_ids: ["missing"] },
+      { cue_ids: ["cue_test", "cue_other"] },
+      { transcript_id: "missing" },
+    ])
+      for (const verb of ["subtitle_tidy", "subtitle_proofread"] as const)
+        expect(await f.manager.start(verb, params)).toMatchObject({ code: "E_VALIDATION" });
+    expect(f.run).not.toHaveBeenCalled();
+    expect(f.kernel).not.toHaveBeenCalled();
+  });
+  it("makes one edit for all transcripts with cues and leaves a transcript without cues alone", async () => {
+    const f = await setup();
+    f.project.transcripts.push({ ...transcript(), id: "trs_other" }, { ...transcript(), id: "trs_empty", cues: [] });
+    await f.manager.start("subtitle_tidy", {});
+    await finished(f);
+    expect(f.run).toHaveBeenCalledTimes(2);
+    expect(f.kernel).toHaveBeenCalledTimes(1);
+    expect(request(f).ops.map((op) => op.transcript_id)).toEqual(["trs_test", "trs_other"]);
+    expect(request(f).ops.every((op) => op.range)).toBe(true);
+    expect(f.manager.latest).toMatchObject({ done: 2, total: 2 });
+  });
+  it("writes nothing when any transcript fails and does not automatically retry manual failures", async () => {
+    const f = await setup();
+    f.project.transcripts.push({ ...transcript(), id: "trs_other" });
+    let calls = 0;
+    f.run.mockImplementation(async () => {
+      if (++calls > 1) throw new Error("Not logged in");
+      return '{"lines":["字字字字","字字字字字字"]}';
+    });
+    await f.manager.start("subtitle_tidy", {});
+    await finished(f);
+    expect(f.manager.latest).toMatchObject({ state: "failed", reason: expect.stringContaining("登录") });
+    expect(f.kernel).not.toHaveBeenCalled();
+    const count = f.run.mock.calls.length;
+    await f.manager.retryFailed();
+    expect(f.run).toHaveBeenCalledTimes(count);
+    expect(f.manager.state.warnings).toEqual([]);
+  });
+  it("preserves protected cues in a manual range and leaves proofread as an explicit failure", async () => {
+    const t = transcript();
+    t.cues = [
+      { id: "cue_locked", first_token: "tok_0", last_token: "tok_3", state: "auto", timing: { locked: true } },
+      { id: "cue_free", first_token: "tok_4", last_token: "tok_9", state: "auto" },
+    ];
+    const f = await setup(t, async () => '{"lines":["字字字字字字"]}');
+    await f.manager.start("subtitle_tidy", { transcript_id: t.id });
+    await finished(f);
+    expect(f.run.mock.calls[0]![1]).toContain('"text":"字字字字字字"');
+    expect(request(f).ops[0]).toMatchObject({
+      range: { from_token: "tok_0", to_token: "tok_9" },
+      cut_after: ["tok_9"],
+    });
+    f.run.mockClear();
+    f.kernel.mockClear();
+    await f.manager.start("subtitle_proofread", { cue_ids: ["cue_free"] });
+    await finished(f);
+    expect(f.manager.latest).toMatchObject({
+      kind: "proofread",
+      state: "failed",
+      reason: expect.stringContaining("尚未实现"),
+    });
+    expect(f.run).not.toHaveBeenCalled();
+    expect(f.kernel).not.toHaveBeenCalled();
+  });
+});
+
+it("manual tidy changes only three cues' span, preserves the mark, and makes one undoable history step", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "zcut-tidy-core-"));
+  const path = join(directory, "project.zcut.json");
+  try {
+    const parsed = parseProject(await readFile("examples/interview.zcut.json", "utf8"));
+    if (!parsed.ok) throw new Error("fixture");
+    const project = parsed.project;
+    const t = project.transcripts[0]!;
+    t.ext = { "zsir.subtitle_pass": { by: "existing" } };
+    t.cues = [
+      t.cues[0]!,
+      ...[6, 8, 10, 12].map((first, i) => ({
+        id: i === 0 ? "cue_2" : `cue_manual_${i}`,
+        first_token: t.tokens[first]!.id,
+        last_token: t.tokens[i === 3 ? 14 : first + 1]!.id,
+        state: "auto" as const,
+      })),
+    ];
+    await writeFile(path, serializeProject(project));
+    const load = async () => {
+      const value = parseProject(await readFile(path, "utf8"));
+      if (!value.ok) throw new Error("fixture");
+      return value.project;
+    };
+    const before = await load();
+    const pass = new SubtitlePass({
+      project: path,
+      load,
+      transcribed: async () => [],
+      dispatch,
+      detect: async () => [{ agent: "claude", available: true }],
+      selected: () => undefined,
+      run: async () =>
+        JSON.stringify({
+          lines: [
+            t.tokens
+              .slice(6, 12)
+              .map((token) => token.text)
+              .join(""),
+          ],
+        }),
+      changed: () => {},
+    });
+    managers.push(pass);
+    await pass.start("subtitle_tidy", { cue_ids: ["cue_2", "cue_manual_1", "cue_manual_2"] });
+    await vi.waitFor(() => expect(pass.latest?.state).not.toBe("running"));
+    expect(pass.latest, JSON.stringify(pass.latest)).toMatchObject({ state: "done" });
+    const after = await load();
+    expect(after.transcripts[0]!.tokens).toEqual(before.transcripts[0]!.tokens);
+    expect(
+      after.transcripts[0]!.cues.filter((cue) => [before.transcripts[0]!.cues[0]!.id, "cue_manual_3"].includes(cue.id)),
+    ).toEqual([before.transcripts[0]!.cues[0], before.transcripts[0]!.cues[4]]);
+    expect(after.transcripts[0]!.ext?.["zsir.subtitle_pass"]).toEqual(
+      before.transcripts[0]!.ext?.["zsir.subtitle_pass"],
+    );
+    expect(after.transcripts[0]!.cues).toHaveLength(3);
+    const history = await dispatch("inspect", { project: path, view: "history" });
+    expect((history.result?.entries as { label: string }[])[0]?.label).toBe("AI 重新分行");
+    expect(after.revision.seq).toBe(before.revision.seq + 1);
+    expect(
+      (
+        await dispatch("undo", {
+          project: path,
+          base_revision: after.revision.id,
+          idempotency_key: "undo-tidy",
+          author: { kind: "human", name: "测试" },
+        })
+      ).ok,
+    ).toBe(true);
+    expect((await load()).transcripts).toEqual(before.transcripts);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 describe("chunking", () => {

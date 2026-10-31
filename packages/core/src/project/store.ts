@@ -60,6 +60,7 @@ type EnvelopeStatus =
   | "failed"
   | "committed_unverified";
 type ErrorCode =
+  | "E_SUB_PASS_RUNNING"
   | "E_BATCH_OPEN"
   | "E_BATCH_SEQ_TAKEN"
   | "E_BATCH_CLOSED"

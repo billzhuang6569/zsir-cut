@@ -140,6 +140,7 @@ export function errorEnvelope(
     | "E_NOT_FOUND"
     | "E_CONFLICT"
     | "E_IDEMPOTENCY_MISMATCH"
+    | "E_SUB_PASS_RUNNING"
     | "E_BATCH_OPEN"
     | "E_VOICE_AUTH"
     | "E_VOICE_PAYMENT"

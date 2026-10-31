@@ -12,7 +12,7 @@ import type { Envelope } from "../../core/src/index.ts";
 import { dispatch, VERBS } from "../../core/src/index.ts";
 import { Agents } from "../src/agents.js";
 import { createMcpServer, readAiState, readHistoryBatches, startHost } from "../src/index.js";
-import { UI_VERBS } from "../src/ui.js";
+import { DESKTOP_VERBS, SUBTITLE_VERBS, UI_VERBS } from "../src/ui.js";
 
 let appDataDir: string;
 beforeEach(async () => {
@@ -205,8 +205,8 @@ describe("desktop host", () => {
     const client = await mcpClient();
     try {
       const tools = await client.listTools();
-      expect(tools.tools.map((tool) => tool.name)).toEqual([...VERBS, ...UI_VERBS].map((verb) => `zcut_${verb}`));
-      expect(tools.tools).toHaveLength(VERBS.length + UI_VERBS.length);
+      expect(tools.tools.map((tool) => tool.name)).toEqual([...VERBS, ...DESKTOP_VERBS].map((verb) => `zcut_${verb}`));
+      expect(tools.tools).toHaveLength(VERBS.length + DESKTOP_VERBS.length);
       const missing = await client.callTool({ name: "zcut_ui_seek", arguments: { at: "1s" } });
       expect(missing.structuredContent).toMatchObject({
         status: "failed",
@@ -238,8 +238,35 @@ describe("desktop host", () => {
       const shown = await client.callTool({ name: "zcut_ui_state", arguments: {} });
       expect(shown.structuredContent).toMatchObject({
         status: "no_op",
-        result: { panel: "subtitles", sub: "style", subtitleBrowser: state.subtitleBrowser },
+        result: {
+          panel: "subtitles",
+          sub: "style",
+          subtitleBrowser: state.subtitleBrowser,
+          subtitle_pass: null,
+          subtitle_selection: null,
+        },
       });
+      for (const verb of SUBTITLE_VERBS) {
+        const accepted = await client.callTool({
+          name: `zcut_${verb}`,
+          arguments: { cue_ids: ["cue_2"], request: "保留口头语" },
+        });
+        expect(accepted.structuredContent).toMatchObject({
+          status: "accepted",
+          result: { pass_id: expect.any(String) },
+        });
+        const progress = await client.callTool({ name: "zcut_ui_state", arguments: {} });
+        expect(progress.structuredContent).toMatchObject({
+          result: {
+            subtitle_pass: {
+              pass_id: (accepted.structuredContent as { result: { pass_id: string } }).result.pass_id,
+              kind: verb === "subtitle_tidy" ? "tidy" : "proofread",
+              state: "failed",
+              reason: expect.stringContaining(verb === "subtitle_tidy" ? "没有检测到" : "尚未实现"),
+            },
+          },
+        });
+      }
       const closed = once(socket, "close");
       socket.close();
       await closed;
@@ -262,8 +289,22 @@ it("serves valid MCP schemas and no-UI failures without a network listener", asy
   await Promise.all([server.connect(left), client.connect(right)]);
   try {
     const tools = await client.listTools();
-    expect(tools.tools).toHaveLength(VERBS.length + UI_VERBS.length);
-    expect(tools.tools.map((tool) => tool.name)).toEqual([...VERBS, ...UI_VERBS].map((verb) => `zcut_${verb}`));
+    expect(tools.tools).toHaveLength(VERBS.length + DESKTOP_VERBS.length);
+    expect(tools.tools.map((tool) => tool.name)).toEqual([...VERBS, ...DESKTOP_VERBS].map((verb) => `zcut_${verb}`));
+    for (const verb of SUBTITLE_VERBS) {
+      const schema = tools.tools.find((tool) => tool.name === `zcut_${verb}`)?.inputSchema;
+      expect(Object.keys(schema?.properties ?? {}).sort()).toEqual(["cue_ids", "request", "transcript_id"]);
+      expect(schema?.properties?.request).toMatchObject({ maxLength: 200 });
+      expect((await client.callTool({ name: `zcut_${verb}`, arguments: {} })).structuredContent).toMatchObject({
+        status: "failed",
+        error: { code: "E_APP_NOT_RUNNING", retryable: true },
+      });
+      for (const args of [{ request: "字".repeat(201) }, { cue_ids: [] }, { transcript_id: 3 }, { extra: true }])
+        expect((await client.callTool({ name: `zcut_${verb}`, arguments: args })).structuredContent).toMatchObject({
+          status: "rejected",
+          error: { code: "E_VALIDATION" },
+        });
+    }
     const uiFields = {
       ui_state: [],
       ui_show_panel: ["panel", "sub"],
@@ -342,7 +383,7 @@ it("serves valid MCP schemas and no-UI failures without a network listener", asy
   }
 });
 
-it("authenticates Streamable HTTP, lists 37 tools and calls inspect using the SDK", async () => {
+it("authenticates Streamable HTTP, lists desktop tools and calls inspect using the SDK", async () => {
   const { StreamableHTTPClientTransport } = await import("@modelcontextprotocol/sdk/client/streamableHttp.js");
   host = await startHost({ project, appDataDir });
   const url = new URL(`http://127.0.0.1:${host.port}/mcp`);
@@ -356,7 +397,7 @@ it("authenticates Streamable HTTP, lists 37 tools and calls inspect using the SD
   // SDK callback declarations do not support exactOptionalPropertyTypes.
   await client.connect(transport as import("@modelcontextprotocol/sdk/shared/transport.js").Transport);
   try {
-    expect((await client.listTools()).tools).toHaveLength(37);
+    expect((await client.listTools()).tools).toHaveLength(VERBS.length + DESKTOP_VERBS.length);
     expect(
       (await client.callTool({ name: "zcut_inspect", arguments: { project, view: "brief" } })).structuredContent,
     ).toMatchObject({ ok: true, verb: "inspect" });

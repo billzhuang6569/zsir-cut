@@ -1,6 +1,7 @@
 // biome-ignore-all lint/style/noNonNullAssertion: Indexed tokens and lines are guarded by chunk and alignment bounds.
 import type { Envelope, Project, Token, Transcript, Verb } from "../../core/dist/index.js";
 import type { AgentKind } from "./agent-events.js";
+import type { SubtitleVerb } from "./ui.js";
 
 const {
   compare,
@@ -31,10 +32,27 @@ export interface PassState {
   warnings: PassWarning[];
   progress?: { transcript_id: string; done: number; total: number }[];
 }
+export interface SubtitlePassState {
+  pass_id: string;
+  kind: "tidy" | "proofread";
+  state: "running" | "done" | "failed";
+  done: number;
+  total: number;
+  reason: string | null;
+}
+export interface SubtitlePassParams {
+  transcript_id?: string;
+  cue_ids?: string[];
+  request?: string;
+}
+type PassTarget = { id: string; range?: { from_token: string; to_token: string } };
+type StartResult =
+  | { pass_id: string }
+  | { code: "E_VALIDATION" | "E_SUB_PASS_RUNNING"; message: string; retryable: boolean };
 export type AgentRunner = (agent: AgentKind, prompt: string, signal: AbortSignal) => Promise<string>;
 type Kernel = (verb: Verb, input: unknown) => Promise<Envelope>;
 
-export function subtitleChunks(transcript: Transcript): Token[][] {
+export function subtitleChunks(transcript: Transcript, range?: PassTarget["range"]): Token[][] {
   const protectedIds = new Set<string>();
   for (const cue of transcript.cues) {
     const start = transcript.tokens.findIndex((token) => token.id === cue.first_token);
@@ -67,8 +85,13 @@ export function subtitleChunks(transcript: Transcript): Token[][] {
     if (available.length) chunks.push(available);
     available = [];
   };
-  for (const token of transcript.tokens) {
-    if (protectedIds.has(token.id)) flush();
+  const first = range ? transcript.tokens.findIndex((token) => token.id === range.from_token) : 0;
+  const last = range
+    ? transcript.tokens.findIndex((token) => token.id === range.to_token)
+    : transcript.tokens.length - 1;
+  if (first < 0 || last < first) throw new Error("字幕范围的字词已变化，请重新选择字幕后重试");
+  for (const token of transcript.tokens.slice(first, last + 1)) {
+    if (protectedIds.has(token.id) || token.state === "approved") flush();
     else if (token.text !== "") available.push(token);
   }
   flush();
@@ -158,6 +181,7 @@ function hidesTerm(tokens: Token[], hidden: Set<string>, terms: string[]) {
 export class SubtitlePass {
   readonly states = new Map<string, PassState>();
   private running = new Map<string, Promise<Envelope>>();
+  latest: SubtitlePassState | null = null;
   private jobs = new Map<string, { timer?: ReturnType<typeof setTimeout> }>();
   private abort = new AbortController();
   private active = 0;
@@ -255,7 +279,7 @@ export class SubtitlePass {
   run(id: string): Promise<Envelope> {
     const existing = this.running.get(id);
     if (existing) return existing;
-    const task = this.organize(id).finally(() => this.running.delete(id));
+    const task = this.organize([{ id }]).finally(() => this.running.delete(id));
     this.running.set(id, task);
     return task;
   }
@@ -288,16 +312,219 @@ export class SubtitlePass {
     }
   }
 
-  private async organize(id: string): Promise<Envelope> {
-    const warnings: PassWarning[] = [];
-    const fallback = (reason: string, chunk?: number) =>
-      warnings.push({
-        code: "W_SUB_PASS_FALLBACK",
+  private async segment(
+    project: Project,
+    target: PassTarget,
+    agents: { available: AgentKind[]; current: AgentKind },
+    warnings: PassWarning[],
+    progresses: { transcript_id: string; done: number; total: number }[],
+    update: () => void,
+    request?: string,
+  ) {
+    const id = target.id;
+    const transcript = project.transcripts.find((t) => t.id === id);
+    if (!transcript) throw new Error("母稿已不存在，请重新打开工程后重试");
+    const fallback = (reason: string, chunk: number) =>
+      warnings.push({ code: "W_SUB_PASS_FALLBACK", transcript_id: id, reason, chunk });
+    const chunks = subtitleChunks(transcript, target.range);
+    const rules = transcriptRules(transcript);
+    const terms = project.recognition?.terms ?? [];
+    const removeFillers = project.recognition?.remove_fillers ?? true;
+    const progress = { transcript_id: id, done: 0, total: chunks.length };
+    progresses.push(progress);
+    update();
+    const results: { ok: boolean; hide: string[]; cuts: string[] }[] = [];
+    let nextChunk = 0;
+    const worker = async () => {
+      while (nextChunk < chunks.length && !this.abort.signal.aborted) {
+        const chunk = nextChunk++;
+        const tokens = chunks[chunk]!;
+        let chunkAgent = agents.current;
+        const processChunk = async (agent: AgentKind) => {
+          let text = "";
+          for (let i = 0; i < tokens.length; i++) {
+            const token = tokens[i]!;
+            const previous = tokens[i - 1];
+            if (previous) {
+              const gap = sub(token.align.start, previous.align.end);
+              if (compare(gap, rules.hard_pause) >= 0) text += " // ";
+              else if (compare(gap, rules.soft_pause) >= 0) text += " / ";
+              else if (/[A-Za-z0-9]$/u.test(previous.text) && /^[A-Za-z0-9]/u.test(token.text)) text += " ";
+            }
+            text += token.text;
+          }
+          const input = { text, remove_fillers: removeFillers, terms, max_chars: rules.cpl * rules.max_lines };
+          const base = `${SUBTITLE_PASS_PROMPT}\n${JSON.stringify(input)}${request ? `\n用户的额外要求：${request}` : ""}`;
+          const ask = async (prompt: string) => {
+            let reason = "Agent 调用失败";
+            for (let retry = 0; retry < 2 && !this.abort.signal.aborted; retry++) {
+              try {
+                const output: unknown = JSON.parse(await this.attempt(agent, prompt));
+                if (
+                  !output ||
+                  typeof output !== "object" ||
+                  Array.isArray(output) ||
+                  Object.keys(output).join() !== "lines" ||
+                  !Array.isArray((output as { lines?: unknown }).lines)
+                )
+                  throw new Error("输出必须只有 lines 数组");
+                const lines = (output as { lines: string[] }).lines;
+                const aligned = alignSubtitleLines(tokens, lines);
+                if (
+                  (!removeFillers && aligned.hide.length) ||
+                  aligned.hide.length * 5 > tokens.length ||
+                  hidesTerm(transcript.tokens, new Set(aligned.hide), terms)
+                )
+                  throw new Error("隐藏字词超过限制或包含名词");
+                return { lines, ...aligned };
+              } catch (error) {
+                reason = error instanceof Error ? error.message : "Agent 调用失败";
+                if (/authenticat|oauth|log(?:ged)?[ -]?in|login|登录|unauthorized/i.test(reason)) break;
+              }
+            }
+            throw new Error(reason);
+          };
+          let result = await ask(base);
+          for (let round = 0; round < 2; round++) {
+            const bad = badSubtitleBoundaries(
+              tokens.filter((t) => !result.hide.includes(t.id)),
+              terms,
+              true,
+            );
+            const problems: string[] = [];
+            result.groups.forEach((group, index) => {
+              const first = group[0]!;
+              const last = group.at(-1)!;
+              if (
+                compare(textWidth(group, rules), mul(rationalNumber(rules.cpl), rational(BigInt(rules.max_lines)))) > 0
+              )
+                problems.push(`第 ${index + 1} 行「${result.lines[index]}」宽度超限`);
+              if (compare(sub(last.align.end, first.align.start), rules.max_duration) > 0)
+                problems.push(`第 ${index + 1} 行「${result.lines[index]}」时长超限`);
+              const next = result.groups[index + 1]?.[0];
+              if (next && bad.has(last.id) && compare(sub(next.align.start, last.align.end), rules.soft_pause) < 0)
+                problems.push(`第 ${index + 1} 行「${result.lines[index]}」与下一行之间是坏断点`);
+            });
+            if (!problems.length) break;
+            try {
+              result = await ask(`${base}\n${JSON.stringify({ 上一次的结果: result.lines, 问题: problems })}`);
+            } catch {
+              break;
+            }
+          }
+          return { ok: true, hide: result.hide, cuts: result.cuts };
+        };
+        try {
+          try {
+            results[chunk] = await processChunk(chunkAgent);
+          } catch (firstError) {
+            const other = agents.available.find((kind) => kind !== chunkAgent);
+            if (!other || this.abort.signal.aborted) throw firstError;
+            agents.current = other;
+            chunkAgent = other;
+            results[chunk] = await processChunk(chunkAgent);
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Agent 调用失败";
+          const reason = /超时/i.test(message)
+            ? "字幕整理超时，请检查网络和 Agent 后重试"
+            : /authenticat|oauth|log(?:ged)?[ -]?in|login|登录|unauthorized/i.test(message)
+              ? chunkAgent === "claude"
+                ? "Claude Code 登录已过期，请在终端运行 claude 重新登录，或在 AI 面板换成 Codex"
+                : "Codex 未登录，请在终端运行 codex 登录，或在 AI 面板换成 Claude Code"
+              : `${chunkAgent === "claude" ? "Claude Code" : "Codex"} 字幕整理失败，请检查登录和 CLI 后重试`;
+          fallback(reason, chunk);
+        } finally {
+          progress.done++;
+          update();
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(6, chunks.length) }, () => worker()));
+    if (this.abort.signal.aborted || warnings.length || results.length !== chunks.length)
+      throw new Error(warnings[0]?.reason ?? "整理已停止");
+
+    const hide = results.flatMap((result) => result.hide);
+    return [
+      ...(hide.length ? [{ op: "hide_tokens", transcript_id: id, tokens: hide }] : []),
+      {
+        op: "resegment",
         transcript_id: id,
-        reason,
-        ...(chunk === undefined ? {} : { chunk }),
+        ...(target.range ? { range: target.range } : {}),
+        cut_after: results.flatMap((result) => result.cuts),
+      },
+    ];
+  }
+
+  async start(verb: SubtitleVerb, params: SubtitlePassParams): Promise<StartResult> {
+    const invalid = (message: string): StartResult => ({ code: "E_VALIDATION", message, retryable: false });
+    const project = await this.options.load();
+    if (this.abort.signal.aborted) return invalid("工程已关闭，请重新打开后重试");
+    let targets: PassTarget[];
+    if (params.cue_ids !== undefined) {
+      if (!params.cue_ids.length) return invalid("请选择至少一条字幕");
+      const selected = params.cue_ids.map((id) => {
+        const transcript = project.transcripts.find((t) => t.cues.some((cue) => cue.id === id));
+        return { transcript, cue: transcript?.cues.find((cue) => cue.id === id) };
       });
-    let envelope: Envelope = {
+      const transcript = selected[0]?.transcript;
+      if (!transcript || selected.some((item) => !item.cue || item.transcript !== transcript))
+        return invalid("选中的字幕必须存在且属于同一份母稿");
+      const first = Math.min(
+        ...selected.map(({ cue }) => transcript.tokens.findIndex((t) => t.id === cue!.first_token)),
+      );
+      const last = Math.max(...selected.map(({ cue }) => transcript.tokens.findIndex((t) => t.id === cue!.last_token)));
+      targets = [
+        {
+          id: transcript.id,
+          range: { from_token: transcript.tokens[first]!.id, to_token: transcript.tokens[last]!.id },
+        },
+      ];
+    } else {
+      const transcripts =
+        params.transcript_id === undefined
+          ? project.transcripts.filter((t) => t.cues.length)
+          : project.transcripts.filter((t) => t.id === params.transcript_id);
+      if (params.transcript_id !== undefined && !transcripts.length) return invalid("指定的母稿不存在");
+      targets = transcripts
+        .filter((t) => t.tokens.length)
+        .map((t) => ({
+          id: t.id,
+          range: { from_token: t.tokens[0]!.id, to_token: t.tokens.at(-1)!.id },
+        }));
+    }
+    if (targets.some((target) => this.running.has(target.id)))
+      return { code: "E_SUB_PASS_RUNNING", message: "这份母稿已有 AI 整理或校对在运行，请完成后重试", retryable: true };
+    const state: SubtitlePassState = {
+      pass_id: newId("job_"),
+      kind: verb === "subtitle_tidy" ? "tidy" : "proofread",
+      state: "running",
+      done: 0,
+      total: 0,
+      reason: null,
+    };
+    this.latest = state;
+    const task = Promise.resolve()
+      .then(async () => {
+        // S4.2 replaces this explicit failure with the proofread pipeline.
+        if (state.kind === "proofread") {
+          state.state = "failed";
+          state.reason = "AI 字幕校对尚未实现，将在 S4.2 提供";
+          this.options.changed();
+          return this.emptyEnvelope();
+        }
+        return this.organize(targets, state, params.request);
+      })
+      .finally(() => {
+        for (const target of targets) this.running.delete(target.id);
+      });
+    for (const target of targets) this.running.set(target.id, task);
+    this.options.changed();
+    return { pass_id: state.pass_id };
+  }
+
+  private emptyEnvelope(): Envelope {
+    return {
       ok: true,
       status: "no_op",
       verb: "edit",
@@ -308,171 +535,66 @@ export class SubtitlePass {
       result: null,
       error: null,
     };
-    this.states.set(id, { running: true, warnings, progress: [{ transcript_id: id, done: 0, total: 0 }] });
-    this.options.changed();
-    try {
-      const detected = await this.options.detect();
-      const selected = this.options.selected();
-      const available = (["claude", "codex"] as const).filter((kind) =>
-        detected.some((item) => item.agent === kind && item.available),
-      );
-      let agent = selected && available.includes(selected) ? selected : available[0];
-      if (!agent) {
-        fallback("没有检测到 Claude Code 或 Codex，请安装并登录后重试");
+  }
+
+  private async organize(targets: PassTarget[], manual?: SubtitlePassState, request?: string): Promise<Envelope> {
+    const warnings: PassWarning[] = [];
+    let progresses: { transcript_id: string; done: number; total: number }[] = [];
+    let envelope = this.emptyEnvelope();
+    const update = () => {
+      if (manual) {
+        manual.done = progresses.reduce((sum, progress) => sum + progress.done, 0);
+        manual.total = progresses.reduce((sum, progress) => sum + progress.total, 0);
       } else
+        for (const target of targets) this.states.set(target.id, { running: true, warnings, progress: progresses });
+      this.options.changed();
+    };
+    update();
+    try {
+      if (targets.length) {
+        const detected = await this.options.detect();
+        const available = (["claude", "codex"] as const).filter((kind) =>
+          detected.some((item) => item.agent === kind && item.available),
+        );
+        const selected = this.options.selected();
+        const current = selected && available.includes(selected) ? selected : available[0];
+        if (!current) throw new Error("没有检测到 Claude Code 或 Codex，请安装并登录后重试");
+        const agents = { available, current };
         for (let revisionAttempt = 0; revisionAttempt < 2; revisionAttempt++) {
-          warnings.length = 0;
+          progresses = [];
           const project = await this.options.load();
-          const transcript = project.transcripts.find((t) => t.id === id);
-          if (!transcript || this.abort.signal.aborted) break;
-          const chunks = subtitleChunks(transcript);
-          const rules = transcriptRules(transcript);
-          const terms = project.recognition?.terms ?? [];
-          const removeFillers = project.recognition?.remove_fillers ?? true;
-          const progress = { transcript_id: id, done: 0, total: chunks.length };
-          this.states.set(id, { running: true, warnings, progress: [progress] });
-          this.options.changed();
-          const results: { ok: boolean; hide: string[]; cuts: string[] }[] = [];
-          let nextChunk = 0;
-          const worker = async () => {
-            while (nextChunk < chunks.length && !this.abort.signal.aborted) {
-              const chunk = nextChunk++;
-              const tokens = chunks[chunk]!;
-              let chunkAgent = agent!;
-              const processChunk = async (agent: AgentKind) => {
-                let text = "";
-                for (let i = 0; i < tokens.length; i++) {
-                  const token = tokens[i]!;
-                  const previous = tokens[i - 1];
-                  if (previous) {
-                    const gap = sub(token.align.start, previous.align.end);
-                    if (compare(gap, rules.hard_pause) >= 0) text += " // ";
-                    else if (compare(gap, rules.soft_pause) >= 0) text += " / ";
-                    else if (/[A-Za-z0-9]$/u.test(previous.text) && /^[A-Za-z0-9]/u.test(token.text)) text += " ";
-                  }
-                  text += token.text;
-                }
-                const input = { text, remove_fillers: removeFillers, terms, max_chars: rules.cpl * rules.max_lines };
-                const base = `${SUBTITLE_PASS_PROMPT}\n${JSON.stringify(input)}`;
-                const ask = async (prompt: string) => {
-                  let reason = "Agent 调用失败";
-                  for (let retry = 0; retry < 2 && !this.abort.signal.aborted; retry++) {
-                    try {
-                      const output: unknown = JSON.parse(await this.attempt(agent, prompt));
-                      if (
-                        !output ||
-                        typeof output !== "object" ||
-                        Array.isArray(output) ||
-                        Object.keys(output).join() !== "lines" ||
-                        !Array.isArray((output as { lines?: unknown }).lines)
-                      )
-                        throw new Error("输出必须只有 lines 数组");
-                      const lines = (output as { lines: string[] }).lines;
-                      const aligned = alignSubtitleLines(tokens, lines);
-                      if (
-                        (!removeFillers && aligned.hide.length) ||
-                        aligned.hide.length * 5 > tokens.length ||
-                        hidesTerm(transcript.tokens, new Set(aligned.hide), terms)
-                      )
-                        throw new Error("隐藏字词超过限制或包含名词");
-                      return { lines, ...aligned };
-                    } catch (error) {
-                      reason = error instanceof Error ? error.message : "Agent 调用失败";
-                      if (/authenticat|oauth|log(?:ged)?[ -]?in|login|登录|unauthorized/i.test(reason)) break;
-                    }
-                  }
-                  throw new Error(reason);
-                };
-                let result = await ask(base);
-                for (let round = 0; round < 2; round++) {
-                  const bad = badSubtitleBoundaries(
-                    tokens.filter((t) => !result.hide.includes(t.id)),
-                    terms,
-                    true,
-                  );
-                  const problems: string[] = [];
-                  result.groups.forEach((group, index) => {
-                    const first = group[0]!;
-                    const last = group.at(-1)!;
-                    if (
-                      compare(
-                        textWidth(group, rules),
-                        mul(rationalNumber(rules.cpl), rational(BigInt(rules.max_lines))),
-                      ) > 0
-                    )
-                      problems.push(`第 ${index + 1} 行「${result.lines[index]}」宽度超限`);
-                    if (compare(sub(last.align.end, first.align.start), rules.max_duration) > 0)
-                      problems.push(`第 ${index + 1} 行「${result.lines[index]}」时长超限`);
-                    const next = result.groups[index + 1]?.[0];
-                    if (
-                      next &&
-                      bad.has(last.id) &&
-                      compare(sub(next.align.start, last.align.end), rules.soft_pause) < 0
-                    )
-                      problems.push(`第 ${index + 1} 行「${result.lines[index]}」与下一行之间是坏断点`);
-                  });
-                  if (!problems.length) break;
-                  try {
-                    result = await ask(`${base}\n${JSON.stringify({ 上一次的结果: result.lines, 问题: problems })}`);
-                  } catch {
-                    break;
-                  }
-                }
-                return { ok: true, hide: result.hide, cuts: result.cuts };
-              };
-              try {
-                try {
-                  results[chunk] = await processChunk(chunkAgent);
-                } catch (firstError) {
-                  const other = available.find((kind) => kind !== chunkAgent);
-                  if (!other || this.abort.signal.aborted) throw firstError;
-                  agent = other;
-                  chunkAgent = other;
-                  results[chunk] = await processChunk(chunkAgent);
-                }
-              } catch (error) {
-                const message = error instanceof Error ? error.message : "Agent 调用失败";
-                const reason = /超时/i.test(message)
-                  ? "字幕整理超时，请检查网络和 Agent 后重试"
-                  : /authenticat|oauth|log(?:ged)?[ -]?in|login|登录|unauthorized/i.test(message)
-                    ? chunkAgent === "claude"
-                      ? "Claude Code 登录已过期，请在终端运行 claude 重新登录，或在 AI 面板换成 Codex"
-                      : "Codex 未登录，请在终端运行 codex 登录，或在 AI 面板换成 Claude Code"
-                    : `${chunkAgent === "claude" ? "Claude Code" : "Codex"} 字幕整理失败，请检查登录和 CLI 后重试`;
-                fallback(reason, chunk);
-              } finally {
-                progress.done++;
-                this.options.changed();
-              }
-            }
-          };
-          await Promise.all(Array.from({ length: Math.min(6, chunks.length) }, () => worker()));
-          if (this.abort.signal.aborted || warnings.length || results.length !== chunks.length) break;
-          const hide = results.flatMap((result) => result.hide);
+          const ops: Record<string, unknown>[] = [];
+          for (const target of targets)
+            ops.push(...(await this.segment(project, target, agents, warnings, progresses, update, request)));
+          if (this.abort.signal.aborted) throw new Error("整理已停止");
           envelope = await this.options.dispatch("edit", {
             project: this.options.project,
             base_revision: project.revision.id,
             idempotency_key: newId("req_"),
             author: { kind: "agent", name: "字幕整理" },
-            label: "AI 整理字幕",
-            ops: [
-              ...(hide.length ? [{ op: "hide_tokens", transcript_id: id, tokens: hide }] : []),
-              { op: "resegment", transcript_id: id, cut_after: results.flatMap((result) => result.cuts) },
-            ],
+            label: manual ? "AI 重新分行" : "AI 整理字幕",
+            ops,
           });
           if (envelope.error?.code === "E_CONFLICT" && revisionAttempt === 0) continue;
           if (!envelope.ok)
-            fallback(
+            throw new Error(
               envelope.error?.code === "E_CONFLICT"
                 ? "工程持续变化，整理未写入"
                 : `整理未写入：${envelope.error?.message ?? "编辑失败"}`,
             );
           break;
         }
+      }
+      if (manual) manual.state = "done";
     } catch (error) {
-      fallback(error instanceof Error ? error.message : "字幕整理失败");
+      const reason = error instanceof Error ? error.message : "字幕整理失败";
+      if (!warnings.length) warnings.push({ code: "W_SUB_PASS_FALLBACK", transcript_id: targets[0]?.id ?? "", reason });
+      if (manual) {
+        manual.state = "failed";
+        manual.reason = reason;
+      }
     } finally {
-      this.states.set(id, { running: false, warnings });
+      if (!manual) for (const target of targets) this.states.set(target.id, { running: false, warnings });
       this.options.changed();
     }
     return {
@@ -482,7 +604,12 @@ export class SubtitlePass {
         ...envelope.verification,
         issues: [
           ...envelope.verification.issues,
-          ...warnings.map((w) => ({ code: w.code, severity: "warning" as const, message: w.reason, ids: [id] })),
+          ...warnings.map((w) => ({
+            code: w.code,
+            severity: "warning" as const,
+            message: w.reason,
+            ids: [w.transcript_id],
+          })),
         ],
       },
     };

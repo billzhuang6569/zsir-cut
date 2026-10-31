@@ -19,8 +19,8 @@ import { Agents } from "./agents.js";
 import { exportPreferences } from "./export-preferences.js";
 import { mediaChannel, runFfmpeg } from "./media.js";
 import { RecentProjects } from "./recent.js";
-import { SubtitlePass } from "./subtitle-pass.js";
-import { PANELS, UI_VERBS, type UiEnvelope, type UiVerb } from "./ui.js";
+import { SubtitlePass, type SubtitlePassParams } from "./subtitle-pass.js";
+import { DESKTOP_VERBS, type DesktopVerb, PANELS, SUBTITLE_VERBS, type SubtitleVerb, type UiEnvelope } from "./ui.js";
 
 const {
   dispatch,
@@ -41,7 +41,14 @@ const {
 const time = z.string().regex(/^(?:0|[1-9]\d*)(?:\/[1-9]\d*)?s$/);
 const duration = time.refine((value) => !/^0(?:\/\d+)?s$/.test(value), "Duration must be positive");
 const id = z.string().min(1).max(200);
+const subtitleSchema = z.strictObject({
+  transcript_id: id.optional(),
+  cue_ids: z.array(id).min(1).optional(),
+  request: z.string().max(200).optional(),
+});
 const uiSchemas = {
+  subtitle_tidy: subtitleSchema,
+  subtitle_proofread: subtitleSchema,
   ui_state: z.strictObject({}),
   ui_show_panel: z.strictObject({ panel: z.enum([...PANELS, "export", "history"]), sub: z.string().optional() }),
   ui_seek: z.union([z.strictObject({ at: time }), z.strictObject({ id })]),
@@ -83,7 +90,7 @@ const uiStateSchema = z.strictObject({
   media: z.strictObject({ id, at: time, in: time.nullable(), out: time.nullable() }).optional(),
 });
 
-function uiEnvelope(verb: UiVerb, code?: string, message = "", retryable = false): UiEnvelope {
+function uiEnvelope(verb: DesktopVerb, code?: string, message = "", retryable = false): UiEnvelope {
   return {
     ok: !code,
     status: code ? (code === "E_VALIDATION" ? "rejected" : "failed") : "no_op",
@@ -98,7 +105,7 @@ function uiEnvelope(verb: UiVerb, code?: string, message = "", retryable = false
 }
 
 export function createMcpServer(
-  callUi: (verb: UiVerb, input: unknown) => Promise<UiEnvelope> = async (verb) =>
+  callUi: (verb: DesktopVerb, input: unknown) => Promise<UiEnvelope> = async (verb) =>
     uiEnvelope(verb, "E_APP_NOT_RUNNING", "桌面界面未连接", true),
   kernel: (verb: Verb, input: unknown) => Promise<Envelope> = (verb, input) => dispatch(verb, input),
 ): Server {
@@ -109,7 +116,7 @@ export function createMcpServer(
         name: `zcut_${verb}`,
         inputSchema: flattenMcpSchema(commandSchemaForVerb(verb)) as { type: "object" },
       })),
-      ...UI_VERBS.map((verb) => ({
+      ...DESKTOP_VERBS.map((verb) => ({
         name: `zcut_${verb}`,
         inputSchema: { ...flattenMcpSchema(z.toJSONSchema(uiSchemas[verb])), type: "object" as const },
       })),
@@ -119,11 +126,11 @@ export function createMcpServer(
     if (!request.params.name.startsWith("zcut_")) throw new Error(`Unknown tool: ${request.params.name}`);
     const verb = request.params.name.slice("zcut_".length);
     let envelope: Envelope | UiEnvelope;
-    if (UI_VERBS.includes(verb as UiVerb)) {
-      const parsed = uiSchemas[verb as UiVerb].safeParse(request.params.arguments ?? {});
+    if (DESKTOP_VERBS.includes(verb as DesktopVerb)) {
+      const parsed = uiSchemas[verb as DesktopVerb].safeParse(request.params.arguments ?? {});
       envelope = parsed.success
-        ? await callUi(verb as UiVerb, parsed.data)
-        : uiEnvelope(verb as UiVerb, "E_VALIDATION", parsed.error.message);
+        ? await callUi(verb as DesktopVerb, parsed.data)
+        : uiEnvelope(verb as DesktopVerb, "E_VALIDATION", parsed.error.message);
     } else if (VERBS.includes(verb as Verb)) envelope = await kernel(verb as Verb, request.params.arguments ?? {});
     else throw new Error(`Unknown tool: ${request.params.name}`);
     return { content: [], structuredContent: envelope };
@@ -318,7 +325,7 @@ export async function startHost(
   });
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
   let ui: WebSocket | undefined;
-  const pending = new Map<string, { resolve: (value: UiEnvelope) => void; timer: NodeJS.Timeout; verb: UiVerb }>();
+  const pending = new Map<string, { resolve: (value: UiEnvelope) => void; timer: NodeJS.Timeout; verb: DesktopVerb }>();
   const disconnected = () => {
     for (const [key, item] of pending) {
       clearTimeout(item.timer);
@@ -358,8 +365,21 @@ export async function startHost(
       throw new Error("Agent must use the current project");
     return kernel(verb, { ...request, project: options.project });
   };
-  const callUi = async (verb: UiVerb, input: unknown): Promise<UiEnvelope> => {
+  const callUi = async (verb: DesktopVerb, input: unknown): Promise<UiEnvelope> => {
     if (!ui || ui.readyState !== WebSocket.OPEN) return uiEnvelope(verb, "E_APP_NOT_RUNNING", "桌面界面未连接", true);
+    if (SUBTITLE_VERBS.includes(verb as SubtitleVerb)) {
+      const parsed = subtitleSchema.safeParse(input);
+      if (!parsed.success) return uiEnvelope(verb, "E_VALIDATION", parsed.error.message);
+      if (!subtitlePass) return uiEnvelope(verb, "E_VALIDATION", "请先打开工程");
+      try {
+        const result = await subtitlePass.start(verb as SubtitleVerb, parsed.data as SubtitlePassParams);
+        return "code" in result
+          ? uiEnvelope(verb, result.code, result.message, result.retryable)
+          : { ...uiEnvelope(verb), status: "accepted", result };
+      } catch (error) {
+        return uiEnvelope(verb, "E_IO", error instanceof Error ? error.message : "无法读取字幕");
+      }
+    }
     const envelope = uiEnvelope(verb);
     const requestId = envelope.request_id;
     return new Promise((resolve) => {
@@ -443,7 +463,12 @@ export async function startHost(
                 ? {
                     ...uiEnvelope(item.verb),
                     request_id: message.id,
-                    result: { ...parsed.data, subtitlePass: subtitlePass?.state },
+                    result: {
+                      ...parsed.data,
+                      subtitlePass: subtitlePass?.state,
+                      subtitle_pass: subtitlePass?.latest ?? null,
+                      subtitle_selection: null,
+                    },
                   }
                 : uiEnvelope(item.verb, "E_INTERNAL", "Invalid UI state"),
             );
@@ -620,6 +645,11 @@ export async function startHost(
         }
         if (typeof message.id !== "string" || typeof message.verb !== "string") {
           client.close(1008, "Invalid message");
+          return;
+        }
+        if (SUBTITLE_VERBS.includes(message.verb)) {
+          const envelope = await callUi(message.verb as SubtitleVerb, message.request ?? {});
+          if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify({ id: message.id, envelope }));
           return;
         }
         if (!VERBS.includes(message.verb)) throw new Error(`Unknown request: ${message.verb}`);

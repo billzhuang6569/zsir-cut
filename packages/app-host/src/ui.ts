@@ -1,9 +1,15 @@
 export const UI_VERBS = ["ui_state", "ui_show_panel", "ui_seek", "ui_select", "ui_play", "ui_pause"] as const;
+export const SUBTITLE_VERBS = ["subtitle_tidy", "subtitle_proofread"] as const;
+export type SubtitleVerb = (typeof SUBTITLE_VERBS)[number];
+export const DESKTOP_VERBS = [...UI_VERBS, ...SUBTITLE_VERBS] as const;
+export type DesktopVerb = (typeof DESKTOP_VERBS)[number];
 export type UiVerb = (typeof UI_VERBS)[number];
 export const PANELS = ["ai", "media", "chapters", "subtitles", "voice"] as const;
 export type Panel = (typeof PANELS)[number];
 export interface UiState {
   subtitlePass?: import("./subtitle-pass.js").PassState | undefined;
+  subtitle_pass?: import("./subtitle-pass.js").SubtitlePassState | null;
+  subtitle_selection?: { cue_ids: string[]; editing: string | null } | null;
   project: string | null;
   panel: Panel;
   sub: string | null;
@@ -22,12 +28,12 @@ export interface UiState {
 }
 export interface UiEnvelope {
   ok: boolean;
-  status: "no_op" | "failed" | "rejected";
-  verb: UiVerb;
+  status: "no_op" | "accepted" | "failed" | "rejected";
+  verb: DesktopVerb;
   request_id: string;
   receipt: null;
   changes: [];
   verification: { level: "none"; passed: boolean; issues: [] };
-  result: UiState | null;
+  result: UiState | { pass_id: string } | null;
   error: { code: string; message: string; retryable: boolean } | null;
 }
