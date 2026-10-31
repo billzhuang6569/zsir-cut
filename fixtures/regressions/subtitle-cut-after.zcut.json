@@ -1,0 +1,477 @@
+{
+  "schema": "zsir-cut/timeline",
+  "schema_version": "0.3",
+  "id": "prj_semantic",
+  "name": "合成无标点中文断句回归",
+  "revision": {
+    "seq": 1,
+    "id": "rev_example_1",
+    "parent": null,
+    "created_at": "2026-10-26T12:00:00Z",
+    "author": {
+      "kind": "human",
+      "name": "example"
+    }
+  },
+  "media": [
+    {
+      "id": "med_a",
+      "kind": "video",
+      "name": "A001.mov",
+      "path": "media/hidden.mov",
+      "size_bytes": 10,
+      "fingerprint": {
+        "algo": "sampled-sha256-v1",
+        "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "duration": "20s",
+      "start_timecode": "10:00:00:00",
+      "reel": "A001",
+      "video": {
+        "rate": "25",
+        "width": 1920,
+        "height": 1080,
+        "pixel_aspect": "1",
+        "vfr": false
+      },
+      "audio": {
+        "sample_rate": "48000",
+        "channels": 2
+      }
+    }
+  ],
+  "timelines": [
+    {
+      "id": "tl_main",
+      "name": "主时间线",
+      "edit_rate": "25",
+      "drop_frame": false,
+      "start_timecode": "00:00:00:00",
+      "audio_rate": "48000",
+      "format": {
+        "width": 1920,
+        "height": 1080,
+        "pixel_aspect": "1"
+      },
+      "tracks": [
+        {
+          "id": "trk_v1",
+          "kind": "video",
+          "name": "V1",
+          "enabled": true,
+          "clips": [
+            {
+              "id": "clp_v1",
+              "occurrence_id": "occ_1",
+              "media_id": "med_a",
+              "timeline_start": "0s",
+              "duration": "20s",
+              "source_start": "0s"
+            }
+          ],
+          "transitions": []
+        },
+        {
+          "id": "trk_a1",
+          "kind": "audio",
+          "name": "A1",
+          "enabled": true,
+          "clips": [
+            {
+              "id": "clp_a1",
+              "occurrence_id": "occ_1",
+              "media_id": "med_a",
+              "timeline_start": "0s",
+              "duration": "20s",
+              "source_start": "0s",
+              "source_channels": [
+                0,
+                1
+              ]
+            }
+          ],
+          "transitions": []
+        },
+        {
+          "id": "trk_sub",
+          "kind": "subtitle",
+          "name": "中文",
+          "enabled": true,
+          "language": "zh-Hans",
+          "carrier_tracks": [
+            "trk_a1"
+          ],
+          "default_style_id": "sty_default",
+          "overrides": [],
+          "free_cues": []
+        }
+      ],
+      "markers": []
+    }
+  ],
+  "transcripts": [
+    {
+      "id": "trs_semantic",
+      "media_id": "med_a",
+      "language": "zh-Hans",
+      "source_channels": [
+        0
+      ],
+      "tokens": [
+        {
+          "id": "tok_mantic_0",
+          "text": "所有",
+          "state": "auto",
+          "align": {
+            "start": "0s",
+            "end": "1/5s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_mantic_1",
+          "text": "的",
+          "state": "auto",
+          "align": {
+            "start": "1/5s",
+            "end": "2/5s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_mantic_2",
+          "text": "点位",
+          "state": "auto",
+          "align": {
+            "start": "2/5s",
+            "end": "3/5s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_mantic_3",
+          "text": "加",
+          "state": "auto",
+          "align": {
+            "start": "3/5s",
+            "end": "4/5s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_mantic_4",
+          "text": "起来",
+          "state": "auto",
+          "align": {
+            "start": "4/5s",
+            "end": "1s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_mantic_5",
+          "text": "可能",
+          "state": "auto",
+          "align": {
+            "start": "1s",
+            "end": "6/5s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_mantic_6",
+          "text": "有",
+          "state": "auto",
+          "align": {
+            "start": "6/5s",
+            "end": "7/5s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_mantic_7",
+          "text": "两万多个",
+          "state": "auto",
+          "align": {
+            "start": "7/5s",
+            "end": "8/5s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_mantic_8",
+          "text": "很多",
+          "state": "auto",
+          "align": {
+            "start": "8/5s",
+            "end": "9/5s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_mantic_9",
+          "text": "的",
+          "state": "auto",
+          "align": {
+            "start": "9/5s",
+            "end": "2s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_mantic_a",
+          "text": "脏活",
+          "state": "auto",
+          "align": {
+            "start": "2s",
+            "end": "11/5s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_mantic_b",
+          "text": "全部",
+          "state": "auto",
+          "align": {
+            "start": "11/5s",
+            "end": "12/5s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_mantic_c",
+          "text": "让",
+          "state": "auto",
+          "align": {
+            "start": "12/5s",
+            "end": "13/5s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_mantic_d",
+          "text": "豆包",
+          "state": "auto",
+          "align": {
+            "start": "13/5s",
+            "end": "14/5s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_mantic_e",
+          "text": "工作",
+          "state": "auto",
+          "align": {
+            "start": "14/5s",
+            "end": "3s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_mantic_f",
+          "text": "去",
+          "state": "auto",
+          "align": {
+            "start": "3s",
+            "end": "16/5s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_mantic_g",
+          "text": "做",
+          "state": "auto",
+          "align": {
+            "start": "16/5s",
+            "end": "17/5s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_mantic_h",
+          "text": "了",
+          "state": "auto",
+          "align": {
+            "start": "17/5s",
+            "end": "18/5s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_mantic_i",
+          "text": "是",
+          "state": "auto",
+          "align": {
+            "start": "18/5s",
+            "end": "19/5s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_mantic_j",
+          "text": "你",
+          "state": "auto",
+          "align": {
+            "start": "19/5s",
+            "end": "4s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_mantic_k",
+          "text": "要",
+          "state": "auto",
+          "align": {
+            "start": "4s",
+            "end": "21/5s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_mantic_l",
+          "text": "真正",
+          "state": "auto",
+          "align": {
+            "start": "21/5s",
+            "end": "22/5s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_mantic_m",
+          "text": "去",
+          "state": "auto",
+          "align": {
+            "start": "22/5s",
+            "end": "23/5s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_mantic_n",
+          "text": "使用",
+          "state": "auto",
+          "align": {
+            "start": "23/5s",
+            "end": "24/5s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_mantic_o",
+          "text": "之后",
+          "state": "auto",
+          "align": {
+            "start": "24/5s",
+            "end": "5s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_mantic_p",
+          "text": "你",
+          "state": "auto",
+          "align": {
+            "start": "5s",
+            "end": "26/5s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_mantic_q",
+          "text": "才",
+          "state": "auto",
+          "align": {
+            "start": "26/5s",
+            "end": "27/5s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_mantic_r",
+          "text": "能够",
+          "state": "auto",
+          "align": {
+            "start": "27/5s",
+            "end": "28/5s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_mantic_s",
+          "text": "去",
+          "state": "auto",
+          "align": {
+            "start": "28/5s",
+            "end": "29/5s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_mantic_t",
+          "text": "感受",
+          "state": "auto",
+          "align": {
+            "start": "29/5s",
+            "end": "6s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_mantic_u",
+          "text": "到",
+          "state": "auto",
+          "align": {
+            "start": "6s",
+            "end": "31/5s",
+            "run": "run_hidden"
+          }
+        }
+      ],
+      "cues": [
+        {
+          "id": "cue_mantic_0",
+          "first_token": "tok_mantic_0",
+          "last_token": "tok_mantic_u",
+          "state": "auto"
+        }
+      ],
+      "raw_runs": [
+        {
+          "id": "run_hidden",
+          "kind": "align",
+          "engine": {
+            "name": "fixture",
+            "model": "fixture",
+            "version": "1"
+          },
+          "created_at": "2026-10-26T12:00:00Z",
+          "range": {
+            "start": "0s",
+            "duration": "20s"
+          },
+          "tokens": []
+        }
+      ],
+      "ext": {
+        "zsir": {
+          "id_tag": "mantic"
+        },
+        "fixture.keep": {
+          "value": "untouched"
+        }
+      }
+    }
+  ],
+  "subtitle_styles": [
+    {
+      "id": "sty_default",
+      "name": "默认",
+      "version": 1,
+      "font_family": "Arial",
+      "font_size": 0.05,
+      "color": "#FFFFFF"
+    }
+  ]
+}

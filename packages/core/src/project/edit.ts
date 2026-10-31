@@ -711,6 +711,7 @@ export function applyEdit(
   allowForce = false,
   idTime?: string,
   result: Record<string, unknown> = {},
+  authorName = project.revision.author.name,
 ): void {
   const warnings: Record<string, unknown>[] = [];
   let serial = 0;
@@ -739,7 +740,7 @@ export function applyEdit(
   }
   for (const op of ops) {
     const before = structuredClone(project);
-    if (SUBTITLE_OPS.has(op.op)) applySubtitleEdit(project, timeline, op, generate, allowForce, warnings);
+    if (SUBTITLE_OPS.has(op.op)) applySubtitleEdit(project, timeline, op, generate, allowForce, warnings, authorName);
     else applyOne(project, timeline, op, generate);
     const oldClips = before.timelines.flatMap((item) => mediaTracks(item).flatMap((track) => track.clips));
     const oldById = new Map(oldClips.map((clip) => [clip.id, clip]));

@@ -551,3 +551,27 @@ it("reports the same history errors during dry run and execution", async () => {
     expect((await write("undo", { batch_id: "bat_absent", dry_run })).error?.code).toBe("E_UNDO_CONFLICT");
   }
 });
+
+it("uses each queued batch step's author for the subtitle pass mark", async () => {
+  const passAuthor = { kind: "agent", name: "字幕整理" };
+  expect(
+    (
+      await send(2, {
+        author: passAuthor,
+        batch: { id: "bat_test", seq: 2, count: 2 },
+        ops: [{ op: "resegment", transcript_id: "trs_A_zh", cut_after: ["tok_020"] }],
+      })
+    ).status,
+  ).toBe("queued");
+  expect(
+    (
+      await send(1, {
+        batch: { id: "bat_test", seq: 1, count: 2 },
+        ops: [{ op: "hide_tokens", transcript_id: "trs_A_zh", tokens: ["tok_019"] }],
+      })
+    ).status,
+  ).toBe("applied");
+  expect((await load()).transcripts.find((item) => item.id === "trs_A_zh")?.ext?.["zsir.subtitle_pass"]).toEqual({
+    by: passAuthor.name,
+  });
+});

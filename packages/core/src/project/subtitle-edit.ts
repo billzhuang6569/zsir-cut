@@ -109,6 +109,7 @@ export function applySubtitleEdit(
   generate: (prefix: string) => string,
   allowForce = false,
   warnings: Record<string, unknown>[] = [],
+  authorName = project.revision.author.name,
 ): void {
   if (op.force === true && !allowForce) fail("E_SESSION_STATE", "force requires a manual approval session");
   const force = op.force === true && allowForce;
@@ -262,6 +263,7 @@ export function applySubtitleEdit(
     }
     case "resegment": {
       const item = transcript(project, op.transcript_id);
+      const cutAfter = op.cut_after === undefined ? undefined : new Set(op.cut_after as string[]);
       const [first, last] = op.range
         ? span(item, (op.range as Record<string, unknown>).from_token, (op.range as Record<string, unknown>).to_token)
         : [0, item.tokens.length - 1];
@@ -310,7 +312,7 @@ export function applySubtitleEdit(
         }
         let stop = cursor;
         while (stop < last && !blocked.has(stop + 1)) stop++;
-        for (const group of segmentTokens(item.tokens.slice(cursor, stop + 1), rules)) {
+        for (const group of segmentTokens(item.tokens.slice(cursor, stop + 1), rules, cutAfter)) {
           const firstId = group[0]!.id,
             lastId = group.at(-1)!.id;
           const previous = old.find((cue) => cue.first_token === firstId && cue.last_token === lastId);
@@ -348,6 +350,12 @@ export function applySubtitleEdit(
         return parts;
       });
       item.cues = [...retained, ...next].sort((a, b) => cueSpan(item, a)[0] - cueSpan(item, b)[0]);
+      if (cutAfter !== undefined && !op.range) {
+        item.ext ??= {};
+        item.ext["zsir.subtitle_pass"] = { by: authorName };
+      } else if (cutAfter === undefined && first === 0 && last === item.tokens.length - 1) {
+        delete item.ext?.["zsir.subtitle_pass"];
+      }
       const live = new Set(item.cues.map((cue) => cue.id));
       for (const entry of project.timelines)
         for (const track of entry.tracks)

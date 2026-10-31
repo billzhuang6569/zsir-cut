@@ -50,6 +50,15 @@ const cjk = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hang
 const sentenceEnd = /[。！？.!?]$/u;
 const innerPunct = /[，、；：,;:]$/u;
 const punctOnly = /^[。！？.!?，、；：,;:]+$/u;
+const noBreakAfter = new Set(
+  "的、地、得、和、与、跟、及、或、在、是、把、被、给、对、向、从、往、让、将、很、最、更、太、都、也、还、就、又、才、再、而、并、这、那、这个、那个、这些、那些、一个、一些、一种、一位、每、各、第".split(
+    "、",
+  ),
+);
+const noBreakBefore = new Set(
+  "的、地、得、了、着、过、吗、呢、吧、啊、呀、嘛、啦、们、上、下、里、中、后、前、时、似的、一样".split("、"),
+);
+const stripPunctuation = (text: string) => text.replace(/^\p{P}+|\p{P}+$/gu, "");
 const ascii = /[A-Za-z0-9]/;
 const visible = (tokens: Token[]) => tokens.filter((token) => token.text !== "");
 const joinSpace = (a: string, b: string) =>
@@ -107,28 +116,31 @@ export function cueBreaks(tokens: Token[], rules: SubtitleRules): string[] {
   return candidates[0] ? [candidates[0].id] : [];
 }
 
-export function segmentTokens(tokens: Token[], rules: SubtitleRules): Token[][] {
+export function segmentTokens(tokens: Token[], rules: SubtitleRules, cutAfter?: ReadonlySet<string>): Token[][] {
   const result: Token[][] = [];
   let sentence: Token[] = [];
   const splitSentence = () => {
     let current: Token[] = [];
     for (const token of sentence) {
-      const next = [...current, token];
-      if (
+      while (
         current.length &&
         !punctOnly.test(token.text) &&
-        (compare(textWidth(next, rules), widthLimit(rules, rules.max_lines)) > 0 ||
+        (compare(textWidth([...current, token], rules), widthLimit(rules, rules.max_lines)) > 0 ||
           compare(sub(token.align.end, current[0]!.align.start), rules.max_duration) > 0)
       ) {
         const half = div(textWidth(current, rules), rational(2n));
-        const choices = current.slice(0, -1).flatMap((entry, index) => {
-          if (!validBoundary(current, index) || compare(textWidth(current.slice(0, index + 1), rules), half) <= 0)
+        const choices = current.flatMap((entry, index) => {
+          const following = current[index + 1] ?? token;
+          if (punctOnly.test(following.text) || compare(textWidth(current.slice(0, index + 1), rules), half) <= 0)
             return [];
-          const pause = sub(current[index + 1]!.align.start, entry.align.end);
+          const pause = sub(following.align.start, entry.align.end);
           const priority = compare(pause, rules.soft_pause) >= 0 ? 0 : innerPunct.test(entry.text) ? 1 : 2;
-          return priority < 2 ? [{ index, priority }] : [];
+          const bad =
+            rules.name === "zh-talk" &&
+            (noBreakAfter.has(stripPunctuation(entry.text)) || noBreakBefore.has(stripPunctuation(following.text)));
+          return [{ index, priority, bad }];
         });
-        choices.sort((a, b) => a.priority - b.priority || b.index - a.index);
+        choices.sort((a, b) => Number(a.bad) - Number(b.bad) || a.priority - b.priority || b.index - a.index);
         const cut = choices[0]?.index ?? current.length - 1;
         result.push(current.slice(0, cut + 1));
         current = current.slice(cut + 1);
@@ -142,7 +154,7 @@ export function segmentTokens(tokens: Token[], rules: SubtitleRules): Token[][] 
     sentence.push(token);
     const next = tokens[index + 1];
     if (
-      sentenceEnd.test(token.text) ||
+      (cutAfter === undefined ? sentenceEnd.test(token.text) : token.text !== "" && cutAfter.has(token.id)) ||
       (next && !punctOnly.test(next.text) && compare(sub(next.align.start, token.align.end), rules.hard_pause) >= 0)
     )
       splitSentence();

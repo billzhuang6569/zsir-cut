@@ -449,6 +449,7 @@ async function runExistingSession(
           session.approval === "manual",
           undefined,
           result,
+          request.author.name,
         );
       applied =
         input.dry_run === true
@@ -597,6 +598,8 @@ async function approve(
               entry.timeline_id,
               session.approval === "manual",
               times.get(entry.parent ?? "") ?? session.base_created_at,
+              {},
+              entry.author?.name,
             );
           } catch (error) {
             failed = { revision: entry.revision, ops: entry.ops, reason: String(error) };

@@ -304,7 +304,7 @@ it("passes worker alignment and repetition warnings through result.warnings and 
   expect(replay.result).toMatchObject({ warnings });
 });
 
-it("continues short token and cue IDs when transcribing again", async () => {
+it("continues short IDs and clears the subtitle pass mark while preserving other ext when transcribing again", async () => {
   await run();
   const before = await project();
   const first = before.transcripts[0]!;
@@ -312,11 +312,14 @@ it("continues short token and cue IDs when transcribing again", async () => {
   expect(tag).toBe(first.id.replaceAll("-", "").slice(-6));
   expect(first.tokens.map((token) => token.id)).toEqual([0, 1, 2, 3].map((i) => `tok_${tag}_${i}`));
   expect(first.cues.map((cue) => cue.id)).toEqual([0, 1, 2].map((i) => `cue_${tag}_${i}`));
+  const raw = JSON.parse(await readFile(path, "utf8"));
+  raw.transcripts[0].ext = { ...first.ext, "zsir.subtitle_pass": { by: "字幕整理" }, "test.keep": [1, 2] };
+  await writeFile(path, JSON.stringify(raw));
   await run(before.revision.id, "again");
   const next = (await project()).transcripts[0]!;
   expect(next.tokens[0]!.id).toBe(`tok_${tag}_4`);
   expect(next.cues[0]!.id).toBe(`cue_${tag}_3`);
-  expect(next.ext).toEqual(first.ext);
+  expect(next.ext).toEqual({ ...first.ext, "test.keep": [1, 2] });
 });
 
 it("merges recognition terms with file hotwords and changes their cache digest", async () => {

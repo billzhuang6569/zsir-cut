@@ -529,3 +529,21 @@ it("reviews recognition as subtitles and carries replace lock warnings into manu
   expect(forced.result?.warnings).toBeUndefined();
   expect((await load()).recognition).toBeUndefined();
 });
+
+it.each([false, true])("preserves the subtitle pass author through session approval (rebase: %s)", async (rebase) => {
+  const session_id = await begin();
+  const passAuthor = { kind: "agent", name: "字幕整理" };
+  const draft = await send("edit", {
+    session_id,
+    author: passAuthor,
+    ops: [{ op: "resegment", transcript_id: "trs_A_zh", cut_after: ["tok_020"] }],
+  });
+  expect(draft.status).toBe("drafted");
+  await send("session_review", { session_id }, draft.receipt?.after ?? "");
+  if (rebase) expect((await send("edit", { ops: [label("clp_v1", "independent")] })).status).toBe("applied");
+  const approved = await send("session_approve", { session_id }, (await load()).revision.id);
+  expect(approved.status).toBe("applied");
+  expect((await load()).transcripts.find((item) => item.id === "trs_A_zh")?.ext?.["zsir.subtitle_pass"]).toEqual({
+    by: passAuthor.name,
+  });
+});
