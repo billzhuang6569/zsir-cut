@@ -23,7 +23,7 @@ function fixture(name: string, directory = "projects"): Project {
   if (!result.ok) throw new Error(JSON.stringify(result.errors));
   return result.project;
 }
-const compact = (cue: ReturnType<typeof projectSubtitles>["cues"][number]) => ({
+const compact = ({ words: _words, ...cue }: ReturnType<typeof projectSubtitles>["cues"][number]) => ({
   ...cue,
   start: printRational(cue.start, true),
   end: printRational(cue.end, true),
@@ -132,6 +132,14 @@ describe("subtitle projection", () => {
     expect(cues).toHaveLength(1);
     expect(cues[0]!.clip_ids).toEqual(["clp_a1", "clp_jump"]);
     expect(cues[0]!.lines).toEqual(["一起", "切这个", "瓜"]);
+    expect(
+      cues[0]!.words?.map((word) => [word.text, printRational(word.start, true), printRational(word.end, true)]),
+    ).toEqual([
+      ["一起", "0s", "1/5s"],
+      ["切", "6/25s", "3/5s"],
+      ["这个", "3/5s", "4/5s"],
+      ["瓜", "4/5s", "1s"],
+    ]);
   });
 
   it("extends a cue with a hidden first word and preserves explicit timing", () => {
@@ -263,4 +271,28 @@ describe("subtitle projection", () => {
     const result = projectSubtitles(project, "tl_std");
     expect(result.unprojected).not.toContainEqual({ clip_id: "clp_a8", token_id: "tok_129" });
   });
+});
+
+it("projects visible word alignments relative to each cue, including speed, display punctuation and overrides", () => {
+  const project = fixture("hidden-tokens", "regressions");
+  const audio = project.timelines[0]!.tracks.find((track) => track.kind === "audio")!;
+  if (audio.kind !== "audio") throw new Error("audio");
+  audio.clips[0]!.duration = seconds(3n, 2n);
+  audio.clips[0]!.time_map = [
+    { at: seconds(0n), source: seconds(0n), interp: "linear" },
+    { at: seconds(3n, 2n), source: seconds(3n), interp: "linear" },
+  ];
+  const cue = projectSubtitles(project, "tl_main").cues[0]!;
+  expect(cue.start).toEqual(seconds(11n, 2n));
+  expect(cue.words?.map((word) => word.text).join("")).toBe(cue.text.replaceAll("\n", ""));
+  expect(cue.words?.map((word) => [printRational(word.start, true), printRational(word.end, true)])).toEqual([
+    ["0s", "1/10s"],
+    ["1/5s", "3/10s"],
+    ["3/10s", "2/5s"],
+    ["2/5s", "1/2s"],
+  ]);
+  const track = project.timelines[0]!.tracks.find((track) => track.kind === "subtitle")!;
+  if (track.kind !== "subtitle") throw new Error("subtitle");
+  track.overrides.push({ occurrence_id: audio.clips[0]!.occurrence_id, cue_id: cue.cue_id, text: "替换" });
+  expect(projectSubtitles(project, "tl_main").cues[0]?.words).toBeUndefined();
 });

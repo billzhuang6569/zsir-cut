@@ -1,0 +1,178 @@
+{
+  "schema": "zsir-cut/timeline",
+  "schema_version": "0.3",
+  "id": "prj_minimal",
+  "name": "Jump animation preserves spaces and stable word centres",
+  "revision": {
+    "seq": 1,
+    "id": "rev_example_1",
+    "parent": null,
+    "created_at": "2026-10-26T12:00:00Z",
+    "author": {
+      "kind": "human",
+      "name": "example"
+    }
+  },
+  "media": [
+    {
+      "id": "med_a",
+      "kind": "audio",
+      "path": "unused.wav",
+      "size_bytes": 0,
+      "fingerprint": {
+        "algo": "sampled-sha256-v1",
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "duration": "2s",
+      "audio": {
+        "sample_rate": "48000",
+        "channels": 1
+      }
+    }
+  ],
+  "timelines": [
+    {
+      "id": "tl_main",
+      "name": "主时间线",
+      "edit_rate": "25",
+      "drop_frame": false,
+      "start_timecode": "00:00:00:00",
+      "audio_rate": "48000",
+      "format": {
+        "width": 320,
+        "height": 180
+      },
+      "tracks": [
+        {
+          "id": "trk_a1",
+          "kind": "audio",
+          "name": "A1",
+          "enabled": true,
+          "clips": [
+            {
+              "id": "clp_a1",
+              "occurrence_id": "occ_1",
+              "media_id": "med_a",
+              "timeline_start": "0s",
+              "duration": "2s",
+              "source_start": "0s",
+              "source_channels": [
+                0
+              ]
+            }
+          ],
+          "transitions": []
+        },
+        {
+          "id": "trk_s",
+          "kind": "subtitle",
+          "name": "Subtitles",
+          "enabled": true,
+          "language": "en",
+          "carrier_tracks": [
+            "trk_a1"
+          ],
+          "default_style_id": "sty_jump",
+          "overrides": [],
+          "free_cues": []
+        }
+      ],
+      "markers": []
+    }
+  ],
+  "transcripts": [
+    {
+      "id": "trs_test",
+      "media_id": "med_a",
+      "language": "en",
+      "source_channels": [
+        0
+      ],
+      "raw_runs": [
+        {
+          "id": "run_test",
+          "kind": "asr",
+          "engine": {
+            "name": "fake",
+            "model": "test",
+            "version": "1"
+          },
+          "created_at": "2026-10-26T12:00:00Z",
+          "range": {
+            "start": "0s",
+            "duration": "2s"
+          },
+          "tokens": [
+            {
+              "text": "Hello",
+              "start": "0s",
+              "end": "1s"
+            },
+            {
+              "text": "world",
+              "start": "1s",
+              "end": "2s"
+            }
+          ]
+        }
+      ],
+      "tokens": [
+        {
+          "id": "tok_0",
+          "text": "Hello",
+          "state": "auto",
+          "align": {
+            "start": "0s",
+            "end": "1s",
+            "run": "run_test"
+          }
+        },
+        {
+          "id": "tok_1",
+          "text": "world",
+          "state": "auto",
+          "align": {
+            "start": "1s",
+            "end": "2s",
+            "run": "run_test"
+          }
+        }
+      ],
+      "cues": [
+        {
+          "id": "cue_0",
+          "first_token": "tok_0",
+          "last_token": "tok_1",
+          "breaks": [],
+          "state": "auto"
+        }
+      ]
+    }
+  ],
+  "subtitle_styles": [
+    {
+      "id": "sty_jump",
+      "name": "Jump",
+      "version": 1,
+      "font_family": "ZcutTestRoboto",
+      "font_size": 0.2,
+      "color": "#FFFFFF",
+      "highlight": {
+        "color": "#FF8800"
+      },
+      "outlines": [
+        {
+          "color": "#000000",
+          "width": 0.04
+        }
+      ],
+      "position": {
+        "anchor": "middle",
+        "margin_v": 0
+      },
+      "animation": {
+        "word": "jump"
+      }
+    }
+  ]
+}

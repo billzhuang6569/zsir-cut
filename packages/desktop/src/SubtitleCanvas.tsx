@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { renderSubtitle } from "../../exporters/src/subtitle-render.ts";
 import { defaultStyle } from "./subtitles.js";
-import type { CueView, StyleView } from "./timeline.js";
+import { type CueView, parseRational, type StyleView, sub } from "./timeline.js";
 
 export { renderSubtitle };
 type Bounds = { x: number; y: number; width: number; height: number };
@@ -15,9 +15,15 @@ export function SubtitleCanvas({
   change,
   dragging,
   preview,
+  at,
+  playing = false,
+  playback,
 }: {
   cues: (Pick<CueView, "text" | "style_id"> & Partial<CueView>)[];
   styles: StyleView[];
+  at?: string;
+  playing?: boolean;
+  playback?: React.MutableRefObject<string | null>;
   preview?: { fields: Partial<StyleView>; cue_ids?: string[] | undefined } | undefined;
   format?: { width: number; height: number } | undefined;
   selected?: string[];
@@ -57,10 +63,40 @@ export function SubtitleCanvas({
     }
     const ctx = canvas.current?.getContext("2d");
     if (!ctx) return;
-    ctx.clearRect(0, 0, width, height);
-    const next = cues.map((cue) => renderSubtitle(ctx, cue.text, styleFor(cue), width, height).bounds);
-    setBounds((previous) => (JSON.stringify(previous) === JSON.stringify(next) ? previous : next));
-  }, [cues, styleFor, width, height]);
+    let animation = 0;
+    const draw = () => {
+      const time = playing ? (playback?.current ?? at) : at;
+      ctx.clearRect(0, 0, width, height);
+      const next = cues.map(
+        (cue) =>
+          renderSubtitle(
+            ctx,
+            cue.text,
+            styleFor(cue),
+            width,
+            height,
+            time && cue.start && cue.end
+              ? {
+                  t: sub(parseRational(time, true), parseRational(cue.start, true)),
+                  duration: sub(parseRational(cue.end, true), parseRational(cue.start, true)),
+                  words: cue.words?.map((word) => ({
+                    ...word,
+                    start: parseRational(word.start, true),
+                    end: parseRational(word.end, true),
+                  })),
+                  text_override: cue.text_override,
+                }
+              : undefined,
+          ).bounds,
+      );
+      setBounds((previous) => (JSON.stringify(previous) === JSON.stringify(next) ? previous : next));
+      if (playing && cues.some((cue) => styleFor(cue).animation)) animation = requestAnimationFrame(draw);
+    };
+    draw();
+    return () => {
+      if (animation) cancelAnimationFrame(animation);
+    };
+  }, [cues, styleFor, width, height, at, playing, playback]);
   useEffect(
     () => () => {
       if (dragging) dragging.current = false;

@@ -17,6 +17,7 @@ export interface ProjectedCue {
   lines: string[];
   style_id: string;
   token_ids: string[];
+  words?: { text: string; start: Rational; end: Rational }[];
 }
 
 export interface UnprojectedToken {
@@ -186,6 +187,15 @@ export function projectSubtitles(
                   lines,
                   style_id: override?.style_id ?? cue.style_id ?? track.default_style_id,
                   token_ids: visible.map((item) => item.token.id),
+                  ...(override?.text !== undefined
+                    ? {}
+                    : {
+                        words: visible.map((item) => ({
+                          text: item.token.text,
+                          start: sub(min(end, max(start, item.start)), start),
+                          end: sub(min(end, max(start, item.end)), start),
+                        })),
+                      }),
                 };
                 cues.push(projected);
                 mergeInfo.set(projected, {
@@ -253,7 +263,7 @@ export function projectSubtitles(
       });
     }
   }
-  if (!mergeJumpCuts) return { cues, unprojected };
+  if (!mergeJumpCuts) return { cues: displayWords(cues), unprojected };
   const byId = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
   cues.sort(
     (a, b) =>
@@ -275,6 +285,12 @@ export function projectSubtitles(
       compare(cue.start, previous.end) >= 0 &&
       compare(sub(cue.start, previous.end), frame) <= 0
     ) {
+      if (previous.words && cue.words) {
+        const shift = sub(cue.start, previous.start);
+        previous.words.push(
+          ...cue.words.map((word) => ({ ...word, start: add(word.start, shift), end: add(word.end, shift) })),
+        );
+      }
       previous.end = cue.end;
       if (cue.clip_id && !previous.clip_ids.includes(cue.clip_id)) previous.clip_ids.push(cue.clip_id);
       previous.token_ids.push(...cue.token_ids);
@@ -295,5 +311,24 @@ export function projectSubtitles(
     merged.push(cue);
     if (info) latest.set(key, cue);
   }
-  return { cues: merged, unprojected };
+  return { cues: displayWords(merged), unprojected };
+}
+
+/** Match display punctuation stripping and inserted separators without changing alignment. */
+function displayWords(cues: ProjectedCue[]) {
+  for (const cue of cues) {
+    if (!cue.words) continue;
+    const chars = [...cue.text.replaceAll("\n", "")];
+    let cursor = 0;
+    cue.words = cue.words.flatMap((word) => {
+      if (!/^\s/u.test(word.text)) while (cursor < chars.length && /\s/u.test(chars[cursor]!)) cursor++;
+      const source = [...word.text];
+      let length = 0;
+      while (length < source.length && chars[cursor + length] === source[length]) length++;
+      const text = chars.slice(cursor, cursor + length).join("");
+      cursor += length;
+      return text ? [{ ...word, text }] : [];
+    });
+  }
+  return cues;
 }

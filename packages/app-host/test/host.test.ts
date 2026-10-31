@@ -119,6 +119,15 @@ describe("desktop host", () => {
         ]),
       );
       expect(
+        preview.envelope.result.cues.find((cue: { cue_id: string }) => cue.cue_id === "cue_1").words,
+      ).toBeUndefined();
+      const aligned = preview.envelope.result.cues.find((cue: { words?: unknown[] }) => cue.words?.length);
+      expect(aligned.words[0]).toMatchObject({
+        text: expect.any(String),
+        start: expect.stringMatching(/s$/),
+        end: expect.stringMatching(/s$/),
+      });
+      expect(
         (
           await dispatch("edit", {
             project,

@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { createCanvas, GlobalFonts, loadImage } from "@napi-rs/canvas";
 import { expect, it } from "vitest";
+import { directStyleLosses } from "../../core/src/direct-export.ts";
 import { parseProject } from "../../core/src/index.ts";
 import { fcpxmlExporter, otioExporter, xmemlExporter } from "../src/index.ts";
 import { type RenderStyle, renderSubtitle } from "../src/subtitle-render.ts";
@@ -171,6 +172,11 @@ it.each([
   const style = project.subtitle_styles[0];
   if (!style) throw new Error("style");
   Object.assign(style, cases.combined, { highlight: { color: "#FF0000" }, animation: { word: "highlight" } });
+  const srtLoss = directStyleLosses(project).find((item) => item.entity_id === style.id);
+  expect(srtLoss).toMatchObject({
+    reason_code: "R_STYLE_NOT_REPRESENTABLE",
+    consequence: expect.stringContaining("highlight、animation"),
+  });
   const losses = exporter
     .losses(project, parsed.project.timelines[0], profile)
     .filter((item) => item.entity_id === style.id && item.reason_code === "R_STYLE_NOT_REPRESENTABLE");

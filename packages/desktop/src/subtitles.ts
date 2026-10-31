@@ -83,6 +83,9 @@ export function subtitleStyleOps(
         .filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(style[key as keyof StyleView]))
         .map(([key, value]) => [key, value ?? null]),
     );
+    const animation = patch.animation as StyleView["animation"];
+    if (animation?.word && animation.word !== "none" && !style.highlight && !patch.highlight)
+      changed.highlight = { color: "#FFD84A" };
     if (!Object.keys(changed).length) continue;
     if (selectedOnly && project.cues.some((cue) => cue.style_id === style.id && !selected.includes(cue.cue_id))) {
       const { id: _id, version: _version, ext: _ext, ...fields } = style as StyleView & { ext?: unknown };

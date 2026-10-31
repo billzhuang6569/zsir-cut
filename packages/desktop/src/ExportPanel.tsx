@@ -441,6 +441,7 @@ export function ExportPanel({
             >
               {src ? <img src={src} alt="成片画面" /> : <span className="zc-muted">暂无画面</span>}
               <SubtitleCanvas
+                at={at}
                 cues={project.cues.filter((cue) => contains(cue.start, cue.end, at))}
                 styles={project.styles}
                 format={project.format}

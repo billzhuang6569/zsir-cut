@@ -157,3 +157,12 @@ Bundled `fixtures/fonts/Roboto-Regular.ttf` for subtitle rendering tests only,
 registered as `ZcutTestRoboto`. Copyright and font metadata are retained in the
 unmodified font. The Apache License, Version 2.0 is included in
 [fixtures/fonts/LICENSE.txt](fixtures/fonts/LICENSE.txt).
+
+### S4.6 subtitle animation
+
+Adapted `packages/core/src/text/caption-animation-renderer.ts` (active word,
+completed word and karaoke fill states) from openreel-video at
+`367d7e90b61b5181f9861b852bb8b9d7a7d2954a` in
+`packages/exporters/src/subtitle-render.ts`. The OpenReel copyright and MIT
+permission notice above apply. Time and easing use bigint rationals; no runtime
+dependency imported.

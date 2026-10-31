@@ -543,6 +543,11 @@ export async function startHost(
                   ),
                   breaks: source?.breaks ?? [],
                   next_cue_id: next && owner?.tokens[last + 1]?.id === next.first_token ? next.id : null,
+                  words: cue.words?.map((word) => ({
+                    ...word,
+                    start: printRational(word.start, true),
+                    end: printRational(word.end, true),
+                  })),
                   start: printRational(cue.start, true),
                   end: printRational(cue.end, true),
                 };
