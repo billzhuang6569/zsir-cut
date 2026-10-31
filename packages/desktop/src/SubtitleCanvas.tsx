@@ -172,16 +172,22 @@ export function SubtitleCanvas({
                   const snap = Math.abs(x - width / 2) <= (6 * width) / start.rect.width;
                   if (snap) x = width / 2;
                   setGuide(snap);
-                  // shortcut: legacy middle anchors ignore margin_v; enable vertical movement once its contract is defined.
                   const top = Math.max(0, Math.min(height - start.bounds.height, start.bounds.y + dy));
+                  const anchor =
+                    position.anchor === "middle" && dy !== 0
+                      ? top + start.bounds.height / 2 > height / 2
+                        ? "bottom"
+                        : "top"
+                      : position.anchor;
                   patch = {
                     position: {
                       ...position,
+                      anchor,
                       offset_x: x / width - 0.5,
                       margin_v:
-                        position.anchor === "top"
+                        anchor === "top"
                           ? top / height
-                          : position.anchor === "bottom"
+                          : anchor === "bottom"
                             ? (height - top - start.bounds.height) / height
                             : position.margin_v,
                     },

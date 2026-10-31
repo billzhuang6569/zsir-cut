@@ -708,7 +708,7 @@ it("previews color dragging and persists only the final released color", async (
   expect(h.call).toHaveBeenCalledTimes(1);
   expect(h.call.mock.lastCall?.[1].ops).toEqual([{ op: "update_style", style_id: "sty_1", color: "#ff0000" }]);
 });
-async function previewHarness() {
+async function previewHarness(view = project) {
   vi.useFakeTimers();
   Object.defineProperty(HTMLElement.prototype, "setPointerCapture", { configurable: true, value: vi.fn() });
   cleanups.push(async () => {
@@ -725,7 +725,7 @@ async function previewHarness() {
     y: 0,
     toJSON: () => ({}),
   });
-  const h = await mount(project, "subtitles", () => ({}), true);
+  const h = await mount(view, "subtitles", () => ({}), true);
   await h.click(cue.text);
   const hit = () => h.find<HTMLButtonElement>(`预览字幕：${cue.text}`);
   const pointer = (target: HTMLElement, type: string, x: number, y: number) =>
@@ -766,26 +766,67 @@ it("selects preview cues, clamps drag inside the frame, snaps to centre, and req
   expect(editor.selectionStart).toBe(editor.value.length);
   expect(editor.selectionEnd).toBe(editor.value.length);
 });
-it("scales from a corner around the subtitle centre and cancels without writing", async () => {
-  const h = await previewHarness();
-  const hit = h.hit();
-  const centre = () => Number.parseFloat(h.hit().style.top) + Number.parseFloat(h.hit().style.height) / 2;
-  const original = centre();
-  const x = ((Number.parseFloat(hit.style.left) + Number.parseFloat(hit.style.width)) / 100) * 320;
-  const y = ((Number.parseFloat(hit.style.top) + Number.parseFloat(hit.style.height)) / 100) * 180;
-  const corner = hit.querySelector<HTMLElement>('[data-subtitle-corner="se"]');
-  if (!corner) throw new Error("corner");
-  await h.pointer(corner, "pointerdown", x, y);
-  await h.pointer(hit, "pointermove", x + 5, y + 1);
-  expect(centre()).toBeCloseTo(original);
-  await h.pointer(hit, "pointerup", x + 5, y + 1);
-  await h.settle();
-  const ops = h.call.mock.lastCall?.[1].ops as { font_size: number }[];
-  expect(ops[0]?.font_size).toBeGreaterThan(defaultStyle.font_size);
-  h.call.mockClear();
-  await h.pointer(h.hit(), "pointerdown", 160, 150);
-  await h.pointer(h.hit(), "pointermove", 180, 140);
-  await h.pointer(h.hit(), "pointercancel", 180, 140);
-  await h.settle();
+it.each([
+  { dy: -40, anchor: "top" },
+  { dy: 40, anchor: "bottom" },
+  { dy: -10000, anchor: "top" },
+  { dy: 10000, anchor: "bottom" },
+  { dy: 0, anchor: "middle" },
+])("drops a middle subtitle at dy=$dy with $anchor anchor and no position jump", async ({ dy, anchor }) => {
+  const style = {
+    ...defaultStyle,
+    id: "sty_1",
+    position: { anchor: "middle" as const, margin_v: 0.08, max_width: 0.8, offset_x: 0 },
+  };
+  const h = await previewHarness({ ...project, styles: [style] });
+  const originalTop = (Number.parseFloat(h.hit().style.top) / 100) * 180;
+  const boxHeight = (Number.parseFloat(h.hit().style.height) / 100) * 180;
+  const expectedTop = Math.max(0, Math.min(180 - boxHeight, originalTop + dy));
+  await h.pointer(h.hit(), "pointerdown", 160, 90);
+  await h.pointer(h.hit(), "pointermove", 190, 90 + dy);
+  expect((Number.parseFloat(h.hit().style.top) / 100) * 180).toBeCloseTo(expectedTop);
   expect(h.call).not.toHaveBeenCalled();
+  await h.pointer(h.hit(), "pointerup", 190, 90 + dy);
+  await h.settle();
+  expect(h.call).toHaveBeenCalledTimes(1);
+  const ops = h.call.mock.lastCall?.[1].ops as { position: typeof style.position }[];
+  expect(ops[0]?.position).toMatchObject({ anchor, max_width: style.position.max_width, offset_x: 30 / 320 });
+  expect(ops[0]?.position.margin_v).toBeCloseTo(
+    anchor === "top"
+      ? expectedTop / 180
+      : anchor === "bottom"
+        ? (180 - expectedTop - boxHeight) / 180
+        : style.position.margin_v,
+  );
 });
+it.each(["bottom", "middle"] as const)(
+  "scales around the %s subtitle centre and cancels without writing",
+  async (anchor) => {
+    const h = await previewHarness({
+      ...project,
+      styles: [{ ...defaultStyle, id: "sty_1", position: { ...defaultStyle.position, margin_v: 0.08, anchor } }],
+    });
+    const hit = h.hit();
+    const centre = () => Number.parseFloat(h.hit().style.top) + Number.parseFloat(h.hit().style.height) / 2;
+    const original = centre();
+    const x = ((Number.parseFloat(hit.style.left) + Number.parseFloat(hit.style.width)) / 100) * 320;
+    const y = ((Number.parseFloat(hit.style.top) + Number.parseFloat(hit.style.height)) / 100) * 180;
+    const corner = hit.querySelector<HTMLElement>('[data-subtitle-corner="se"]');
+    if (!corner) throw new Error("corner");
+    await h.pointer(corner, "pointerdown", x, y);
+    await h.pointer(hit, "pointermove", x + 5, y + 1);
+    expect(centre()).toBeCloseTo(original);
+    await h.pointer(hit, "pointerup", x + 5, y + 1);
+    await h.settle();
+    const ops = h.call.mock.lastCall?.[1].ops as { font_size: number; position: { anchor: string } }[];
+    expect(ops[0]?.font_size).toBeGreaterThan(defaultStyle.font_size);
+    if (anchor === "middle") expect(ops[0]).not.toHaveProperty("position");
+    else expect(ops[0]?.position.anchor).toBe(anchor);
+    h.call.mockClear();
+    await h.pointer(h.hit(), "pointerdown", 160, 150);
+    await h.pointer(h.hit(), "pointermove", 180, 140);
+    await h.pointer(h.hit(), "pointercancel", 180, 140);
+    await h.settle();
+    expect(h.call).not.toHaveBeenCalled();
+  },
+);

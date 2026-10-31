@@ -144,3 +144,16 @@ OpenCut-app/opencut-classic at `cf5e79e919144200294fb9fed22a222592a0aeea`
 in `packages/desktop/src/timelineTrim.ts` and `packages/desktop/src/TimelinePreview.tsx`.
 The OpenCut copyright and MIT notice above apply. Existing rational snapping,
 overlap checks and gesture lifecycle are reused; no WASM or runtime dependency imported.
+
+## Roboto (Apache-2.0)
+
+Repository: https://github.com/googlefonts/roboto
+
+Version: `2.001047; 2015` (font metadata).
+
+Copyright 2015 Google Inc. All Rights Reserved.
+
+Bundled `fixtures/fonts/Roboto-Regular.ttf` for subtitle rendering tests only,
+registered as `ZcutTestRoboto`. Copyright and font metadata are retained in the
+unmodified font. The Apache License, Version 2.0 is included in
+[fixtures/fonts/LICENSE.txt](fixtures/fonts/LICENSE.txt).
