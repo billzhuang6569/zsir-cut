@@ -262,7 +262,7 @@ describe("desktop host", () => {
               pass_id: (accepted.structuredContent as { result: { pass_id: string } }).result.pass_id,
               kind: verb === "subtitle_tidy" ? "tidy" : "proofread",
               state: "failed",
-              reason: expect.stringContaining(verb === "subtitle_tidy" ? "没有检测到" : "尚未实现"),
+              reason: expect.stringContaining("没有检测到"),
             },
           },
         });

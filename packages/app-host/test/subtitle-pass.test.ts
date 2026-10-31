@@ -13,7 +13,14 @@ import {
   type Transcript,
   validateCommand,
 } from "../../core/src/index.ts";
-import { type AgentRunner, SUBTITLE_PASS_PROMPT, SubtitlePass, subtitleChunks } from "../src/subtitle-pass.js";
+import {
+  type AgentRunner,
+  SUBTITLE_PASS_PROMPT,
+  SUBTITLE_PROOFREAD_PROMPT,
+  SUBTITLE_SUMMARY_PROMPT,
+  SubtitlePass,
+  subtitleChunks,
+} from "../src/subtitle-pass.js";
 
 const managers: SubtitlePass[] = [];
 afterEach(async () => {
@@ -73,7 +80,11 @@ async function setup(t = transcript(), runner: AgentRunner = async () => '{"line
     dispatch: kernel,
     detect,
     selected,
-    run,
+    run: async (agent, prompt, signal) => {
+      if (prompt.startsWith(SUBTITLE_SUMMARY_PROMPT)) return '{"summary":"测试","terms":[]}';
+      if (prompt.startsWith(SUBTITLE_PROOFREAD_PROMPT)) return '{"fixes":[]}';
+      return run(agent, prompt, signal);
+    },
     changed,
   });
   managers.push(manager);
@@ -315,7 +326,11 @@ describe("subtitle pass", () => {
         }),
     );
     f.project.transcripts.push(
-      { ...transcript(), id: "trs_marked", ext: { "zsir.subtitle_pass": { by: "字幕整理" } } },
+      {
+        ...transcript(),
+        id: "trs_marked",
+        ext: { "zsir.subtitle_pass": { by: "字幕整理" }, "zsir.proofread": { by: "字幕校对" } },
+      },
       { ...transcript(), id: "trs_empty", cues: [] },
     );
     const opened = f.manager.open();
@@ -570,7 +585,7 @@ describe("manual subtitle verbs", () => {
     expect(f.run).toHaveBeenCalledTimes(count);
     expect(f.manager.state.warnings).toEqual([]);
   });
-  it("preserves protected cues in a manual range and leaves proofread as an explicit failure", async () => {
+  it("preserves protected cues in a manual range and completes proofread without unnecessary writes", async () => {
     const t = transcript();
     t.cues = [
       { id: "cue_locked", first_token: "tok_0", last_token: "tok_3", state: "auto", timing: { locked: true } },
@@ -590,8 +605,8 @@ describe("manual subtitle verbs", () => {
     await finished(f);
     expect(f.manager.latest).toMatchObject({
       kind: "proofread",
-      state: "failed",
-      reason: expect.stringContaining("尚未实现"),
+      state: "done",
+      reason: null,
     });
     expect(f.run).not.toHaveBeenCalled();
     expect(f.kernel).not.toHaveBeenCalled();

@@ -343,6 +343,7 @@ export function applyTranscription(project: Project, request: TranscribeRequest,
   }
   flush();
   delete transcript.ext?.["zsir.subtitle_pass"];
+  delete transcript.ext?.["zsir.proofread"];
   transcript.cues = [...keptCues, ...cues].sort(
     (a, b) =>
       transcript!.tokens.findIndex((token) => token.id === a.first_token) -

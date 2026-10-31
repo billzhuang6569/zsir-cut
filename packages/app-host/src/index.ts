@@ -588,6 +588,7 @@ export async function startHost(
                         default_style_id: track.default_style_id,
                       })) ?? [],
                   subtitlePass: subtitlePass?.state,
+                  subtitle_pass: subtitlePass?.latest ?? null,
                   unprocessedTranscripts: project.transcripts
                     .filter((t) => t.cues.length && t.ext?.["zsir.subtitle_pass"] === undefined)
                     .map((t) => t.id),

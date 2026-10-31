@@ -514,29 +514,41 @@ export function useSubtitlePanel({
   const background =
     config && clip ? mediaUrl(config, "thumb", clip.media_id, printRational(sourceAt(clip, at), true)) : undefined;
   const passProgress = project?.subtitlePass?.progress ?? [];
-  const failed = project?.subtitlePass?.warnings ?? [];
+  const warnings = project?.subtitlePass?.warnings ?? [];
+  const failed = warnings.filter((w) => w.code === "W_SUB_PASS_FALLBACK");
+  const latestPass = project?.subtitle_pass ?? state.subtitle_pass;
+  const manual = latestPass?.state === "running" ? latestPass : undefined;
+  const running = !!manual || project?.subtitlePass?.running;
+  const proofreading = manual ? manual.kind === "proofread" : project?.subtitlePass?.phase === "proofread";
+  const breaking = project?.subtitlePass?.running && project.subtitlePass.phase !== "proofread";
   const pending = !!project?.unprocessedTranscripts?.length;
-  const done = passProgress.reduce((sum, item) => sum + item.done, 0);
-  const total = passProgress.reduce((sum, item) => sum + item.total, 0);
+  const done = manual?.done ?? passProgress.reduce((sum, item) => sum + item.done, 0);
+  const total = manual?.total ?? passProgress.reduce((sum, item) => sum + item.total, 0);
   const controls = (
     <div className="zc-sub-controls">
       <p className={`zc-sub-status${project?.recognized ? " is-recognized" : ""}`}>
         <span className="zc-dot" aria-hidden="true" />
-        {project?.subtitlePass?.running
-          ? `AI 整理字幕… ${done} / ${total}`
-          : failed.length
-            ? "字幕整理失败"
+        {running
+          ? proofreading
+            ? `AI 校对 · ${done}/${total}`
+            : `AI 整理字幕 · 分行 ${done}/${total}`
+          : warnings.length
+            ? failed.length
+              ? "字幕整理失败"
+              : warnings.some((w) => w.code === "W_SUB_PROOFREAD_FAILED")
+                ? "字幕校对失败"
+                : "部分校对已跳过"
             : pending
               ? "AI 整理字幕…"
               : project?.recognized
                 ? `已识别${project.recognitionRevision !== undefined ? ` · 第 ${project.recognitionRevision} 版` : ""} · ${cues.length} 条字幕`
                 : "还没有识别"}
-        {!!project?.subtitlePass?.warnings.length && !project.subtitlePass.running && (
+        {!!warnings.length && !running && (
           <span
             className="zc-sub-attention"
             role="img"
-            aria-label="字幕整理失败"
-            title={project.subtitlePass.warnings.map((warning) => warning.reason).join("；")}
+            aria-label={failed.length ? "字幕整理失败" : "字幕校对警告"}
+            title={warnings.map((warning) => warning.reason).join("；")}
           >
             ⚠
           </span>
@@ -622,7 +634,15 @@ export function useSubtitlePanel({
           </button>
         ))}
       </div>
-      {project?.subtitlePass?.running ? (
+      {warnings.length > 0 && !failed.length && !running && (
+        <p role="alert">
+          {warnings.map((w) => w.reason).join("；")}{" "}
+          {warnings.some((w) => w.code === "W_SUB_PROOFREAD_FAILED") && (
+            <IconButton icon="refresh" label="重新校对" onClick={() => void call("chat_subtitle_retry", {})} />
+          )}
+        </p>
+      )}
+      {breaking ? (
         <p className="zc-muted">
           识别完成，AI 正在按意思断句，大约还要 {Math.max(1, Math.ceil((total - done) / 6))} 分钟
         </p>

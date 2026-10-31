@@ -565,7 +565,7 @@ it("shows subtitle pass progress, failure reason, and retry", async () => {
     ...project,
     subtitlePass: { running: true, warnings: [], progress: [{ transcript_id: "tra_1", done: 1, total: 8 }] },
   });
-  expect(running.container.textContent).toContain("AI 整理字幕… 1 / 8");
+  expect(running.container.textContent).toContain("AI 整理字幕 · 分行 1/8");
   expect(running.container.textContent).toContain("大约还要 2 分钟");
   expect(running.container.querySelectorAll(".zc-sub-row")).toHaveLength(0);
   expect(running.container.textContent).not.toContain("已识别 · 第 4 版");
@@ -586,6 +586,21 @@ it("shows subtitle pass progress, failure reason, and retry", async () => {
 it.each([
   ["整理中", { running: true, warnings: [], progress: [{ transcript_id: "tra_1", done: 1, total: 2 }] }, false],
   ["完成", { running: false, warnings: [], progress: [] }, true],
+  [
+    "校对中",
+    {
+      running: true,
+      phase: "proofread" as const,
+      warnings: [],
+      progress: [{ transcript_id: "tra_1", done: 2, total: 6, phase: "proofread" as const }],
+    },
+    true,
+  ],
+  [
+    "校对失败",
+    { running: false, warnings: [{ code: "W_SUB_PROOFREAD_FAILED", reason: "校对失败", transcript_id: "tra_1" }] },
+    true,
+  ],
   [
     "失败",
     {
@@ -830,3 +845,54 @@ it.each(["bottom", "middle"] as const)(
     expect(h.call).not.toHaveBeenCalled();
   },
 );
+it("shows proofread progress while keeping the cue list editable", async () => {
+  const h = await mount({
+    ...project,
+    subtitlePass: {
+      running: true,
+      phase: "proofread",
+      warnings: [],
+      progress: [{ transcript_id: "tra_1", done: 2, total: 6 }],
+    },
+  });
+  expect(h.container.textContent).toContain("AI 校对 · 2/6");
+  expect(h.container.querySelectorAll(".zc-sub-row")).toHaveLength(2);
+  const row = h.container.querySelector<HTMLButtonElement>(".zc-sub-text");
+  if (!row) throw new Error("cue missing");
+  await h.key(row, "Enter");
+  expect(h.find<HTMLTextAreaElement>("编辑字幕").disabled).toBe(false);
+  await h.input("编辑字幕", "您好世界");
+  await h.key(h.find("编辑字幕"), "Enter", { metaKey: true });
+  expect(h.call).toHaveBeenCalledWith("edit", expect.objectContaining({ label: "编辑字幕文字" }));
+});
+
+it("shows proofread failure and retry without hiding the breaking result", async () => {
+  const h = await mount({
+    ...project,
+    subtitlePass: {
+      running: false,
+      warnings: [{ code: "W_SUB_PROOFREAD_FAILED", reason: "Codex 未登录", transcript_id: "tra_1" }],
+    },
+  });
+  expect(h.container.textContent).toContain("字幕校对失败");
+  expect(h.find("字幕校对警告").title).toBe("Codex 未登录");
+  expect(h.container.querySelectorAll(".zc-sub-row")).toHaveLength(2);
+  await h.click("重新校对");
+  expect(h.call).toHaveBeenCalledWith("chat_subtitle_retry", {});
+});
+
+it("shows progress from a manually requested proofread pass in preview data", async () => {
+  const h = await mount({
+    ...project,
+    subtitle_pass: {
+      pass_id: "job_manual",
+      kind: "proofread",
+      state: "running",
+      done: 2,
+      total: 6,
+      reason: null,
+    },
+  });
+  expect(h.container.textContent).toContain("AI 校对 · 2/6");
+  expect(h.container.querySelectorAll(".zc-sub-row")).toHaveLength(2);
+});
