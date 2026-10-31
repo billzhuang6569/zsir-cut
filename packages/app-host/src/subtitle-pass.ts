@@ -12,6 +12,9 @@ export const SUBTITLE_PASS_PROMPT = `你是字幕断句助手，只读输入 JSO
 不在「的、地、得、和、与、在、是、把、被、给、对、让、很、都、也、就、这个、一个」这类字后面断。
 不在「了、着、过、吗、呢、吧、啊、们、上、里、时」这类字前面断。「做了｜是你」要断在「做了」后面，而不是「是」后面。
 不拆名词、人名、品牌、数字和单位：「抖音」「两万多个」「二十四小时」要在同一条里。
+每条都要是说完的一句或一个完整成分：不以「需要、可能、就是、能够、可以、要、会、去、帮我们、给到、这么一个」这类没说完的词结尾；不要只有「可能就是」「然后他们只需要」这种半截话，和后面放在同一条，到 16 个字为止。少于 6 个字的条，除非本身是独立的一句，就和前后合在一起。
+不以「是」结尾；「的」只在「是……的」句式或句子真正说完时放在结尾。
+先按这些要求断一遍，再逐条检查结尾和开头，然后输出。
 remove_fillers 为 true 时，隐藏单独出现的「呃、嗯、啊、哎」和紧挨着的重复（「上传上传」只留一个、「开始开始」只留一个）。有意义的语气词（「好啊」「对吧」）不动。不要隐藏专有名词，一块里隐藏的不超过两成。为 false 时 hide 必须为空。
 例子（没有标点的原文）：所有的点位加起来可能有两万多个很多的脏活全部让豆包工作去做了是你要真正去使用之后你才能够去感受到
 好的断法：所有的点位加起来 ｜ 可能有两万多个 ｜ 很多的脏活 ｜ 全部让豆包工作去做了 ｜ 是你要真正去使用之后 ｜ 你才能够去感受到
@@ -45,7 +48,7 @@ export function subtitleChunks(transcript: Transcript): Token[][] {
   for (let start = 0; start < tokens.length; ) {
     let end = start + 1;
     let soft = 0;
-    while (end < tokens.length && end - start < 300) {
+    while (end < tokens.length && end - start < 600) {
       const previous = tokens[end - 1];
       const next = tokens[end];
       if (!previous || !next) break;
@@ -54,8 +57,8 @@ export function subtitleChunks(transcript: Transcript): Token[][] {
       if (compare(gap, rules.soft_pause) >= 0) soft = end;
       end++;
     }
-    // At the size limit prefer the latest soft pause, including the 300th token.
-    if (end < tokens.length && end - start === 300) {
+    // At the size limit prefer the latest soft pause, including the 600th token.
+    if (end < tokens.length && end - start === 600) {
       const previous = tokens[end - 1];
       const next = tokens[end];
       if (previous && next && compare(sub(next.align.start, previous.align.end), rules.soft_pause) >= 0) soft = end;
@@ -204,7 +207,7 @@ export class SubtitlePass {
   }
 
   private async attempt(agent: AgentKind, prompt: string) {
-    if (this.active >= 3) await new Promise<void>((resolve) => this.waiting.push(resolve));
+    if (this.active >= 6) await new Promise<void>((resolve) => this.waiting.push(resolve));
     else this.active++;
     const controller = new AbortController();
     const cancel = () => controller.abort();
@@ -270,7 +273,7 @@ export class SubtitlePass {
           const chunks = subtitleChunks(transcript);
           const rules = transcriptRules(transcript);
           const terms = project.recognition?.terms ?? [];
-          const removeFillers = project.recognition?.remove_fillers ?? false;
+          const removeFillers = project.recognition?.remove_fillers ?? true;
           const results = await Promise.all(
             chunks.map(async (tokens, chunk) => {
               const pauses = tokens.flatMap((token, i) => {

@@ -361,6 +361,28 @@ it("merges recognition terms with file hotwords and changes their cache digest",
   expect(override[override.indexOf("--language") + 1]).toBe("auto");
 });
 
+it.each([undefined, false, true])(
+  "defaults filler removal to true and respects explicit settings (%s)",
+  async (setting) => {
+    const sample = JSON.parse(await readFile(path, "utf8"));
+    if (setting === undefined) delete sample.recognition;
+    else sample.recognition = { remove_fillers: setting };
+    await writeFile(path, JSON.stringify(sample));
+    await writeFile(
+      join(directory, "scenario.json"),
+      JSON.stringify({
+        tokens: [
+          { text: "嗯", start_ms: 1000, end_ms: 1080, conf: null },
+          { text: "好", start_ms: 1080, end_ms: 1160, conf: null },
+        ],
+      }),
+    );
+    const job = await run();
+    expect(job.state, JSON.stringify(job.envelope)).toBe("succeeded");
+    expect((await project()).transcripts[0]!.tokens[0]!.text).toBe(setting === false ? "嗯" : "");
+  },
+);
+
 it("hides whole default fillers only, keeps heard and joins cues across hidden tokens", async () => {
   const words = ["开头", "嗯", "啊！", "（呃）", "额", "哦", "唉", "哎", "诶", "那个", "嗯嗯", "结尾"];
   const sample = JSON.parse(await readFile(path, "utf8"));

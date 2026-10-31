@@ -240,8 +240,8 @@ export function useSubtitlePanel({
   const setBrowser = (patch: Partial<typeof browser>) =>
     update({ ...state, subtitleBrowser: { ...browser, ...patch } });
   const recognition = project?.recognition ?? {};
-  const [removeFillers, setRemoveFillers] = useState(recognition.remove_fillers ?? false);
-  useEffect(() => setRemoveFillers(recognition.remove_fillers ?? false), [recognition.remove_fillers]);
+  const [removeFillers, setRemoveFillers] = useState(recognition.remove_fillers ?? true);
+  useEffect(() => setRemoveFillers(recognition.remove_fillers ?? true), [recognition.remove_fillers]);
   const cues = project?.cues ?? [];
   const at = project ? seekTarget(project, cues, state.playhead) : "0s";
   const subtitleTracks = project?.subtitleTracks ?? project?.tracks.filter((track) => track.kind === "subtitle") ?? [];
@@ -465,7 +465,7 @@ export function useSubtitlePanel({
             checked={removeFillers}
             onChange={(e) => setRemoveFillers(e.target.checked)}
             onBlur={() => {
-              if (removeFillers !== (recognition.remove_fillers ?? false))
+              if (removeFillers !== (recognition.remove_fillers ?? true))
                 setRecognition({ remove_fillers: removeFillers });
             }}
           />

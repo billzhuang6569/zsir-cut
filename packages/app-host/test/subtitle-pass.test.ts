@@ -103,6 +103,11 @@ describe("subtitle pass", () => {
       }),
     );
     expect(f.run.mock.calls[0]![1]).toContain(SUBTITLE_PASS_PROMPT);
+    expect(SUBTITLE_PASS_PROMPT).toContain("需要、可能、就是、能够、可以、要、会、去、帮我们、给到、这么一个");
+    expect(SUBTITLE_PASS_PROMPT).toContain("少于 6 个字");
+    expect(SUBTITLE_PASS_PROMPT).toContain("不以「是」结尾");
+    expect(SUBTITLE_PASS_PROMPT).toContain("是……的");
+    expect(SUBTITLE_PASS_PROMPT).toContain("逐条检查结尾和开头");
     expect(f.manager.state).toEqual({ running: false, warnings: [] });
   });
   it.each([
@@ -143,6 +148,15 @@ describe("subtitle pass", () => {
     expect(f.run.mock.calls[1]![2].aborted).toBe(true);
     expect(f.manager.state.warnings[0]?.reason).toContain("超时");
     expect(f.kernel).not.toHaveBeenCalled();
+  });
+  it.each([undefined, false, true])("uses the filler setting in the prompt and edits (%s)", async (setting) => {
+    const f = await setup();
+    if (setting === undefined) delete f.project.recognition;
+    else f.project.recognition = { remove_fillers: setting };
+    await f.manager.run("trs_test");
+    const input = JSON.parse(f.run.mock.calls[0]![1].split("\n").at(-1)!);
+    expect(input.remove_fillers).toBe(setting ?? true);
+    expect(request(f).ops.some((op) => op.op === "hide_tokens")).toBe(setting ?? true);
   });
   it.each([false, true])("drops unsafe hides but retains cuts (remove_fillers=%s)", async (enabled) => {
     const f = await setup(transcript(), async () => '{"cut_after":[4],"hide":[0,1,2]}');
@@ -299,35 +313,40 @@ describe("subtitle pass", () => {
     await vi.advanceTimersByTimeAsync(3000);
     expect(f.run).not.toHaveBeenCalled();
   });
-  it("caps concurrency at three and cancels queued work on project close", async () => {
+  it("caps concurrency at six and cancels queued work on project close", async () => {
     const releases: (() => void)[] = [];
     const f = await setup(
-      transcript(50, 10),
+      transcript(100, 10),
       async () => new Promise<string>((resolve) => releases.push(() => resolve('{"cut_after":[],"hide":[]}'))),
     );
     const task = f.manager.run("trs_test");
-    await vi.waitFor(() => expect(f.run).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() => expect(f.run).toHaveBeenCalledTimes(6));
     releases[0]!();
-    await vi.waitFor(() => expect(f.run).toHaveBeenCalledTimes(4));
+    await vi.waitFor(() => expect(f.run).toHaveBeenCalledTimes(7));
     await f.manager.stop();
     await task;
     expect(f.run.mock.calls.every((call) => call[2].aborted || call === f.run.mock.calls[0])).toBe(true);
-    expect(f.run).toHaveBeenCalledTimes(4);
+    expect(f.run).toHaveBeenCalledTimes(7);
     expect(f.kernel).not.toHaveBeenCalled();
   });
 });
 
 describe("chunking", () => {
-  it("uses hard pauses and latest soft pause under 300, then falls back to 300", () => {
+  it("uses hard pauses and latest soft pause under 600, then falls back to 600", () => {
     expect(subtitleChunks(transcript(30, 10)).map((chunk) => chunk.length)).toEqual([10, 10, 10]);
-    expect(subtitleChunks(transcript(650)).map((chunk) => chunk.length)).toEqual([300, 300, 50]);
-    const t = transcript(310);
+    expect(subtitleChunks(transcript(1250)).map((chunk) => chunk.length)).toEqual([600, 600, 50]);
+    const t = transcript(610);
     for (let i = 0; i < t.tokens.length; i++) {
-      const shift = (i >= 200 ? 3 : 0) + (i >= 270 ? 3 : 0);
+      const shift = (i >= 400 ? 3 : 0) + (i >= 570 ? 3 : 0);
       t.tokens[i]!.align.start = rational(BigInt(i + shift), 10n);
       t.tokens[i]!.align.end = rational(BigInt(i + shift + 1), 10n);
     }
-    expect(subtitleChunks(t).map((chunk) => chunk.length)).toEqual([270, 40]);
+    expect(subtitleChunks(t).map((chunk) => chunk.length)).toEqual([570, 40]);
+    for (let i = 600; i < t.tokens.length; i++) {
+      t.tokens[i]!.align.start = rational(BigInt(i + 9), 10n);
+      t.tokens[i]!.align.end = rational(BigInt(i + 10), 10n);
+    }
+    expect(subtitleChunks(t).map((chunk) => chunk.length)).toEqual([600, 10]);
   });
   it("excludes hidden tokens and every token in locked/approved cues", () => {
     const t = transcript();

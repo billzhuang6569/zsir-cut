@@ -288,6 +288,8 @@ else process.stdout.write(JSON.stringify({result,is_error:false}));
     expect(captured.args).toEqual(
       expect.arrayContaining([
         "-p",
+        "--model",
+        "sonnet",
         "--output-format",
         "json",
         "--tools",

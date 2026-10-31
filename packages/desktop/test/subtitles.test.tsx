@@ -341,10 +341,11 @@ it("uses exactly the export renderer and identical drawing calls for style and t
 
 it("commits the filler switch only on blur", async () => {
   const h = await mount();
+  expect(h.find<HTMLInputElement>("去除水词").checked).toBe(true);
   await act(async () => h.find<HTMLInputElement>("去除水词").click());
   expect(h.call).not.toHaveBeenCalled();
   await h.blur("去除水词");
-  expect(h.call.mock.lastCall?.[1].ops).toEqual([{ op: "set_recognition", remove_fillers: true }]);
+  expect(h.call.mock.lastCall?.[1].ops).toEqual([{ op: "set_recognition", remove_fillers: false }]);
 });
 it("edits an existing occurrence override without changing the source transcript", async () => {
   const h = await mount({ ...project, cues: [{ ...cue, text_override: true, occurrence_id: "occ_1" }] });
