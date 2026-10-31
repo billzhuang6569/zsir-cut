@@ -1075,3 +1075,32 @@ it("shares project voice_generate validation, completed worker receipts and idem
     await server.close();
   }
 }, 30000);
+
+it("exposes split_token through CLI and MCP with identical replay envelopes", async () => {
+  const server = createServer();
+  const client = new Client({ name: "split-token-parity", version: "1" });
+  const [left, right] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(left), client.connect(right)]);
+  try {
+    const request = {
+      base_revision: "rev_fixture_1",
+      idempotency_key: "split-token",
+      author,
+      label: "拆分字幕",
+      ops: [
+        { op: "split_token", transcript_id: "trs_A_zh", token_id: "tok_018", at: 2, new_id: "tok_split_right" },
+        { op: "split_cue", cue_id: "cue_zh_03", after_token: "tok_018", new_id: "cue_split_right" },
+      ],
+    };
+    expect(invokeCli("edit", request).envelope.status).toBe("applied");
+    const cli = invokeCli("edit", request).envelope;
+    const mcp = (await client.callTool({ name: "zcut_edit", arguments: { project, ...request } }))
+      .structuredContent as Record<string, unknown>;
+    expect(validateEnvelope(mcp).valid).toBe(true);
+    expect(withoutRequestId(mcp)).toEqual(withoutRequestId(cli));
+    expect(mcp.receipt).toMatchObject({ replayed: true });
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});

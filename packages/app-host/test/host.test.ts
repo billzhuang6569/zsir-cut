@@ -112,7 +112,9 @@ describe("desktop host", () => {
             transcript_id: "trs_cam_a_zh",
             style_id: "sty_override",
             text_override: true,
-            tokens: expect.arrayContaining([{ id: "tok_01", text: "我们" }]),
+            tokens: expect.arrayContaining([expect.objectContaining({ id: "tok_01", text: "我们" })]),
+            locked: expect.any(Boolean),
+            breaks: expect.any(Array),
           }),
         ]),
       );
@@ -225,6 +227,7 @@ describe("desktop host", () => {
         range: null,
         loop: false,
         subtitleBrowser: { search: "关键词", find: "旧词", replace: "新词", matchCase: true },
+        subtitle_selection: { cue_ids: ["cue_1", "cue_2"], editing: "cue_1" },
       };
       socket.on("message", (raw) => {
         const message = JSON.parse(raw.toString());
@@ -244,7 +247,7 @@ describe("desktop host", () => {
           sub: "style",
           subtitleBrowser: state.subtitleBrowser,
           subtitle_pass: null,
-          subtitle_selection: null,
+          subtitle_selection: state.subtitle_selection,
         },
       });
       for (const verb of SUBTITLE_VERBS) {

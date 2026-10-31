@@ -1798,3 +1798,171 @@ describe("semantic subtitle resegment", () => {
     expect(await readFile(path, "utf8")).toBe(before);
   });
 });
+
+describe("split_token", () => {
+  const splitOp = { op: "split_token", transcript_id: "trs_A_zh", token_id: "tok_018", at: 2, new_id: "tok_right" };
+  it("preserves IDs and state, divides alignment by display width and makes one interpolate run", async () => {
+    const before = await read();
+    const old = before.transcripts
+      .find((item) => item.id === "trs_A_zh")!
+      .tokens.find((token) => token.id === "tok_018")!;
+    expect(old.text).toBe("Agent");
+    expect((await edit([splitOp])).status).toBe("applied");
+    const item = (await read()).transcripts.find((entry) => entry.id === "trs_A_zh")!;
+    const index = item.tokens.findIndex((token) => token.id === old.id);
+    const [left, right] = item.tokens.slice(index, index + 2);
+    expect([left!.text, right!.text]).toEqual(["Ag", "ent"]);
+    expect([left!.state, right!.state]).toEqual([old.state, old.state]);
+    expect([left!.heard, right!.heard]).toEqual([undefined, undefined]);
+    const middle = add(old.align.start, mul(sub(old.align.end, old.align.start), rational(2n, 5n)));
+    expect(left!.align).toEqual({ start: old.align.start, end: middle, run: right!.align.run });
+    expect(right!.align.end).toEqual(old.align.end);
+    expect(item.raw_runs.find((run) => run.id === left!.align.run)).toMatchObject({
+      kind: "align",
+      engine: { name: "interpolate" },
+      range: { start: old.align.start },
+      tokens: [
+        { text: "Ag", start: old.align.start, end: middle },
+        { text: "ent", start: middle, end: old.align.end },
+      ],
+    });
+    await validateAndUndo(before);
+  });
+  it("splits Unicode code points, preserves heard only on the left and rewrites last_token and breaks", async () => {
+    const project = await read();
+    const item = project.transcripts.find((entry) => entry.id === "trs_A_zh")!;
+    const token = item.tokens.find((entry) => entry.id === "tok_024")!;
+    token.text = "中😀A";
+    token.heard = "原来听到的";
+    token.state = "edited";
+    const cue = item.cues.find((entry) => entry.last_token === token.id)!;
+    cue.breaks = [token.id];
+    await writeFile(path, serializeProject(project));
+    const before = await read();
+    expect((await edit([{ ...splitOp, token_id: token.id, at: 2 }])).status).toBe("applied");
+    const after = (await read()).transcripts.find((entry) => entry.id === item.id)!;
+    const left = after.tokens.find((entry) => entry.id === token.id)!;
+    const right = after.tokens.find((entry) => entry.id === "tok_right")!;
+    expect([left.text, right.text, left.heard, right.heard]).toEqual(["中😀", "A", token.heard, ""]);
+    expect(sub(left.align.end, left.align.start)).toEqual(
+      mul(sub(token.align.end, token.align.start), rational(3n, 4n)),
+    );
+    expect(after.cues.find((entry) => entry.id === cue.id)).toMatchObject({
+      last_token: "tok_right",
+      breaks: ["tok_right"],
+    });
+    await validateAndUndo(before);
+  });
+  it("allocates the next short ID and splits equal-width halves at the exact midpoint", async () => {
+    const project = await read();
+    const item = project.transcripts.find((entry) => entry.id === "trs_A_zh")!;
+    const token = item.tokens.find((entry) => entry.id === "tok_018")!;
+    token.text = "字幕";
+    await writeFile(path, serializeProject(project));
+    const { new_id: _id, ...op } = splitOp;
+    expect((await edit([{ ...op, at: 1 }])).status).toBe("applied");
+    const after = (await read()).transcripts.find((entry) => entry.id === item.id)!;
+    const left = after.tokens.find((entry) => entry.id === token.id)!;
+    const right = after.tokens[after.tokens.indexOf(left) + 1]!;
+    expect(right.id).toMatch(/^tok_.*_0$/);
+    expect(left.align.end).toEqual(
+      add(token.align.start, mul(sub(token.align.end, token.align.start), rational(1n, 2n))),
+    );
+  });
+  it.each([
+    ["hidden", "", 1],
+    ["single code point", "😀", 1],
+    ["zero", "Agent", 0],
+    ["end", "Agent", 5],
+    ["past end", "Agent", 6],
+    ["fractional", "Agent", 1.5],
+  ])("rejects %s without changing bytes", async (_name, text, at) => {
+    const project = await read();
+    project.transcripts.find((entry) => entry.id === "trs_A_zh")!.tokens.find((entry) => entry.id === "tok_018")!.text =
+      text as string;
+    await writeFile(path, serializeProject(project));
+    const before = await readFile(path, "utf8");
+    const result = await edit([{ ...splitOp, at }]);
+    expect(result.status).toBe("rejected");
+    expect(result.error?.code).toBe("E_VALIDATION");
+    expect(await readFile(path, "utf8")).toBe(before);
+  });
+  it.each(["approved-token", "approved-cue", "locked-cue"])("protects %s", async (kind) => {
+    const project = await read();
+    const item = project.transcripts.find((entry) => entry.id === "trs_A_zh")!;
+    const token = item.tokens.find((entry) => entry.id === "tok_018")!;
+    const cue = item.cues.find((entry) => entry.first_token === token.id)!;
+    if (kind === "approved-token") token.state = "approved";
+    else if (kind === "approved-cue") cue.state = "approved";
+    else cue.timing = { locked: true };
+    await writeFile(path, serializeProject(project));
+    const before = await readFile(path, "utf8");
+    expect((await edit([splitOp])).error?.code).toBe("E_LOCKED");
+    expect((await edit([{ ...splitOp, force: true }])).error?.code).toBe("E_SESSION_STATE");
+    expect(await readFile(path, "utf8")).toBe(before);
+  });
+  it("rejects missing references, duplicate IDs and mixed-domain batches atomically", async () => {
+    const before = await readFile(path, "utf8");
+    expect((await edit([{ ...splitOp, token_id: "tok_missing" }])).error?.code).toBe("E_NOT_FOUND");
+    expect((await edit([{ ...splitOp, transcript_id: "trs_missing" }])).error?.code).toBe("E_NOT_FOUND");
+    expect((await edit([{ ...splitOp, new_id: "tok_019" }])).ok).toBe(false);
+    expect((await edit([splitOp, { op: "split", clip_id: "clp_v2", at: "15s" }])).error?.code).toBe("E_MIXED_DOMAIN");
+    expect(await readFile(path, "utf8")).toBe(before);
+  });
+  it("splits a token and a cue in one revision, then a single undo restores the original content bytes", async () => {
+    const before = await read();
+    const result = await edit(
+      [splitOp, { op: "split_cue", cue_id: "cue_zh_03", after_token: "tok_018", new_id: "cue_right" }],
+      { label: "拆分字幕" },
+    );
+    expect(result.status, JSON.stringify(result)).toBe("applied");
+    const after = await read();
+    expect(after.revision.seq).toBe(before.revision.seq + 1);
+    expect(
+      after.transcripts.find((entry) => entry.id === "trs_A_zh")!.cues.find((cue) => cue.id === "cue_right")!
+        .first_token,
+    ).toBe("tok_right");
+    await validateAndUndo(before);
+  });
+});
+
+it("allows split_token force only in a manual session while preserving approved state", async () => {
+  const begun = await dispatch("session_begin", {
+    project: path,
+    base_revision: "rev_fixture_1",
+    idempotency_key: "begin-split-manual",
+    author,
+    approval: "manual",
+    intent: "拆分已批准字词",
+  });
+  const session_id = (begun.result as { session_id: string }).session_id;
+  const result = await dispatch(
+    "edit",
+    request(
+      [
+        {
+          op: "split_token",
+          transcript_id: "trs_A_zh",
+          token_id: "tok_000",
+          at: 1,
+          new_id: "tok_approved_right",
+          force: true,
+        },
+      ],
+      "rev_fixture_1",
+      { session_id },
+    ),
+  );
+  expect(result.status, JSON.stringify(result)).toBe("drafted");
+  const draft = parseProject(
+    await readFile(join(directory, ".zcut", "prj_std_25", "sessions", session_id, "draft.zcut.json"), "utf8"),
+  );
+  if (!draft.ok) throw new Error("Invalid draft");
+  const item = draft.project.transcripts.find((item) => item.id === "trs_A_zh")!;
+  expect(item.tokens.find((token) => token.id === "tok_approved_right")?.state).toBe("approved");
+  expect(
+    (await read()).transcripts
+      .find((item) => item.id === "trs_A_zh")!
+      .tokens.some((token) => token.id === "tok_approved_right"),
+  ).toBe(false);
+});

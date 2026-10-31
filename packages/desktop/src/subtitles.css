@@ -463,3 +463,113 @@
   inset: 0;
   margin: auto;
 }
+
+.zc-sub-list {
+  overflow-y: auto;
+  min-height: 0;
+}
+.zc-sub-row {
+  grid-template-columns: calc(var(--control-h) * 3) minmax(0, 1fr) auto;
+  align-items: start;
+}
+.zc-sub-time {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  border: 0;
+  background: transparent;
+  color: var(--text-4);
+  font-family: var(--font-mono);
+  font-size: var(--label-size);
+  padding: var(--space-3);
+  cursor: pointer;
+  min-height: var(--icon-btn-compact);
+}
+.zc-sub-text {
+  min-height: var(--icon-btn-compact);
+  cursor: text;
+  overflow-wrap: anywhere;
+}
+.zc-sub-text:focus-visible,
+.zc-sub-time:focus-visible,
+.zc-sub-list:focus-visible {
+  outline: 1px solid var(--text);
+  outline-offset: -1px;
+}
+.zc-sub-text[aria-readonly="true"] {
+  cursor: default;
+  color: var(--text-3);
+}
+.zc-sub-row.is-current {
+  box-shadow: inset 2px 0 var(--info);
+  background: var(--panel-2);
+}
+.zc-sub-row.is-running {
+  opacity: 0.55;
+}
+.zc-sub-edited {
+  text-decoration: underline dashed var(--text-4);
+  text-underline-offset: 3px;
+}
+.zc-sub-text mark {
+  color: var(--attention);
+  background: var(--attention-soft);
+}
+.zc-sub-toolbar,
+.zc-sub-heading,
+.zc-sub-ai {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.zc-sub-heading > span,
+.zc-sub-toolbar > span {
+  margin-right: auto;
+  color: var(--text-3);
+}
+.zc-sub-parameters [role="menu"] {
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+.zc-sub-parameters [role="menuitem"] {
+  font: inherit;
+  text-align: left;
+  padding: var(--space-3) var(--space-5);
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  min-height: var(--icon-btn);
+  cursor: pointer;
+}
+.zc-sub-parameters [role="menuitem"]:hover,
+.zc-sub-parameters [role="menuitem"]:focus-visible {
+  background: var(--raised);
+}
+.zc-sub-parameters [role="menuitem"]:disabled {
+  color: var(--text-off);
+  cursor: default;
+}
+.zc-sub-menu {
+  position: fixed;
+  z-index: 30;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+fieldset.zc-sub-list {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.zc-sub-parameters:has(.zc-sub-list) {
+  flex: 1;
+  min-height: 0;
+}
+.zc-sub-parameters:has(.zc-sub-list) > :not(.zc-sub-list) {
+  flex-shrink: 0;
+}

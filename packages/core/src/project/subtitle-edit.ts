@@ -252,6 +252,43 @@ export function applySubtitleEdit(
       item.tokens.splice(first, old.length, ...next);
       break;
     }
+    case "split_token": {
+      const item = transcript(project, op.transcript_id);
+      const [index] = span(item, op.token_id, op.token_id);
+      protect(item, index, index, force);
+      const token = item.tokens[index]!;
+      const chars = Array.from(token.text);
+      const at = op.at as number;
+      if (!Number.isInteger(at) || at < 1 || at >= chars.length) fail("E_VALIDATION", "Split point is outside token");
+      const id = (op.new_id as string | undefined) ?? transcriptIds(project, item, "tok_")();
+      const left = chars.slice(0, at).join("");
+      const right = chars.slice(at).join("");
+      const start = token.align.start,
+        end = token.align.end;
+      const rules = transcriptRules(item);
+      const leftWidth = textWidth([{ ...token, text: left }], rules);
+      const rightWidth = textWidth([{ ...token, text: right }], rules);
+      const middle = add(start, mul(sub(end, start), div(leftWidth, add(leftWidth, rightWidth))));
+      const run = generate("run_");
+      const next: Token = { ...structuredClone(token), id, text: right, align: { start: middle, end, run } };
+      if (token.heard !== undefined) next.heard = "";
+      token.text = left;
+      token.align = { start, end: middle, run };
+      item.tokens.splice(index + 1, 0, next);
+      item.raw_runs.push({
+        id: run,
+        kind: "align",
+        engine: { name: "interpolate", model: "interpolate", version: "1" },
+        created_at: project.revision.created_at,
+        range: { start, duration: sub(end, start) },
+        tokens: [token, next].map((entry) => ({ text: entry.text, start: entry.align.start, end: entry.align.end })),
+      });
+      for (const cue of item.cues) {
+        if (cue.last_token === token.id) cue.last_token = id;
+        if (cue.breaks) cue.breaks = cue.breaks.map((value) => (value === token.id ? id : value));
+      }
+      break;
+    }
     case "hide_tokens":
     case "set_token_state": {
       const item = transcript(project, op.transcript_id);

@@ -1,5 +1,10 @@
 // @vitest-environment jsdom
+
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { copyFile, mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -9,7 +14,7 @@ import type { ProjectView } from "../src/connection.js";
 import { renderSubtitle, SubtitleCanvas } from "../src/SubtitleCanvas.js";
 import { useSubtitlePanel } from "../src/SubtitlePanel.js";
 import { initialState } from "../src/state.js";
-import { alignment, defaultStyle, textEdit } from "../src/subtitles.js";
+import { alignment, caretOffset, cueEdit, defaultStyle, placeCaret, textEdit, textEdits } from "../src/subtitles.js";
 import { TimelinePreview } from "../src/TimelinePreview.js";
 import { recordingCanvas } from "./canvas.js";
 
@@ -67,6 +72,8 @@ async function mount(
   withPreview = false,
 ) {
   let state: UiState = { ...initialState(), project: "/示例.zcut.json", panel: "subtitles", sub };
+  let setView: (view: ProjectView) => void = () => {};
+  let setUi: (state: UiState) => void = () => {};
   const call = vi.fn(async (verb: string, request: Record<string, unknown>) => responder(verb, request));
   const editCue = vi.fn();
   const container = document.createElement("div");
@@ -74,8 +81,11 @@ async function mount(
   const root = createRoot(container);
   function Harness() {
     const [ui, update] = useState(state);
+    const [current, updateView] = useState(view);
+    setView = updateView;
+    setUi = update;
     state = ui;
-    const panel = useSubtitlePanel({ project: view, state: ui, update, call });
+    const panel = useSubtitlePanel({ project: current, state: ui, update, call });
     return (
       <>
         {panel.controls}
@@ -111,18 +121,27 @@ async function mount(
     return element;
   };
   const click = async (label: string) => {
-    const button = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
-      (button) => button.getAttribute("aria-label") === label || button.textContent === label,
-    );
+    const elements = [...container.querySelectorAll<HTMLElement>("button, [role=textbox]")];
+    const button =
+      elements.find((element) => element.getAttribute("aria-label") === label) ??
+      elements.find((element) => element.textContent === label);
     if (!button) throw new Error(label);
-    await act(async () => button.click());
+    await act(async () => {
+      button.focus();
+      button.click();
+    });
   };
   const input = async (label: string, value: string) => {
     const element = find<HTMLInputElement | HTMLTextAreaElement>(label);
     await act(async () => {
-      const prototype =
-        element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-      Object.getOwnPropertyDescriptor(prototype, "value")?.set?.call(element, value);
+      if (element.getAttribute("contenteditable") === "true") {
+        element.textContent = value;
+        placeCaret(element, value.length);
+      } else {
+        const prototype =
+          element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+        Object.getOwnPropertyDescriptor(prototype, "value")?.set?.call(element, value);
+      }
       element.dispatchEvent(new Event("input", { bubbles: true }));
     });
     return element;
@@ -144,7 +163,22 @@ async function mount(
       else await new Promise((resolve) => setTimeout(resolve, 1010));
     });
   };
-  return { container, call, editCue, find, click, input, blur, key, settle, state: () => state };
+  const focus = async (label: string, offset: number) => act(async () => placeCaret(find(label), offset));
+  return {
+    container,
+    call,
+    editCue,
+    settle,
+    find,
+    click,
+    input,
+    blur,
+    key,
+    focus,
+    state: () => state,
+    view: async (next: ProjectView) => act(async () => setView(next)),
+    update: async (patch: Partial<UiState>) => act(async () => setUi({ ...state, ...patch })),
+  };
 }
 it("submits only changed recognition fields on blur and preserves terms", async () => {
   const h = await mount();
@@ -193,7 +227,7 @@ it("replaces text, reports locked skips and highlights affected rows", async () 
   expect(h.container.textContent).toContain("跳过 1 条锁定字幕");
   expect(h.container.querySelectorAll(".is-skipped")).toHaveLength(1);
 });
-it("seeks exactly, navigates rows, edits a minimal token range and cancels", async () => {
+it("seeks on a single click, edits in place on blur, and Esc discards", async () => {
   const h = await mount();
   await h.click("你好世界");
   expect(h.state()).toMatchObject({
@@ -201,26 +235,33 @@ it("seeks exactly, navigates rows, edits a minimal token range and cancels", asy
     playhead: { at: "1001/1000s" },
     preview: "timeline",
     playing: false,
+    subtitle_selection: { cue_ids: ["cue_1"], editing: "cue_1" },
   });
-  const row = h.container.querySelector<HTMLButtonElement>(".zc-sub-text");
-  if (!row) throw new Error();
-  await h.key(row, "ArrowDown");
-  expect(h.state().selected).toEqual(["cue_free"]);
-  await h.key(row, "Enter");
+  expect(h.container.querySelector(".zc-sub-row textarea")).toBeNull();
   await h.input("编辑字幕", "你好朋友");
-  await h.key(h.find("编辑字幕"), "Enter", { metaKey: true });
+  expect(h.call).not.toHaveBeenCalled();
+  await h.blur("编辑字幕");
   expect(h.call.mock.lastCall?.[1]).toMatchObject({
-    label: "编辑字幕文字",
-    ops: [{ op: "edit_text", transcript_id: "tra_1", from_token: "tok_2", to_token: "tok_2", text: "朋友" }],
+    label: "修改字幕",
+    ops: [
+      {
+        op: "edit_text",
+        transcript_id: "tra_1",
+        from_token: "tok_2",
+        to_token: "tok_2",
+        text: "朋友",
+        new_ids: [expect.any(String)],
+      },
+    ],
   });
-  const currentRow = h.container.querySelector<HTMLButtonElement>(".zc-sub-text");
-  if (!currentRow) throw new Error();
-  await h.key(currentRow, "Enter");
+  await h.click("你好世界");
+  await h.input("编辑字幕", "放弃");
   await h.key(h.find("编辑字幕"), "Escape");
   expect(h.container.querySelector('[aria-label="编辑字幕"]')).toBeNull();
+  expect(h.container.querySelector(".zc-sub-text")?.textContent).toBe("你好世界");
   expect(h.call).toHaveBeenCalledTimes(1);
-  expect(h.container.querySelector(".zc-sub-row > span")?.getAttribute("title")).toBe("字幕显示时间过短");
-  expect(h.container.querySelectorAll("time")).toHaveLength(0);
+  expect(h.container.querySelector(".zc-sub-time")?.getAttribute("title")).toBe("字幕显示时间过短");
+  expect(h.container.querySelectorAll("time")).toHaveLength(2);
 });
 it("adds a frame-aligned free cue and deletes source and free cues through their own operations", async () => {
   const h = await mount();
@@ -250,9 +291,9 @@ it("preserves free cue identity, exact timing and style when editing", async () 
   const h = await mount();
   const row = h.container.querySelectorAll<HTMLButtonElement>(".zc-sub-text")[1];
   if (!row) throw new Error();
-  await h.key(row, "Enter");
+  await act(async () => row.focus());
   await h.input("编辑字幕", "新文字");
-  await h.key(h.find("编辑字幕"), "Enter", { metaKey: true });
+  await h.blur("编辑字幕");
   expect(h.call.mock.lastCall?.[1].ops).toEqual([
     { op: "remove_free_cue", track_id: "trk_s", id: "cue_free" },
     {
@@ -377,9 +418,9 @@ it("edits an existing occurrence override without changing the source transcript
   const h = await mount({ ...project, cues: [{ ...cue, text_override: true, occurrence_id: "occ_1" }] });
   const row = h.container.querySelector<HTMLButtonElement>(".zc-sub-text");
   if (!row) throw new Error();
-  await h.key(row, "Enter");
+  await act(async () => row.focus());
   await h.input("编辑字幕", "覆盖文字");
-  await h.key(h.find("编辑字幕"), "Enter", { metaKey: true });
+  await h.blur("编辑字幕");
   expect(h.call.mock.lastCall?.[1].ops).toEqual([
     { op: "set_override", track_id: "trk_s", occurrence_id: "occ_1", cue_id: "cue_1", text: "覆盖文字" },
   ]);
@@ -397,10 +438,16 @@ it("disables repeated recognition while polling progress, then recovers after co
       (b) => b.textContent === "重新识别",
     );
     if (!button) throw new Error();
-    await act(async () => button.click());
+    await act(async () => {
+      button.focus();
+      button.click();
+    });
     expect(button.disabled).toBe(true);
     expect(button.textContent).toContain("50%");
-    await act(async () => button.click());
+    await act(async () => {
+      button.focus();
+      button.click();
+    });
     expect(h.call.mock.calls.filter(([verb]) => verb === "transcribe")).toHaveLength(1);
     await act(async () => vi.advanceTimersByTimeAsync(500));
     expect(button.disabled).toBe(false);
@@ -752,6 +799,11 @@ async function previewHarness(view = project) {
   return { ...h, hit, pointer };
 }
 it("selects preview cues, clamps drag inside the frame, snaps to centre, and requests list editing", async () => {
+  const scroll = vi.fn();
+  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: scroll });
+  cleanups.push(async () => {
+    Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
+  });
   const h = await previewHarness();
   await h.pointer(h.hit(), "pointerdown", 160, 160);
   expect(h.hit().classList.contains("is-selected")).toBe(true);
@@ -772,14 +824,18 @@ it("selects preview cues, clamps drag inside the frame, snaps to centre, and req
   await h.pointer(hit, "pointerup", 10000, -10000);
   await h.settle();
   await h.input("搜索字幕", "不存在");
+  await h.update({ sub: "style" });
   await act(async () => h.hit().dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
   expect(h.editCue).toHaveBeenCalledWith(cue);
   expect(h.state().subtitle_selection).toEqual({ cue_ids: [cue.cue_id], editing: cue.cue_id });
-  const editor = h.find<HTMLTextAreaElement>("编辑字幕");
-  expect(editor.value).toBe(cue.text);
+  const editor = h.find("编辑字幕");
+  expect(editor.getAttribute("contenteditable")).toBe("true");
+  expect(editor.textContent).toBe(cue.text);
   expect(document.activeElement).toBe(editor);
-  expect(editor.selectionStart).toBe(editor.value.length);
-  expect(editor.selectionEnd).toBe(editor.value.length);
+  expect(caretOffset(editor)).toBe(cue.text.length);
+  expect(window.getSelection()?.isCollapsed).toBe(true);
+  expect(scroll).toHaveBeenCalledWith({ block: "nearest" });
+  expect(scroll.mock.instances.at(-1)).toBe(editor.closest(".zc-sub-row"));
 });
 it.each([
   { dy: -40, anchor: "top" },
@@ -857,13 +913,11 @@ it("shows proofread progress while keeping the cue list editable", async () => {
   });
   expect(h.container.textContent).toContain("AI 校对 · 2/6");
   expect(h.container.querySelectorAll(".zc-sub-row")).toHaveLength(2);
-  const row = h.container.querySelector<HTMLButtonElement>(".zc-sub-text");
-  if (!row) throw new Error("cue missing");
-  await h.key(row, "Enter");
-  expect(h.find<HTMLTextAreaElement>("编辑字幕").disabled).toBe(false);
+  await h.focus(cue.text, 1);
+  expect(h.find("编辑字幕").getAttribute("contenteditable")).toBe("true");
   await h.input("编辑字幕", "您好世界");
-  await h.key(h.find("编辑字幕"), "Enter", { metaKey: true });
-  expect(h.call).toHaveBeenCalledWith("edit", expect.objectContaining({ label: "编辑字幕文字" }));
+  await h.blur("编辑字幕");
+  expect(h.call).toHaveBeenCalledWith("edit", expect.objectContaining({ label: "修改字幕" }));
 });
 
 it("shows proofread failure and retry without hiding the breaking result", async () => {
@@ -895,4 +949,473 @@ it("shows progress from a manually requested proofread pass in preview data", as
   });
   expect(h.container.textContent).toContain("AI 校对 · 2/6");
   expect(h.container.querySelectorAll(".zc-sub-row")).toHaveLength(2);
+});
+
+const nextCue = {
+  ...cue,
+  cue_id: "cue_2",
+  text: "再见朋友",
+  start: "3s",
+  end: "5s",
+  tokens: [
+    { id: "tok_3", text: "再见" },
+    { id: "tok_4", text: "朋友" },
+  ],
+  next_cue_id: null,
+};
+const listProject = { ...project, cues: [{ ...cue, next_cue_id: "cue_2" }, nextCue] };
+
+it.each([1, 2])("splits at character %i in one edit batch with explicit IDs", async (offset) => {
+  const h = await mount(listProject);
+  await h.focus(cue.text, offset);
+  expect(caretOffset(h.find("编辑字幕"))).toBe(offset);
+  await h.key(h.find("编辑字幕"), "Enter");
+  const request = h.call.mock.lastCall?.[1];
+  expect(request?.label).toBe("拆分字幕");
+  const ops = request?.ops as Record<string, unknown>[];
+  expect(ops.map((op) => op.op)).toEqual(offset === 1 ? ["split_token", "split_cue"] : ["split_cue"]);
+  if (offset === 1) expect(ops[0]).toMatchObject({ token_id: "tok_1", at: 1, new_id: expect.stringMatching(/^tok_/) });
+  expect(ops.at(-1)).toMatchObject({
+    op: "split_cue",
+    cue_id: "cue_1",
+    after_token: "tok_1",
+    new_id: expect.stringMatching(/^cue_/),
+  });
+  expect(h.call).toHaveBeenCalledTimes(1);
+  const id = ops.at(-1)?.new_id as string;
+  await h.view({
+    ...listProject,
+    revision: { id: "rev_2", seq: 8 },
+    cues: [
+      { ...cue, text: offset === 1 ? "你" : "你好", tokens: [{ id: "tok_1", text: offset === 1 ? "你" : "你好" }] },
+      { ...nextCue, cue_id: id, text: "后半条", tokens: [{ id: "tok_r", text: "后半条" }] },
+      nextCue,
+    ],
+  });
+  expect(h.state().subtitle_selection?.editing).toBe(id);
+  expect(caretOffset(h.find("编辑字幕"))).toBe(0);
+});
+it("includes pending char-diff edits and their preassigned IDs before split_token and split_cue", async () => {
+  const h = await mount(listProject);
+  await h.click(cue.text);
+  await h.input("编辑字幕", "你好新世界");
+  await h.focus("编辑字幕", 3);
+  await h.key(h.find("编辑字幕"), "Enter");
+  const ops = h.call.mock.lastCall?.[1].ops as Record<string, unknown>[];
+  expect(ops.map((op) => op.op)).toEqual(["edit_text", "split_token", "split_cue"]);
+  expect(ops[0]).toMatchObject({
+    from_token: "tok_2",
+    to_token: "tok_2",
+    text: "新世界",
+    new_ids: [expect.any(String)],
+  });
+  expect(ops[1]).toMatchObject({ token_id: (ops[0]?.new_ids as string[])[0], at: 1 });
+  expect(ops[2]?.after_token).toBe(ops[1]?.token_id);
+  expect(h.call).toHaveBeenCalledTimes(1);
+});
+it("Enter at start does nothing and at end goes to the next cue start", async () => {
+  const h = await mount(listProject);
+  await h.focus(cue.text, 0);
+  await h.key(h.find("编辑字幕"), "Enter");
+  expect(h.call).not.toHaveBeenCalled();
+  await h.focus("编辑字幕", cue.text.length);
+  await h.key(h.find("编辑字幕"), "Enter");
+  expect(h.state().subtitle_selection?.editing).toBe("cue_2");
+  expect(caretOffset(h.find("编辑字幕"))).toBe(0);
+  expect(h.call).not.toHaveBeenCalled();
+});
+it.each([1, 2])("Shift+Enter at %i stores breaks without creating another cue", async (offset) => {
+  const h = await mount(listProject);
+  await h.focus(cue.text, offset);
+  await h.key(h.find("编辑字幕"), "Enter", { shiftKey: true });
+  expect(h.find("编辑字幕").textContent).toBe(`${cue.text.slice(0, offset)}\n${cue.text.slice(offset)}`);
+  expect(h.call).not.toHaveBeenCalled();
+  await h.blur("编辑字幕");
+  const request = h.call.mock.lastCall?.[1];
+  expect(request?.label).toBe("修改字幕");
+  const ops = request?.ops as Record<string, unknown>[];
+  expect(ops.map((op) => op.op)).toEqual(offset === 1 ? ["split_token", "set_cue"] : ["set_cue"]);
+  expect(ops.at(-1)).toEqual({ op: "set_cue", cue_id: "cue_1", breaks: ["tok_1"] });
+});
+it.each([
+  ["Backspace", 0, "cue_2"],
+  ["Delete", 4, "cue_1"],
+] as const)("%s merges adjacent cues at the seam", async (key, offset, id) => {
+  const h = await mount(listProject);
+  await h.focus(id === "cue_1" ? cue.text : nextCue.text, offset);
+  await h.key(h.find("编辑字幕"), key);
+  expect(h.call.mock.lastCall?.[1]).toMatchObject({
+    label: "合并字幕",
+    ops: [{ op: "merge_cues", cue_ids: ["cue_1", "cue_2"] }],
+  });
+  expect(h.state().subtitle_selection?.editing).toBe("cue_1");
+  expect(caretOffset(h.find("编辑字幕"))).toBe(4);
+});
+it.each(["locked", "other-transcript", "non-adjacent"])("refuses merging %s with a readable status", async (kind) => {
+  const next = {
+    ...nextCue,
+    ...(kind === "locked" ? { locked: true } : kind === "other-transcript" ? { transcript_id: "trs_other" } : {}),
+  };
+  const h = await mount({
+    ...listProject,
+    cues: [{ ...cue, next_cue_id: kind === "non-adjacent" ? "cue_missing" : "cue_2" }, next],
+  });
+  await h.focus(cue.text, 4);
+  await h.key(h.find("编辑字幕"), "Delete");
+  expect(h.call).not.toHaveBeenCalled();
+  expect(h.container.textContent).toContain("这两条不能合并");
+});
+it("Up/Down keep code-point column, commit pending edits, and respect multiline boundaries", async () => {
+  const h = await mount(listProject);
+  await h.focus(cue.text, 1);
+  await h.key(h.find("编辑字幕"), "ArrowDown");
+  expect(h.state().subtitle_selection?.editing).toBe("cue_2");
+  expect(caretOffset(h.find("编辑字幕"))).toBe(1);
+  await h.input("编辑字幕", "再见同学");
+  await h.focus("编辑字幕", 2);
+  await h.key(h.find("编辑字幕"), "ArrowUp");
+  expect(h.call.mock.lastCall?.[1].label).toBe("修改字幕");
+  expect(h.state().subtitle_selection?.editing).toBe("cue_1");
+  expect(caretOffset(h.find("编辑字幕"))).toBe(2);
+  await h.key(h.find("编辑字幕"), "Enter", { shiftKey: true });
+  await h.focus("编辑字幕", 0);
+  await h.key(h.find("编辑字幕"), "ArrowDown");
+  expect(h.state().subtitle_selection?.editing).toBe("cue_1");
+});
+it("routes dirty text undo/redo locally and clean undo/redo to the project", async () => {
+  const h = await mount(listProject);
+  await h.click(cue.text);
+  await h.input("编辑字幕", "你好朋友");
+  await h.input("编辑字幕", "你好同学");
+  await h.key(h.find("编辑字幕"), "z", { metaKey: true });
+  expect(h.find("编辑字幕").textContent).toBe("你好朋友");
+  await h.key(h.find("编辑字幕"), "z", { metaKey: true, shiftKey: true });
+  expect(h.find("编辑字幕").textContent).toBe("你好同学");
+  await h.key(h.find("编辑字幕"), "z", { metaKey: true });
+  await h.key(h.find("编辑字幕"), "z", { metaKey: true });
+  expect(h.find("编辑字幕").textContent).toBe(cue.text);
+  expect(h.call).not.toHaveBeenCalled();
+  await h.key(h.find("编辑字幕"), "z", { metaKey: true });
+  expect(h.call.mock.lastCall?.[0]).toBe("undo");
+  await h.key(h.find("编辑字幕"), "z", { metaKey: true, shiftKey: true });
+  expect(h.call.mock.lastCall?.[0]).toBe("redo");
+});
+it("supports time-column selection, Cmd toggle, Shift range, Cmd+A and batch actions", async () => {
+  const third = { ...nextCue, cue_id: "cue_3", start: "5s", end: "7s", text: "第三条" };
+  const h = await mount({
+    ...listProject,
+    cues: [listProject.cues[0] as typeof cue, { ...nextCue, next_cue_id: "cue_3" }, third],
+  });
+  await h.click("选择字幕 1");
+  expect(h.state().subtitle_selection).toEqual({ cue_ids: ["cue_1"], editing: null });
+  await act(async () => h.find("选择字幕 2").dispatchEvent(new MouseEvent("click", { bubbles: true, metaKey: true })));
+  expect(h.state().selected).toEqual(["cue_1", "cue_2"]);
+  expect(h.find("合并").title).toBe("合并");
+  await h.click("样式");
+  await h.click("正文");
+  expect(h.call.mock.lastCall?.[1].ops).toEqual([
+    { op: "set_cue", cue_id: "cue_1", style_id: "sty_1" },
+    { op: "set_cue", cue_id: "cue_2", style_id: "sty_1" },
+  ]);
+  await h.click("删除选中字幕");
+  expect(h.call.mock.lastCall?.[1]).toMatchObject({
+    label: "删除字幕",
+    ops: [
+      { op: "hide_tokens", tokens: ["tok_1", "tok_2"] },
+      { op: "hide_tokens", tokens: ["tok_3", "tok_4"] },
+    ],
+  });
+  await h.click("选择字幕 1");
+  await act(async () => h.find("选择字幕 3").dispatchEvent(new MouseEvent("click", { bubbles: true, shiftKey: true })));
+  expect(h.state().selected).toEqual(["cue_1", "cue_2", "cue_3"]);
+  await h.click("取消选择");
+  await h.key(h.find("字幕列表"), "a", { metaKey: true });
+  expect(h.state().selected).toHaveLength(3);
+  expect(h.state().subtitle_selection?.editing).toBeNull();
+});
+it.each(["locked", "approved"])("shows a lock and read-only text for %s cues", async (kind) => {
+  const locked =
+    kind === "locked"
+      ? { ...cue, locked: true }
+      : { ...cue, tokens: cue.tokens.map((token) => ({ ...token, state: "approved" })) };
+  const h = await mount({ ...project, cues: [locked] });
+  expect(h.find("已锁定")).toBeTruthy();
+  expect(h.find(cue.text).getAttribute("aria-readonly")).toBe("true");
+  await h.focus(cue.text, 1);
+  await h.key(h.find(cue.text), "Enter");
+  expect(h.call).not.toHaveBeenCalled();
+  expect(h.state().subtitle_selection?.editing).toBeNull();
+});
+it.each(["tidy", "proofread"] as const)(
+  "runs selected AI %s with optional requirements, dims the range, and retries failure",
+  async (kind) => {
+    const h = await mount(listProject, "subtitles", () => ({ pass_id: "pass_1" }));
+    await h.key(h.find("字幕列表"), "a", { metaKey: true });
+    await h.click(kind === "tidy" ? "AI 重新分行" : "AI 校对");
+    await h.input("有什么要求？（可以不填）", "短一点");
+    await h.click("开始");
+    expect(h.call.mock.lastCall).toEqual([`subtitle_${kind}`, { cue_ids: ["cue_1", "cue_2"], request: "短一点" }]);
+    const running = {
+      pass_id: "pass_1",
+      kind,
+      state: "running" as const,
+      done: 1,
+      total: 2,
+      reason: "",
+    };
+    await h.view({ ...listProject, subtitle_pass: running, subtitlePass: { running: true, warnings: [] } });
+    expect(h.container.querySelectorAll(".is-running")).toHaveLength(2);
+    expect(h.container.querySelectorAll(".zc-sub-row")).toHaveLength(2);
+    expect(h.container.textContent).toContain(`${kind === "tidy" ? "AI 重新分行" : "AI 校对"} · 1/2`);
+    await h.view({ ...listProject, subtitle_pass: { ...running, state: "failed", reason: "Agent 超时" } });
+    expect(h.container.textContent).toContain("Agent 超时");
+    expect(h.container.querySelectorAll(".is-running")).toHaveLength(0);
+    await h.click("重试 AI 操作");
+    expect(h.call).toHaveBeenCalledTimes(2);
+    await h.click("AI 校对");
+    await h.click("开始");
+    expect(h.call.mock.lastCall).toEqual(["subtitle_proofread", { cue_ids: ["cue_1", "cue_2"] }]);
+    await h.click("更多字幕操作");
+    await h.click("全部校对");
+    await h.click("开始");
+    expect(h.call.mock.lastCall).toEqual(["subtitle_proofread", {}]);
+  },
+);
+it("underlines edited words, exposes original text and restores through edit_text in the context menu", async () => {
+  const h = await mount({
+    ...listProject,
+    cues: [
+      {
+        ...cue,
+        tokens: [
+          { id: "tok_1", text: "你好", state: "edited", heard: "您好" },
+          cue.tokens[1] as { id: string; text: string },
+        ],
+      },
+      nextCue,
+    ],
+  });
+  const token = h.container.querySelector<HTMLElement>(".zc-sub-edited");
+  expect(token?.title).toBe("原来：您好");
+  await act(async () =>
+    token?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 20, clientY: 20 })),
+  );
+  expect(h.find("字幕菜单").textContent).toContain("复制文字");
+  await h.click("还原");
+  expect(h.call.mock.lastCall?.[1].ops).toEqual([
+    { op: "edit_text", transcript_id: "tra_1", from_token: "tok_1", to_token: "tok_1", text: "您好" },
+  ]);
+});
+it("finds previous/next matches, highlights the current occurrence and replaces only one", async () => {
+  const repeated = {
+    ...cue,
+    text: "你好你好",
+    tokens: [
+      { id: "tok_1", text: "你好" },
+      { id: "tok_2", text: "你好" },
+    ],
+  };
+  const h = await mount({
+    ...listProject,
+    cues: [repeated, { ...nextCue, text: "你好", tokens: [{ id: "tok_3", text: "你好" }] }],
+  });
+  await h.click("查找替换");
+  await h.input("查找", "你好");
+  await h.input("替换为", "您好");
+  expect(h.container.querySelectorAll("mark")).toHaveLength(1);
+  await h.click("下一个");
+  await h.click("替换");
+  expect(h.call.mock.lastCall?.[1].ops).toEqual([
+    expect.objectContaining({ op: "edit_text", from_token: "tok_2", to_token: "tok_2", text: "您好" }),
+  ]);
+  await h.click("上一个");
+  await h.click("替换");
+  expect(h.call.mock.lastCall?.[1].ops).toEqual([expect.objectContaining({ from_token: "tok_1", to_token: "tok_1" })]);
+});
+it("follows playback except within three seconds of user scrolling", async () => {
+  const scroll = vi.fn();
+  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: scroll });
+  cleanups.push(async () => {
+    Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
+  });
+  let now = 10000;
+  vi.spyOn(Date, "now").mockImplementation(() => now);
+  const h = await mount(listProject);
+  await h.update({ playing: true, playhead: { at: "2s" } });
+  expect(h.container.querySelector(".is-current")?.textContent).toContain(cue.text);
+  expect(scroll).toHaveBeenCalledTimes(1);
+  await act(async () => h.find("字幕列表").dispatchEvent(new WheelEvent("wheel", { bubbles: true })));
+  now += 2000;
+  await h.update({ playhead: { at: "3s" } });
+  expect(scroll).toHaveBeenCalledTimes(1);
+  now += 1001;
+  await h.update({ playhead: { at: "4s" } });
+  expect(scroll).toHaveBeenCalledTimes(2);
+});
+it("plans separate whole-token edits and preserves hidden-token boundaries", () => {
+  const words = {
+    ...cue,
+    text: "甲乙丙",
+    tokens: [
+      { id: "a", text: "甲" },
+      { id: "b", text: "乙" },
+      { id: "c", text: "丙" },
+    ],
+  };
+  expect(textEdits(words, "一乙三")).toMatchObject([
+    { from_token: "a", to_token: "a", text: "一" },
+    { from_token: "c", to_token: "c", text: "三" },
+  ]);
+  const hidden = {
+    ...cue,
+    tokens: [
+      cue.tokens[0] as { id: string; text: string },
+      { id: "hidden", text: "" },
+      cue.tokens[1] as { id: string; text: string },
+    ],
+  };
+  expect(cueEdit(hidden, cue.text, 2).ops).toMatchObject([{ op: "split_cue", after_token: "tok_1" }]);
+  expect(() => cueEdit(hidden, "新的字幕")).toThrow("隐藏字词");
+});
+it.each([false, true])(
+  "a component split inside a token followed by one project undo restores content bytes (pending edit: %s)",
+  async (pending) => {
+    const directory = await mkdtemp(join(tmpdir(), "subtitle-component-"));
+    const path = join(directory, "project.zcut.json");
+    cleanups.push(async () => {
+      await rm(directory, { recursive: true, force: true });
+    });
+    await copyFile("fixtures/projects/std-25.zcut.json", path);
+    const load = async () =>
+      JSON.parse(await readFile(path, "utf8")) as {
+        revision: { id: string; seq: number };
+        transcripts: {
+          id: string;
+          cues: { id: string; first_token: string; last_token: string }[];
+          tokens: { id: string; text: string }[];
+        }[];
+      };
+    const before = await load();
+    const item = before.transcripts.find((item) => item.id === "trs_A_zh");
+    const source = item?.cues.find((cue) => cue.id === "cue_zh_03");
+    if (!item || !source) throw new Error("fixture cue");
+    const tokens = item.tokens.slice(
+      item.tokens.findIndex((token) => token.id === source.first_token),
+      item.tokens.findIndex((token) => token.id === source.last_token) + 1,
+    );
+    const view = {
+      ...project,
+      id: "tl_std",
+      revision: { id: before.revision.id, seq: before.revision.seq },
+      cues: [
+        {
+          ...cue,
+          cue_id: source.id,
+          transcript_id: item.id,
+          text: tokens.map((token) => token.text).join(""),
+          tokens: tokens.map(({ id, text }) => ({ id, text })),
+        },
+      ],
+    };
+    const h = await mount(view, "subtitles", async (verb, request) => {
+      const run = spawnSync(process.execPath, ["packages/cli/src/index.ts", verb, path], {
+        encoding: "utf8",
+        input: JSON.stringify({ ...request, project: path }),
+      });
+      const result = JSON.parse(run.stdout);
+      expect(result.ok, JSON.stringify(result)).toBe(true);
+      return result.result;
+    });
+    await h.focus(view.cues[0]?.text ?? "", 2);
+    if (pending) {
+      await h.input("编辑字幕", (view.cues[0]?.text ?? "").replace("Agent", "AgXent"));
+      await h.focus("编辑字幕", 2);
+    }
+    await h.key(h.find("编辑字幕"), "Enter");
+    const after = await load();
+    expect(after.revision.seq).toBe(before.revision.seq + 1);
+    await h.view({ ...view, revision: { id: after.revision.id, seq: after.revision.seq } });
+    await h.key(h.container.querySelector(".zc-sub-text") as HTMLElement, "z", { metaKey: true });
+    const restored = await load();
+    expect(JSON.stringify({ ...restored, revision: before.revision })).toBe(JSON.stringify(before));
+    expect(h.call.mock.calls.map(([verb]) => verb)).toEqual(["edit", "undo"]);
+  },
+);
+
+it("maps edits of generated English spaces to the complete neighboring tokens", () => {
+  const english = {
+    ...cue,
+    text: "hello world",
+    tokens: [
+      { id: "a", text: "hello" },
+      { id: "b", text: "world" },
+    ],
+  };
+  expect(textEdits(english, "helloworld")).toMatchObject([{ from_token: "a", to_token: "b", text: "helloworld" }]);
+  expect(textEdits(english, "hello! world")).toMatchObject([{ from_token: "a", to_token: "a", text: "hello!" }]);
+  expect(cueEdit({ ...cue, breaks: ["offscreen"] }, "你好\n世界").ops.at(-1)).toEqual({
+    op: "set_cue",
+    cue_id: cue.cue_id,
+    breaks: ["offscreen", "tok_1"],
+  });
+});
+
+it("keeps arrows within wrapped visual lines and preserves the visual character column across cues", async () => {
+  Object.defineProperty(Range.prototype, "getClientRects", {
+    configurable: true,
+    value: function (this: Range) {
+      const top = this.startContainer.parentElement?.dataset.token === "tok_2" ? 25 : 5;
+      return [{ top, bottom: top + 15, height: 15 }];
+    },
+  });
+  cleanups.push(async () => {
+    Reflect.deleteProperty(Range.prototype, "getClientRects");
+  });
+  const h = await mount(listProject);
+  const first = h.find(cue.text);
+  vi.spyOn(first, "getBoundingClientRect").mockReturnValue({ top: 0, bottom: 42, height: 42 } as DOMRect);
+  await h.focus(cue.text, 1);
+  await h.key(h.find("编辑字幕"), "ArrowDown");
+  expect(h.state().subtitle_selection?.editing).toBe("cue_1");
+  await h.focus("编辑字幕", 3);
+  await h.key(h.find("编辑字幕"), "ArrowUp");
+  expect(h.state().subtitle_selection?.editing).toBe("cue_1");
+  await h.key(h.find("编辑字幕"), "ArrowDown");
+  expect(h.state().subtitle_selection?.editing).toBe("cue_2");
+  expect(caretOffset(h.find("编辑字幕"))).toBe(1);
+});
+
+it("copies all selected cue text through the row context menu", async () => {
+  const descriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  const writeText = vi.fn(async () => {});
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+  cleanups.push(async () => {
+    if (descriptor) Object.defineProperty(navigator, "clipboard", descriptor);
+    else Reflect.deleteProperty(navigator, "clipboard");
+  });
+  const h = await mount(listProject);
+  await h.key(h.find("字幕列表"), "a", { metaKey: true });
+  await act(async () => h.find(cue.text).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true })));
+  await h.click("复制文字");
+  expect(writeText).toHaveBeenCalledWith(`${cue.text}\n${nextCue.text}`);
+  expect(h.call).not.toHaveBeenCalled();
+});
+
+it("keeps pending inline edits in the same batch when merging from the context menu", async () => {
+  const h = await mount(listProject);
+  await h.click(cue.text);
+  await h.input("编辑字幕", "你好朋友");
+  await act(async () => h.find("编辑字幕").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true })));
+  const merge = [...h.find("字幕菜单").querySelectorAll<HTMLButtonElement>("button")].find(
+    (button) => button.textContent === "与下一条合并",
+  );
+  await act(async () => merge?.click());
+  expect(h.call).toHaveBeenCalledTimes(1);
+  expect(h.call.mock.lastCall?.[1]).toMatchObject({
+    label: "合并字幕",
+    ops: [
+      { op: "edit_text", from_token: "tok_2", to_token: "tok_2", text: "朋友" },
+      { op: "merge_cues", cue_ids: ["cue_1", "cue_2"] },
+    ],
+  });
 });

@@ -85,6 +85,10 @@ const uiStateSchema = z.strictObject({
   sub: z.string().nullable(),
   playhead: z.union([z.strictObject({ at: time }), z.strictObject({ id })]),
   selected: z.array(id),
+  subtitle_selection: z
+    .strictObject({ cue_ids: z.array(id), editing: id.nullable() })
+    .nullable()
+    .optional(),
   playing: z.boolean(),
   range: z.strictObject({ start: time, duration }).nullable(),
   loop: z.boolean(),
@@ -487,7 +491,7 @@ export async function startHost(
                       ...parsed.data,
                       subtitlePass: subtitlePass?.state,
                       subtitle_pass: subtitlePass?.latest ?? null,
-                      subtitle_selection: null,
+                      subtitle_selection: parsed.data.subtitle_selection ?? { cue_ids: [], editing: null },
                     },
                   }
                 : uiEnvelope(item.verb, "E_INTERNAL", "Invalid UI state"),
@@ -506,27 +510,43 @@ export async function startHost(
           const journal = await openProject({ projectPath }).journal();
           const lastRecognition = journal.findLast((entry) => entry.verb === "transcribe");
           const cues = timeline
-            ? projectSubtitles(project, timeline.id).cues.map((cue) => ({
-                ...cue,
-                text_override: timeline.tracks.some(
-                  (track) =>
-                    track.kind === "subtitle" &&
-                    track.id === cue.track_id &&
-                    track.overrides.some(
-                      (item) =>
-                        item.occurrence_id === cue.occurrence_id &&
-                        item.cue_id === cue.cue_id &&
-                        item.text !== undefined,
-                    ),
-                ),
-                transcript_id: project.transcripts.find((item) => item.cues.some((row) => row.id === cue.cue_id))?.id,
-                tokens: project.transcripts
-                  .find((item) => item.cues.some((row) => row.id === cue.cue_id))
-                  ?.tokens.filter((token) => cue.token_ids.includes(token.id))
-                  .map(({ id, text }) => ({ id, text })),
-                start: printRational(cue.start, true),
-                end: printRational(cue.end, true),
-              }))
+            ? projectSubtitles(project, timeline.id).cues.map((cue) => {
+                const owner = project.transcripts.find((item) => item.cues.some((row) => row.id === cue.cue_id));
+                const source = owner?.cues.find((row) => row.id === cue.cue_id);
+                const first = owner?.tokens.findIndex((token) => token.id === source?.first_token) ?? -1;
+                const last = owner?.tokens.findIndex((token) => token.id === source?.last_token) ?? -1;
+                const next = source && owner?.cues[owner.cues.indexOf(source) + 1];
+                const projected = owner?.tokens.filter((token) => cue.token_ids.includes(token.id)) ?? [];
+                const shownFirst = owner?.tokens.indexOf(projected[0] as (typeof projected)[number]) ?? -1;
+                const shownLast = owner?.tokens.indexOf(projected.at(-1) as (typeof projected)[number]) ?? -1;
+                return {
+                  ...cue,
+                  text_override: timeline.tracks.some(
+                    (track) =>
+                      track.kind === "subtitle" &&
+                      track.id === cue.track_id &&
+                      track.overrides.some(
+                        (item) =>
+                          item.occurrence_id === cue.occurrence_id &&
+                          item.cue_id === cue.cue_id &&
+                          item.text !== undefined,
+                      ),
+                  ),
+                  transcript_id: owner?.id,
+                  tokens: owner?.tokens
+                    .slice(shownFirst, shownLast + 1)
+                    .map(({ id, text, heard, state }) => ({ id, text, heard, state })),
+                  locked: !!(
+                    source?.timing?.locked ||
+                    source?.state === "approved" ||
+                    owner?.tokens.slice(first, last + 1).some((token) => token.state === "approved")
+                  ),
+                  breaks: source?.breaks ?? [],
+                  next_cue_id: next && owner?.tokens[last + 1]?.id === next.first_token ? next.id : null,
+                  start: printRational(cue.start, true),
+                  end: printRational(cue.end, true),
+                };
+              })
             : [];
           client.send(
             JSON.stringify({
