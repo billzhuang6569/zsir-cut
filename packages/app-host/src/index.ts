@@ -14,7 +14,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { WebSocket, WebSocketServer } from "ws";
 import { z } from "zod";
-import type { DispatchOptions, Envelope, Verb } from "../../core/dist/index.js";
+import type { DispatchOptions, Envelope, SubtitleStyle, Verb } from "../../core/dist/index.js";
 import { Agents } from "./agents.js";
 import { exportPreferences } from "./export-preferences.js";
 import { mediaChannel, runFfmpeg } from "./media.js";
@@ -38,6 +38,25 @@ const {
   new URL(import.meta.url.endsWith(".ts") ? "../../core/src/index.ts" : "../../core/dist/index.js", import.meta.url)
     .href
 );
+export function subtitleStylesForPreview(styles: SubtitleStyle[]) {
+  return styles.map((style) => ({
+    ...style,
+    ...(style.animation
+      ? {
+          animation: {
+            ...style.animation,
+            ...(style.animation.in
+              ? { in: { ...style.animation.in, duration: printRational(style.animation.in.duration, true) } }
+              : {}),
+            ...(style.animation.out
+              ? { out: { ...style.animation.out, duration: printRational(style.animation.out.duration, true) } }
+              : {}),
+          },
+        }
+      : {}),
+  }));
+}
+
 const time = z.string().regex(/^(?:0|[1-9]\d*)(?:\/[1-9]\d*)?s$/);
 const duration = time.refine((value) => !/^0(?:\/\d+)?s$/.test(value), "Duration must be positive");
 const id = z.string().min(1).max(200);
@@ -559,7 +578,7 @@ export async function startHost(
                       tail: printRational(item.tail ?? { numerator: 10n, denominator: 1n }, true),
                     })) ?? [],
                   cues,
-                  styles: project.subtitle_styles,
+                  styles: subtitleStylesForPreview(project.subtitle_styles),
                   subtitleTracks:
                     timeline?.tracks
                       .filter((track) => track.kind === "subtitle")

@@ -10,7 +10,7 @@ import type { renderPreview } from "./preview.ts";
 import { projectSubtitles } from "./project/projection.ts";
 import { validateProjectSemantics } from "./project/semantics.ts";
 import { clipTimeMap, mapSourceTimeToClip } from "./project/time-map.ts";
-import type { Project, Timeline } from "./project/types.ts";
+import type { Project, SubtitleStyle, Timeline } from "./project/types.ts";
 import {
   add,
   compare,
@@ -24,6 +24,12 @@ import {
   sub,
 } from "./rational.ts";
 import { validateLossReport, validateManifest } from "./schema.ts";
+
+export function unrepresentableStyleFields(style: SubtitleStyle) {
+  return (
+    ["italic", "underline", "letter_spacing", "align", "outlines", "shadow", "glow", "highlight", "animation"] as const
+  ).filter((field) => style[field] !== undefined);
+}
 
 export const PROFILES = {
   "fcp-11-fcpxml-1.13": { host: "final_cut_pro", min_host_version: "11", format: "fcpxml", format_version: "1.13" },

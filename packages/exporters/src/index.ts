@@ -20,6 +20,7 @@ import { otioExporter } from "./otio.ts";
 import { xmemlExporter } from "./xmeml.ts";
 
 const {
+  unrepresentableStyleFields,
   add,
   compare,
   div,
@@ -848,7 +849,7 @@ export const fcpxmlExporter: Exporter & { validationNotes?: string } = {
           "approximated",
           "warning",
           "R_STYLE_NOT_REPRESENTABLE",
-          "FCP 字幕使用默认外观，请在宿主中调整样式",
+          `FCP 字幕使用默认外观，请在宿主中调整样式${unrepresentableStyleFields(style).length ? `；无法表达：${unrepresentableStyleFields(style).join("、")}` : ""}`,
         ),
       );
     for (const missing of projectSubtitles(project, timeline.id).unprojected) {

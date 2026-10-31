@@ -58,14 +58,17 @@ beforeEach(() => {
 afterEach(async () => {
   for (const close of cleanups.splice(0)) await close();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 async function mount(
   view = project,
   sub = "subtitles",
   responder: (verb: string, request: Record<string, unknown>) => unknown = () => ({}),
+  withPreview = false,
 ) {
   let state: UiState = { ...initialState(), project: "/示例.zcut.json", panel: "subtitles", sub };
   const call = vi.fn(async (verb: string, request: Record<string, unknown>) => responder(verb, request));
+  const editCue = vi.fn();
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
@@ -77,6 +80,23 @@ async function mount(
       <>
         {panel.controls}
         {panel.parameters}
+        {withPreview && (
+          <TimelinePreview
+            project={view}
+            state={ui}
+            update={update}
+            call={call}
+            config={undefined}
+            error={null}
+            dragging={{ current: false }}
+            subtitlePreview={panel.stylePreview}
+            onSubtitleStyle={panel.previewStyle}
+            onEditSubtitle={(cue) => {
+              editCue(cue);
+              panel.editCue(cue);
+            }}
+          />
+        )}
       </>
     );
   }
@@ -118,7 +138,13 @@ async function mount(
     act(async () => {
       element.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, ...extra }));
     });
-  return { container, call, find, click, input, blur, key, state: () => state };
+  const settle = async () => {
+    await act(async () => {
+      if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(1000);
+      else await new Promise((resolve) => setTimeout(resolve, 1010));
+    });
+  };
+  return { container, call, editCue, find, click, input, blur, key, settle, state: () => state };
 }
 it("submits only changed recognition fields on blur and preserves terms", async () => {
   const h = await mount();
@@ -246,6 +272,7 @@ it.each([0, 1, 2].flatMap((row) => [0, 1, 2].map((column) => [row, column])))(
     const h = await mount(project, "style");
     const label = `${["上", "中", "下"][row]}${["左", "中", "右"][column]}`;
     await h.click(label);
+    await h.settle();
     const mapped = alignment(row, column, 0.8);
     expect(mapped).toEqual({ anchor: ["top", "middle", "bottom"][row], offset_x: ((column - 1) * (1 - 0.8)) / 2 });
     if (row === 2 && column === 1) expect(h.call).not.toHaveBeenCalled();
@@ -256,17 +283,16 @@ it.each([0, 1, 2].flatMap((row) => [0, 1, 2].map((column) => [row, column])))(
       });
   },
 );
-it("previews slider movement but commits once on release, and applies styles without IDs or version", async () => {
+it("previews slider movement, writes once after the release merge window, and keeps metadata out of the update", async () => {
   const h = await mount(project, "style");
   const slider = await h.input("字号", "0.06");
   expect(h.call).not.toHaveBeenCalled();
   await act(async () => slider.dispatchEvent(new Event("pointerup", { bubbles: true })));
   await h.blur("字号");
+  await h.settle();
   expect(h.call).toHaveBeenCalledTimes(1);
   expect(h.call.mock.lastCall?.[1].ops).toEqual([{ op: "update_style", style_id: "sty_1", font_size: 0.06 }]);
-  await h.click("应用到所有字幕");
   const ops = h.call.mock.lastCall?.[1].ops as Record<string, unknown>[];
-  expect(ops[0]).toMatchObject({ op: "update_style", style_id: "sty_1", font_size: 0.06 });
   expect(ops[0]).not.toHaveProperty("version");
   expect(ops[0]).not.toHaveProperty("id");
 });
@@ -441,7 +467,7 @@ it("opens filler chips separately from the switch and supports adding and removi
   ]);
   expect(h.container.querySelector("details")).toBeNull();
 });
-it("edits each track default independently of cue overrides and previews only its own cues", async () => {
+it("previews the selected track and applies edits to every style when scope is all", async () => {
   const h = await mount(
     {
       ...project,
@@ -463,20 +489,30 @@ it("edits each track default independently of cue overrides and previews only it
   expect(h.find<HTMLInputElement>("字号").value).toBe("0.07");
   expect(h.container.querySelector(".zc-sub-sample canvas")?.getAttribute("aria-label")).toBe("English sample");
   expect(h.call).not.toHaveBeenCalled();
-  await h.click("黄字");
+  await h.input("文字颜色", "#FFD84A");
+  await h.blur("文字颜色");
+  await h.settle();
   expect(h.call.mock.lastCall?.[1].ops).toEqual([
+    expect.objectContaining({ op: "update_style", style_id: "sty_1", color: "#FFD84A" }),
     expect.objectContaining({ op: "update_style", style_id: "sty_en", color: "#FFD84A" }),
   ]);
 });
-it("hides single-track selection and renders visual, selectable preset samples", async () => {
+it("reserves empty preset and animation containers and uses the specified collapsible groups", async () => {
   const h = await mount(project, "style");
   expect(h.container.querySelector('[aria-label="字幕样式轨道"]')).toBeNull();
-  const presets = h.container.querySelectorAll(".zc-sub-preset");
-  expect([...presets].map((p) => p.textContent)).toEqual(["字幕", "字幕", "字幕"]);
-  expect(presets[0]?.getAttribute("aria-pressed")).toBe("true");
-  await h.click("黑底白字");
-  expect(presets[1]?.getAttribute("aria-pressed")).toBe("true");
-  expect(presets[0]?.getAttribute("aria-pressed")).toBe("false");
+  expect(h.container.querySelector(".zc-sub-presets")?.textContent).toBe("");
+  expect([...h.container.querySelectorAll("summary")].map((item) => item.textContent)).toEqual([
+    "文字",
+    "描边",
+    "阴影",
+    "发光",
+    "底板",
+    "位置",
+  ]);
+  expect(h.container.querySelector("details")?.open).toBe(true);
+  await h.click("动画");
+  expect(h.container.querySelector(".zc-sub-animation")?.textContent).toBe("");
+  expect(h.call).not.toHaveBeenCalled();
 });
 
 it("uses the selected track cue at the playhead and falls back to its first cue in a gap", async () => {
@@ -499,6 +535,7 @@ it("supports common fonts, custom fonts and font weight through the existing sty
     });
   expect(h.find<HTMLSelectElement>("字体族").textContent).toContain("思源黑体");
   await select("字体族", "Source Han Sans SC");
+  await h.settle();
   expect(h.call.mock.lastCall?.[1].ops).toEqual([
     { op: "update_style", style_id: "sty_1", font_family: "Source Han Sans SC" },
   ]);
@@ -506,54 +543,21 @@ it("supports common fonts, custom fonts and font weight through the existing sty
   expect(h.call).toHaveBeenCalledTimes(1);
   await h.input("其他字体", "Custom Font");
   await h.blur("其他字体");
+  await h.settle();
   expect(h.call.mock.lastCall?.[1].ops).toEqual([
     { op: "update_style", style_id: "sty_1", font_family: "Custom Font" },
   ]);
   await select("字重", "700");
+  await h.settle();
   expect(h.call.mock.lastCall?.[1].ops).toEqual([{ op: "update_style", style_id: "sty_1", font_weight: 700 }]);
 });
 
-it("keeps preset samples distinct with the application CSS cascade, including disabled controls", async () => {
-  const sheet = document.createElement("style");
-  sheet.textContent = ["subtitles.css", "ai.css", "shell.css"]
-    .map((name) => readFileSync(`packages/desktop/src/${name}`, "utf8"))
-    .join("\n");
-  document.head.append(sheet);
-  cleanups.push(async () => sheet.remove());
+it("uses compact token-based style groups with accessible icon controls", async () => {
+  const css = readFileSync("packages/desktop/src/subtitles.css", "utf8");
+  expect(css).toContain(".zc-sub-style details");
   const h = await mount(project, "style");
-  const buttons = [...h.container.querySelectorAll<HTMLButtonElement>(".zc-sub-preset")];
-  const samples = buttons.map((button) => button.querySelector("span") as HTMLElement);
-  const appearances = samples.map((sample) => {
-    const css = getComputedStyle(sample);
-    return [css.color, css.backgroundColor];
-  });
-  expect(appearances.map(([color]) => color)).toEqual([
-    "rgb(255, 255, 255)",
-    "rgb(255, 255, 255)",
-    "rgb(255, 216, 74)",
-  ]);
-  expect(new Set(appearances.map((appearance) => JSON.stringify(appearance))).size).toBe(3);
-  expect(getComputedStyle(samples[1] as HTMLElement).backgroundColor).toBe("rgba(0, 0, 0, 0.8)");
-  expect(getComputedStyle(samples[1] as HTMLElement).borderRadius).toBe("4px");
-  for (const index of [0, 2]) {
-    expect(getComputedStyle(samples[index] as HTMLElement).textShadow).toContain("#000");
-    expect(getComputedStyle(samples[index] as HTMLElement).fontWeight).toBe("700");
-  }
-  for (const [index, button] of buttons.entries()) {
-    expect(button.title).toBe(["描边白字", "黑底白字", "黄字"][index]);
-    expect(getComputedStyle(button).backgroundColor).toBe("rgb(51, 51, 51)");
-  }
-  const selected = buttons[0] as HTMLButtonElement;
-  expect(getComputedStyle(selected).borderTopWidth).toBe("1px");
-  expect(getComputedStyle(selected).borderTopColor).toBe("rgb(221, 221, 221)");
-  await h.click("黑底白字");
-  expect(getComputedStyle(buttons[1] as HTMLElement).borderTopColor).toBe("rgb(221, 221, 221)");
-  expect(getComputedStyle(selected).borderTopColor).toBe("rgba(0, 0, 0, 0)");
-  await act(async () => {
-    for (const button of buttons) button.disabled = true;
-  });
-  expect(samples.map((sample) => getComputedStyle(sample).color)).toEqual(appearances.map(([color]) => color));
-  for (const button of buttons) expect(getComputedStyle(button).opacity).toBe("1");
+  for (const label of ["斜体", "下划线", "添加描边"]) expect(h.find(label).title).toBe(label);
+  expect(h.find<HTMLInputElement>("启用阴影").getAttribute("aria-checked")).toBe("false");
 });
 
 it("shows subtitle pass progress, failure reason, and retry", async () => {
@@ -636,4 +640,152 @@ it("does not show unmarked transcript cues before pass state arrives", async () 
   const panel = await mount(view);
   expect(panel.container.querySelectorAll(".zc-sub-row")).toHaveLength(0);
   expect(panel.container.textContent).not.toContain("已识别 · 第 4 版");
+});
+
+async function selectOption(h: Awaited<ReturnType<typeof mount>>, label: string, value: string) {
+  await act(async () => {
+    const element = h.find<HTMLSelectElement>(label);
+    element.value = value;
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+}
+it("merges releases within one second and copies only selected cues in the same edit", async () => {
+  vi.useFakeTimers();
+  const h = await mount();
+  await h.click(cue.text);
+  await h.click("样式");
+  await selectOption(h, "应用到", "selected");
+  const first = await h.input("字号", "0.06");
+  await act(async () => first.dispatchEvent(new Event("pointerup", { bubbles: true })));
+  await act(async () => vi.advanceTimersByTimeAsync(600));
+  const second = await h.input("字号", "0.07");
+  await act(async () => second.dispatchEvent(new Event("pointerup", { bubbles: true })));
+  await act(async () => vi.advanceTimersByTimeAsync(999));
+  expect(h.call).not.toHaveBeenCalled();
+  await act(async () => vi.advanceTimersByTimeAsync(1));
+  expect(h.call).toHaveBeenCalledTimes(1);
+  const ops = h.call.mock.lastCall?.[1].ops as Record<string, unknown>[];
+  expect(ops).toHaveLength(2);
+  expect(ops[0]).toMatchObject({ op: "add_style", font_size: 0.07 });
+  expect(ops[0]).not.toHaveProperty("version");
+  expect(ops[1]).toEqual({ op: "set_cue", cue_id: cue.cue_id, style_id: ops[0]?.id });
+});
+it("caps outlines at three layers and writes disabled effects as null", async () => {
+  vi.useFakeTimers();
+  const h = await mount(project, "style");
+  await h.click("添加描边");
+  await h.click("添加描边");
+  expect(h.find<HTMLButtonElement>("添加描边").disabled).toBe(true);
+  await h.settle();
+  const ops = h.call.mock.lastCall?.[1].ops as { outlines: unknown[] }[];
+  expect(ops[0]?.outlines).toHaveLength(3);
+  const withShadow = {
+    ...project,
+    styles: [
+      {
+        ...project.styles[0],
+        id: "sty_1",
+        font_family: "Arial",
+        font_size: 0.05,
+        color: "#FFFFFF",
+        shadow: { color: "#000000", distance: 0.1, blur: 0.2, angle: 90 },
+      },
+    ],
+  };
+  const shadow = await mount(withShadow, "style");
+  await act(async () => shadow.find<HTMLInputElement>("启用阴影").click());
+  await shadow.settle();
+  expect(shadow.call.mock.lastCall?.[1].ops).toEqual([{ op: "update_style", style_id: "sty_1", shadow: null }]);
+});
+it("previews color dragging and persists only the final released color", async () => {
+  vi.useFakeTimers();
+  const h = await mount(project, "style");
+  const color = await h.input("文字颜色取色", "#00ff00");
+  await h.input("文字颜色取色", "#ff0000");
+  expect(h.call).not.toHaveBeenCalled();
+  await act(async () => color.dispatchEvent(new Event("pointerup", { bubbles: true })));
+  await h.settle();
+  expect(h.call).toHaveBeenCalledTimes(1);
+  expect(h.call.mock.lastCall?.[1].ops).toEqual([{ op: "update_style", style_id: "sty_1", color: "#ff0000" }]);
+});
+async function previewHarness() {
+  vi.useFakeTimers();
+  Object.defineProperty(HTMLElement.prototype, "setPointerCapture", { configurable: true, value: vi.fn() });
+  cleanups.push(async () => {
+    Reflect.deleteProperty(HTMLElement.prototype, "setPointerCapture");
+  });
+  vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockReturnValue({
+    left: 0,
+    top: 0,
+    width: 320,
+    height: 180,
+    right: 320,
+    bottom: 180,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
+  });
+  const h = await mount(project, "subtitles", () => ({}), true);
+  await h.click(cue.text);
+  const hit = () => h.find<HTMLButtonElement>(`预览字幕：${cue.text}`);
+  const pointer = (target: HTMLElement, type: string, x: number, y: number) =>
+    act(async () => {
+      const event = new MouseEvent(type, { bubbles: true, button: 0, clientX: x, clientY: y });
+      Object.defineProperty(event, "pointerId", { value: 1 });
+      target.dispatchEvent(event);
+    });
+  return { ...h, hit, pointer };
+}
+it("selects preview cues, clamps drag inside the frame, snaps to centre, and requests list editing", async () => {
+  const h = await previewHarness();
+  await h.pointer(h.hit(), "pointerdown", 160, 160);
+  expect(h.hit().classList.contains("is-selected")).toBe(true);
+  await h.pointer(h.hit(), "pointermove", 162, 130);
+  expect(h.container.querySelector(".zc-subtitle-guide")).not.toBeNull();
+  expect(h.call).not.toHaveBeenCalled();
+  await h.pointer(h.hit(), "pointerup", 162, 130);
+  await h.settle();
+  const ops = h.call.mock.lastCall?.[1].ops as { position: { anchor: string; offset_x: number; margin_v: number } }[];
+  expect(ops[0]?.position).toMatchObject({ anchor: "bottom", offset_x: 0 });
+  expect(ops[0]?.position.margin_v).toBeCloseTo(0.08 + 30 / 180);
+  await h.pointer(h.hit(), "pointerdown", 160, 130);
+  await h.pointer(h.hit(), "pointermove", 10000, -10000);
+  const hit = h.hit();
+  expect(Number.parseFloat(hit.style.left)).toBeGreaterThanOrEqual(0);
+  expect(Number.parseFloat(hit.style.top)).toBeGreaterThanOrEqual(0);
+  expect(Number.parseFloat(hit.style.left) + Number.parseFloat(hit.style.width)).toBeLessThanOrEqual(100.00001);
+  await h.pointer(hit, "pointerup", 10000, -10000);
+  await h.settle();
+  await h.input("搜索字幕", "不存在");
+  await act(async () => h.hit().dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
+  expect(h.editCue).toHaveBeenCalledWith(cue);
+  expect(h.state().subtitle_selection).toEqual({ cue_ids: [cue.cue_id], editing: cue.cue_id });
+  const editor = h.find<HTMLTextAreaElement>("编辑字幕");
+  expect(editor.value).toBe(cue.text);
+  expect(document.activeElement).toBe(editor);
+  expect(editor.selectionStart).toBe(editor.value.length);
+  expect(editor.selectionEnd).toBe(editor.value.length);
+});
+it("scales from a corner around the subtitle centre and cancels without writing", async () => {
+  const h = await previewHarness();
+  const hit = h.hit();
+  const centre = () => Number.parseFloat(h.hit().style.top) + Number.parseFloat(h.hit().style.height) / 2;
+  const original = centre();
+  const x = ((Number.parseFloat(hit.style.left) + Number.parseFloat(hit.style.width)) / 100) * 320;
+  const y = ((Number.parseFloat(hit.style.top) + Number.parseFloat(hit.style.height)) / 100) * 180;
+  const corner = hit.querySelector<HTMLElement>('[data-subtitle-corner="se"]');
+  if (!corner) throw new Error("corner");
+  await h.pointer(corner, "pointerdown", x, y);
+  await h.pointer(hit, "pointermove", x + 5, y + 1);
+  expect(centre()).toBeCloseTo(original);
+  await h.pointer(hit, "pointerup", x + 5, y + 1);
+  await h.settle();
+  const ops = h.call.mock.lastCall?.[1].ops as { font_size: number }[];
+  expect(ops[0]?.font_size).toBeGreaterThan(defaultStyle.font_size);
+  h.call.mockClear();
+  await h.pointer(h.hit(), "pointerdown", 160, 150);
+  await h.pointer(h.hit(), "pointermove", 180, 140);
+  await h.pointer(h.hit(), "pointercancel", 180, 140);
+  await h.settle();
+  expect(h.call).not.toHaveBeenCalled();
 });

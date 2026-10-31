@@ -61,7 +61,11 @@ export function validateProjectSemantics(project: Project, parseIssues: ProjectI
     addId(item.id);
     if (item.video?.vfr) report("W_VFR", "warning", "Variable frame rate media", item.id);
   }
-  for (const item of project.subtitle_styles) addId(item.id);
+  for (const item of project.subtitle_styles) {
+    addId(item.id);
+    if (item.animation?.word && item.animation.word !== "none" && !item.highlight)
+      report("E_VALIDATION", "error", "Word animation requires highlight", item.id);
+  }
   const overlayPaths = new Set<string>();
   for (const overlay of project.subtitle_overlays ?? []) {
     addId(overlay.id);

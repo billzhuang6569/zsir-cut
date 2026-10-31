@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import type { Clip, CutRow, Exporter, LossItem, Media, Rational } from "../../core/dist/index.js";
 
 const {
+  unrepresentableStyleFields,
   add,
   clipTimeMap,
   compare,
@@ -466,7 +467,7 @@ export const otioExporter: Exporter & { validationNotes?: string } = {
           "approximated",
           "warning",
           "R_STYLE_NOT_REPRESENTABLE",
-          "字幕样式需在 Resolve 中调整",
+          `字幕样式需在 Resolve 中调整${unrepresentableStyleFields(style).length ? `；无法表达：${unrepresentableStyleFields(style).join("、")}` : ""}`,
         ),
       );
     for (const cue of projectSubtitles(project, timeline.id).cues)

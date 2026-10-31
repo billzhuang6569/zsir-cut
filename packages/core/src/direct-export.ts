@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { link, lstat, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { subtitleFiles } from "./export-framework.ts";
+import { type LossItem, subtitleFiles, unrepresentableStyleFields } from "./export-framework.ts";
 import { fingerprint } from "./fingerprint.ts";
 import type { ValidationIssue } from "./project/semantics.ts";
 import { clipTimeMap } from "./project/time-map.ts";
@@ -35,6 +35,28 @@ export function directFiles(project: Project, timeline: Timeline, profile: Direc
       used.add(name);
       return { name, data: file.data };
     });
+  });
+}
+
+export function directStyleLosses(project: Project): LossItem[] {
+  return project.subtitle_styles.flatMap((style) => {
+    const fields = unrepresentableStyleFields(style);
+    return fields.length
+      ? [
+          {
+            entity_id: style.id,
+            entity_kind: "style",
+            feature: "subtitle_style",
+            status: "unsupported",
+            severity: "warning",
+            timeline_range: null,
+            reason_code: "R_STYLE_NOT_REPRESENTABLE",
+            consequence: `SRT 无法表达：${fields.join("、")}`,
+            fallback_asset: null,
+            recoverable_from_source_project: true,
+          },
+        ]
+      : [];
   });
 }
 
@@ -234,7 +256,8 @@ export async function runDirectExport(
       }
       published.push(destination);
     }
-    return { files: results, warnings: audio?.warnings ?? [] };
+    const styleLosses = profile === "direct-srt" ? directStyleLosses(project) : [];
+    return { files: results, warnings: audio?.warnings ?? [], ...(styleLosses.length ? { losses: styleLosses } : {}) };
   } catch (error) {
     for (const path of published) await rm(path);
     throw error;

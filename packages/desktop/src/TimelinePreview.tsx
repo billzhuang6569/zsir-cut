@@ -9,6 +9,7 @@ import { Clip, Icon, IconButton } from "./components.js";
 import { DESKTOP_AUTHOR, type ProjectView } from "./connection.js";
 import { useReverseAudio } from "./reverse-audio.js";
 import { SubtitleCanvas } from "./SubtitleCanvas.js";
+import { subtitleStyleOps } from "./subtitles.js";
 import {
   add,
   type ClipView,
@@ -102,8 +103,16 @@ export function TimelinePreview({
   hideViewer = false,
   onMediaDrop,
   onEditSubtitle,
+  subtitlePreview,
+  onSubtitleStyle,
 }: {
   onEditSubtitle?: (cue: CueView) => void;
+  subtitlePreview?: { fields: Partial<import("./timeline.js").StyleView>; cue_ids?: string[] | undefined } | undefined;
+  onSubtitleStyle?: (
+    cue: import("./timeline.js").CueView,
+    patch: Partial<import("./timeline.js").StyleView>,
+    commit: boolean,
+  ) => void;
   readOnly?: boolean;
   historyBanner?: ReactNode;
   onHistory?: () => void;
@@ -119,6 +128,7 @@ export function TimelinePreview({
   errorDetail?: string | undefined;
   dragging: React.MutableRefObject<boolean>;
 }) {
+  const [subtitleDraft, setSubtitleDraft] = useState<Partial<import("./timeline.js").StyleView> | null>(null);
   const [drop, setDrop] = useState<{ track: string; at: string } | null>(null);
   const [scale, setScale] = useState(48);
   const [movePreview, setMovePreview] = useState<{
@@ -688,7 +698,53 @@ export function TimelinePreview({
                 近似
               </span>
             )}
-            <SubtitleCanvas cues={captions} styles={project?.styles ?? []} format={project?.format} />
+            <SubtitleCanvas
+              cues={captions}
+              styles={project?.styles ?? []}
+              preview={subtitlePreview ?? (subtitleDraft ? { fields: subtitleDraft } : undefined)}
+              format={project?.format}
+              selected={state.selected}
+              dragging={dragging}
+              select={
+                viewerOnly
+                  ? undefined
+                  : (cue) =>
+                      update({
+                        ...latest.current.state,
+                        selected: [cue.cue_id],
+                        subtitle_selection: { cue_ids: [cue.cue_id], editing: null },
+                      })
+              }
+              edit={(cue) => {
+                if (readOnly) return;
+                update({
+                  ...latest.current.state,
+                  panel: "subtitles",
+                  sub: "subtitles",
+                  selected: [cue.cue_id],
+                  subtitle_selection: { cue_ids: [cue.cue_id], editing: cue.cue_id },
+                  subtitleBrowser: {
+                    ...latest.current.state.subtitleBrowser,
+                    search: "",
+                    find: latest.current.state.subtitleBrowser?.find ?? "",
+                    replace: latest.current.state.subtitleBrowser?.replace ?? "",
+                    matchCase: latest.current.state.subtitleBrowser?.matchCase ?? false,
+                  },
+                  history: { open: false, revision: null, label: null },
+                });
+                onEditSubtitle?.(cue);
+              }}
+              change={
+                readOnly || viewerOnly
+                  ? undefined
+                  : (onSubtitleStyle ??
+                    ((cue, patch, commit) => {
+                      setSubtitleDraft(patch);
+                      if (commit && project)
+                        void write("edit", "调整字幕样式", subtitleStyleOps(project, [cue.cue_id], patch, false));
+                    }))
+              }
+            />
           </div>
           <div className="zc-player">
             <IconButton

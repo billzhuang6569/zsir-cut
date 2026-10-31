@@ -1,5 +1,7 @@
 // biome-ignore-all lint/style/noNonNullAssertion: Synthetic fixture and probe assertions guard indexed entries.
+
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -297,3 +299,19 @@ it("merges missing glyphs into the existing font warning even for a registered f
     },
   ]);
 }, 30000);
+
+it("keeps every decoded legacy overlay pixel identical to the pre-S4.5 export", async () => {
+  project.subtitle_styles[0]!.font_family = "Arial";
+  await renderSubtitleOverlay(project, overlay(), path);
+  const bytes = await decode();
+  const hashes = Array.from({ length: bytes.length / frameSize() }, (_, i) =>
+    createHash("sha256").update(frame(bytes, i)).digest("hex"),
+  );
+  const expected = JSON.parse(
+    await readFile(
+      new URL("../../../fixtures/golden/subtitle-styles/legacy-overlay.frames.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  expect(hashes).toEqual(expected);
+});
