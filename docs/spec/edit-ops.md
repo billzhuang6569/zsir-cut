@@ -138,7 +138,7 @@
 |---|---|---|
 | `hide_tokens` | `transcript_id`、`tokens` | `text` 设为空串；原 `heard` 没有时先把原 `text` 存进 `heard` |
 | `set_token_state` | `transcript_id`、`tokens`、`state` | 设置状态 |
-| `resegment` | `transcript_id`、`range`（可选，首尾字词）、`rules`（可选）、`cut_after`（可选，字词 ID 数组） | 按 `subtitle-rules.md` 重新生成范围内的字幕条，跳过锁定和已批准的。带 `cut_after` 时按 AI 断点分条（`subtitle-rules.md` 第 10 节）。首尾字词与旧条相同的新条沿用旧 ID，其余拿新 ID |
+| `resegment` | `transcript_id`、`range`（可选，首尾字词）、`rules`（可选）、`cut_after`（可选，字词 ID 数组） | 按 `subtitle-rules.md` 重新生成范围内的字幕条，跳过锁定和已批准的。带 `cut_after` 时只在这些字词后断开，内核不再按宽度、时长或停顿切（`subtitle-rules.md` 第 10 节）。首尾字词与旧条相同的新条沿用旧 ID，其余拿新 ID |
 | `set_cue` | `cue_id`、`breaks`、`timing`、`style_id`、`state` | 改字幕条 |
 | `split_cue` | `cue_id`、`after_token`、`new_id` | 在某字词之后拆成两条，后一条拿新 ID。原条的人工时间：起点留给前一条，终点留给后一条，拆分处两侧都不设人工值 |
 | `merge_cues` | `cue_ids` | 合并相邻的字幕条，保留第一条的 ID。人工时间保留第一条的起点和最后一条的终点 |
