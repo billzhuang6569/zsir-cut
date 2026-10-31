@@ -344,3 +344,25 @@ process.stdin.resume(); setInterval(()=>{},1000);`,
   expect(() => process.kill(captured.pid, 0)).toThrow();
   await expect(stat(captured.cwd)).rejects.toMatchObject({ code: "ENOENT" });
 });
+
+it("retains Claude authentication details from nonzero JSON output", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "zcut-pass-auth-"));
+  directories.push(directory);
+  const script = join(directory, "fake-agent");
+  await writeFile(
+    script,
+    `#!${process.execPath}\nprocess.stdout.write(JSON.stringify({is_error:true,result:'Failed to authenticate: OAuth session expired'})); process.exitCode=1;`,
+    { mode: 0o700 },
+  );
+  const manager = new Agents({
+    project: join(directory, "project.zcut.json"),
+    projectId: "prj_test",
+    url: "unused",
+    token: "unused",
+    emit: () => {},
+    commands: { claude: script, codex: script },
+  });
+  await expect(manager.subtitlePass("claude", "test", new AbortController().signal)).rejects.toThrow(
+    "Failed to authenticate",
+  );
+});

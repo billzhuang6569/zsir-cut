@@ -291,6 +291,7 @@ export class Agents {
           }
         };
         let stdout = "";
+        let stderr = "";
         let failure: Error | undefined;
         const abort = () => {
           failure = new Error("字幕整理 Agent 已停止");
@@ -304,14 +305,23 @@ export class Agents {
             kill();
           } else stdout += data.toString();
         });
-        child.stderr.resume();
+        child.stderr.on("data", (data: Buffer) => {
+          stderr += data.toString().slice(0, Math.max(0, 65536 - stderr.length));
+        });
         child.once("error", () => {
           failure = new Error("无法启动字幕整理 Agent");
         });
         child.once("close", (code) => {
           signal.removeEventListener("abort", abort);
-          if (failure || code !== 0) reject(failure ?? new Error(`Agent 退出（${code}），请检查登录状态和 CLI 版本`));
-          else resolve(stdout);
+          if (failure) reject(failure);
+          else if (code !== 0) {
+            let detail = stderr;
+            try {
+              const parsed = JSON.parse(stdout);
+              if (typeof parsed.result === "string") detail += ` ${parsed.result}`;
+            } catch {}
+            reject(new Error(detail || `Agent 退出（${code}），请检查登录状态和 CLI 版本`));
+          } else resolve(stdout);
         });
         child.stdin.on("error", () => {});
         child.stdin.end(prompt);
@@ -322,7 +332,8 @@ export class Agents {
         return await readFile(output, "utf8");
       }
       const result = JSON.parse(output);
-      if (result.is_error || typeof result.result !== "string") throw new Error("Agent 未返回文字结果");
+      if (result.is_error || typeof result.result !== "string")
+        throw new Error(typeof result.result === "string" ? result.result : "Agent 未返回文字结果");
       return result.result;
     } finally {
       await rm(directory, { recursive: true, force: true });

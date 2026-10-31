@@ -7,7 +7,6 @@ const {
   sub,
   transcriptRules,
   newId,
-  segmentTokens,
   textWidth,
   rationalNumber,
   mul,
@@ -194,6 +193,18 @@ export class SubtitlePass {
     );
   }
 
+  async retryFailed() {
+    const ids = new Set(
+      [...this.states.entries()].filter(([, state]) => state.warnings.length || state.running).map(([id]) => id),
+    );
+    await Promise.all(
+      [...ids].map(async (id) => {
+        await this.running.get(id);
+        if (!this.abort.signal.aborted && this.states.get(id)?.warnings.length) await this.run(id);
+      }),
+    );
+  }
+
   observe(verb: Verb, input: unknown, envelope: Envelope) {
     if (this.abort.signal.aborted) return;
     const request = input as Record<string, unknown>;
@@ -302,11 +313,12 @@ export class SubtitlePass {
     try {
       const detected = await this.options.detect();
       const selected = this.options.selected();
-      const agent =
-        selected ??
-        (["claude", "codex"] as const).find((kind) => detected.some((item) => item.agent === kind && item.available));
-      if (!agent || !detected.some((item) => item.agent === agent && item.available)) {
-        fallback("没有可用的 Agent，保留规则断句");
+      const available = (["claude", "codex"] as const).filter((kind) =>
+        detected.some((item) => item.agent === kind && item.available),
+      );
+      let agent = selected && available.includes(selected) ? selected : available[0];
+      if (!agent) {
+        fallback("没有检测到 Claude Code 或 Codex，请安装并登录后重试");
       } else
         for (let revisionAttempt = 0; revisionAttempt < 2; revisionAttempt++) {
           warnings.length = 0;
@@ -320,51 +332,57 @@ export class SubtitlePass {
           const progress = { transcript_id: id, done: 0, total: chunks.length };
           this.states.set(id, { running: true, warnings, progress: [progress] });
           this.options.changed();
-          const results = await Promise.all(
-            chunks.map(async (tokens, chunk) => {
-              let text = "";
-              for (let i = 0; i < tokens.length; i++) {
-                const token = tokens[i]!;
-                const previous = tokens[i - 1];
-                if (previous) {
-                  const gap = sub(token.align.start, previous.align.end);
-                  if (compare(gap, rules.hard_pause) >= 0) text += " // ";
-                  else if (compare(gap, rules.soft_pause) >= 0) text += " / ";
-                  else if (/[A-Za-z0-9]$/u.test(previous.text) && /^[A-Za-z0-9]/u.test(token.text)) text += " ";
-                }
-                text += token.text;
-              }
-              const input = { text, remove_fillers: removeFillers, terms, max_chars: rules.cpl * rules.max_lines };
-              const base = `${SUBTITLE_PASS_PROMPT}\n${JSON.stringify(input)}`;
-              const ask = async (prompt: string) => {
-                let reason = "Agent 调用失败";
-                for (let retry = 0; retry < 2 && !this.abort.signal.aborted; retry++) {
-                  try {
-                    const output: unknown = JSON.parse(await this.attempt(agent, prompt));
-                    if (
-                      !output ||
-                      typeof output !== "object" ||
-                      Array.isArray(output) ||
-                      Object.keys(output).join() !== "lines" ||
-                      !Array.isArray((output as { lines?: unknown }).lines)
-                    )
-                      throw new Error("输出必须只有 lines 数组");
-                    const lines = (output as { lines: string[] }).lines;
-                    const aligned = alignSubtitleLines(tokens, lines);
-                    if (
-                      (!removeFillers && aligned.hide.length) ||
-                      aligned.hide.length * 5 > tokens.length ||
-                      hidesTerm(transcript.tokens, new Set(aligned.hide), terms)
-                    )
-                      throw new Error("隐藏字词超过限制或包含名词");
-                    return { lines, ...aligned };
-                  } catch (error) {
-                    reason = error instanceof Error ? error.message : "Agent 调用失败";
+          const results: { ok: boolean; hide: string[]; cuts: string[] }[] = [];
+          let nextChunk = 0;
+          const worker = async () => {
+            while (nextChunk < chunks.length && !this.abort.signal.aborted) {
+              const chunk = nextChunk++;
+              const tokens = chunks[chunk]!;
+              let chunkAgent = agent!;
+              const processChunk = async (agent: AgentKind) => {
+                let text = "";
+                for (let i = 0; i < tokens.length; i++) {
+                  const token = tokens[i]!;
+                  const previous = tokens[i - 1];
+                  if (previous) {
+                    const gap = sub(token.align.start, previous.align.end);
+                    if (compare(gap, rules.hard_pause) >= 0) text += " // ";
+                    else if (compare(gap, rules.soft_pause) >= 0) text += " / ";
+                    else if (/[A-Za-z0-9]$/u.test(previous.text) && /^[A-Za-z0-9]/u.test(token.text)) text += " ";
                   }
+                  text += token.text;
                 }
-                throw new Error(reason);
-              };
-              try {
+                const input = { text, remove_fillers: removeFillers, terms, max_chars: rules.cpl * rules.max_lines };
+                const base = `${SUBTITLE_PASS_PROMPT}\n${JSON.stringify(input)}`;
+                const ask = async (prompt: string) => {
+                  let reason = "Agent 调用失败";
+                  for (let retry = 0; retry < 2 && !this.abort.signal.aborted; retry++) {
+                    try {
+                      const output: unknown = JSON.parse(await this.attempt(agent, prompt));
+                      if (
+                        !output ||
+                        typeof output !== "object" ||
+                        Array.isArray(output) ||
+                        Object.keys(output).join() !== "lines" ||
+                        !Array.isArray((output as { lines?: unknown }).lines)
+                      )
+                        throw new Error("输出必须只有 lines 数组");
+                      const lines = (output as { lines: string[] }).lines;
+                      const aligned = alignSubtitleLines(tokens, lines);
+                      if (
+                        (!removeFillers && aligned.hide.length) ||
+                        aligned.hide.length * 5 > tokens.length ||
+                        hidesTerm(transcript.tokens, new Set(aligned.hide), terms)
+                      )
+                        throw new Error("隐藏字词超过限制或包含名词");
+                      return { lines, ...aligned };
+                    } catch (error) {
+                      reason = error instanceof Error ? error.message : "Agent 调用失败";
+                      if (/authenticat|oauth|log(?:ged)?[ -]?in|login|登录|unauthorized/i.test(reason)) break;
+                    }
+                  }
+                  throw new Error(reason);
+                };
                 let result = await ask(base);
                 for (let round = 0; round < 2; round++) {
                   const bad = badSubtitleBoundaries(
@@ -401,21 +419,35 @@ export class SubtitlePass {
                   }
                 }
                 return { ok: true, hide: result.hide, cuts: result.cuts };
+              };
+              try {
+                try {
+                  results[chunk] = await processChunk(chunkAgent);
+                } catch (firstError) {
+                  const other = available.find((kind) => kind !== chunkAgent);
+                  if (!other || this.abort.signal.aborted) throw firstError;
+                  agent = other;
+                  chunkAgent = other;
+                  results[chunk] = await processChunk(chunkAgent);
+                }
               } catch (error) {
-                const reason = error instanceof Error ? error.message : "Agent 调用失败";
-                fallback(`第 ${chunk + 1} 块：${reason}`, chunk);
-                return {
-                  ok: false,
-                  hide: [],
-                  cuts: segmentTokens(tokens, rules, undefined, terms).map((group) => group.at(-1)!.id),
-                };
+                const message = error instanceof Error ? error.message : "Agent 调用失败";
+                const reason = /超时/i.test(message)
+                  ? "字幕整理超时，请检查网络和 Agent 后重试"
+                  : /authenticat|oauth|log(?:ged)?[ -]?in|login|登录|unauthorized/i.test(message)
+                    ? chunkAgent === "claude"
+                      ? "Claude Code 登录已过期，请在终端运行 claude 重新登录，或在 AI 面板换成 Codex"
+                      : "Codex 未登录，请在终端运行 codex 登录，或在 AI 面板换成 Claude Code"
+                    : `${chunkAgent === "claude" ? "Claude Code" : "Codex"} 字幕整理失败，请检查登录和 CLI 后重试`;
+                fallback(reason, chunk);
               } finally {
                 progress.done++;
                 this.options.changed();
               }
-            }),
-          );
-          if (this.abort.signal.aborted || !results.some((result) => result.ok)) break;
+            }
+          };
+          await Promise.all(Array.from({ length: Math.min(6, chunks.length) }, () => worker()));
+          if (this.abort.signal.aborted || warnings.length || results.length !== chunks.length) break;
           const hide = results.flatMap((result) => result.hide);
           envelope = await this.options.dispatch("edit", {
             project: this.options.project,

@@ -95,9 +95,10 @@ export interface OverlayView {
   last_export: { created_at: string; revision_id: string; size_bytes: number } | null;
 }
 export interface PreviewData {
+  unprocessedTranscripts?: string[];
   subtitlePass?: {
     running: boolean;
-    warnings: { code: string; reason: string }[];
+    warnings: { code: string; reason: string; transcript_id?: string }[];
     progress?: { transcript_id: string; done: number; total: number }[];
   };
   subtitleOverlays?: OverlayView[];

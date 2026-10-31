@@ -556,7 +556,7 @@ it("keeps preset samples distinct with the application CSS cascade, including di
   for (const button of buttons) expect(getComputedStyle(button).opacity).toBe("1");
 });
 
-it("shows subtitle pass progress and a fallback reason beside the restored status", async () => {
+it("shows subtitle pass progress, failure reason, and retry", async () => {
   const running = await mount({
     ...project,
     subtitlePass: { running: true, warnings: [], progress: [{ transcript_id: "tra_1", done: 1, total: 8 }] },
@@ -572,14 +572,25 @@ it("shows subtitle pass progress and a fallback reason beside the restored statu
       warnings: [{ code: "W_SUB_PASS_FALLBACK", reason: "第 2 块：Agent 超时（120 秒）" }],
     },
   });
-  expect(done.container.textContent).toContain("已识别 · 第 4 版 · 2 条字幕");
-  expect(done.find("字幕整理退回规则断句").title).toBe("第 2 块：Agent 超时（120 秒）");
+  expect(done.container.textContent).toContain("字幕整理失败");
+  expect(done.find("字幕整理失败").title).toBe("第 2 块：Agent 超时（120 秒）");
+  expect(done.container.querySelectorAll(".zc-sub-row")).toHaveLength(0);
+  await done.click("重新整理");
+  expect(done.call).toHaveBeenCalledWith("chat_subtitle_retry", {});
 });
 
 it.each([
   ["整理中", { running: true, warnings: [], progress: [{ transcript_id: "tra_1", done: 1, total: 2 }] }, false],
   ["完成", { running: false, warnings: [], progress: [] }, true],
-  ["退路", { running: false, warnings: [{ code: "W_SUB_PASS_FALLBACK", reason: "Agent 超时" }], progress: [] }, true],
+  [
+    "失败",
+    {
+      running: false,
+      warnings: [{ code: "W_SUB_PASS_FALLBACK", reason: "Agent 超时", transcript_id: "tra_1" }],
+      progress: [],
+    },
+    false,
+  ],
 ])("shows timeline and preview correctly: %s", async (_name, subtitlePass, shown) => {
   const other = { ...cue, cue_id: "cue_other", transcript_id: "tra_other", text: "其他母稿" };
   const view = { ...project, cues: [cue, other], subtitlePass };
@@ -617,5 +628,12 @@ it.each([
   expect(drawn.includes(cue.text)).toBe(shown);
   const panel = await mount(view);
   expect(panel.container.querySelectorAll(".zc-sub-row")).toHaveLength(shown ? 2 : 0);
-  if (_name === "退路") expect(panel.find("字幕整理退回规则断句").title).toBe("Agent 超时");
+  if (_name === "失败") expect(panel.find("字幕整理失败").title).toBe("Agent 超时");
+});
+
+it("does not show unmarked transcript cues before pass state arrives", async () => {
+  const view = { ...project, unprocessedTranscripts: ["tra_1"] };
+  const panel = await mount(view);
+  expect(panel.container.querySelectorAll(".zc-sub-row")).toHaveLength(0);
+  expect(panel.container.textContent).not.toContain("已识别 · 第 4 版");
 });

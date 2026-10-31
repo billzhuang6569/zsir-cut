@@ -419,6 +419,8 @@ export function useSubtitlePanel({
   const background =
     config && clip ? mediaUrl(config, "thumb", clip.media_id, printRational(sourceAt(clip, at), true)) : undefined;
   const passProgress = project?.subtitlePass?.progress ?? [];
+  const failed = project?.subtitlePass?.warnings ?? [];
+  const pending = !!project?.unprocessedTranscripts?.length;
   const done = passProgress.reduce((sum, item) => sum + item.done, 0);
   const total = passProgress.reduce((sum, item) => sum + item.total, 0);
   const controls = (
@@ -427,14 +429,18 @@ export function useSubtitlePanel({
         <span className="zc-dot" aria-hidden="true" />
         {project?.subtitlePass?.running
           ? `AI 整理字幕… ${done} / ${total}`
-          : project?.recognized
-            ? `已识别${project.recognitionRevision !== undefined ? ` · 第 ${project.recognitionRevision} 版` : ""} · ${cues.length} 条字幕`
-            : "还没有识别"}
+          : failed.length
+            ? "字幕整理失败"
+            : pending
+              ? "AI 整理字幕…"
+              : project?.recognized
+                ? `已识别${project.recognitionRevision !== undefined ? ` · 第 ${project.recognitionRevision} 版` : ""} · ${cues.length} 条字幕`
+                : "还没有识别"}
         {!!project?.subtitlePass?.warnings.length && !project.subtitlePass.running && (
           <span
             className="zc-sub-attention"
             role="img"
-            aria-label="字幕整理退回规则断句"
+            aria-label="字幕整理失败"
             title={project.subtitlePass.warnings.map((warning) => warning.reason).join("；")}
           >
             ⚠
@@ -525,6 +531,13 @@ export function useSubtitlePanel({
         <p className="zc-muted">
           识别完成，AI 正在按意思断句，大约还要 {Math.max(1, Math.ceil((total - done) / 6))} 分钟
         </p>
+      ) : failed.length ? (
+        <p role="alert">
+          {failed.map((warning) => warning.reason).join("；")}{" "}
+          <IconButton icon="refresh" label="重新整理" onClick={() => void call("chat_subtitle_retry", {})} />
+        </p>
+      ) : pending ? (
+        <p className="zc-muted">识别完成，AI 正在按意思断句</p>
       ) : state.sub !== "style" ? (
         <>
           <div className="zc-sub-search-row">

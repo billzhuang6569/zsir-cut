@@ -117,10 +117,10 @@ describe("subtitle pass", () => {
     '{"cut_after":[],"hide":["1"]}',
     '{"cut_after":[]}',
     '{"cut_after":[],"hide":[],"text":"rewrite"}',
-  ])("retries invalid output twice then retains rules: %s", async (output) => {
+  ])("retries invalid output on both agents without writing: %s", async (output) => {
     const f = await setup(transcript(), async () => output);
     const result = await f.manager.run("trs_test");
-    expect(f.run).toHaveBeenCalledTimes(2);
+    expect(f.run).toHaveBeenCalledTimes(4);
     expect(f.kernel).not.toHaveBeenCalled();
     expect(result.verification.issues[0]?.code).toBe("W_SUB_PASS_FALLBACK");
   });
@@ -134,6 +134,7 @@ describe("subtitle pass", () => {
   it("times out each call at 120s, aborts both attempts and never writes a mark", async () => {
     vi.useFakeTimers();
     const f = await setup(transcript(), async () => new Promise(() => {}));
+    f.detect.mockResolvedValue([{ agent: "claude", available: true }]);
     const task = f.manager.run("trs_test");
     await vi.advanceTimersByTimeAsync(119999);
     expect(f.run).toHaveBeenCalledTimes(1);
@@ -184,11 +185,11 @@ describe("subtitle pass", () => {
     const f = await setup(t, async () => JSON.stringify({ lines: [output] }));
     f.project.recognition = { remove_fillers: kind !== "disabled", terms: kind === "term" ? ["豆包"] : [] };
     const result = await f.manager.run(t.id);
-    expect(f.run).toHaveBeenCalledTimes(2);
+    expect(f.run).toHaveBeenCalledTimes(4);
     expect(f.kernel).not.toHaveBeenCalled();
     expect(result.verification.issues[0]?.code).toBe("W_SUB_PASS_FALLBACK");
   });
-  it("uses rule segmentation only for a failed chunk", async () => {
+  it("writes nothing when a later chunk fails", async () => {
     const t = transcript(21);
     t.tokens[10]!.text = "锁";
     t.cues = [{ id: "cue_locked", first_token: "tok_10", last_token: "tok_10", state: "approved" }];
@@ -199,7 +200,7 @@ describe("subtitle pass", () => {
       return JSON.stringify({ lines: ["字字字字", "字字字字字字"] });
     });
     const result = await f.manager.run(t.id);
-    expect(request(f).ops[0]).toMatchObject({ cut_after: ["tok_3", "tok_9", "tok_20"] });
+    expect(f.kernel).not.toHaveBeenCalled();
     expect(result.result?.warnings).toEqual([expect.objectContaining({ chunk: 1, code: "W_SUB_PASS_FALLBACK" })]);
   });
   it("requests up to two revisions and retains the last legal result", async () => {
@@ -238,21 +239,21 @@ describe("subtitle pass", () => {
     expect(result.verification.issues).toEqual(
       expect.arrayContaining([expect.objectContaining({ code: "W_SUB_PASS_FALLBACK" })]),
     );
-    expect(request(f).ops).toEqual([{ op: "resegment", transcript_id: t.id, cut_after: ["tok_9", "tok_20"] }]);
+    expect(f.kernel).not.toHaveBeenCalled();
   });
   it("all failed and no Agent never call edit", async () => {
     const f = await setup(transcript(20, 10), async () => {
       throw new Error("离线");
     });
     await f.manager.run("trs_test");
-    expect(f.run).toHaveBeenCalledTimes(2);
+    expect(f.run).toHaveBeenCalledTimes(4);
     expect(f.kernel).not.toHaveBeenCalled();
     f.detect.mockResolvedValue([]);
     f.run.mockClear();
     await f.manager.run("trs_test");
     expect(f.run).not.toHaveBeenCalled();
     expect(f.kernel).not.toHaveBeenCalled();
-    expect(f.manager.state.warnings[0]?.reason).toContain("没有可用");
+    expect(f.manager.state.warnings[0]?.reason).toContain("没有检测到");
   });
   it("chooses panel Agent, otherwise Claude first, otherwise Codex", async () => {
     const f = await setup();
@@ -357,28 +358,88 @@ describe("subtitle pass", () => {
     await vi.advanceTimersByTimeAsync(3000);
     expect(f.run).not.toHaveBeenCalled();
   });
-  it("caps concurrency at six and cancels queued work on project close", async () => {
-    const releases: (() => void)[] = [];
-    const f = await setup(
-      {
-        ...transcript(80),
-        cues: Array.from({ length: 7 }, (_, i) => ({
-          id: `cue_lock_${i}`,
-          first_token: `tok_${i * 10 + 9}`,
-          last_token: `tok_${i * 10 + 9}`,
-          state: "approved" as const,
-        })),
-      },
-      async () => new Promise<string>((resolve) => releases.push(() => resolve('{"lines":["字字字字字字字字字"]}'))),
+  it("switches concurrent chunks and uses the replacement for queued chunks", async () => {
+    const t = transcript(87);
+    t.cues = Array.from({ length: 7 }, (_, i) => ({
+      id: `locked_${i}`,
+      first_token: `tok_${i * 11 + 10}`,
+      last_token: `tok_${i * 11 + 10}`,
+      state: "approved" as const,
+    }));
+    for (let i = 0; i < t.tokens.length; i++) t.tokens[i]!.text = String.fromCharCode(0x4e00 + Math.floor(i / 11));
+    let active = 0;
+    let maxActive = 0;
+    const f = await setup(t, async (agent, prompt) => {
+      active++;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active--;
+      if (agent === "claude") throw new Error("Failed to authenticate: OAuth session expired");
+      return JSON.stringify({ lines: [JSON.parse(prompt.split("\n").at(-1)!).text] });
+    });
+    await f.manager.run(t.id);
+    const calls = f.run.mock.calls.map(([agent, prompt]) => ({
+      agent,
+      text: JSON.parse(prompt.split("\n").at(-1)!).text,
+    }));
+    expect(calls.filter(({ agent }) => agent === "claude")).toHaveLength(6);
+    expect(new Set(calls.filter(({ agent }) => agent === "claude").map(({ text }) => text)).size).toBe(6);
+    expect(calls.filter(({ agent }) => agent === "codex")).toHaveLength(8);
+    expect(new Set(calls.filter(({ agent }) => agent === "codex").map(({ text }) => text)).size).toBe(8);
+    expect(maxActive).toBe(6);
+    expect(f.kernel).toHaveBeenCalledTimes(1);
+    expect(request(f).ops[0]).toMatchObject({
+      cut_after: ["tok_9", "tok_20", "tok_31", "tok_42", "tok_53", "tok_64", "tok_75", "tok_86"],
+    });
+  });
+  it("retries failures after an agent change or retry request", async () => {
+    const f = await setup(transcript(), async (agent) => {
+      if (agent === "claude") throw new Error("Failed to authenticate");
+      return '{"lines":["字字字字","字字字字字字"]}';
+    });
+    f.detect.mockResolvedValue([{ agent: "claude", available: true }]);
+    await f.manager.run("trs_test");
+    expect(f.manager.state.warnings[0]?.reason).toContain("Claude Code 登录已过期");
+    f.detect.mockResolvedValue([{ agent: "codex", available: true }]);
+    f.selected.mockReturnValue("codex");
+    await f.manager.retryFailed();
+    expect(f.kernel).toHaveBeenCalledTimes(1);
+    expect(f.manager.state.warnings).toEqual([]);
+  });
+  it("queues a retry if the agent changes while a failing pass is running", async () => {
+    let rejectFirst!: (error: Error) => void;
+    const f = await setup(transcript(), async (agent) =>
+      agent === "claude"
+        ? new Promise((_, reject) => {
+            rejectFirst = reject;
+          })
+        : '{"lines":["字字字字","字字字字字字"]}',
     );
+    f.detect.mockResolvedValue([{ agent: "claude", available: true }]);
     const task = f.manager.run("trs_test");
-    await vi.waitFor(() => expect(f.run).toHaveBeenCalledTimes(6));
-    releases[0]!();
-    await vi.waitFor(() => expect(f.run).toHaveBeenCalledTimes(7));
+    await vi.waitFor(() => expect(f.run).toHaveBeenCalledTimes(1));
+    f.detect.mockResolvedValue([{ agent: "codex", available: true }]);
+    f.selected.mockReturnValue("codex");
+    const retry = f.manager.retryFailed();
+    rejectFirst(new Error("Failed to authenticate"));
+    await Promise.all([task, retry]);
+    expect(f.kernel).toHaveBeenCalledTimes(1);
+  });
+  it("explains Codex login failure when it is the only agent", async () => {
+    const f = await setup(transcript(), async () => {
+      throw new Error("Not logged in");
+    });
+    f.detect.mockResolvedValue([{ agent: "codex", available: true }]);
+    await f.manager.run("trs_test");
+    expect(f.manager.state.warnings[0]?.reason).toContain("Codex 未登录");
+    expect(f.kernel).not.toHaveBeenCalled();
+  });
+  it("cancels an active chunk on close without writing", async () => {
+    const f = await setup(transcript(), async () => new Promise(() => {}));
+    const task = f.manager.run("trs_test");
+    await vi.waitFor(() => expect(f.run).toHaveBeenCalledTimes(1));
     await f.manager.stop();
     await task;
-    expect(f.run.mock.calls.every((call) => call[2].aborted || call === f.run.mock.calls[0])).toBe(true);
-    expect(f.run).toHaveBeenCalledTimes(7);
     expect(f.kernel).not.toHaveBeenCalled();
   });
 });
