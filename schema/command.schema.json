@@ -2157,6 +2157,22 @@
           "type": "object",
           "required": [
             "op",
+            "transcript_id"
+          ],
+          "properties": {
+            "op": {
+              "const": "mark_proofread"
+            },
+            "transcript_id": {
+              "$ref": "#/$defs/id"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "op",
             "transcript_id",
             "token_id",
             "at"
