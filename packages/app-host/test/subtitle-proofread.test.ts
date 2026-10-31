@@ -100,6 +100,38 @@ const edits = (f: Awaited<ReturnType<typeof setup>>, call = 0) =>
   };
 
 describe("proofread checks with a fake agent", () => {
+  it.each([false, true])("partial proofread never marks even when every cue is selected (fixes: %s)", async (fix) => {
+    const f = await setup(transcript(), async () => fixes(fix ? [{ id: "cue_0", text: "我们今天公布了消息" }] : []));
+    await f.pass.start("subtitle_proofread", { cue_ids: ["cue_0"] });
+    const result = await f.pass.run("trs_test");
+    expect(f.pass.latest?.state).toBe("done");
+    if (fix) {
+      expect(edits(f).ops).toEqual([
+        { op: "edit_text", transcript_id: "trs_test", from_token: "tok_4", to_token: "tok_5", text: "公布" },
+      ]);
+    } else {
+      expect(f.kernel).not.toHaveBeenCalled();
+      expect(result.status).toBe("no_op");
+    }
+  });
+  it("appends a mark for every whole transcript in one batch", async () => {
+    const f = await setup();
+    const other = transcript(["这里也是工部的消息"]);
+    other.id = "trs_other";
+    other.cues[0]!.id = "cue_other";
+    for (const token of other.tokens) token.id += "_other";
+    other.cues[0]!.first_token += "_other";
+    other.cues[0]!.last_token += "_other";
+    f.project.transcripts.push(other);
+    await finish(f);
+    expect(edits(f)).toMatchObject({
+      label: "AI 校对字幕（没有要改的字）",
+      ops: [
+        { op: "mark_proofread", transcript_id: "trs_test" },
+        { op: "mark_proofread", transcript_id: "trs_other" },
+      ],
+    });
+  });
   it.each([
     ["empty", "", "改后文字为空"],
     ["punctuation", "我们今天公布了消息。", "标点"],
@@ -112,7 +144,7 @@ describe("proofread checks with a fake agent", () => {
     expect(f.run).toHaveBeenCalledTimes(2);
     expect(f.run.mock.calls[1]![1]).toContain(problem);
     expect(f.run.mock.calls[1]![1]).toContain('"上一次的结果":{"fixes":');
-    expect(f.kernel).not.toHaveBeenCalled();
+    expect(edits(f).ops).toEqual([{ op: "mark_proofread", transcript_id: "trs_test" }]);
     expect(f.pass.latest).toMatchObject({ state: "done", done: 1, total: 1 });
   });
   it("counts skipped lines in the envelope and retains the already-valid fixes during revision", async () => {
@@ -140,6 +172,7 @@ describe("proofread checks with a fake agent", () => {
       ops: [
         { op: "edit_text", from_token: "tok_4", to_token: "tok_5", text: "公布" },
         { op: "edit_text", from_token: "tok_13", to_token: "tok_14", text: "公布" },
+        { op: "mark_proofread", transcript_id: "trs_test" },
       ],
     });
     // The automatic entry exposes warnings in its envelope as well as the panel state.
@@ -160,7 +193,7 @@ describe("proofread checks with a fake agent", () => {
     );
     await finish(f);
     expect(f.run).toHaveBeenCalledTimes(1);
-    expect(edits(f).ops).toHaveLength(3);
+    expect(edits(f).ops).toHaveLength(4);
   });
   it("ignores unknown, locked, approved cues and approved tokens", async () => {
     const t = transcript(Array(5).fill("我们今天工部了消息"));
@@ -190,7 +223,7 @@ describe("proofread checks with a fake agent", () => {
     f.run.mockRejectedValueOnce(new Error("启动失败"));
     await finish(f);
     expect(f.run).toHaveBeenCalledTimes(2);
-    expect(f.kernel).not.toHaveBeenCalled();
+    expect(edits(f).ops).toEqual([{ op: "mark_proofread", transcript_id: "trs_test" }]);
   });
   it("reports a readable failure and writes nothing if a block fails", async () => {
     const f = await setup(transcript(), async () => {
@@ -229,7 +262,7 @@ describe("proofread checks with a fake agent", () => {
         : fixes([{ id: "cue_0", text: "我们今天公布了消息" }]),
     );
     const result = await f.pass.run(t.id);
-    expect(f.kernel).not.toHaveBeenCalled();
+    expect(edits(f).ops).toEqual([{ op: "mark_proofread", transcript_id: "trs_test" }]);
     expect(result.status).toBe("no_op");
     expect(result.result?.warnings).toEqual([expect.objectContaining({ code: "W_SUB_PROOFREAD_SKIPPED", count: 1 })]);
   });
@@ -255,10 +288,13 @@ describe("proofread checks with a fake agent", () => {
     expect(f.kernel).toHaveBeenCalledTimes(2);
     expect(edits(f, 1)).toMatchObject({
       base_revision: "rev_new",
-      ops: [{ from_token: "tok_13", to_token: "tok_14", text: "公布" }],
+      ops: [
+        { from_token: "tok_13", to_token: "tok_14", text: "公布" },
+        { op: "mark_proofread", transcript_id: "trs_test" },
+      ],
     });
   });
-  it("returns no_op without a second write when every cue changed during a conflict", async () => {
+  it("retries with only the mark when every cue changed during a whole-transcript conflict", async () => {
     const t = transcript();
     t.ext = { "zsir.subtitle_pass": { by: "字幕整理" } };
     const f = await setup(t, async (_a, p) =>
@@ -278,7 +314,11 @@ describe("proofread checks with a fake agent", () => {
     const result = await f.pass.run(t.id);
     expect(result.status).toBe("no_op");
     expect(result.ok).toBe(true);
-    expect(f.kernel).toHaveBeenCalledTimes(1);
+    expect(f.kernel).toHaveBeenCalledTimes(2);
+    expect(edits(f, 1)).toMatchObject({
+      label: "AI 校对字幕（没有要改的字）",
+      ops: [{ op: "mark_proofread", transcript_id: "trs_test" }],
+    });
   });
   it("does not overwrite a cue locked or changed while the agent was running", async () => {
     const f = await setup(transcript(["我们今天工部了消息", "这里也是工部的消息"]), async () => {
@@ -290,7 +330,7 @@ describe("proofread checks with a fake agent", () => {
       ]);
     });
     await finish(f);
-    expect(f.kernel).not.toHaveBeenCalled();
+    expect(edits(f).ops).toEqual([{ op: "mark_proofread", transcript_id: "trs_test" }]);
   });
   it("chunks <=80 cues, runs six at once, and switches queued chunks to the replacement agent", async () => {
     const f = await setup(transcript(Array(561).fill("我们今天工部了消息")), async (agent, prompt) => {
@@ -310,7 +350,7 @@ describe("proofread checks with a fake agent", () => {
     expect(f.run.mock.calls.filter(([a]) => a === "codex")).toHaveLength(8);
     expect(f.pass.latest).toMatchObject({ done: 8, total: 8, state: "done" });
     expect(f.kernel).toHaveBeenCalledTimes(1);
-    expect(edits(f).ops).toHaveLength(561);
+    expect(edits(f).ops).toHaveLength(562);
     expect(edits(f).ops[0]!.from_token).toBe("tok_4");
   });
   it("limits the selected cue span, merges terms, and includes user requirements in JSON and prompt", async () => {
@@ -404,7 +444,7 @@ it("uses at most 12000 Unicode characters for summary and falls back to project 
   f.project.recognition!.terms = ["豆包"];
   const result = await f.pass.run(t.id);
   expect(result.result?.warnings).toEqual([]);
-  expect(f.kernel).not.toHaveBeenCalled();
+  expect(edits(f).ops).toEqual([{ op: "mark_proofread", transcript_id: "trs_test" }]);
 });
 
 it("keeps the breaking write and exposes a proofread-only warning on proofread failure", async () => {
@@ -439,18 +479,24 @@ it("reopens unmarked transcripts for both steps, tidy-only transcripts for proof
   });
   await f.pass.open();
   expect(f.run).toHaveBeenCalledTimes(3);
-  expect(f.kernel).toHaveBeenCalledTimes(1);
+  expect(f.kernel).toHaveBeenCalledTimes(2);
   f.run.mockClear();
   f.kernel.mockClear();
   f.project.transcripts[0]!.ext = { "zsir.subtitle_pass": { by: "字幕整理" } };
   await f.pass.open();
   expect(f.run).toHaveBeenCalledTimes(2);
-  expect(f.kernel).not.toHaveBeenCalled();
+  expect(edits(f).ops).toEqual([{ op: "mark_proofread", transcript_id: "trs_test" }]);
   expect(f.run.mock.calls.some(([, p]) => p.startsWith(SUBTITLE_PASS_PROMPT))).toBe(false);
   f.run.mockClear();
   f.project.transcripts[0]!.ext!["zsir.proofread"] = { by: "字幕校对" };
   await f.pass.open();
   expect(f.run).not.toHaveBeenCalled();
+  f.kernel.mockClear();
+  delete f.project.transcripts[0]!.ext!["zsir.subtitle_pass"];
+  await f.pass.open();
+  expect(f.run).toHaveBeenCalledTimes(1);
+  expect(f.run.mock.calls[0]![1]).toContain(SUBTITLE_PASS_PROMPT);
+  expect(f.kernel).toHaveBeenCalledTimes(1);
 });
 
 it("keeps host prompts exactly synchronized with the Skill quoted blocks", async () => {
@@ -467,68 +513,107 @@ it("keeps host prompts exactly synchronized with the Skill quoted blocks", async
   expect(SUBTITLE_PROOFREAD_PROMPT).toBe(`${quote("校对要求")}\n\n${skill.split("\n\n修改轮：")[1]!.split("\n\n")[0]}`);
 });
 
-it("writes the proofread mark, edited/heard tokens and one undoable real core history step", async () => {
-  const directory = await mkdtemp(join(process.cwd(), ".tmp/proofread-core-"));
-  const path = join(directory, "project.zcut.json");
-  try {
-    const parsed = parseProject(await readFile("examples/interview.zcut.json", "utf8"));
-    if (!parsed.ok) throw new Error("fixture");
-    const project = parsed.project;
-    const t = project.transcripts[0]!;
-    t.tokens[1]!.text = "工部";
-    for (const token of t.tokens) token.state = "auto";
-    for (const cue of t.cues) {
-      cue.state = "auto";
-      delete cue.timing;
-    }
-    t.ext = { "test.keep": true, "zsir.subtitle_pass": { by: "字幕整理" } };
-    await writeFile(path, serializeProject(project));
-    const load = async (): Promise<Project> => {
-      const p = parseProject(await readFile(path, "utf8"));
-      if (!p.ok) throw new Error("fixture");
-      return p.project;
-    };
-    const before = await load();
-    const run: AgentRunner = async (_a, p) =>
-      fixes(
-        input(p)
-          .lines.map((l: { id: string; text: string }) => ({ id: l.id, text: l.text.replace("工部", "公布") }))
-          .filter((l: { text: string }) => l.text.includes("公布")),
+it.each(["manual-fix", "manual-no-fix", "automatic-no-fix"])(
+  "writes one undoable real core history step and skips proofread on reopen (%s)",
+  async (mode) => {
+    const fix = mode === "manual-fix";
+    const directory = await mkdtemp(join(process.cwd(), ".tmp/proofread-core-"));
+    const path = join(directory, "project.zcut.json");
+    try {
+      const parsed = parseProject(await readFile("examples/interview.zcut.json", "utf8"));
+      if (!parsed.ok) throw new Error("fixture");
+      const project = parsed.project;
+      const t = project.transcripts[0]!;
+      t.tokens[1]!.text = "工部";
+      for (const token of t.tokens) token.state = "auto";
+      for (const cue of t.cues) {
+        cue.state = "auto";
+        delete cue.timing;
+      }
+      t.ext = { "test.keep": true, "zsir.subtitle_pass": { by: "字幕整理" } };
+      await writeFile(path, serializeProject(project));
+      const load = async (): Promise<Project> => {
+        const p = parseProject(await readFile(path, "utf8"));
+        if (!p.ok) throw new Error("fixture");
+        return p.project;
+      };
+      const before = await load();
+      const run = vi.fn<AgentRunner>(async (_a, p) =>
+        fix
+          ? fixes(
+              input(p)
+                .lines.map((l: { id: string; text: string }) => ({ id: l.id, text: l.text.replace("工部", "公布") }))
+                .filter((l: { text: string }) => l.text.includes("公布")),
+            )
+          : fixes(),
       );
-    const pass = new SubtitlePass({
-      project: path,
-      load,
-      transcribed: async () => [],
-      dispatch,
-      detect: async () => [{ agent: "claude", available: true }],
-      selected: () => undefined,
-      run,
-      changed: () => {},
-    });
-    managers.push(pass);
-    await pass.start("subtitle_proofread", {});
-    await vi.waitFor(() => expect(pass.latest?.state).not.toBe("running"));
-    expect(pass.latest).toMatchObject({ state: "done" });
-    const after = await load();
-    expect(after.revision.seq).toBe(before.revision.seq + 1);
-    expect(after.transcripts[0]!.ext).toMatchObject({ "zsir.proofread": { by: "字幕校对" }, "test.keep": true });
-    expect(after.transcripts[0]!.tokens).toContainEqual(
-      expect.objectContaining({ text: "公布", heard: "工部", state: "edited" }),
-    );
-    const history = await dispatch("inspect", { project: path, view: "history" });
-    expect((history.result?.entries as { label: string }[])[0]!.label).toBe("AI 校对字幕");
-    const undo = await dispatch("undo", {
-      project: path,
-      base_revision: after.revision.id,
-      idempotency_key: "undo-proofread",
-      author: { kind: "human", name: "测试" },
-    });
-    expect(undo.ok).toBe(true);
-    expect((await load()).transcripts).toEqual(before.transcripts);
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
+      const pass = new SubtitlePass({
+        project: path,
+        load,
+        transcribed: async () => [],
+        dispatch,
+        detect: async () => [{ agent: "claude", available: true }],
+        selected: () => undefined,
+        run,
+        changed: () => {},
+      });
+      managers.push(pass);
+      if (mode === "automatic-no-fix") await pass.open();
+      else {
+        await pass.start("subtitle_proofread", { transcript_id: t.id });
+        await vi.waitFor(() => expect(pass.latest?.state).not.toBe("running"));
+        expect(pass.latest).toMatchObject({ state: "done" });
+      }
+      const after = await load();
+      expect(after.revision.seq).toBe(before.revision.seq + 1);
+      expect(after.transcripts[0]!.ext).toMatchObject({ "zsir.proofread": { by: "字幕校对" }, "test.keep": true });
+      if (fix)
+        expect(after.transcripts[0]!.tokens).toContainEqual(
+          expect.objectContaining({ text: "公布", heard: "工部", state: "edited" }),
+        );
+      else
+        expect(after.transcripts).toEqual(
+          before.transcripts.map((t, i) =>
+            i === 0
+              ? {
+                  ...t,
+                  ext: { ...t.ext, "zsir.proofread": { by: "字幕校对" } },
+                }
+              : t,
+          ),
+        );
+      const history = await dispatch("inspect", { project: path, view: "history" });
+      expect((history.result?.entries as { label: string }[])[0]!.label).toBe(
+        fix ? "AI 校对字幕" : "AI 校对字幕（没有要改的字）",
+      );
+      run.mockClear();
+      const reopened = new SubtitlePass({
+        project: path,
+        load,
+        transcribed: async () => [],
+        dispatch,
+        detect: async () => [{ agent: "claude", available: true }],
+        selected: () => undefined,
+        run,
+        changed: () => {},
+      });
+      managers.push(reopened);
+      await reopened.open();
+      expect(run).not.toHaveBeenCalled();
+      expect((await load()).revision).toEqual(after.revision);
+      const undo = await dispatch("undo", {
+        project: path,
+        base_revision: after.revision.id,
+        idempotency_key: "undo-proofread",
+        author: { kind: "human", name: "测试" },
+      });
+      expect(undo.ok).toBe(true);
+      expect((await load()).transcripts).toEqual(before.transcripts);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
 
 it("keeps multiple changes within a token from consuming text from the next token", () => {
   const t = transcript([""], [["abcdef", "GH"]]);
@@ -568,7 +653,7 @@ it("discards unknown and protected IDs before checking their proposed text", asy
   );
   await finish(f);
   expect(f.run).toHaveBeenCalledTimes(1);
-  expect(edits(f).ops).toHaveLength(1);
+  expect(edits(f).ops).toHaveLength(2);
 });
 
 it("does not let a pending summary occupy any of the six breaking slots", async () => {
@@ -623,7 +708,7 @@ it("allows existing punctuation while rejecting newly added punctuation", async 
   const f = await setup(transcript(["版本1.0工部消息"]), async () => fixes([{ id: "cue_0", text: "版本1.0公布消息" }]));
   await finish(f);
   expect(f.run).toHaveBeenCalledTimes(1);
-  expect(edits(f).ops).toHaveLength(1);
+  expect(edits(f).ops).toHaveLength(2);
 });
 
 it("keeps distinct corrections on opposite sides of a manual line break in separate token edits", () => {

@@ -352,12 +352,13 @@ export class SubtitlePass {
     const project = await this.options.load();
     const transcript = project.transcripts.find((t) => t.id === id);
     if (!transcript || this.abort.signal.aborted) return this.emptyEnvelope();
-    const summary = this.summary(transcript);
+    const summary = transcript.ext?.["zsir.proofread"] === undefined ? this.summary(transcript) : undefined;
     let breaking = this.emptyEnvelope();
     if (transcript.ext?.["zsir.subtitle_pass"] === undefined) {
       breaking = await this.organize([{ id }]);
       if (this.states.get(id)?.warnings.length || this.abort.signal.aborted) return breaking;
     }
+    if (transcript.ext?.["zsir.proofread"] !== undefined) return breaking;
     this.states.set(id, { running: true, phase: "proofread", warnings: [], progress: [] });
     this.options.changed();
     const result = await this.proofread([{ id }], undefined, undefined, await summary);
@@ -581,7 +582,9 @@ export class SubtitlePass {
         .filter((t) => t.tokens.length)
         .map((t) => ({
           id: t.id,
-          range: { from_token: t.tokens[0]!.id, to_token: t.tokens.at(-1)!.id },
+          ...(verb === "subtitle_tidy"
+            ? { range: { from_token: t.tokens[0]!.id, to_token: t.tokens.at(-1)!.id } }
+            : {}),
         }));
     }
     if (targets.some((target) => this.running.has(target.id)))
@@ -868,6 +871,8 @@ export class SubtitlePass {
             skip(fix.transcript_id, 1);
           } else ops.push(...edits);
         }
+        const label = ops.length ? "AI 校对字幕" : "AI 校对字幕（没有要改的字）";
+        for (const target of targets) if (!target.range) ops.push({ op: "mark_proofread", transcript_id: target.id });
         if (!ops.length) {
           envelope = this.emptyEnvelope();
           break;
@@ -877,7 +882,7 @@ export class SubtitlePass {
           base_revision: latest.revision.id,
           idempotency_key: newId("req_"),
           author: { kind: "agent", name: "字幕校对" },
-          label: "AI 校对字幕",
+          label,
           ops,
         });
         if (envelope.error?.code === "E_CONFLICT" && attempt === 0) continue;

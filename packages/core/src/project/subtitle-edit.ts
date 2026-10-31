@@ -114,6 +114,12 @@ export function applySubtitleEdit(
   if (op.force === true && !allowForce) fail("E_SESSION_STATE", "force requires a manual approval session");
   const force = op.force === true && allowForce;
   switch (op.op) {
+    case "mark_proofread": {
+      const item = transcript(project, op.transcript_id);
+      item.ext ??= {};
+      item.ext["zsir.proofread"] = { by: authorName };
+      break;
+    }
     case "set_recognition": {
       const { op: _op, ...fields } = op;
       if (fields.terms)
@@ -244,10 +250,6 @@ export function applySubtitleEdit(
         if (cue.breaks) cue.breaks = cue.breaks.map((id) => (oldIds.has(id) ? next.at(-1)!.id : id));
       }
       item.tokens.splice(first, old.length, ...next);
-      if (authorName === "字幕校对") {
-        item.ext ??= {};
-        item.ext["zsir.proofread"] = { by: authorName };
-      }
       break;
     }
     case "hide_tokens":
