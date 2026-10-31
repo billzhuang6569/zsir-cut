@@ -50,7 +50,9 @@ def main():
             rows.append(row)
             if any(width(l) > 16 for l in lines): issues["too_wide"].append(row)
             if dur > 6: issues["too_long"].append(row)
-            if clean(vis[-1]["text"]) in NO_END: issues["bad_end"].append(row)
+            last = clean(vis[-1]["text"])
+            shi_de = last == "的" and any(clean(t["text"]).endswith("是") or clean(t["text"]) == "是" for t in vis[:-1])
+            if last in NO_END and not shi_de: issues["bad_end"].append(row)
             if clean(vis[0]["text"]) in NO_START: issues["bad_start"].append(row)
             if width(text) < 3: issues["short"].append(row)
             if prev_last is not None:
