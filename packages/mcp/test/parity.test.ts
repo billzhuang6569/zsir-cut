@@ -45,6 +45,46 @@ afterEach(async () => {
 });
 
 describe("CLI and MCP", () => {
+  it("shares mark_proofread dry-run, writes and replay envelopes", async () => {
+    const server = createServer();
+    const client = new Client({ name: "proofread-parity", version: "1" });
+    const [left, right] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(left), client.connect(right)]);
+    try {
+      const input = {
+        project,
+        base_revision: "rev_fixture_1",
+        idempotency_key: "mark-proofread",
+        author,
+        label: "AI 校对字幕（没有要改的字）",
+        ops: [{ op: "mark_proofread", transcript_id: "trs_A_zh" }],
+      };
+      for (const dry_run of [true, false]) {
+        const request = { ...input, dry_run };
+        const cliResult = invokeCli("edit", request);
+        expect(cliResult.code).toBe(0);
+        expect(cliResult.envelope.status).toBe(dry_run ? "dry_run" : "applied");
+        const mcp = (await client.callTool({ name: "zcut_edit", arguments: request })).structuredContent as Record<
+          string,
+          unknown
+        >;
+        expect(validateEnvelope(mcp).valid).toBe(true);
+        if (!dry_run) {
+          expect(mcp.receipt).toMatchObject({ replayed: true });
+          mcp.receipt = { ...(mcp.receipt as Record<string, unknown>), replayed: false };
+        }
+        expect(withoutRequestId(cliResult.envelope)).toEqual(withoutRequestId(mcp));
+        const saved = parseProject(await readFile(project, "utf8"));
+        if (!saved.ok) throw new Error("Invalid project");
+        expect(saved.project.transcripts.find((t) => t.id === "trs_A_zh")?.ext?.["zsir.proofread"]).toEqual(
+          dry_run ? undefined : { by: author.name },
+        );
+      }
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
   it("begins a session through the SDK with an object author", async () => {
     const server = createServer();
     const client = new Client({ name: "object-author", version: "1" });

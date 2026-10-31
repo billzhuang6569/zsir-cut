@@ -165,6 +165,55 @@ describe("edit examples", () => {
 });
 
 describe("subtitle edit operations", () => {
+  it.each([undefined, { "test.keep": true, "zsir.proofread": { by: "previous" } }])(
+    "marks a protected transcript without changing anything else, overwrites the author and supports undo",
+    async (ext) => {
+      const project = await read();
+      const transcript = project.transcripts.find((item) => item.id === "trs_A_zh")!;
+      if (ext) transcript.ext = ext;
+      else delete transcript.ext;
+      for (const token of transcript.tokens) token.state = "approved";
+      for (const cue of transcript.cues) cue.timing = { ...cue.timing, locked: true };
+      await writeFile(path, serializeProject(project));
+      const op = { op: "mark_proofread", transcript_id: transcript.id };
+      const preview = await dispatch("edit", { ...request([op]), dry_run: true });
+      expect(preview.status).toBe("dry_run");
+      expect(await read()).toEqual(project);
+      const result = await edit([op]);
+      expect(result.status, JSON.stringify(result)).toBe("applied");
+      const after = await read();
+      const expected = structuredClone(project);
+      expected.transcripts.find((item) => item.id === transcript.id)!.ext = {
+        ...ext,
+        "zsir.proofread": { by: author.name },
+      };
+      expect(withoutRevision(after)).toBe(withoutRevision(expected));
+      expect(result.changes).toEqual(preview.changes);
+      await validateAndUndo(project);
+    },
+  );
+  it("rejects missing transcripts and mixing mark_proofread with timeline edits atomically", async () => {
+    const before = await readFile(path, "utf8");
+    expect((await edit([{ op: "mark_proofread", transcript_id: "trs_missing" }])).error?.code).toBe("E_NOT_FOUND");
+    expect(
+      (
+        await edit([
+          { op: "mark_proofread", transcript_id: "trs_A_zh" },
+          { op: "split", clip_id: "clp_v2", at: "15s" },
+        ])
+      ).error?.code,
+    ).toBe("E_MIXED_DOMAIN");
+    expect(await readFile(path, "utf8")).toBe(before);
+  });
+  it.each(["字幕校对", "other author"])("edit_text by %s never marks a transcript", async (name) => {
+    const before = (await read()).transcripts.find((item) => item.id === "trs_A_zh")!;
+    const result = await edit(
+      [{ op: "edit_text", transcript_id: before.id, from_token: "tok_018", to_token: "tok_019", text: "新文字" }],
+      { author: { kind: "agent", name } },
+    );
+    expect(result.status).toBe("applied");
+    expect((await read()).transcripts.find((item) => item.id === before.id)!.ext?.["zsir.proofread"]).toBeUndefined();
+  });
   it("rejects approved tokens and locked cues, and force outside a manual session", async () => {
     const before = await readFile(path, "utf8");
     const op = {

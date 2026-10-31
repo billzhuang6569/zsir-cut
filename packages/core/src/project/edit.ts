@@ -777,6 +777,7 @@ export const SUBTITLE_OPS = new Set([
   "update_overlay",
   "remove_overlay",
   "edit_text",
+  "mark_proofread",
   "replace_text",
   "set_recognition",
   "hide_tokens",

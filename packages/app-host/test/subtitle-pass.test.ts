@@ -13,7 +13,14 @@ import {
   type Transcript,
   validateCommand,
 } from "../../core/src/index.ts";
-import { type AgentRunner, SUBTITLE_PASS_PROMPT, SubtitlePass, subtitleChunks } from "../src/subtitle-pass.js";
+import {
+  type AgentRunner,
+  SUBTITLE_PASS_PROMPT,
+  SUBTITLE_PROOFREAD_PROMPT,
+  SUBTITLE_SUMMARY_PROMPT,
+  SubtitlePass,
+  subtitleChunks,
+} from "../src/subtitle-pass.js";
 
 const managers: SubtitlePass[] = [];
 afterEach(async () => {
@@ -73,7 +80,11 @@ async function setup(t = transcript(), runner: AgentRunner = async () => '{"line
     dispatch: kernel,
     detect,
     selected,
-    run,
+    run: async (agent, prompt, signal) => {
+      if (prompt.startsWith(SUBTITLE_SUMMARY_PROMPT)) return '{"summary":"测试","terms":[]}';
+      if (prompt.startsWith(SUBTITLE_PROOFREAD_PROMPT)) return '{"fixes":[]}';
+      return run(agent, prompt, signal);
+    },
     changed,
   });
   managers.push(manager);
@@ -86,11 +97,11 @@ function request(f: Awaited<ReturnType<typeof setup>>) {
 }
 
 describe("subtitle pass", () => {
-  it("maps chunk indices and submits exactly one ordered edit/history step", async () => {
+  it("maps chunk indices into one tidy step followed by one no-fix proofread step", async () => {
     const f = await setup();
     const result = await f.manager.run("trs_test");
     expect(result.ok).toBe(true);
-    expect(f.kernel).toHaveBeenCalledTimes(1);
+    expect(f.kernel).toHaveBeenCalledTimes(2);
     expect(f.kernel).toHaveBeenCalledWith(
       "edit",
       expect.objectContaining({
@@ -98,6 +109,15 @@ describe("subtitle pass", () => {
         label: "AI 整理字幕",
         base_revision: f.project.revision.id,
         ops: [{ op: "resegment", transcript_id: "trs_test", cut_after: ["tok_3", "tok_9"] }],
+      }),
+    );
+    expect(f.kernel).toHaveBeenNthCalledWith(
+      2,
+      "edit",
+      expect.objectContaining({
+        label: "AI 校对字幕（没有要改的字）",
+        author: { kind: "agent", name: "字幕校对" },
+        ops: [{ op: "mark_proofread", transcript_id: "trs_test" }],
       }),
     );
     expect(f.run.mock.calls[0]![1]).toContain(SUBTITLE_PASS_PROMPT);
@@ -130,7 +150,7 @@ describe("subtitle pass", () => {
     f.run.mockRejectedValueOnce(new Error("临时失败"));
     await f.manager.run("trs_test");
     expect(f.run).toHaveBeenCalledTimes(2);
-    expect(f.kernel).toHaveBeenCalledTimes(1);
+    expect(f.kernel).toHaveBeenCalledTimes(2);
   });
   it("times out each call at 120s, aborts both attempts and never writes a mark", async () => {
     vi.useFakeTimers();
@@ -157,7 +177,7 @@ describe("subtitle pass", () => {
     await task;
     expect(f.run).toHaveBeenCalledTimes(2);
     expect(f.run.mock.calls[0]![2].aborted).toBe(true);
-    expect(f.kernel).toHaveBeenCalledTimes(1);
+    expect(f.kernel).toHaveBeenCalledTimes(2);
     expect(f.manager.state.warnings).toEqual([]);
   });
   it("hides filler words and accepts punctuation and slashes", async () => {
@@ -284,7 +304,7 @@ describe("subtitle pass", () => {
     });
     await f.manager.run("trs_test");
     expect(f.run).toHaveBeenCalledTimes(2);
-    expect(f.kernel).toHaveBeenCalledTimes(2);
+    expect(f.kernel).toHaveBeenCalledTimes(3);
     expect(f.kernel.mock.calls[1]).toEqual([
       "edit",
       expect.objectContaining({
@@ -315,7 +335,11 @@ describe("subtitle pass", () => {
         }),
     );
     f.project.transcripts.push(
-      { ...transcript(), id: "trs_marked", ext: { "zsir.subtitle_pass": { by: "字幕整理" } } },
+      {
+        ...transcript(),
+        id: "trs_marked",
+        ext: { "zsir.subtitle_pass": { by: "字幕整理" }, "zsir.proofread": { by: "字幕校对" } },
+      },
       { ...transcript(), id: "trs_empty", cues: [] },
     );
     const opened = f.manager.open();
@@ -388,7 +412,7 @@ describe("subtitle pass", () => {
     expect(calls.filter(({ agent }) => agent === "codex")).toHaveLength(8);
     expect(new Set(calls.filter(({ agent }) => agent === "codex").map(({ text }) => text)).size).toBe(8);
     expect(maxActive).toBe(6);
-    expect(f.kernel).toHaveBeenCalledTimes(1);
+    expect(f.kernel).toHaveBeenCalledTimes(2);
     expect(request(f).ops[0]).toMatchObject({
       cut_after: ["tok_9", "tok_20", "tok_31", "tok_42", "tok_53", "tok_64", "tok_75", "tok_86"],
     });
@@ -404,7 +428,7 @@ describe("subtitle pass", () => {
     f.detect.mockResolvedValue([{ agent: "codex", available: true }]);
     f.selected.mockReturnValue("codex");
     await f.manager.retryFailed();
-    expect(f.kernel).toHaveBeenCalledTimes(1);
+    expect(f.kernel).toHaveBeenCalledTimes(2);
     expect(f.manager.state.warnings).toEqual([]);
   });
   it("queues a retry if the agent changes while a failing pass is running", async () => {
@@ -424,7 +448,7 @@ describe("subtitle pass", () => {
     const retry = f.manager.retryFailed();
     rejectFirst(new Error("Failed to authenticate"));
     await Promise.all([task, retry]);
-    expect(f.kernel).toHaveBeenCalledTimes(1);
+    expect(f.kernel).toHaveBeenCalledTimes(2);
   });
   it("explains Codex login failure when it is the only agent", async () => {
     const f = await setup(transcript(), async () => {
@@ -517,7 +541,7 @@ describe("manual subtitle verbs", () => {
     expect(other).toHaveProperty("pass_id");
     release('{"lines":["字字字字","字字字字字字"]}');
     await f.manager.run("trs_test");
-    expect(f.kernel).toHaveBeenCalledTimes(1);
+    expect(f.kernel).toHaveBeenCalledTimes(2);
   });
   it("also reports busy while an automatic pass runs", async () => {
     const f = await setup(transcript(), async () => new Promise(() => {}));
@@ -570,7 +594,7 @@ describe("manual subtitle verbs", () => {
     expect(f.run).toHaveBeenCalledTimes(count);
     expect(f.manager.state.warnings).toEqual([]);
   });
-  it("preserves protected cues in a manual range and leaves proofread as an explicit failure", async () => {
+  it("preserves protected cues in a manual range and completes proofread without unnecessary writes", async () => {
     const t = transcript();
     t.cues = [
       { id: "cue_locked", first_token: "tok_0", last_token: "tok_3", state: "auto", timing: { locked: true } },
@@ -590,8 +614,8 @@ describe("manual subtitle verbs", () => {
     await finished(f);
     expect(f.manager.latest).toMatchObject({
       kind: "proofread",
-      state: "failed",
-      reason: expect.stringContaining("尚未实现"),
+      state: "done",
+      reason: null,
     });
     expect(f.run).not.toHaveBeenCalled();
     expect(f.kernel).not.toHaveBeenCalled();

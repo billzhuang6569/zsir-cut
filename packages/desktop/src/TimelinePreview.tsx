@@ -621,9 +621,13 @@ export function TimelinePreview({
   const snapPreview = cuePreview?.target ?? trimPreview ?? movePreview?.target;
   const organizing = new Set([
     ...(project?.unprocessedTranscripts ?? []),
-    ...(project?.subtitlePass?.progress?.map((item) => item.transcript_id) ?? []),
-    ...(project?.subtitlePass?.warnings.map((item) => item.transcript_id).filter((id): id is string => Boolean(id)) ??
-      []),
+    ...(project?.subtitlePass?.progress
+      ?.filter((item) => item.phase !== "proofread" && project.subtitlePass?.phase !== "proofread")
+      .map((item) => item.transcript_id) ?? []),
+    ...(project?.subtitlePass?.warnings
+      .filter((item) => item.code === "W_SUB_PASS_FALLBACK")
+      .map((item) => item.transcript_id)
+      .filter((id): id is string => Boolean(id)) ?? []),
   ]);
   const visibleCues =
     project?.cues.filter((cue) => contains(cue.start, cue.end, at) && !organizing.has(cue.transcript_id ?? "")) ?? [];

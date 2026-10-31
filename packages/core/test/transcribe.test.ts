@@ -304,7 +304,7 @@ it("passes worker alignment and repetition warnings through result.warnings and 
   expect(replay.result).toMatchObject({ warnings });
 });
 
-it("continues short IDs and clears the subtitle pass mark while preserving other ext when transcribing again", async () => {
+it("continues short IDs and clears the subtitle pass and proofread marks while preserving other ext when transcribing again", async () => {
   await run();
   const before = await project();
   const first = before.transcripts[0]!;
@@ -313,7 +313,12 @@ it("continues short IDs and clears the subtitle pass mark while preserving other
   expect(first.tokens.map((token) => token.id)).toEqual([0, 1, 2, 3].map((i) => `tok_${tag}_${i}`));
   expect(first.cues.map((cue) => cue.id)).toEqual([0, 1, 2].map((i) => `cue_${tag}_${i}`));
   const raw = JSON.parse(await readFile(path, "utf8"));
-  raw.transcripts[0].ext = { ...first.ext, "zsir.subtitle_pass": { by: "字幕整理" }, "test.keep": [1, 2] };
+  raw.transcripts[0].ext = {
+    ...first.ext,
+    "zsir.subtitle_pass": { by: "字幕整理" },
+    "zsir.proofread": { by: "字幕校对" },
+    "test.keep": [1, 2],
+  };
   await writeFile(path, JSON.stringify(raw));
   await run(before.revision.id, "again");
   const next = (await project()).transcripts[0]!;

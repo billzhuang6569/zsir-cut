@@ -17,6 +17,7 @@ import { DESKTOP_VERBS, SUBTITLE_VERBS, UI_VERBS } from "../src/ui.js";
 let appDataDir: string;
 beforeEach(async () => {
   vi.spyOn(Agents.prototype, "detect").mockResolvedValue([]);
+  vi.spyOn(Agents.prototype, "subtitlePass").mockRejectedValue(new Error("Unexpected Agent call in host test"));
   appDataDir = await mkdtemp(join(tmpdir(), "zcut-recent-test-"));
 });
 let host: Awaited<ReturnType<typeof startHost>> | undefined;
@@ -255,18 +256,21 @@ describe("desktop host", () => {
           status: "accepted",
           result: { pass_id: expect.any(String) },
         });
-        const progress = await client.callTool({ name: "zcut_ui_state", arguments: {} });
-        expect(progress.structuredContent).toMatchObject({
-          result: {
-            subtitle_pass: {
-              pass_id: (accepted.structuredContent as { result: { pass_id: string } }).result.pass_id,
-              kind: verb === "subtitle_tidy" ? "tidy" : "proofread",
-              state: "failed",
-              reason: expect.stringContaining(verb === "subtitle_tidy" ? "没有检测到" : "尚未实现"),
+        await vi.waitFor(async () => {
+          const progress = await client.callTool({ name: "zcut_ui_state", arguments: {} });
+          expect(progress.structuredContent).toMatchObject({
+            result: {
+              subtitle_pass: {
+                pass_id: (accepted.structuredContent as { result: { pass_id: string } }).result.pass_id,
+                kind: verb === "subtitle_tidy" ? "tidy" : "proofread",
+                state: "failed",
+                reason: expect.stringContaining("没有检测到"),
+              },
             },
-          },
+          });
         });
       }
+      expect(Agents.prototype.subtitlePass).not.toHaveBeenCalled();
       const closed = once(socket, "close");
       socket.close();
       await closed;

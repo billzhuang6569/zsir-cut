@@ -110,11 +110,13 @@ export interface OverlayView {
 }
 export interface PreviewData {
   transcripts?: TranscriptView[];
+  subtitle_pass?: import("../../app-host/src/subtitle-pass.js").SubtitlePassState | null;
   unprocessedTranscripts?: string[];
   subtitlePass?: {
     running: boolean;
+    phase?: "breaking" | "proofread";
     warnings: { code: string; reason: string; transcript_id?: string }[];
-    progress?: { transcript_id: string; done: number; total: number }[];
+    progress?: { transcript_id: string; done: number; total: number; phase?: "breaking" | "proofread" }[];
   };
   subtitleOverlays?: OverlayView[];
   subtitleTracks?: { id: string; name: string; default_style_id: string }[];
