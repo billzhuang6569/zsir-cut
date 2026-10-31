@@ -264,7 +264,7 @@ const args=process.argv.slice(2); let input='';
 process.stdin.on('data',chunk=>input+=chunk);
 process.stdin.on('end',()=>{
 writeFileSync(${JSON.stringify(capture)},JSON.stringify({args,input,cwd:process.cwd()}));
-const result='{"cut_after":[1],"hide":[]}';
+const result='{"lines":["字幕"]}';
 if(args.includes('--output-last-message')) writeFileSync(args[args.indexOf('--output-last-message')+1],result);
 else process.stdout.write(JSON.stringify({result,is_error:false}));
 });`,
@@ -279,7 +279,7 @@ else process.stdout.write(JSON.stringify({result,is_error:false}));
     commands: { claude: script, codex: script },
   });
   const result = await manager.subtitlePass(agent, "只输出 JSON", new AbortController().signal);
-  expect(JSON.parse(result)).toEqual({ cut_after: [1], hide: [] });
+  expect(JSON.parse(result)).toEqual({ lines: ["字幕"] });
   const captured = JSON.parse(await readFile(capture, "utf8"));
   expect(captured.input).toBe("只输出 JSON");
   expect(captured.cwd).not.toBe(directory);
@@ -309,6 +309,7 @@ else process.stdout.write(JSON.stringify({result,is_error:false}));
         "mcp_servers={}",
       ]),
     );
+    expect(captured.args).not.toContain("tools.update_plan=false");
   }
 });
 

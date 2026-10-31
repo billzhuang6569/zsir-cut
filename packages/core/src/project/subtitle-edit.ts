@@ -323,12 +323,12 @@ export function applySubtitleEdit(
           const previous = old.find((cue) => cue.first_token === firstId && cue.last_token === lastId);
           next.push(
             previous
-              ? { ...previous, breaks: cueBreaks(group, rules) }
+              ? { ...previous, breaks: cueBreaks(group, rules, cutAfter !== undefined) }
               : {
                   id: cueId(),
                   first_token: firstId,
                   last_token: lastId,
-                  breaks: cueBreaks(group, rules),
+                  breaks: cueBreaks(group, rules, cutAfter !== undefined),
                   state: "auto",
                 },
           );

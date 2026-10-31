@@ -50,7 +50,7 @@ function transcript(count = 10, hardEvery = 0): Transcript {
     cues: [{ id: "cue_test", first_token: "tok_0", last_token: `tok_${count - 1}`, state: "auto" }],
   };
 }
-async function setup(t = transcript(), runner: AgentRunner = async () => '{"cut_after":[3],"hide":[0]}') {
+async function setup(t = transcript(), runner: AgentRunner = async () => '{"lines":["字字字字","字字字字字字"]}') {
   const parsed = parseProject(await readFile("examples/interview.zcut.json", "utf8"));
   if (!parsed.ok) throw new Error("fixture");
   const project = parsed.project;
@@ -96,19 +96,16 @@ describe("subtitle pass", () => {
         author: { kind: "agent", name: "字幕整理" },
         label: "AI 整理字幕",
         base_revision: f.project.revision.id,
-        ops: [
-          { op: "hide_tokens", transcript_id: "trs_test", tokens: ["tok_0"] },
-          { op: "resegment", transcript_id: "trs_test", cut_after: ["tok_3", "tok_9"] },
-        ],
+        ops: [{ op: "resegment", transcript_id: "trs_test", cut_after: ["tok_3", "tok_9"] }],
       }),
     );
     expect(f.run.mock.calls[0]![1]).toContain(SUBTITLE_PASS_PROMPT);
     expect(SUBTITLE_PASS_PROMPT).toContain("需要、可能、就是、能够、可以、要、会、去、帮我们、给到、这么一个");
-    expect(SUBTITLE_PASS_PROMPT).toContain("少于 6 个字");
-    expect(SUBTITLE_PASS_PROMPT).toContain("不以「是」结尾");
+    expect(SUBTITLE_PASS_PROMPT).toContain("少于 4 个字");
+    expect(SUBTITLE_PASS_PROMPT).toContain("不以「的、地、得");
     expect(SUBTITLE_PASS_PROMPT).toContain("是……的");
-    expect(SUBTITLE_PASS_PROMPT).toContain("逐条检查结尾和开头");
-    expect(f.manager.state).toEqual({ running: false, warnings: [] });
+    expect(SUBTITLE_PASS_PROMPT).toContain("逐行检查一遍结尾和开头");
+    expect(f.manager.state).toEqual({ running: false, warnings: [], progress: [] });
   });
   it.each([
     "bad",
@@ -149,59 +146,106 @@ describe("subtitle pass", () => {
     expect(f.manager.state.warnings[0]?.reason).toContain("超时");
     expect(f.kernel).not.toHaveBeenCalled();
   });
-  it.each([undefined, false, true])("uses the filler setting in the prompt and edits (%s)", async (setting) => {
+  it("retries a timed out call and accepts the next result", async () => {
+    vi.useFakeTimers();
     const f = await setup();
-    if (setting === undefined) delete f.project.recognition;
-    else f.project.recognition = { remove_fillers: setting };
-    await f.manager.run("trs_test");
-    const input = JSON.parse(f.run.mock.calls[0]![1].split("\n").at(-1)!);
-    expect(input.remove_fillers).toBe(setting ?? true);
-    expect(request(f).ops.some((op) => op.op === "hide_tokens")).toBe(setting ?? true);
+    f.run.mockImplementationOnce(async () => new Promise(() => {}));
+    const task = f.manager.run("trs_test");
+    await vi.advanceTimersByTimeAsync(120000);
+    await task;
+    expect(f.run).toHaveBeenCalledTimes(2);
+    expect(f.run.mock.calls[0]![2].aborted).toBe(true);
+    expect(f.kernel).toHaveBeenCalledTimes(1);
+    expect(f.manager.state.warnings).toEqual([]);
   });
-  it.each([false, true])("drops unsafe hides but retains cuts (remove_fillers=%s)", async (enabled) => {
-    const f = await setup(transcript(), async () => '{"cut_after":[4],"hide":[0,1,2]}');
-    f.project.recognition!.remove_fillers = enabled;
-    await f.manager.run("trs_test");
-    expect(request(f).ops).toEqual([{ op: "resegment", transcript_id: "trs_test", cut_after: ["tok_4", "tok_9"] }]);
-    expect(f.run).toHaveBeenCalledTimes(1);
-  });
-  it("drops hide touching even part of a multi-token project term; allows exactly 20% otherwise", async () => {
-    const f = await setup(transcript(), async () => '{"cut_after":[4],"hide":[0,1]}');
-    const tokens = f.project.transcripts[0]!.tokens;
-    tokens[1]!.text = "豆";
-    tokens[2]!.text = "包";
-    f.project.recognition!.terms = ["豆包"];
-    await f.manager.run("trs_test");
-    expect(request(f).ops).toHaveLength(1);
-    f.kernel.mockClear();
-    f.project.recognition!.terms = [];
-    await f.manager.run("trs_test");
-    expect(request(f).ops[0]).toMatchObject({ tokens: ["tok_0", "tok_1"] });
-  });
-  it("puts the boundary on the last visible token when the chunk tail is hidden", async () => {
-    const f = await setup(transcript(), async () => '{"cut_after":[9],"hide":[9]}');
-    await f.manager.run("trs_test");
-    expect(request(f).ops[1]).toMatchObject({ cut_after: ["tok_8"] });
-  });
-  it("uses chunk-end fallback for only failed chunks", async () => {
-    const f = await setup(transcript(20, 10), async (_agent, prompt) => {
-      const input = JSON.parse(prompt.split("\n").at(-1)!);
-      if (input.tokens[0] === "失败") throw new Error("登录过期");
-      return '{"cut_after":[3],"hide":[]}';
-    });
-    f.project.transcripts[0]!.tokens[10]!.text = "失败";
-    const result = await f.manager.run("trs_test");
-    expect(request(f).ops[0]).toMatchObject({ cut_after: ["tok_3", "tok_9", "tok_19"] });
-    expect(result.result?.warnings).toEqual([
-      expect.objectContaining({ code: "W_SUB_PASS_FALLBACK", chunk: 1, reason: "第 2 块：登录过期" }),
+  it("hides filler words and accepts punctuation and slashes", async () => {
+    const t = transcript();
+    t.tokens[0]!.text = "呃";
+    const f = await setup(t, async () => '{"lines":["字，字 / 字字","字字字字字"]}');
+    await f.manager.run(t.id);
+    expect(request(f).ops).toEqual([
+      { op: "hide_tokens", transcript_id: t.id, tokens: ["tok_0"] },
+      { op: "resegment", transcript_id: t.id, cut_after: ["tok_4", "tok_9"] },
     ]);
+  });
+  it.each(["changed", "too many", "term", "disabled"])("rejects invalid or unsafe skips: %s", async (kind) => {
+    const t = transcript();
+    t.tokens[0]!.text = "呃";
+    t.tokens[1]!.text = "豆";
+    t.tokens[2]!.text = "包";
+    const output =
+      kind === "changed"
+        ? "改变"
+        : kind === "too many"
+          ? "字字字字字字字"
+          : kind === "term"
+            ? "呃包字字字字字字字"
+            : "豆包字字字字字字字";
+    const f = await setup(t, async () => JSON.stringify({ lines: [output] }));
+    f.project.recognition = { remove_fillers: kind !== "disabled", terms: kind === "term" ? ["豆包"] : [] };
+    const result = await f.manager.run(t.id);
+    expect(f.run).toHaveBeenCalledTimes(2);
+    expect(f.kernel).not.toHaveBeenCalled();
+    expect(result.verification.issues[0]?.code).toBe("W_SUB_PASS_FALLBACK");
+  });
+  it("uses rule segmentation only for a failed chunk", async () => {
+    const t = transcript(21);
+    t.tokens[10]!.text = "锁";
+    t.cues = [{ id: "cue_locked", first_token: "tok_10", last_token: "tok_10", state: "approved" }];
+    t.tokens[11]!.text = "失败";
+    const f = await setup(t, async (_agent, prompt) => {
+      const input = JSON.parse(prompt.split("\n").at(-1)!);
+      if (input.text.startsWith("失败")) throw new Error("登录过期");
+      return JSON.stringify({ lines: ["字字字字", "字字字字字字"] });
+    });
+    const result = await f.manager.run(t.id);
+    expect(request(f).ops[0]).toMatchObject({ cut_after: ["tok_3", "tok_9", "tok_20"] });
+    expect(result.result?.warnings).toEqual([expect.objectContaining({ chunk: 1, code: "W_SUB_PASS_FALLBACK" })]);
+  });
+  it("requests up to two revisions and retains the last legal result", async () => {
+    const t = transcript(20);
+    const f = await setup(t, async () => JSON.stringify({ lines: ["字".repeat(20)] }));
+    f.run
+      .mockResolvedValueOnce(JSON.stringify({ lines: ["字".repeat(20)] }))
+      .mockResolvedValueOnce(JSON.stringify({ lines: ["字".repeat(10), "字".repeat(10)] }));
+    await f.manager.run(t.id);
+    expect(f.run).toHaveBeenCalledTimes(2);
+    expect(f.run.mock.calls[1]![1]).toContain("宽度超限");
+    expect(request(f).ops[0]).toMatchObject({ cut_after: ["tok_9", "tok_19"] });
+    f.run.mockClear();
+    f.kernel.mockClear();
+    await f.manager.run(t.id);
+    expect(f.run).toHaveBeenCalledTimes(3);
+    expect(request(f).ops[0]).toMatchObject({ cut_after: ["tok_19"] });
+    f.run.mockClear();
+    f.kernel.mockClear();
+    f.run.mockResolvedValueOnce(JSON.stringify({ lines: ["字".repeat(20)] })).mockResolvedValue("无效");
+    await f.manager.run(t.id);
+    expect(f.run).toHaveBeenCalledTimes(3);
+    expect(request(f).ops[0]).toMatchObject({ cut_after: ["tok_19"] });
+  });
+  it("rejects hiding a term spanning a protected chunk boundary", async () => {
+    const t = transcript(21);
+    t.tokens[9]!.text = "豆";
+    t.tokens[10]!.text = "包";
+    t.cues = [{ id: "cue_locked", first_token: "tok_10", last_token: "tok_10", state: "approved" }];
+    const f = await setup(t, async (_agent, prompt) => {
+      const input = JSON.parse(prompt.split("\n").at(-1)!);
+      return JSON.stringify({ lines: [input.text.includes("豆") ? "字".repeat(9) : "字".repeat(10)] });
+    });
+    f.project.recognition!.terms = ["豆包"];
+    const result = await f.manager.run(t.id);
+    expect(result.verification.issues).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "W_SUB_PASS_FALLBACK" })]),
+    );
+    expect(request(f).ops).toEqual([{ op: "resegment", transcript_id: t.id, cut_after: ["tok_9", "tok_20"] }]);
   });
   it("all failed and no Agent never call edit", async () => {
     const f = await setup(transcript(20, 10), async () => {
       throw new Error("离线");
     });
     await f.manager.run("trs_test");
-    expect(f.run).toHaveBeenCalledTimes(4);
+    expect(f.run).toHaveBeenCalledTimes(2);
     expect(f.kernel).not.toHaveBeenCalled();
     f.detect.mockResolvedValue([]);
     f.run.mockClear();
@@ -277,7 +321,7 @@ describe("subtitle pass", () => {
     const same = f.manager.run("trs_test");
     expect(f.manager.run("trs_test")).toBe(same);
     expect(f.manager.state.running).toBe(true);
-    release('{"cut_after":[],"hide":[]}');
+    release('{"lines":["字字字字","字字字字字字"]}');
     await Promise.all([opened, same]);
     expect(f.run).toHaveBeenCalledTimes(1);
   });
@@ -316,8 +360,16 @@ describe("subtitle pass", () => {
   it("caps concurrency at six and cancels queued work on project close", async () => {
     const releases: (() => void)[] = [];
     const f = await setup(
-      transcript(100, 10),
-      async () => new Promise<string>((resolve) => releases.push(() => resolve('{"cut_after":[],"hide":[]}'))),
+      {
+        ...transcript(80),
+        cues: Array.from({ length: 7 }, (_, i) => ({
+          id: `cue_lock_${i}`,
+          first_token: `tok_${i * 10 + 9}`,
+          last_token: `tok_${i * 10 + 9}`,
+          state: "approved" as const,
+        })),
+      },
+      async () => new Promise<string>((resolve) => releases.push(() => resolve('{"lines":["字字字字字字字字字"]}'))),
     );
     const task = f.manager.run("trs_test");
     await vi.waitFor(() => expect(f.run).toHaveBeenCalledTimes(6));
@@ -333,7 +385,7 @@ describe("subtitle pass", () => {
 
 describe("chunking", () => {
   it("uses hard pauses and latest soft pause under 600, then falls back to 600", () => {
-    expect(subtitleChunks(transcript(30, 10)).map((chunk) => chunk.length)).toEqual([10, 10, 10]);
+    expect(subtitleChunks(transcript(30, 10)).map((chunk) => chunk.length)).toEqual([30]);
     expect(subtitleChunks(transcript(1250)).map((chunk) => chunk.length)).toEqual([600, 600, 50]);
     const t = transcript(610);
     for (let i = 0; i < t.tokens.length; i++) {
@@ -355,11 +407,13 @@ describe("chunking", () => {
       { id: "cue_lock", first_token: "tok_2", last_token: "tok_3", state: "auto", timing: { locked: true } },
       { id: "cue_approved", first_token: "tok_5", last_token: "tok_6", state: "approved" },
     ];
+    t.tokens[8]!.state = "approved";
+    t.cues.push({ id: "cue_token_approved", first_token: "tok_7", last_token: "tok_8", state: "auto" });
     expect(
       subtitleChunks(t)
         .flat()
         .map((t) => t.id),
-    ).toEqual(["tok_0", "tok_4", "tok_7", "tok_8", "tok_9"]);
+    ).toEqual(["tok_0", "tok_4", "tok_9"]);
   });
 });
 
@@ -391,7 +445,13 @@ it.skipIf(!supportsCutAfter)("S2.1 integration: one real history step, mark, and
       dispatch,
       detect: async () => [{ agent: "claude", available: true }],
       selected: () => undefined,
-      run: async () => '{"cut_after":[],"hide":[]}',
+      run: async () =>
+        JSON.stringify({
+          lines: subtitleChunks(t)[0]!
+            .map((token) => token.text)
+            .join("")
+            .match(/.{1,10}/gu),
+        }),
       changed: () => {},
     });
     managers.push(pass);
@@ -415,32 +475,19 @@ it.skipIf(!supportsCutAfter)("S2.1 integration: one real history step, mark, and
   }
 });
 
-it("protects project terms crossing a chunk boundary and English terms with spaces", async () => {
-  const f = await setup(transcript(20, 10), async () => '{"cut_after":[3],"hide":[0]}');
-  f.project.recognition!.terms = ["豆包", "Open AI"];
-  const tokens = f.project.transcripts[0]!.tokens;
-  tokens[9]!.text = "豆";
-  tokens[10]!.text = "包";
-  tokens[0]!.text = "Open";
-  tokens[1]!.text = "AI";
-  await f.manager.run("trs_test");
-  expect(request(f).ops).toHaveLength(1);
-  expect(request(f).ops[0]).toMatchObject({ cut_after: ["tok_3", "tok_9", "tok_13", "tok_19"] });
-});
-
-it("uses stored pause rules and sends pauses in chunk-local indices", async () => {
+it("uses stored pause rules and sends text with pause markers", async () => {
   const t = transcript(6);
   t.subtitle_rules = { profile: "zh-talk", hard_pause: rational(2n), soft_pause: rational(1n, 2n) };
   for (const token of t.tokens.slice(3)) {
     token.align.start = rational((token.align.start.numerator * 10n) / token.align.start.denominator + 5n, 10n);
     token.align.end = rational((token.align.end.numerator * 10n) / token.align.end.denominator + 5n, 10n);
   }
-  const f = await setup(t, async () => '{"cut_after":[],"hide":[]}');
+  const f = await setup(t, async () => '{"lines":["字字字","字字字"]}');
   await f.manager.run(t.id);
   expect(JSON.parse(f.run.mock.calls[0]![1].split("\n").at(-1)!)).toEqual({
-    tokens: Array(6).fill("字"),
-    pauses: [2],
+    text: "字字字 / 字字字",
     remove_fillers: true,
     terms: [],
+    max_chars: 16,
   });
 });

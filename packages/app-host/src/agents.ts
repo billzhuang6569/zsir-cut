@@ -268,8 +268,6 @@ export class Agents {
                 "code_mode_host",
               ].flatMap((feature) => ["-c", `features.${feature}=false`]),
               "-c",
-              "tools.update_plan=false",
-              "-c",
               "mcp_servers={}",
               "--output-last-message",
               join(directory, "output.json"),

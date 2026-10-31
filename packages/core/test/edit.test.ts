@@ -1577,17 +1577,20 @@ describe("semantic subtitle resegment", () => {
         .join(""),
     );
 
-  it("corrects real noun and number boundaries using project recognition terms", async () => {
+  it("preserves noun and number boundaries from cut_after", async () => {
     await copyFile(
       new URL("../../../fixtures/regressions/subtitle-term-number-boundary.zcut.json", import.meta.url),
       path,
     );
     const result = await resegment({ cut_after: ["tok_boundary_2", "tok_boundary_7"] });
     expect(result.status, JSON.stringify(result)).toBe("applied");
-    expect(texts((await read()).transcripts[0]!)).toEqual(["感受到的", "豆包工作", "十几家", "二十几家的"]);
+    expect((await read()).transcripts[0]!.cues.slice(0, 2).map((cue) => cue.last_token)).toEqual([
+      "tok_boundary_2",
+      "tok_boundary_7",
+    ]);
   });
 
-  it("§10.1 ignores sentence punctuation with cut_after, including empty arrays, but keeps hard pauses", async () => {
+  it("§10.1 ignores punctuation and hard pauses with cut_after", async () => {
     const value = await read();
     const item = value.transcripts[0]!;
     item.tokens[0]!.text += "。";
@@ -1598,8 +1601,7 @@ describe("semantic subtitle resegment", () => {
     await writeFile(path, serializeProject(value));
     expect((await resegment({ cut_after: [], rules: { cpl: 100, max_duration: "20s" } })).status).toBe("applied");
     expect(texts((await read()).transcripts[0]!)).toEqual([
-      "所有。的点位加",
-      "起来可能有两万多个很多的脏活全部让豆包工作去做了是你要真正去使用之后你才能够去感受到",
+      "所有。的点位加起来可能有两万多个很多的脏活全部让豆包工作去做了是你要真正去使用之后你才能够去感受到",
     ]);
   });
 
@@ -1627,25 +1629,24 @@ describe("semantic subtitle resegment", () => {
     await validateAndUndo(before);
   });
 
-  it("§10.3 keeps fitting segments whole and splits oversized segments within width and duration limits", async () => {
+  it("§10.2 keeps oversized segments whole", async () => {
     const before = await read();
     const item = before.transcripts[0]!;
     expect((await resegment({ cut_after: [item.tokens[7]!.id, item.tokens[17]!.id] })).status).toBe("applied");
     expect(texts((await read()).transcripts[0]!)).toEqual([
       "所有的点位加起来可能有两万多个",
       "很多的脏活全部让豆包工作去做了",
-      "是你要真正去使用之后你才能够去",
-      "感受到",
+      "是你要真正去使用之后你才能够去感受到",
     ]);
     // A wide budget isolates the duration limit, with no pause or punctuation to split on.
     expect((await resegment({ cut_after: [], rules: { cpl: 100, max_duration: "1s" } })).status).toBe("applied");
     const timed = (await read()).transcripts[0]!;
-    expect(timed.cues.length).toBeGreaterThan(1);
-    for (const cue of timed.cues) {
-      const first = timed.tokens.find((token) => token.id === cue.first_token)!;
-      const last = timed.tokens.find((token) => token.id === cue.last_token)!;
-      expect(compare(sub(last.align.end, first.align.start), rational(1n))).toBeLessThanOrEqual(0);
-    }
+    expect(timed.cues).toHaveLength(1);
+    expect((await dispatch("validate", { project: path })).verification.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "W_SUB_TOO_WIDE", ids: expect.arrayContaining([timed.cues[0]!.id]) }),
+      ]),
+    );
   });
 
   it("§10.4 never merges short AI segments and retains display extension and warnings", async () => {
@@ -1672,7 +1673,7 @@ describe("semantic subtitle resegment", () => {
     expect((await resegment({ cut_after: item.tokens.map((token) => token.id) })).status).toBe("applied");
     const after = (await read()).transcripts[0]!;
     expect(after.cues.slice(0, 3)).toEqual(item.cues.slice(0, 3));
-    expect(after.cues.slice(3)).toHaveLength(20);
+    expect(after.cues.slice(3)).toHaveLength(item.tokens.length - 6);
     expect((await resegment({ cut_after: item.tokens.map((token) => token.id) })).status).toBe("no_op");
     await validateAndUndo(value);
   });
@@ -1689,7 +1690,7 @@ describe("semantic subtitle resegment", () => {
     expect(texts((await read()).transcripts[0]!).slice(0, 3)).toEqual([
       "所有的点位加起来可能有两万多个",
       "很多的脏活全部让豆包工作去做了",
-      "是你",
+      "是",
     ]);
   });
 
