@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import type { Project, SubtitleOverlay } from "../../core/dist/index.js";
 import { checkSubtitleFont } from "./subtitle-fonts.ts";
-import { renderSubtitle } from "./subtitle-render.ts";
+import { renderSubtitle, subtitleAnimationState } from "./subtitle-render.ts";
 
 const {
   add,
@@ -19,6 +19,7 @@ const {
   projectSubtitles,
   quantizeCue,
   rational,
+  sub,
 }: typeof import("../../core/dist/index.js") = await import(
   new URL(import.meta.url.endsWith(".ts") ? "../../core/src/index.ts" : "../../core/dist/index.js", import.meta.url)
     .href
@@ -71,36 +72,63 @@ export async function renderSubtitleOverlay(project: Project, overlay: SubtitleO
     await reservation.close();
     directory = await mkdtemp(join(dirname(overlay.output_path), ".zcut-overlay-"));
     const images = new Map<string, string>();
+    const frames: typeof cues = [];
     for (const item of cues) {
       const style = project.subtitle_styles.find((style) => style.id === item.cue.style_id)!;
       const text = item.cue.lines.join("\n");
-      const key = JSON.stringify([text, style]);
-      let file = images.get(key);
-      if (!file) {
-        const { found, missing } = checkSubtitleFont(text, style);
-        if (!found || missing.length) {
-          let warning = warnings.find((w) => w.code === "W_FONT_FALLBACK" && w.font_family === style.font_family);
-          if (!warning) {
-            warning = { code: "W_FONT_FALLBACK", font_family: style.font_family };
-            warnings.push(warning);
-          }
-          if (missing.length)
-            warning.missing_glyphs = [...new Set([...((warning.missing_glyphs as string[]) ?? []), ...missing])];
+      const { found, missing } = checkSubtitleFont(text, style);
+      if (!found || missing.length) {
+        let warning = warnings.find((w) => w.code === "W_FONT_FALLBACK" && w.font_family === style.font_family);
+        if (!warning) {
+          warning = { code: "W_FONT_FALLBACK", font_family: style.font_family };
+          warnings.push(warning);
         }
-        // Preserve project text; leave unsupported characters blank instead of drawing tofu.
-        const drawable = [...text].map((char) => (missing.includes(char) ? " " : char)).join("");
-        const canvas = createCanvas(width, height);
-        const rendered = renderSubtitle(canvas.getContext("2d"), drawable, style, width, height);
-        warnings.push(...rendered.warnings.map((warning) => ({ ...warning, cue_id: item.cue.cue_id })));
-        file = join(directory, `cue-${images.size}.png`);
-        await writeFile(file, await canvas.encode("png"));
-        images.set(key, file);
+        if (missing.length)
+          warning.missing_glyphs = [...new Set([...((warning.missing_glyphs as string[]) ?? []), ...missing])];
       }
-      item.file = file;
+      // Preserve project text; leave unsupported characters blank instead of drawing tofu.
+      const drawable = [...text].map((char) => (missing.includes(char) ? " " : char)).join("");
+      const words = item.cue.words?.map((word) => ({
+        ...word,
+        text: [...word.text].map((char) => (missing.includes(char) ? " " : char)).join(""),
+      }));
+      const step = style.animation ? 1n : item.end - item.start;
+      let previous: (typeof cues)[number] | undefined;
+      for (let at = item.start; at < item.end; at += step) {
+        const frame = style.animation
+          ? {
+              t: sub(div(rational(at), timeline.edit_rate), item.cue.start),
+              duration: sub(item.cue.end, item.cue.start),
+              words,
+            }
+          : undefined;
+        const state = subtitleAnimationState(drawable, style, frame);
+        const key = JSON.stringify([text, style, state], (_key, value) =>
+          typeof value === "bigint" ? String(value) : value,
+        );
+        let file = images.get(key);
+        if (!file) {
+          const canvas = createCanvas(width, height);
+          const rendered = renderSubtitle(canvas.getContext("2d"), drawable, style, width, height, frame);
+          for (const warning of rendered.warnings) {
+            if (!warnings.some((entry) => entry.code === warning.code && entry.cue_id === item.cue.cue_id))
+              warnings.push({ ...warning, cue_id: item.cue.cue_id });
+          }
+          file = join(directory, `cue-${images.size}.png`);
+          await writeFile(file, await canvas.encode("png"));
+          images.set(key, file);
+        }
+        const end = at + step;
+        if (previous?.file === file) previous.end = end;
+        else {
+          previous = { ...item, start: at, end, file };
+          frames.push(previous);
+        }
+      }
     }
     const transparent = join(directory, "empty.png");
     await writeFile(transparent, await createCanvas(width, height).encode("png"));
-    const cuts = [...new Set([0n, frameCount, ...cues.flatMap((item) => [item.start, item.end])])].sort((a, b) =>
+    const cuts = [...new Set([0n, frameCount, ...frames.flatMap((item) => [item.start, item.end])])].sort((a, b) =>
       a < b ? -1 : a > b ? 1 : 0,
     );
     const composites = new Map<string, string>();
@@ -109,11 +137,17 @@ export async function renderSubtitleOverlay(project: Project, overlay: SubtitleO
     const micros = (frame: bigint) =>
       floor(add(mul(div(rational(frame), timeline.edit_rate), rational(1000000n)), rational(1n, 2n)));
     const lines = ["ffconcat version 1.0"];
+    const order = new Map(cues.map((item, index) => [item.cue, index]));
+    const pending = [...frames].sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));
+    let cursor = 0;
+    let active: typeof cues = [];
     let last = transparent;
     for (let index = 0; index < cuts.length - 1; index++) {
       const start = cuts[index]!,
         end = cuts[index + 1]!;
-      const active = cues.filter((item) => item.start <= start && item.end > start);
+      active = active.filter((item) => item.end > start);
+      while (pending[cursor] && pending[cursor]!.start <= start) active.push(pending[cursor++]!);
+      active.sort((a, b) => order.get(a.cue)! - order.get(b.cue)!);
       let file = active[0]?.file ?? transparent;
       if (active.length > 1) {
         const key = active.map((item) => item.file).join("\n");

@@ -14,7 +14,16 @@ import type { ProjectView } from "../src/connection.js";
 import { renderSubtitle, SubtitleCanvas } from "../src/SubtitleCanvas.js";
 import { useSubtitlePanel } from "../src/SubtitlePanel.js";
 import { initialState } from "../src/state.js";
-import { alignment, caretOffset, cueEdit, defaultStyle, placeCaret, textEdit, textEdits } from "../src/subtitles.js";
+import {
+  alignment,
+  caretOffset,
+  cueEdit,
+  defaultStyle,
+  placeCaret,
+  subtitleStyleOps,
+  textEdit,
+  textEdits,
+} from "../src/subtitles.js";
 import { TimelinePreview } from "../src/TimelinePreview.js";
 import { recordingCanvas } from "./canvas.js";
 
@@ -63,6 +72,7 @@ beforeEach(() => {
 afterEach(async () => {
   for (const close of cleanups.splice(0)) await close();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 async function mount(
@@ -544,7 +554,7 @@ it("previews the selected track and applies edits to every style when scope is a
     expect.objectContaining({ op: "update_style", style_id: "sty_en", color: "#FFD84A" }),
   ]);
 });
-it("reserves empty preset and animation containers and uses the specified collapsible groups", async () => {
+it("keeps the preset placeholder and displays the animation groups with shared renderer thumbnails", async () => {
   const h = await mount(project, "style");
   expect(h.container.querySelector('[aria-label="字幕样式轨道"]')).toBeNull();
   expect(h.container.querySelector(".zc-sub-presets")?.textContent).toBe("");
@@ -558,7 +568,12 @@ it("reserves empty preset and animation containers and uses the specified collap
   ]);
   expect(h.container.querySelector("details")?.open).toBe(true);
   await h.click("动画");
-  expect(h.container.querySelector(".zc-sub-animation")?.textContent).toBe("");
+  expect([...h.container.querySelectorAll(".zc-sub-animation h4")].map((item) => item.textContent)).toEqual([
+    "入场",
+    "出场",
+    "逐字",
+  ]);
+  expect(h.container.querySelectorAll(".zc-sub-animation-cell canvas")).toHaveLength(13);
   expect(h.call).not.toHaveBeenCalled();
 });
 
@@ -1418,4 +1433,165 @@ it("keeps pending inline edits in the same batch when merging from the context m
       { op: "merge_cues", cue_ids: ["cue_1", "cue_2"] },
     ],
   });
+});
+
+it("selects animations, supplies highlight in the same write and commits rational durations on release", async () => {
+  vi.useFakeTimers();
+  const h = await mount(project, "style");
+  await h.click("动画");
+  await h.click("入场：上升");
+  await h.settle();
+  expect(h.call.mock.lastCall?.[1].ops).toEqual([
+    { op: "update_style", style_id: "sty_1", animation: { in: { type: "rise", duration: "1/5s" } } },
+  ]);
+  const calls = h.call.mock.calls.length;
+  await h.input("入场时长", "0.35");
+  expect(h.call).toHaveBeenCalledTimes(calls);
+  await act(async () => h.find("入场时长").dispatchEvent(new Event("pointerup", { bubbles: true })));
+  await h.settle();
+  expect(h.call.mock.lastCall?.[1].ops).toEqual([
+    expect.objectContaining({ animation: { in: { type: "rise", duration: "7/20s" } } }),
+  ]);
+  await h.click("出场：下沉");
+  await h.click("逐字：填色");
+  await h.settle();
+  expect(h.container.querySelector('[aria-label="逐字"] input[type="range"]')).toBeNull();
+  expect(h.container.querySelectorAll('.zc-sub-animation input[type="range"]')).toHaveLength(2);
+  expect(h.call.mock.lastCall?.[1].ops).toEqual([
+    expect.objectContaining({
+      highlight: { color: "#FFD84A" },
+      animation: { in: { type: "rise", duration: "7/20s" }, out: { type: "sink", duration: "1/5s" }, word: "fill" },
+    }),
+  ]);
+  await h.click("入场：无");
+  await h.settle();
+  expect(JSON.parse(JSON.stringify(h.call.mock.lastCall?.[1].ops))).toEqual([
+    expect.objectContaining({ animation: { out: { type: "sink", duration: "1/5s" }, word: "fill" } }),
+  ]);
+});
+it("uses the selected subtitle style copy rule for word animation", async () => {
+  vi.useFakeTimers();
+  const h = await mount();
+  await h.click("你好世界");
+  await h.click("样式");
+  await act(async () => {
+    const select = h.find<HTMLSelectElement>("应用到");
+    select.value = "selected";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await h.click("动画");
+  await h.click("逐字：跳动");
+  await h.settle();
+  const ops = h.call.mock.lastCall?.[1].ops as Record<string, unknown>[];
+  expect(ops).toHaveLength(2);
+  expect(ops[0]).toMatchObject({ op: "add_style", highlight: { color: "#FFD84A" }, animation: { word: "jump" } });
+  expect(ops[1]).toEqual({ op: "set_cue", cue_id: "cue_1", style_id: ops[0]?.id });
+});
+it("draws the paused playhead frame with projected word times and ignores override word effects", async () => {
+  const recorded = recordingCanvas();
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => recorded.context);
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  const style = { ...defaultStyle, id: "sty_1", highlight: { color: "#FF8800" }, animation: { word: "fill" as const } };
+  const timed = {
+    ...cue,
+    words: [
+      { text: "你好", start: "0s", end: "1s" },
+      { text: "世界", start: "1s", end: "2s" },
+    ],
+  };
+  await act(async () =>
+    root.render(<SubtitleCanvas cues={[timed]} styles={[style]} at="1501/1000s" format={project.format} />),
+  );
+  expect(recorded.calls.some((call) => call[0] === "clip")).toBe(true);
+  recorded.calls.length = 0;
+  await act(async () =>
+    root.render(
+      <SubtitleCanvas
+        cues={[{ ...timed, text_override: true }]}
+        styles={[style]}
+        at="1501/1000s"
+        format={project.format}
+      />,
+    ),
+  );
+  expect(recorded.calls.some((call) => call[0] === "clip")).toBe(false);
+  await act(async () => root.unmount());
+});
+
+it("redraws animated captions from the playback clock every frame and cancels on pause", async () => {
+  const callbacks = new Map<number, FrameRequestCallback>();
+  let sequence = 0;
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    callbacks.set(++sequence, callback);
+    return sequence;
+  });
+  vi.stubGlobal("cancelAnimationFrame", (id: number) => callbacks.delete(id));
+  const recorded = recordingCanvas();
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => recorded.context);
+  const root = createRoot(document.createElement("div"));
+  const playback = { current: cue.start as string | null };
+  const styles = [{ ...defaultStyle, id: "sty_1", animation: { in: { type: "fade" as const, duration: "1s" } } }];
+  await act(async () =>
+    root.render(
+      <SubtitleCanvas
+        cues={[cue]}
+        styles={styles}
+        playing
+        playback={playback}
+        at={cue.start}
+        format={project.format}
+      />,
+    ),
+  );
+  expect(recorded.calls).toContainEqual(["globalAlpha", 0]);
+  const count = recorded.calls.filter((call) => call[0] === "clearRect").length;
+  playback.current = "3/2s";
+  await act(async () => {
+    const scheduled = [...callbacks.values()];
+    callbacks.clear();
+    for (const callback of scheduled) callback(16);
+  });
+  expect(recorded.calls.filter((call) => call[0] === "clearRect")).toHaveLength(count + 1);
+  expect(recorded.calls.filter((call) => call[0] === "globalAlpha").at(-1)?.[1]).toBeGreaterThan(0);
+  await act(async () => root.render(<SubtitleCanvas cues={[cue]} styles={styles} at="3/2s" format={project.format} />));
+  expect(callbacks.size).toBe(0);
+  await act(async () => root.unmount());
+});
+it("loops the shared renderer on thumbnail hover and stops after leaving without writing", async () => {
+  const callbacks = new Map<number, FrameRequestCallback>();
+  let sequence = 0;
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    callbacks.set(++sequence, callback);
+    return sequence;
+  });
+  vi.stubGlobal("cancelAnimationFrame", (id: number) => callbacks.delete(id));
+  vi.spyOn(performance, "now").mockReturnValue(0);
+  const recorded = recordingCanvas();
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => recorded.context);
+  const h = await mount(project, "style");
+  await h.click("动画");
+  const cell = h.find("入场：淡入");
+  await act(async () => cell.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
+  expect(callbacks.size).toBe(1);
+  recorded.calls.length = 0;
+  for (const time of [100, 2100]) {
+    await act(async () => {
+      const scheduled = [...callbacks.values()];
+      callbacks.clear();
+      for (const callback of scheduled) callback(time);
+    });
+  }
+  expect(recorded.calls.filter((call) => call[0] === "globalAlpha").map((call) => call[1])).toEqual([0.875, 0.875]);
+  await act(async () => cell.dispatchEvent(new MouseEvent("mouseout", { bubbles: true })));
+  expect(callbacks.size).toBe(0);
+  expect(h.call).not.toHaveBeenCalled();
+});
+it("adds missing highlight per target style without overwriting existing highlight colors", () => {
+  const colored = { ...project.styles[0], ...defaultStyle, id: "sty_1", highlight: { color: "#AA0000" } };
+  const view = { ...project, styles: [colored, { ...defaultStyle, id: "sty_2" }] };
+  expect(subtitleStyleOps(view, [], { animation: { word: "highlight" } }, false)).toEqual([
+    { op: "update_style", style_id: "sty_1", animation: { word: "highlight" } },
+    { op: "update_style", style_id: "sty_2", animation: { word: "highlight" }, highlight: { color: "#FFD84A" } },
+  ]);
 });

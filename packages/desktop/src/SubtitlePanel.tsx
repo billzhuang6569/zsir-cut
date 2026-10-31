@@ -3,6 +3,7 @@ import type { UiState } from "../../app-host/src/ui.js";
 import { Icon, IconButton } from "./components.js";
 import type { ProjectView } from "./connection.js";
 import { DESKTOP_AUTHOR } from "./connection.js";
+import { SubtitleAnimationCell } from "./SubtitleAnimationCell.js";
 import { SubtitleCanvas } from "./SubtitleCanvas.js";
 import {
   alignment,
@@ -27,9 +28,11 @@ import {
   contains,
   frameTime,
   mul,
+  numberOf,
   parseRational,
   printRational,
   type Recognition,
+  rational,
   type StyleView,
   seekTarget,
   sourceAt,
@@ -1520,10 +1523,12 @@ export function useSubtitlePanel({
             <SubtitleCanvas
               cues={[
                 {
+                  ...sample,
                   text: sample?.text ?? "字幕样式预览",
                   style_id: styleDraft.id,
                 },
               ]}
+              at={at}
               styles={[styleDraft]}
               format={project?.format}
             />
@@ -1559,7 +1564,91 @@ export function useSubtitlePanel({
             ))}
           </div>
           {styleTab === "animation" ? (
-            <div className="zc-sub-animation" />
+            <fieldset className="zc-sub-animation" disabled={!style || busy || (selectedOnly && !selectedCue)}>
+              {(["in", "out", "word"] as const).map((group) => {
+                const name = { in: "入场", out: "出场", word: "逐字" }[group];
+                const choices =
+                  group === "in"
+                    ? [
+                        ["none", "无"],
+                        ["fade", "淡入"],
+                        ["rise", "上升"],
+                        ["pop", "放大"],
+                        ["typewriter", "打字机"],
+                      ]
+                    : group === "out"
+                      ? [
+                          ["none", "无"],
+                          ["fade", "淡出"],
+                          ["sink", "下沉"],
+                          ["pop", "缩小"],
+                        ]
+                      : [
+                          ["none", "无"],
+                          ["highlight", "高亮"],
+                          ["fill", "填色"],
+                          ["jump", "跳动"],
+                        ];
+                const current = styleDraft.animation?.[group];
+                const selected = typeof current === "string" ? current : (current?.type ?? "none");
+                const duration = typeof current === "object" ? current.duration : "1/5s";
+                const seconds = typeof duration === "string" ? parseRational(duration, true) : duration;
+                return (
+                  <section key={group} aria-label={name}>
+                    <h4>{name}</h4>
+                    <div className="zc-sub-animation-grid">
+                      {choices.map(([type = "none", title]) => {
+                        const choice =
+                          group === "word"
+                            ? type
+                            : type === "none"
+                              ? undefined
+                              : { type, duration: printRational(seconds, true) };
+                        const animation = { ...styleDraft.animation, [group]: choice } as NonNullable<
+                          StyleView["animation"]
+                        >;
+                        const highlight = styleDraft.highlight ?? { color: "#FFD84A" };
+                        return (
+                          <SubtitleAnimationCell
+                            key={type}
+                            label={`${name}：${title}`}
+                            selected={selected === type}
+                            style={{
+                              ...styleDraft,
+                              highlight,
+                              animation: { [group]: choice } as NonNullable<StyleView["animation"]>,
+                            }}
+                            choose={() =>
+                              changeStyle(
+                                {
+                                  animation,
+                                  ...(group === "word" && type !== "none" && !styleDraft.highlight
+                                    ? { highlight }
+                                    : {}),
+                                },
+                                true,
+                                `animation.${group}`,
+                              )
+                            }
+                          />
+                        );
+                      })}
+                    </div>
+                    {group !== "word" &&
+                      selected !== "none" &&
+                      number(`${name}时长`, numberOf(seconds), 0.05, 2, 0.05, (value) => ({
+                        animation: {
+                          ...styleDraft.animation,
+                          [group]: {
+                            type: selected,
+                            duration: printRational(rational(BigInt(Math.round(value * 1000)), 1000n), true),
+                          },
+                        } as NonNullable<StyleView["animation"]>,
+                      }))}
+                  </section>
+                );
+              })}
+            </fieldset>
           ) : (
             <fieldset className="zc-sub-style" disabled={!style || busy || (selectedOnly && !selectedCue)}>
               <div className="zc-sub-presets" />

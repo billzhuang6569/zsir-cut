@@ -102,7 +102,7 @@ it("opens the project through inspect and receives UI commands", async () => {
     const path = './examples/interview.zcut.json';
     const parsed = parseProject(readFileSync(path, 'utf8'));
     const envelope = await dispatch('inspect', {project:path,view:'timeline'});
-    const cues = projectSubtitles(parsed.project, parsed.project.timelines[0].id).cues.map(cue => ({...cue,start:printRational(cue.start,true),end:printRational(cue.end,true)}));
+    const cues = projectSubtitles(parsed.project, parsed.project.timelines[0].id).cues.map(cue => ({...cue,start:printRational(cue.start,true),end:printRational(cue.end,true),words:cue.words?.map(word=>({...word,start:printRational(word.start,true),end:printRational(word.end,true)}))}));
     console.log(JSON.stringify({timeline:envelope.result,cues}));
   `,
     ],

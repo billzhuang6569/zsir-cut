@@ -326,6 +326,7 @@ export function TimelinePreview({
   const playhead = useRef<HTMLDivElement>(null);
   const clock = useRef<HTMLOutputElement>(null);
   const playbackAt = useRef<string | null>(null);
+  const subtitleAt = useRef<string | null>(null);
   const lastClip = useRef<string | undefined>(undefined);
   const latest = useRef({ state, project });
   latest.current = { state, project };
@@ -379,6 +380,7 @@ export function TimelinePreview({
   }, [project, state.playhead, update]);
   useEffect(() => {
     if (hideViewer || !state.playing || !project) return;
+    subtitleAt.current = seekTarget(project, project.cues, latest.current.state.playhead);
     let started = performance.now();
     let previous = seekTarget(project, project.cues, latest.current.state.playhead);
     let start = frameAt(previous, project.edit_rate);
@@ -443,6 +445,7 @@ export function TimelinePreview({
         started = now;
         start = frameAt(next, project.edit_rate);
       }
+      subtitleAt.current = next;
       if (playhead.current) playhead.current.style.left = `calc(var(--track-label-w) + ${pixelAt(next, scale)}px)`;
       if (clock.current) clock.current.textContent = timecode(next, project);
       const from = frameAt(target, project.edit_rate),
@@ -704,6 +707,9 @@ export function TimelinePreview({
             )}
             <SubtitleCanvas
               cues={captions}
+              at={at}
+              playback={subtitleAt}
+              playing={state.playing}
               styles={project?.styles ?? []}
               preview={subtitlePreview ?? (subtitleDraft ? { fields: subtitleDraft } : undefined)}
               format={project?.format}

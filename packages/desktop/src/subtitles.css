@@ -573,3 +573,40 @@ fieldset.zc-sub-list {
 .zc-sub-parameters:has(.zc-sub-list) > :not(.zc-sub-list) {
   flex-shrink: 0;
 }
+
+.zc-sub-animation {
+  border: 0;
+  margin: 0;
+  padding: var(--space-6);
+}
+.zc-sub-animation h4 {
+  margin: var(--space-6) 0 var(--space-4);
+  font-size: var(--label-size);
+}
+.zc-sub-animation-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+.zc-sub-animation-cell {
+  padding: 0 0 var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+  color: var(--text-3);
+  cursor: pointer;
+  font: inherit;
+}
+.zc-sub-animation-cell canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.zc-sub-animation-cell[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.zc-sub-animation-cell:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

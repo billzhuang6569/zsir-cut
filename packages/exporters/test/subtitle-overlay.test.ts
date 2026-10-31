@@ -329,3 +329,66 @@ it("keeps every decoded legacy overlay pixel identical to the pre-S4.5 export", 
     reference.mockRestore();
   }
 }, 30000);
+
+it("deduplicates animation states, retains one image for static cues and repeats decoded animation pixels", async () => {
+  const style = project.subtitle_styles[0]!;
+  style.font_family = "ZcutTestRoboto";
+  const subtitles = timeline().tracks[1]!;
+  if (subtitles.kind !== "subtitle") throw new Error("subtitle");
+  subtitles.free_cues[0]!.text = "Alpha";
+  style.animation = { in: { type: "fade", duration: q(2n, 25n) }, out: { type: "fade", duration: q(2n, 25n) } };
+  const renderer = vi.spyOn(subtitleRenderer, "renderSubtitle");
+  try {
+    await renderSubtitleOverlay(project, overlay(), path);
+    // Five frames per cue: start, eased, settled, settled, eased; three unique states each.
+    expect(renderer).toHaveBeenCalledTimes(6);
+    const first = await decode();
+    expect(alphas(frame(first, 5)).every((alpha) => alpha === 0)).toBe(true);
+    expect(alphas(frame(first, 7)).some((alpha) => alpha > 0)).toBe(true);
+    renderer.mockClear();
+    await renderSubtitleOverlay(project, overlay(), path);
+    expect(renderer).toHaveBeenCalledTimes(6);
+    expect((await decode()).equals(first)).toBe(true);
+    delete style.animation;
+    renderer.mockClear();
+    await renderSubtitleOverlay(project, overlay(), path);
+    expect(renderer).toHaveBeenCalledTimes(2);
+    expect(renderer.mock.calls.every((call) => call[5] === undefined)).toBe(true);
+  } finally {
+    renderer.mockRestore();
+  }
+}, 30000);
+
+it("passes projected rational words to each overlay frame and exports word fill deterministically", async () => {
+  const parsed = parseProject(
+    await readFile(new URL("../../../fixtures/regressions/hidden-tokens.zcut.json", import.meta.url), "utf8"),
+  );
+  if (!parsed.ok) throw new Error("fixture");
+  const target = overlay();
+  project = parsed.project;
+  target.timeline_id = timeline().id;
+  target.subtitle_track_id = timeline().tracks.find((track) => track.kind === "subtitle")!.id;
+  target.tail = q(0n);
+  project.subtitle_overlays = [target];
+  timeline().format = { width: 160, height: 90 };
+  timeline().edit_rate = q(10n);
+  Object.assign(project.subtitle_styles[0]!, {
+    font_family: "ZcutTestRoboto",
+    highlight: { color: "#FF8800" },
+    animation: { word: "fill" },
+  });
+  project.transcripts[0]!.tokens.forEach((token, index) => {
+    token.text = ["Hello", "", "world", "again", "now"][index]!;
+  });
+  const renderer = vi.spyOn(subtitleRenderer, "renderSubtitle");
+  try {
+    await renderSubtitleOverlay(project, overlay(), path);
+    expect(renderer.mock.calls.some((call) => call[5]?.words?.length === 4)).toBe(true);
+    expect(renderer.mock.calls.every((call) => typeof call[5]?.t.numerator === "bigint")).toBe(true);
+    const first = await decode();
+    await renderSubtitleOverlay(project, overlay(), path);
+    expect((await decode()).equals(first)).toBe(true);
+  } finally {
+    renderer.mockRestore();
+  }
+}, 30000);

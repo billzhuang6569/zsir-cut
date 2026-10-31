@@ -3,6 +3,7 @@ import { defineConfig } from "vite";
 import { tokenCss } from "./src/tokens.js";
 
 export default defineConfig({
+  build: { target: "es2022" },
   plugins: [
     react(),
     {

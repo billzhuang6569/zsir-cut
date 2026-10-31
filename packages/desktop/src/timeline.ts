@@ -52,6 +52,7 @@ export interface CueView {
   clip_id?: string | null;
   clip_ids?: string[];
   text_override?: boolean;
+  words?: { text: string; start: string; end: string }[];
   transcript_id?: string;
   tokens?: { id: string; text: string; heard?: string; state?: string }[];
   locked?: boolean;
