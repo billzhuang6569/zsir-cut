@@ -19,6 +19,7 @@ import { Agents } from "./agents.js";
 import { exportPreferences } from "./export-preferences.js";
 import { mediaChannel, runFfmpeg } from "./media.js";
 import { RecentProjects } from "./recent.js";
+import { SubtitlePass } from "./subtitle-pass.js";
 import { PANELS, UI_VERBS, type UiEnvelope, type UiVerb } from "./ui.js";
 
 const {
@@ -327,6 +328,7 @@ export async function startHost(
   };
   const batches = new Set<string>();
   let agents: Agents | undefined;
+  let subtitlePass: SubtitlePass | undefined;
   const notify = (type: string) => {
     if (ui?.readyState === WebSocket.OPEN) ui.send(JSON.stringify({ type }));
   };
@@ -334,6 +336,7 @@ export async function startHost(
     const epoch = projectEpoch;
     const envelope = await dispatch(verb, input, options.dispatchOptions);
     if (epoch !== projectEpoch || verb === "create_project") return envelope;
+    subtitlePass?.observe(verb, input, envelope);
     const job = verb === "job_status" ? (envelope.result as { envelope?: { receipt?: unknown } } | null) : null;
     if (envelope.receipt || job?.envelope?.receipt) notify("project_changed");
     const request = input as { batch?: { id?: string } };
@@ -437,7 +440,11 @@ export async function startHost(
             const parsed = uiStateSchema.safeParse(message.result);
             item.resolve(
               parsed.success
-                ? { ...uiEnvelope(item.verb), request_id: message.id, result: parsed.data }
+                ? {
+                    ...uiEnvelope(item.verb),
+                    request_id: message.id,
+                    result: { ...parsed.data, subtitlePass: subtitlePass?.state },
+                  }
                 : uiEnvelope(item.verb, "E_INTERNAL", "Invalid UI state"),
             );
           }
@@ -481,6 +488,17 @@ export async function startHost(
               id: message.id,
               envelope: {
                 ok: true,
+                verification: {
+                  level: "none",
+                  passed: true,
+                  issues:
+                    subtitlePass?.state.warnings.map((warning) => ({
+                      code: warning.code,
+                      severity: "warning",
+                      message: warning.reason,
+                      ids: [warning.transcript_id],
+                    })) ?? [],
+                },
                 result: {
                   historyBatches: await readHistoryBatches(join(dirname(resolve(projectPath)), ".zcut", project.id)),
                   media: project.media.map((item) => ({
@@ -525,6 +543,7 @@ export async function startHost(
                         name: track.name,
                         default_style_id: track.default_style_id,
                       })) ?? [],
+                  subtitlePass: subtitlePass?.state,
                   recognition: project.recognition,
                   recognized: project.transcripts.some((item) => item.raw_runs.some((run) => run.kind === "asr")),
                   recognitionRevision: lastRecognition?.seq,
@@ -548,7 +567,11 @@ export async function startHost(
             if (!agents) throw new Error("未打开工程");
             const request = message.request ?? {};
             let result: unknown;
-            if (message.verb === "chat_agents") result = await agents.detect();
+            if (message.verb === "chat_select") {
+              if (!["claude", "codex"].includes(request.agent)) throw new Error("Invalid Agent");
+              agents.selected = request.agent;
+              result = {};
+            } else if (message.verb === "chat_agents") result = await agents.detect();
             else if (message.verb === "chat_list") result = await agents.list();
             else if (message.verb === "chat_history") result = await agents.history(request.id);
             else if (message.verb === "chat_send")
@@ -607,6 +630,8 @@ export async function startHost(
   const bind = async (path: string | null) => {
     const next = path ? await loadPath(path) : undefined;
     if (path && next) await recent.add(path, next.name);
+    await subtitlePass?.stop();
+    subtitlePass = undefined;
     await agents?.stop();
     agents = undefined;
     projectEpoch++;
@@ -626,6 +651,34 @@ export async function startHost(
           if (event.type === "end") notify("ai_changed");
         },
       });
+    if (options.project && agents) {
+      const currentAgents = agents;
+      currentAgents.selected = (await currentAgents.list().catch(() => []))[0]?.agent;
+      const project = options.project;
+      subtitlePass = new SubtitlePass({
+        project,
+        load: () => loadPath(project),
+        transcribed: async (revision) => {
+          const entry = (await openProject({ projectPath: project }).journal()).find(
+            (entry) => entry.verb === "transcribe" && entry.revision === revision,
+          );
+          return [
+            ...new Set(
+              entry?.changes
+                ?.filter((change) => change.entity === "run" && change.after !== null)
+                .map((change) => change.after_parent)
+                .filter((id): id is string => typeof id === "string") ?? [],
+            ),
+          ];
+        },
+        dispatch: kernel,
+        detect: () => currentAgents.detect(),
+        selected: () => currentAgents.selected,
+        run: (agent, prompt, signal) => currentAgents.subtitlePass(agent, prompt, signal),
+        changed: () => notify("project_changed"),
+      });
+      void subtitlePass.open().catch(() => {});
+    }
     if (ui?.readyState === WebSocket.OPEN)
       ui.send(JSON.stringify({ type: "bootstrap", project: options.project ?? null, fcpIcon: await readFcpIcon() }));
   };
@@ -636,6 +689,7 @@ export async function startHost(
     token,
     mcp,
     close: async () => {
+      await subtitlePass?.stop();
       await agents?.stop();
       await Promise.all([...httpServers].map((server) => server.close()));
       disconnected();

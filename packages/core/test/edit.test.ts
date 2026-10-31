@@ -1577,6 +1577,16 @@ describe("semantic subtitle resegment", () => {
         .join(""),
     );
 
+  it("corrects real noun and number boundaries using project recognition terms", async () => {
+    await copyFile(
+      new URL("../../../fixtures/regressions/subtitle-term-number-boundary.zcut.json", import.meta.url),
+      path,
+    );
+    const result = await resegment({ cut_after: ["tok_boundary_2", "tok_boundary_7"] });
+    expect(result.status, JSON.stringify(result)).toBe("applied");
+    expect(texts((await read()).transcripts[0]!)).toEqual(["感受到的", "豆包工作", "十几家", "二十几家的"]);
+  });
+
   it("§10.1 ignores sentence punctuation with cut_after, including empty arrays, but keeps hard pauses", async () => {
     const value = await read();
     const item = value.transcripts[0]!;
@@ -1639,9 +1649,9 @@ describe("semantic subtitle resegment", () => {
   });
 
   it("§10.4 never merges short AI segments and retains display extension and warnings", async () => {
-    expect((await resegment({ cut_after: ["tok_mantic_0", "tok_mantic_1"] })).status).toBe("applied");
+    expect((await resegment({ cut_after: ["tok_mantic_2", "tok_mantic_3", "tok_mantic_t"] })).status).toBe("applied");
     const item = (await read()).transcripts[0]!;
-    expect(texts(item).slice(0, 2)).toEqual(["所有", "的"]);
+    expect(texts(item).slice(0, 2)).toEqual(["所有的点位", "加"]);
     const ranges = displayRanges(item);
     expect(ranges[0]!.warnings).toContain("W_SUB_SHORT");
     expect(compare(ranges.at(-1)!.end, item.tokens.at(-1)!.align.end)).toBeGreaterThan(0);
@@ -1662,7 +1672,7 @@ describe("semantic subtitle resegment", () => {
     expect((await resegment({ cut_after: item.tokens.map((token) => token.id) })).status).toBe("applied");
     const after = (await read()).transcripts[0]!;
     expect(after.cues.slice(0, 3)).toEqual(item.cues.slice(0, 3));
-    expect(after.cues.slice(3)).toHaveLength(item.tokens.length - 6);
+    expect(after.cues.slice(3)).toHaveLength(20);
     expect((await resegment({ cut_after: item.tokens.map((token) => token.id) })).status).toBe("no_op");
     await validateAndUndo(value);
   });
@@ -1679,7 +1689,7 @@ describe("semantic subtitle resegment", () => {
     expect(texts((await read()).transcripts[0]!).slice(0, 3)).toEqual([
       "所有的点位加起来可能有两万多个",
       "很多的脏活全部让豆包工作去做了",
-      "是",
+      "是你",
     ]);
   });
 

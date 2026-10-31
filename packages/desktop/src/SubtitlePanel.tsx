@@ -240,8 +240,8 @@ export function useSubtitlePanel({
   const setBrowser = (patch: Partial<typeof browser>) =>
     update({ ...state, subtitleBrowser: { ...browser, ...patch } });
   const recognition = project?.recognition ?? {};
-  const [removeFillers, setRemoveFillers] = useState(recognition.remove_fillers ?? false);
-  useEffect(() => setRemoveFillers(recognition.remove_fillers ?? false), [recognition.remove_fillers]);
+  const [removeFillers, setRemoveFillers] = useState(recognition.remove_fillers ?? true);
+  useEffect(() => setRemoveFillers(recognition.remove_fillers ?? true), [recognition.remove_fillers]);
   const cues = project?.cues ?? [];
   const at = project ? seekTarget(project, cues, state.playhead) : "0s";
   const subtitleTracks = project?.subtitleTracks ?? project?.tracks.filter((track) => track.kind === "subtitle") ?? [];
@@ -422,9 +422,21 @@ export function useSubtitlePanel({
     <div className="zc-sub-controls">
       <p className={`zc-sub-status${project?.recognized ? " is-recognized" : ""}`}>
         <span className="zc-dot" aria-hidden="true" />
-        {project?.recognized
-          ? `已识别${project.recognitionRevision !== undefined ? ` · 第 ${project.recognitionRevision} 版` : ""} · ${cues.length} 条字幕`
-          : "还没有识别"}
+        {project?.subtitlePass?.running
+          ? "整理字幕…"
+          : project?.recognized
+            ? `已识别${project.recognitionRevision !== undefined ? ` · 第 ${project.recognitionRevision} 版` : ""} · ${cues.length} 条字幕`
+            : "还没有识别"}
+        {!!project?.subtitlePass?.warnings.length && !project.subtitlePass.running && (
+          <span
+            className="zc-sub-attention"
+            role="img"
+            aria-label="字幕整理退回规则断句"
+            title={project.subtitlePass.warnings.map((warning) => warning.reason).join("；")}
+          >
+            ⚠
+          </span>
+        )}
       </p>
       <fieldset disabled={!project || busy}>
         <SelectSetting
@@ -453,7 +465,7 @@ export function useSubtitlePanel({
             checked={removeFillers}
             onChange={(e) => setRemoveFillers(e.target.checked)}
             onBlur={() => {
-              if (removeFillers !== (recognition.remove_fillers ?? false))
+              if (removeFillers !== (recognition.remove_fillers ?? true))
                 setRecognition({ remove_fillers: removeFillers });
             }}
           />

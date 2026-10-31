@@ -103,6 +103,7 @@ describe("AI panel", () => {
     const call = vi.fn(async (verb: string, request: Record<string, unknown>): Promise<unknown> => {
       if (verb === "chat_agents") return [{ agent: "claude", available: true, version: "fake" }];
       if (verb === "chat_send") return { id: "chat_test" };
+      if (verb === "chat_select") return {};
       if (verb === "chat_list") return [];
       if (verb === "ai_state")
         return {
@@ -189,6 +190,7 @@ describe("AI panel", () => {
         ];
       if (verb === "ai_state") return { sessions: [session], batches: [{ state: "open", count: 4, applied: [1] }] };
       if (verb === "chat_send") return { id: "chat_test" };
+      if (verb === "chat_select") return {};
       if (verb === "chat_list")
         return requestLog.filter((entry) => entry.verb === "chat_list").length === 1
           ? []
@@ -615,6 +617,7 @@ it("restores complete recent history, scrolls down, highlights rows and reloads 
   try {
     await act(async () => root.render(<Harness call={call} path="/project" />));
     expect(call).toHaveBeenCalledWith("chat_history", { id: "chat_recent" });
+    expect(call).toHaveBeenCalledWith("chat_select", { agent: "codex" });
     expect(container.textContent).toContain("chat_recent 问题");
     expect(container.textContent).toContain("之前的完整回复");
     expect(container.textContent).toContain("后续回复");
@@ -639,6 +642,7 @@ it("restores complete recent history, scrolls down, highlights rows and reloads 
     expect(titleStyle.overflow).toBe("hidden");
     await act(async () => button(container, "之前的对话").click());
     expect(container.textContent).toContain("chat_older 问题");
+    expect(call).toHaveBeenCalledWith("chat_select", { agent: "claude" });
     await act(async () => root.render(<Harness call={call} path="/project" connectionEpoch={1} />));
     expect(container.textContent).toContain("chat_recent 问题");
     expect(call.mock.calls.filter(([verb]) => verb === "chat_list")).toHaveLength(3);

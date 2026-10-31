@@ -341,10 +341,11 @@ it("uses exactly the export renderer and identical drawing calls for style and t
 
 it("commits the filler switch only on blur", async () => {
   const h = await mount();
+  expect(h.find<HTMLInputElement>("去除水词").checked).toBe(true);
   await act(async () => h.find<HTMLInputElement>("去除水词").click());
   expect(h.call).not.toHaveBeenCalled();
   await h.blur("去除水词");
-  expect(h.call.mock.lastCall?.[1].ops).toEqual([{ op: "set_recognition", remove_fillers: true }]);
+  expect(h.call.mock.lastCall?.[1].ops).toEqual([{ op: "set_recognition", remove_fillers: false }]);
 });
 it("edits an existing occurrence override without changing the source transcript", async () => {
   const h = await mount({ ...project, cues: [{ ...cue, text_override: true, occurrence_id: "occ_1" }] });
@@ -553,4 +554,19 @@ it("keeps preset samples distinct with the application CSS cascade, including di
   });
   expect(samples.map((sample) => getComputedStyle(sample).color)).toEqual(appearances.map(([color]) => color));
   for (const button of buttons) expect(getComputedStyle(button).opacity).toBe("1");
+});
+
+it("shows subtitle pass progress and a fallback reason beside the restored status", async () => {
+  const running = await mount({ ...project, subtitlePass: { running: true, warnings: [] } });
+  expect(running.container.textContent).toContain("整理字幕…");
+  expect(running.container.textContent).not.toContain("已识别 · 第 4 版");
+  const done = await mount({
+    ...project,
+    subtitlePass: {
+      running: false,
+      warnings: [{ code: "W_SUB_PASS_FALLBACK", reason: "第 2 块：Agent 超时（120 秒）" }],
+    },
+  });
+  expect(done.container.textContent).toContain("已识别 · 第 4 版 · 2 条字幕");
+  expect(done.find("字幕整理退回规则断句").title).toBe("第 2 块：Agent 超时（120 秒）");
 });

@@ -45,6 +45,27 @@ describe("desktop shell", () => {
     for (const token of tokens.size.tokens) expect(css).toContain(`--${token.name}: ${token.value};`);
   });
 
+  it("keeps selected subtitle clips on their track color with the shared selection outline", () => {
+    const style = document.createElement("style");
+    style.textContent = readFileSync(new NodeURL("../src/timeline.css", import.meta.url), "utf8");
+    document.head.append(style);
+    try {
+      const rules = Array.from(style.sheet?.cssRules ?? []).filter(
+        (rule): rule is CSSStyleRule => rule instanceof CSSStyleRule,
+      );
+      const subtitle = rules.find((rule) => rule.selectorText === ".zc-clip-subtitle");
+      const selected = rules.find((rule) => rule.selectorText === ".zc-clip.is-selected");
+      const lane = rules.find((rule) => rule.selectorText === ".zc-track-lane .zc-clip");
+      expect(subtitle?.style.background).toBe("var(--track-subtitle)");
+      expect(selected?.style.getPropertyValue("box-shadow")).toBe("0 0 0 2px var(--text)");
+      expect(lane?.style.getPropertyValue("background")).toBe("");
+      expect(lane?.style.getPropertyValue("box-shadow")).toBe("");
+      expect(rules.some((rule) => rule.selectorText === ".zc-clip-subtitle.is-selected")).toBe(false);
+    } finally {
+      style.remove();
+    }
+  });
+
   it("records all six UI verbs without changing the project", () => {
     let state: UiState = { ...initialState(), project: "/example.zcut.json" };
     state = applyUi(state, "ui_show_panel", { panel: "subtitles", sub: "style" });

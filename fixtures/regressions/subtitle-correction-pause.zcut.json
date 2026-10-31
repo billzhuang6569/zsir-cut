@@ -1,0 +1,532 @@
+{
+  "schema": "zsir-cut/timeline",
+  "schema_version": "0.3",
+  "id": "prj_semantic",
+  "name": "断点停顿与名词回归（合成时间）",
+  "revision": {
+    "seq": 1,
+    "id": "rev_example_1",
+    "parent": null,
+    "created_at": "2026-10-26T12:00:00Z",
+    "author": {
+      "kind": "human",
+      "name": "example"
+    }
+  },
+  "media": [
+    {
+      "id": "med_a",
+      "kind": "video",
+      "name": "A001.mov",
+      "path": "media/hidden.mov",
+      "size_bytes": 10,
+      "fingerprint": {
+        "algo": "sampled-sha256-v1",
+        "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "duration": "20s",
+      "start_timecode": "10:00:00:00",
+      "reel": "A001",
+      "video": {
+        "rate": "25",
+        "width": 1920,
+        "height": 1080,
+        "pixel_aspect": "1",
+        "vfr": false
+      },
+      "audio": {
+        "sample_rate": "48000",
+        "channels": 2
+      }
+    }
+  ],
+  "timelines": [
+    {
+      "id": "tl_main",
+      "name": "主时间线",
+      "edit_rate": "25",
+      "drop_frame": false,
+      "start_timecode": "00:00:00:00",
+      "audio_rate": "48000",
+      "format": {
+        "width": 1920,
+        "height": 1080,
+        "pixel_aspect": "1"
+      },
+      "tracks": [
+        {
+          "id": "trk_v1",
+          "kind": "video",
+          "name": "V1",
+          "enabled": true,
+          "clips": [
+            {
+              "id": "clp_v1",
+              "occurrence_id": "occ_1",
+              "media_id": "med_a",
+              "timeline_start": "0s",
+              "duration": "20s",
+              "source_start": "0s"
+            }
+          ],
+          "transitions": []
+        },
+        {
+          "id": "trk_a1",
+          "kind": "audio",
+          "name": "A1",
+          "enabled": true,
+          "clips": [
+            {
+              "id": "clp_a1",
+              "occurrence_id": "occ_1",
+              "media_id": "med_a",
+              "timeline_start": "0s",
+              "duration": "20s",
+              "source_start": "0s",
+              "source_channels": [
+                0,
+                1
+              ]
+            }
+          ],
+          "transitions": []
+        },
+        {
+          "id": "trk_sub",
+          "kind": "subtitle",
+          "name": "中文",
+          "enabled": true,
+          "language": "zh-Hans",
+          "carrier_tracks": [
+            "trk_a1"
+          ],
+          "default_style_id": "sty_default",
+          "overrides": [],
+          "free_cues": []
+        }
+      ],
+      "markers": []
+    }
+  ],
+  "transcripts": [
+    {
+      "id": "trs_semantic",
+      "media_id": "med_a",
+      "language": "zh-Hans",
+      "source_channels": [
+        0
+      ],
+      "tokens": [
+        {
+          "id": "tok_case_0",
+          "text": "以前",
+          "state": "auto",
+          "align": {
+            "start": "0s",
+            "end": "1/10s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_1",
+          "text": "是",
+          "state": "auto",
+          "align": {
+            "start": "1/10s",
+            "end": "1/5s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_2",
+          "text": "由",
+          "state": "auto",
+          "align": {
+            "start": "1/5s",
+            "end": "3/10s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_3",
+          "text": "我们",
+          "state": "auto",
+          "align": {
+            "start": "3/10s",
+            "end": "2/5s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_4",
+          "text": "人工",
+          "state": "auto",
+          "align": {
+            "start": "2/5s",
+            "end": "1/2s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_5",
+          "text": "去",
+          "state": "auto",
+          "align": {
+            "start": "1/2s",
+            "end": "3/5s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_6",
+          "text": "操作",
+          "state": "auto",
+          "align": {
+            "start": "3/5s",
+            "end": "7/10s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_7",
+          "text": "的",
+          "state": "auto",
+          "align": {
+            "start": "7/10s",
+            "end": "4/5s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_8",
+          "text": "可能",
+          "state": "auto",
+          "align": {
+            "start": "26/25s",
+            "end": "57/50s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_9",
+          "text": "其实",
+          "state": "auto",
+          "align": {
+            "start": "107/50s",
+            "end": "56/25s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_10",
+          "text": "普遍",
+          "state": "auto",
+          "align": {
+            "start": "56/25s",
+            "end": "117/50s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_11",
+          "text": "是",
+          "state": "auto",
+          "align": {
+            "start": "117/50s",
+            "end": "61/25s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_12",
+          "text": "偏",
+          "state": "auto",
+          "align": {
+            "start": "61/25s",
+            "end": "127/50s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_13",
+          "text": "大",
+          "state": "auto",
+          "align": {
+            "start": "127/50s",
+            "end": "66/25s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_14",
+          "text": "的",
+          "state": "auto",
+          "align": {
+            "start": "66/25s",
+            "end": "137/50s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_15",
+          "text": "他们",
+          "state": "auto",
+          "align": {
+            "start": "141/50s",
+            "end": "73/25s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_16",
+          "text": "我",
+          "state": "auto",
+          "align": {
+            "start": "98/25s",
+            "end": "201/50s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_17",
+          "text": "是",
+          "state": "auto",
+          "align": {
+            "start": "201/50s",
+            "end": "103/25s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_18",
+          "text": "目前",
+          "state": "auto",
+          "align": {
+            "start": "103/25s",
+            "end": "211/50s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_19",
+          "text": "所在",
+          "state": "auto",
+          "align": {
+            "start": "211/50s",
+            "end": "108/25s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_20",
+          "text": "的",
+          "state": "auto",
+          "align": {
+            "start": "108/25s",
+            "end": "221/50s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_21",
+          "text": "是",
+          "state": "auto",
+          "align": {
+            "start": "221/50s",
+            "end": "113/25s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_22",
+          "text": "凯",
+          "state": "auto",
+          "align": {
+            "start": "121/25s",
+            "end": "247/50s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_23",
+          "text": "迪",
+          "state": "auto",
+          "align": {
+            "start": "247/50s",
+            "end": "126/25s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_24",
+          "text": "仕",
+          "state": "auto",
+          "align": {
+            "start": "126/25s",
+            "end": "257/50s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_25",
+          "text": "智能锁",
+          "state": "auto",
+          "align": {
+            "start": "257/50s",
+            "end": "131/25s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_26",
+          "text": "我",
+          "state": "auto",
+          "align": {
+            "start": "156/25s",
+            "end": "317/50s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_27",
+          "text": "是",
+          "state": "auto",
+          "align": {
+            "start": "317/50s",
+            "end": "161/25s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_28",
+          "text": "目前",
+          "state": "auto",
+          "align": {
+            "start": "161/25s",
+            "end": "327/50s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_29",
+          "text": "所在",
+          "state": "auto",
+          "align": {
+            "start": "327/50s",
+            "end": "166/25s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_30",
+          "text": "的",
+          "state": "auto",
+          "align": {
+            "start": "166/25s",
+            "end": "337/50s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_31",
+          "text": "是",
+          "state": "auto",
+          "align": {
+            "start": "337/50s",
+            "end": "171/25s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_32",
+          "text": "凯",
+          "state": "auto",
+          "align": {
+            "start": "347/50s",
+            "end": "176/25s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_33",
+          "text": "迪",
+          "state": "auto",
+          "align": {
+            "start": "176/25s",
+            "end": "357/50s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_34",
+          "text": "仕",
+          "state": "auto",
+          "align": {
+            "start": "357/50s",
+            "end": "181/25s",
+            "run": "run_hidden"
+          }
+        },
+        {
+          "id": "tok_case_35",
+          "text": "智能锁",
+          "state": "auto",
+          "align": {
+            "start": "181/25s",
+            "end": "367/50s",
+            "run": "run_hidden"
+          }
+        }
+      ],
+      "cues": [
+        {
+          "id": "cue_mantic_0",
+          "first_token": "tok_case_0",
+          "last_token": "tok_case_35",
+          "state": "auto"
+        }
+      ],
+      "raw_runs": [
+        {
+          "id": "run_hidden",
+          "kind": "align",
+          "engine": {
+            "name": "fixture",
+            "model": "fixture",
+            "version": "1"
+          },
+          "created_at": "2026-10-26T12:00:00Z",
+          "range": {
+            "start": "0s",
+            "duration": "20s"
+          },
+          "tokens": []
+        }
+      ],
+      "ext": {
+        "zsir": {
+          "id_tag": "mantic"
+        },
+        "fixture.keep": {
+          "value": "untouched"
+        }
+      }
+    }
+  ],
+  "subtitle_styles": [
+    {
+      "id": "sty_default",
+      "name": "默认",
+      "version": 1,
+      "font_family": "Arial",
+      "font_size": 0.05,
+      "color": "#FFFFFF"
+    }
+  ],
+  "recognition": {
+    "terms": [
+      "凯迪仕"
+    ]
+  }
+}

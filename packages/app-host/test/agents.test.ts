@@ -250,3 +250,96 @@ it("orders saved conversations by modification time across host restarts", async
   ]);
   expect((await reopened.history(first.id)).events).toContainEqual({ type: "text", text: "好" });
 }, 15000);
+
+it.each(["claude", "codex"] as const)("runs an isolated headless subtitle pass with %s", async (agent) => {
+  const directory = await mkdtemp(join(tmpdir(), "zcut-pass-runner-"));
+  directories.push(directory);
+  const script = join(directory, "fake-agent");
+  const capture = join(directory, "capture.json");
+  await writeFile(
+    script,
+    `#!${process.execPath}
+const {writeFileSync}=require('node:fs');
+const args=process.argv.slice(2); let input='';
+process.stdin.on('data',chunk=>input+=chunk);
+process.stdin.on('end',()=>{
+writeFileSync(${JSON.stringify(capture)},JSON.stringify({args,input,cwd:process.cwd()}));
+const result='{"cut_after":[1],"hide":[]}';
+if(args.includes('--output-last-message')) writeFileSync(args[args.indexOf('--output-last-message')+1],result);
+else process.stdout.write(JSON.stringify({result,is_error:false}));
+});`,
+    { mode: 0o700 },
+  );
+  const manager = new Agents({
+    project: join(directory, "project.zcut.json"),
+    projectId: "prj_test",
+    url: "unused",
+    token: "unused",
+    emit: () => {},
+    commands: { claude: script, codex: script },
+  });
+  const result = await manager.subtitlePass(agent, "只输出 JSON", new AbortController().signal);
+  expect(JSON.parse(result)).toEqual({ cut_after: [1], hide: [] });
+  const captured = JSON.parse(await readFile(capture, "utf8"));
+  expect(captured.input).toBe("只输出 JSON");
+  expect(captured.cwd).not.toBe(directory);
+  await expect(stat(captured.cwd)).rejects.toMatchObject({ code: "ENOENT" });
+  if (agent === "claude") {
+    expect(captured.args).toEqual(
+      expect.arrayContaining([
+        "-p",
+        "--output-format",
+        "json",
+        "--tools",
+        "",
+        "--strict-mcp-config",
+        '{"mcpServers":{}}',
+      ]),
+    );
+    expect(captured.args).not.toContain("--model");
+  } else {
+    expect(captured.args).toEqual(
+      expect.arrayContaining([
+        "exec",
+        "--sandbox",
+        "read-only",
+        "--ignore-user-config",
+        "features.shell_tool=false",
+        "features.apps=false",
+        "mcp_servers={}",
+      ]),
+    );
+  }
+});
+
+it("aborts a subtitle Agent process and cleans its isolated directory", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "zcut-pass-abort-"));
+  directories.push(directory);
+  const script = join(directory, "fake-agent");
+  const capture = join(directory, "capture.json");
+  await writeFile(
+    script,
+    `#!${process.execPath}
+const {writeFileSync}=require('node:fs');
+writeFileSync(${JSON.stringify(capture)}, JSON.stringify({cwd:process.cwd(),pid:process.pid}));
+process.stdin.resume(); setInterval(()=>{},1000);`,
+    { mode: 0o700 },
+  );
+  const manager = new Agents({
+    project: join(directory, "project.zcut.json"),
+    projectId: "prj_test",
+    url: "unused",
+    token: "unused",
+    emit: () => {},
+    commands: { claude: script, codex: script },
+  });
+  const abort = new AbortController();
+  const task = manager.subtitlePass("claude", "只输出 JSON", abort.signal);
+  const rejected = expect(task).rejects.toThrow("已停止");
+  await vi.waitFor(async () => expect((await stat(capture)).size).toBeGreaterThan(0));
+  const captured = JSON.parse(await readFile(capture, "utf8"));
+  abort.abort();
+  await rejected;
+  expect(() => process.kill(captured.pid, 0)).toThrow();
+  await expect(stat(captured.cwd)).rejects.toMatchObject({ code: "ENOENT" });
+});

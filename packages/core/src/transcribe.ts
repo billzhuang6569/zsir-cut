@@ -283,8 +283,8 @@ export function applyTranscription(project: Project, request: TranscribeRequest,
         ...(token.conf === undefined ? {} : { conf: token.conf }),
       },
     }));
-  if (project.recognition?.remove_fillers) {
-    const fillers = new Set(project.recognition.filler_words ?? ["嗯", "啊", "呃", "额", "哦", "唉", "哎", "诶"]);
+  if (project.recognition?.remove_fillers ?? true) {
+    const fillers = new Set(project.recognition?.filler_words ?? ["嗯", "啊", "呃", "额", "哦", "唉", "哎", "诶"]);
     let count = 0;
     for (const token of additions) {
       if (!fillers.has(token.text.replace(/^\p{P}+|\p{P}+$/gu, ""))) continue;
@@ -327,7 +327,7 @@ export function applyTranscription(project: Project, request: TranscribeRequest,
   const cues: Cue[] = [];
   let group: Token[] = [];
   const flush = () => {
-    for (const segment of segmentTokens(group, rules))
+    for (const segment of segmentTokens(group, rules, undefined, project.recognition?.terms))
       cues.push({
         id: cueId(),
         first_token: segment[0]!.id,

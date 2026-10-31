@@ -62,6 +62,120 @@ const ranges = (
 };
 
 describe("subtitle rules", () => {
+  it.each([
+    [["甲甲甲", "豆包", "工作", "乙乙"], ["豆包工作"], "甲甲甲", 5],
+    [["甲甲", "二", "十几家", "乙乙"], [], "甲甲", 4],
+    [["甲甲", "三", "小时", "乙乙"], [], "甲甲", 4],
+    [["甲甲", "aB", "Cd", "乙乙"], ["ABCD"], "甲甲", 4],
+    [["甲甲甲", "豆包", "", "工作", "乙乙"], ["豆包工作"], "甲甲甲", 5],
+  ])("avoids splitting terms and numbers during rule segmentation", (words, terms, expected, cpl) => {
+    const tokens = make(words);
+    expect(
+      segmentTokens(tokens, { ...zh, cpl }, undefined, terms)[0]!
+        .map((token) => token.text)
+        .join(""),
+    ).toBe(expected);
+  });
+
+  it.each([
+    [["甲", "是", "豆包", "工作", "乙"], ["豆包工作"], 1, 0],
+    [["甲", "二", "十几家", "的", "乙"], [], 2, 0],
+    [["甲", "是", "aB", "", "Cd", "乙"], ["ABCD"], 1, 0],
+  ])("does not move AI cuts into terms or numbers", (words, terms, cut, expected) => {
+    const tokens = make(words);
+    const groups = segmentTokens(tokens, zh, new Set([tokens[cut]!.id]), terms);
+    expect(tokens.indexOf(groups[0]!.at(-1)!)).toBe(expected);
+  });
+
+  it.each([
+    [["甲", "豆", "包", "工作", "乙"], ["豆包工作"], 2, 3],
+    [["甲", "二", "十几家", "乙"], [], 1, 2],
+    [["甲", "三", "", "小时", "乙"], [], 1, 3],
+  ])("corrects cuts already inside a term or number", (words, terms, cut, expected) => {
+    const tokens = make(words);
+    const groups = segmentTokens(tokens, zh, new Set([tokens[cut]!.id]), terms);
+    expect(tokens.indexOf(groups[0]!.at(-1)!)).toBe(expected);
+  });
+
+  it.each([
+    ["move forward", ["甲", "的", "是", "乙", "丙"], [2], [3]],
+    ["move backward", ["甲", "乙", "是", "的", "丙"], [2], [1]],
+    ["prefer later on a tie", ["甲", "是", "乙", "丙"], [1], [2]],
+    ["drop without a nearby good boundary", ["是", "是", "的", "和", "是", "把", "是", "乙"], [3], []],
+    ["process corrections sequentially", ["甲", "是", "乙", "是", "丙", "丁"], [1, 3], [2, 4]],
+    ["ignore hidden tokens as boundaries", ["甲", "是", "", "乙", "丙"], [1, 2], [3]],
+  ])("corrects AI cuts: %s", (_name, words, cuts, expected) => {
+    const tokens = make(words as string[]);
+    const groups = segmentTokens(tokens, zh, new Set((cuts as number[]).map((i) => tokens[i]!.id)));
+    expect(groups.slice(0, -1).map((group) => tokens.indexOf(group.at(-1)!))).toEqual(expected);
+  });
+
+  it("keeps a bad cut when moving and merging exceed the duration limit", () => {
+    const tokens = make(["甲", "是", "乙", "丙"], [4n, 4n, 4n, 4n]);
+    const groups = segmentTokens(tokens, { ...zh, max_duration: s(8n, 10n) }, new Set([tokens[1]!.id]));
+    expect(groups.map((group) => group.map((token) => token.text))).toEqual([
+      ["甲", "是"],
+      ["乙", "丙"],
+    ]);
+  });
+
+  it("keeps a bad cut when moving and merging exceed the width limit", () => {
+    const tokens = make(["甲甲", "是", "乙乙", "丙丙"]);
+    const groups = segmentTokens(tokens, { ...zh, cpl: 4 }, new Set([tokens[1]!.id]));
+    expect(groups.map((group) => group.map((token) => token.text))).toEqual([
+      ["甲甲", "是"],
+      ["乙乙", "丙丙"],
+    ]);
+  });
+
+  it("leaves English AI cuts unchanged", () => {
+    const tokens = make(["甲", "是", "乙", "丙"]);
+    const groups = segmentTokens(tokens, subtitleRules("en"), new Set([tokens[1]!.id]));
+    expect(groups[0]!.at(-1)!.text).toBe("是");
+  });
+
+  it("corrects real-case AI boundaries in the regression project", async () => {
+    const parsed = parseProject(await readFile("fixtures/regressions/subtitle-boundary-correction.zcut.json", "utf8"));
+    if (!parsed.ok) throw new Error("Invalid regression fixture");
+    const tokens = parsed.project.transcripts[0]!.tokens;
+    const groups = segmentTokens(tokens, zh, new Set([tokens[7]!.id, tokens[19]!.id]));
+    expect(groups.map((group) => group.map((token) => token.text).join(""))).toEqual([
+      "运营老师现在只需要非常专注的",
+      "我做好我脚本的打磨",
+      "我是目前所在的是凯迪仕",
+      "智能锁",
+    ]);
+  });
+  it("respects real-case pauses and avoids splitting the project term", async () => {
+    const parsed = parseProject(await readFile("fixtures/regressions/subtitle-correction-pause.zcut.json", "utf8"));
+    if (!parsed.ok) throw new Error("Invalid regression fixture");
+    const tokens = parsed.project.transcripts[0]!.tokens;
+    const terms = parsed.project.recognition!.terms!;
+    for (const [start, end, cut, expected] of [
+      [0, 9, 7, "以前是由我们人工去操作的"],
+      [9, 16, 14, "其实普遍是偏大的"],
+      [16, 26, 21, "我是目前所在的是"],
+      [26, 36, 31, "我是目前所在的是凯迪仕"],
+    ] as const) {
+      const groups = segmentTokens(tokens.slice(start, end), zh, new Set([tokens[cut]!.id]), terms);
+      expect(groups.map((group) => group.map((token) => token.text).join(""))[0]).toBe(expected);
+    }
+  });
+
+  it.each(["的", "地", "得"])("exempts %s only as a trigger, not as a replacement or other bad boundary", (word) => {
+    const tokens = make(["甲", word, "是", "乙", "丙"]);
+    expect(segmentTokens(tokens, zh, new Set([tokens[1]!.id]))[0]!.at(-1)!.text).toBe(word);
+    expect(segmentTokens(tokens, zh, new Set([tokens[2]!.id]))[0]!.at(-1)!.text).toBe("乙");
+    const term = make(["甲", word, "乙", "丙"]);
+    expect(segmentTokens(term, zh, new Set([term[1]!.id]), [`${word}乙`])[0]!.at(-1)!.text).toBe("乙");
+    const before = make(["甲", word, "了", "乙"]);
+    expect(segmentTokens(before, zh, new Set([before[1]!.id]))[0]!.at(-1)!.text).toBe("了");
+  });
+
+  it.each([29n, 30n, 31n])("compares the pause against soft_pause exactly: %s/100s", (gap) => {
+    const tokens = make(["甲", "是", "乙", "丙"], [10n, 10n, 10n, 10n], [0n, 0n, gap], 100n);
+    expect(segmentTokens(tokens, zh, new Set([tokens[1]!.id]))[0]!.at(-1)!.text).toBe(gap < 30n ? "乙" : "是");
+  });
   it.each(["的", "是", "和", "「是」，"])("avoids a width split after the whole token %s", (word) => {
     const tokens = make(["甲甲甲甲", "乙", "丙", "丁", word, "戊戊"]);
     const rules = { ...zh, cpl: 7 + Number(textWidth([tokens[4]!], zh).numerator) };

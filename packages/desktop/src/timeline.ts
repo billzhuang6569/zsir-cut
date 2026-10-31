@@ -95,6 +95,7 @@ export interface OverlayView {
   last_export: { created_at: string; revision_id: string; size_bytes: number } | null;
 }
 export interface PreviewData {
+  subtitlePass?: { running: boolean; warnings: { code: string; reason: string }[] };
   subtitleOverlays?: OverlayView[];
   subtitleTracks?: { id: string; name: string; default_style_id: string }[];
   recognition?: Recognition;

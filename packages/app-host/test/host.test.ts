@@ -10,11 +10,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import type { Envelope } from "../../core/src/index.ts";
 import { dispatch, VERBS } from "../../core/src/index.ts";
+import { Agents } from "../src/agents.js";
 import { createMcpServer, readAiState, readHistoryBatches, startHost } from "../src/index.js";
 import { UI_VERBS } from "../src/ui.js";
 
 let appDataDir: string;
 beforeEach(async () => {
+  vi.spyOn(Agents.prototype, "detect").mockResolvedValue([]);
   appDataDir = await mkdtemp(join(tmpdir(), "zcut-recent-test-"));
 });
 let host: Awaited<ReturnType<typeof startHost>> | undefined;
@@ -22,6 +24,7 @@ afterEach(async () => {
   await host?.close();
   host = undefined;
   await rm(appDataDir, { recursive: true, force: true });
+  vi.restoreAllMocks();
 });
 const project = fileURLToPath(new URL("../../../examples/interview.zcut.json", import.meta.url));
 const cli = fileURLToPath(new URL("../../cli/src/index.ts", import.meta.url));
@@ -418,7 +421,6 @@ it("discovers only open main-project batches, including batches with no journal 
 });
 
 it("rebinds MCP and bootstrap, stops the old Agent and preserves binding on invalid open", async () => {
-  const { Agents } = await import("../src/agents.js");
   const stop = vi.spyOn(Agents.prototype, "stop");
   const next = join(appDataDir, "next.zcut.json");
   const source = JSON.parse(await readFile(project, "utf8"));
