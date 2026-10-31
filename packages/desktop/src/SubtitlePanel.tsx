@@ -418,12 +418,15 @@ export function useSubtitlePanel({
     ?.clips.find((clip) => clip.enabled && contains(clip.timeline_in.t, clip.timeline_out.t, at));
   const background =
     config && clip ? mediaUrl(config, "thumb", clip.media_id, printRational(sourceAt(clip, at), true)) : undefined;
+  const passProgress = project?.subtitlePass?.progress ?? [];
+  const done = passProgress.reduce((sum, item) => sum + item.done, 0);
+  const total = passProgress.reduce((sum, item) => sum + item.total, 0);
   const controls = (
     <div className="zc-sub-controls">
       <p className={`zc-sub-status${project?.recognized ? " is-recognized" : ""}`}>
         <span className="zc-dot" aria-hidden="true" />
         {project?.subtitlePass?.running
-          ? "整理字幕…"
+          ? `AI 整理字幕… ${done} / ${total}`
           : project?.recognized
             ? `已识别${project.recognitionRevision !== undefined ? ` · 第 ${project.recognitionRevision} 版` : ""} · ${cues.length} 条字幕`
             : "还没有识别"}
@@ -518,7 +521,11 @@ export function useSubtitlePanel({
           </button>
         ))}
       </div>
-      {state.sub !== "style" ? (
+      {project?.subtitlePass?.running ? (
+        <p className="zc-muted">
+          识别完成，AI 正在按意思断句，大约还要 {Math.max(1, Math.ceil((total - done) / 6))} 分钟
+        </p>
+      ) : state.sub !== "style" ? (
         <>
           <div className="zc-sub-search-row">
             <label className="zc-sub-search">

@@ -535,7 +535,9 @@ export function TimelinePreview({
   };
   const width = project ? Math.max(800, pixelAt(project.duration.t, scale) + 100) : 800;
   const snapPreview = trimPreview ?? movePreview?.target;
-  const visibleCues = project?.cues.filter((cue) => contains(cue.start, cue.end, at)) ?? [];
+  const organizing = new Set(project?.subtitlePass?.progress?.map((item) => item.transcript_id) ?? []);
+  const visibleCues =
+    project?.cues.filter((cue) => contains(cue.start, cue.end, at) && !organizing.has(cue.transcript_id ?? "")) ?? [];
   const captionKey = visibleCues.map((cue) => `${cue.cue_id}:${cue.piece}:${cue.text}:${cue.style_id}`).join("\0");
   // Keep the canvas unchanged between caption boundaries.
   // biome-ignore lint/correctness/useExhaustiveDependencies: captionKey includes every rendered cue field.
@@ -921,7 +923,7 @@ export function TimelinePreview({
                               key={`${cue.cue_id}-${cue.piece}-${cue.start}`}
                               selectionId={cue.cue_id}
                               kind="subtitle"
-                              label={cue.text.replaceAll("\n", " ")}
+                              label={organizing.has(cue.transcript_id ?? "") ? "" : cue.text.replaceAll("\n", " ")}
                               selected={state.selected.includes(cue.cue_id)}
                               dimmed={
                                 !track.enabled || (state.selected.length > 0 && !state.selected.includes(cue.cue_id))

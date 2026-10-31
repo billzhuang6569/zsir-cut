@@ -98,8 +98,8 @@ export function textWidth(tokens: Token[], rules: SubtitleRules): Rational {
 const widthLimit = (rules: SubtitleRules, lines = 1) => mul(rationalNumber(rules.cpl), rational(BigInt(lines)));
 const validBoundary = (tokens: Token[], after: number) =>
   after < tokens.length - 1 && !punctOnly.test(tokens[after + 1]!.text);
-export function cueBreaks(tokens: Token[], rules: SubtitleRules): string[] {
-  if (rules.max_lines === 1 || compare(textWidth(tokens, rules), widthLimit(rules)) <= 0) return [];
+export function cueBreaks(tokens: Token[], rules: SubtitleRules, ai = false): string[] {
+  if ((!ai && rules.max_lines === 1) || compare(textWidth(tokens, rules), widthLimit(rules)) <= 0) return [];
   const candidates = tokens.slice(0, -1).flatMap((token, index) => {
     if (!validBoundary(tokens, index)) return [];
     const left = textWidth(tokens.slice(0, index + 1), rules);
@@ -113,15 +113,24 @@ export function cueBreaks(tokens: Token[], rules: SubtitleRules): string[] {
       rational(value.numerator < 0n ? -value.numerator : value.numerator, value.denominator);
     return compare(abs(a.difference), abs(b.difference)) || a.index - b.index;
   });
-  return candidates[0] ? [candidates[0].id] : [];
+  if (candidates[0]) return [candidates[0].id];
+  if (ai) {
+    const last = tokens
+      .slice(0, -1)
+      .findLast(
+        (_, index) =>
+          validBoundary(tokens, index) && compare(textWidth(tokens.slice(0, index + 1), rules), widthLimit(rules)) <= 0,
+      );
+    return last ? [last.id] : [];
+  }
+  return [];
 }
 
-export function segmentTokens(
+export function badSubtitleBoundaries(
   tokens: Token[],
-  rules: SubtitleRules,
-  cutAfter?: ReadonlySet<string>,
   terms: readonly string[] = [],
-): Token[][] {
+  excludeParticles = false,
+): Set<string> {
   const entries = visible(tokens);
   const fold = (text: string) =>
     text.replace(/\p{Script=Latin}/gu, (letter) => {
@@ -131,7 +140,6 @@ export function segmentTokens(
   const text = fold(entries.map((token) => token.text).join(""));
   const foldedTerms = terms.filter(Boolean).map(fold);
   const bad = new Set<string>();
-  const correctionBad = new Set<string>();
   let offset = 0;
   for (let i = 0; i < entries.length - 1; i++) {
     const before = entries[i]!;
@@ -143,63 +151,38 @@ export function segmentTokens(
       return start >= 0 && begin + start < offset && begin + start + term.length > offset;
     });
     const beforeWord = stripPunctuation(before.text);
-    const afterBad = noBreakAfter.has(beforeWord);
+    const afterBad = noBreakAfter.has(beforeWord) && !(excludeParticles && ["的", "地", "得"].includes(beforeWord));
     const otherBad =
       noBreakBefore.has(stripPunctuation(after.text)) ||
       splitsTerm ||
       (/[0-9零一二三四五六七八九十百千万亿两几半]$/u.test(before.text) &&
         /^[0-9零一二三四五六七八九十百千万亿两几半个位家条年月日天号点分秒岁元块倍次小时%]/u.test(after.text));
     if (afterBad || otherBad) bad.add(before.id);
-    if (otherBad || (afterBad && !["的", "地", "得"].includes(beforeWord))) correctionBad.add(before.id);
   }
-  const isBad = (before: Token) => bad.has(before.id);
-  if (cutAfter && rules.name === "zh-talk") {
-    const corrected = new Set(cutAfter);
-    const correct = (chunk: Token[]) => {
-      const entries = visible(chunk);
-      const cuts = entries.flatMap((token, index) =>
-        index < entries.length - 1 && corrected.has(token.id) ? [index] : [],
-      );
-      const fits = (start: number, end: number) =>
-        compare(textWidth(entries.slice(start, end + 1), rules), widthLimit(rules, rules.max_lines)) <= 0 &&
-        compare(sub(entries[end]!.align.end, entries[start]!.align.start), rules.max_duration) <= 0;
-      for (let i = 0; i < cuts.length; i++) {
-        const cut = cuts[i]!;
-        if (
-          !correctionBad.has(entries[cut]!.id) ||
-          compare(sub(entries[cut + 1]!.align.start, entries[cut]!.align.end), rules.soft_pause) >= 0
-        )
-          continue;
-        const start = (cuts[i - 1] ?? -1) + 1;
-        const end = cuts[i + 1] ?? entries.length - 1;
-        const candidates = Array.from({ length: end - start }, (_, offset) => start + offset)
-          .filter((index) => Math.abs(index - cut) <= 3 && validBoundary(entries, index))
-          .filter((index) => !isBad(entries[index]!))
-          .sort((a, b) => Math.abs(a - cut) - Math.abs(b - cut) || b - a);
-        const nearest = candidates[0];
-        if (nearest !== undefined && fits(start, nearest) && fits(nearest + 1, end)) {
-          corrected.delete(entries[cut]!.id);
-          corrected.add(entries[nearest]!.id);
-          cuts[i] = nearest;
-        } else if (fits(start, end)) {
-          corrected.delete(entries[cut]!.id);
-          cuts.splice(i--, 1);
-        }
-      }
-    };
-    let start = 0;
-    for (let i = 0; i < tokens.length - 1; i++) {
-      if (
-        !punctOnly.test(tokens[i + 1]!.text) &&
-        compare(sub(tokens[i + 1]!.align.start, tokens[i]!.align.end), rules.hard_pause) >= 0
-      ) {
-        correct(tokens.slice(start, i + 1));
-        start = i + 1;
+  return bad;
+}
+
+export function segmentTokens(
+  tokens: Token[],
+  rules: SubtitleRules,
+  cutAfter?: ReadonlySet<string>,
+  terms: readonly string[] = [],
+): Token[][] {
+  if (cutAfter !== undefined) {
+    const result: Token[][] = [];
+    let group: Token[] = [];
+    for (const token of tokens) {
+      group.push(token);
+      if (token.text !== "" && cutAfter.has(token.id)) {
+        result.push(group);
+        group = [];
       }
     }
-    correct(tokens.slice(start));
-    cutAfter = corrected;
+    if (group.length) result.push(group);
+    return result;
   }
+  const bad = badSubtitleBoundaries(tokens, terms);
+  const isBad = (before: Token) => bad.has(before.id);
   const result: Token[][] = [];
   let sentence: Token[] = [];
   const splitSentence = () => {
@@ -236,7 +219,7 @@ export function segmentTokens(
     sentence.push(token);
     const next = tokens[index + 1];
     if (
-      (cutAfter === undefined ? sentenceEnd.test(token.text) : token.text !== "" && cutAfter.has(token.id)) ||
+      sentenceEnd.test(token.text) ||
       (next && !punctOnly.test(next.text) && compare(sub(next.align.start, token.align.end), rules.hard_pause) >= 0)
     )
       splitSentence();
@@ -271,7 +254,11 @@ export function displayRanges(transcript: Transcript): CueDisplay[] {
     const maximum = next ? sub(next.start, rules.min_gap) : undefined;
     const maxEnd = (value: Rational) => (maximum && compare(value, maximum) > 0 ? maximum : value);
     const width = textWidth(row.tokens, rules);
-    if (row.tokens.some((token) => compare(textWidth([token], rules), widthLimit(rules)) > 0))
+    if (
+      compare(width, widthLimit(rules, rules.max_lines)) > 0 ||
+      compare(sub(row.end, row.start), rules.max_duration) > 0 ||
+      row.tokens.some((token) => compare(textWidth([token], rules), widthLimit(rules)) > 0)
+    )
       warnings.push("W_SUB_TOO_WIDE");
     let end = row.end;
     if (!row.cue.timing) {
