@@ -15,6 +15,7 @@ import type { ProjectView } from "../src/connection.js";
 import { renderSubtitle, SubtitleCanvas } from "../src/SubtitleCanvas.js";
 import { useSubtitlePanel } from "../src/SubtitlePanel.js";
 import { initialState } from "../src/state.js";
+import { renderPreset, subtitlePresets } from "../src/subtitle-presets.js";
 import {
   alignment,
   caretOffset,
@@ -336,7 +337,8 @@ it.each([0, 1, 2].flatMap((row) => [0, 1, 2].map((column) => [row, column])))(
     await h.settle();
     const mapped = alignment(row, column, 0.8);
     expect(mapped).toEqual({ anchor: ["top", "middle", "bottom"][row], offset_x: ((column - 1) * (1 - 0.8)) / 2 });
-    if (row === 2 && column === 1) expect(h.call).not.toHaveBeenCalled();
+    expect(h.find<HTMLButtonElement>(label).disabled).toBe(column !== 1);
+    if (column !== 1 || (row === 2 && column === 1)) expect(h.call).not.toHaveBeenCalled();
     else
       expect(h.call.mock.lastCall?.[1]).toMatchObject({
         label: "修改字幕样式",
@@ -534,7 +536,7 @@ it("opens filler chips separately from the switch and supports adding and removi
   ]);
   expect(h.container.querySelector("details")).toBeNull();
 });
-it("previews the selected track and applies edits to every style when scope is all", async () => {
+it("shows the selected track style and applies edits to every style when scope is all", async () => {
   const h = await mount(
     {
       ...project,
@@ -551,10 +553,10 @@ it("previews the selected track and applies edits to every style when scope is a
     "style",
   );
   expect(h.find<HTMLInputElement>("字号").value).toBe("0.045");
-  expect(h.container.querySelector(".zc-sub-sample canvas")?.getAttribute("aria-label")).toBe("你好世界");
+  expect(h.container.querySelector(".zc-sub-sample")).toBeNull();
   await h.click("English");
   expect(h.find<HTMLInputElement>("字号").value).toBe("0.07");
-  expect(h.container.querySelector(".zc-sub-sample canvas")?.getAttribute("aria-label")).toBe("English sample");
+  expect(h.find<HTMLButtonElement>("字幕样式轨道").textContent).toContain("English");
   expect(h.call).not.toHaveBeenCalled();
   await h.input("文字颜色", "#FFD84A");
   await h.blur("文字颜色");
@@ -564,11 +566,11 @@ it("previews the selected track and applies edits to every style when scope is a
     expect.objectContaining({ op: "update_style", style_id: "sty_en", color: "#FFD84A" }),
   ]);
 });
-it("keeps the preset placeholder and displays the animation groups with shared renderer thumbnails", async () => {
+it("shows presets and displays the animation groups with shared renderer thumbnails", async () => {
   const h = await mount(project, "style");
   expect(h.container.querySelector('[aria-label="字幕样式轨道"]')).toBeNull();
-  expect(h.container.querySelector(".zc-sub-presets")?.textContent).toBe("");
-  expect([...h.container.querySelectorAll("summary")].map((item) => item.textContent)).toEqual([
+  expect(h.container.querySelectorAll(".zc-sub-preset-cell")).toHaveLength(subtitlePresets.length);
+  expect([...h.container.querySelectorAll("summary")].map((item) => item.textContent?.trim())).toEqual([
     "文字",
     "描边",
     "阴影",
@@ -587,14 +589,20 @@ it("keeps the preset placeholder and displays the animation groups with shared r
   expect(h.call).not.toHaveBeenCalled();
 });
 
-it("uses the selected track cue at the playhead and falls back to its first cue in a gap", async () => {
-  const h = await mount({
-    ...project,
-    cues: [cue, { ...cue, cue_id: "later", text: "当前字幕", start: "5s", end: "7s" }],
-  });
+it("shows the selected cue at the playhead in the central preview", async () => {
+  const h = await mount(
+    {
+      ...project,
+      cues: [cue, { ...cue, cue_id: "later", text: "当前字幕", start: "5s", end: "7s" }],
+    },
+    "subtitles",
+    () => ({}),
+    true,
+  );
   await h.click("当前字幕");
   await h.click("样式");
-  expect(h.container.querySelector(".zc-sub-sample canvas")?.getAttribute("aria-label")).toBe("当前字幕");
+  expect(h.container.querySelector(".zc-sub-sample")).toBeNull();
+  expect(h.container.querySelector(".zc-subtitle-canvas")?.getAttribute("aria-label")).toBe("当前字幕");
   expect(h.call).not.toHaveBeenCalled();
 });
 it("supports common fonts, custom fonts and font weight through the existing style operation", async () => {
@@ -1736,4 +1744,143 @@ it("preassigns only referenced IDs and shares core's stored-tag and collision ru
   expect(cueEdit(collisionCue, cue.text, 1, transcripts).newCue).toBe(coreCue);
   expect(coreCue).toBe("cue_56abcdef_0");
   expect(transcript.ext).toBeUndefined();
+});
+
+it("shows the compact style layout with only text expanded and a single track hidden", async () => {
+  const h = await mount(project, "style");
+  expect(h.container.querySelector(".zc-sub-sample")).toBeNull();
+  expect(h.container.textContent).not.toContain("▼");
+  expect(h.container.querySelector('[aria-label="字幕样式轨道"]')).toBeNull();
+  const open = [...h.container.querySelectorAll(".zc-sub-style details[open] > summary")];
+  expect(open.map((summary) => summary.textContent?.trim())).toEqual(["文字"]);
+  expect(h.container.querySelectorAll(".zc-sub-style summary > .zc-icon")).toHaveLength(6);
+  expect(h.container.querySelectorAll(".zc-sub-preset-grid")).toHaveLength(5);
+  expect(h.container.querySelectorAll(".zc-sub-preset-cell")).toHaveLength(subtitlePresets.length);
+  expect(
+    h.find("应用到").compareDocumentPosition(h.container.querySelector(".zc-sub-presets") as Node) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(h.find<HTMLInputElement>("字号").type).toBe("number");
+  expect(h.container.querySelectorAll(".zc-sub-colors button")).toHaveLength(8);
+  expect(h.container.querySelectorAll(".zc-sub-style summary .zc-switch")).toHaveLength(3);
+  expect(h.container.querySelectorAll(".zc-sub-align button:disabled")).toHaveLength(6);
+  expect(h.container.querySelector('[aria-label="底板颜色取色"]')).toBeNull();
+  await act(async () => h.find<HTMLInputElement>("启用底板").click());
+  expect(h.find("底板颜色取色")).toBeTruthy();
+  await act(async () => h.find<HTMLInputElement>("启用底板").click());
+  expect(h.container.querySelector('[aria-label="底板颜色取色"]')).toBeNull();
+  await h.view({
+    ...project,
+    subtitleTracks: [...(project.subtitleTracks ?? []), { id: "trk_other", name: "字幕 B", default_style_id: "sty_1" }],
+  });
+  expect(h.find("字幕样式轨道").textContent).toContain("字幕 B");
+});
+
+it("applies a preset as one named edit, keeps identity and position, and clears omitted effects", async () => {
+  const style = {
+    ...project.styles[0],
+    ...defaultStyle,
+    id: "sty_1",
+    name: "保留名字",
+    version: 9,
+    max_lines: 3,
+    position: { anchor: "top" as const, offset_x: 0.17, margin_v: 0.12, max_width: 0.65 },
+    italic: true,
+    underline: true,
+    letter_spacing: 0.1,
+    align: "left" as const,
+    outlines: [{ color: "#FF0000", width: 0.1 }],
+    box: { color: "#FFFFFF", padding: 0.3 },
+    shadow: { color: "#000000", blur: 0.1, distance: 0.1, angle: 90 },
+    glow: { color: "#FF0000", blur: 0.1 },
+    highlight: { color: "#00FF00" },
+    animation: { word: "fill" as const },
+  };
+  const h = await mount({ ...project, styles: [style] }, "style");
+  await h.click("套用样式：经典白字");
+  expect(h.call).toHaveBeenCalledTimes(1);
+  const request = h.call.mock.lastCall?.[1];
+  expect(request?.label).toBe("套用样式：经典白字");
+  const ops = request?.ops as Record<string, unknown>[];
+  expect(ops).toHaveLength(1);
+  expect(ops[0]).toMatchObject({
+    op: "update_style",
+    style_id: "sty_1",
+    italic: null,
+    underline: null,
+    letter_spacing: null,
+    align: null,
+    outlines: null,
+    shadow: null,
+    glow: null,
+    highlight: null,
+    animation: null,
+    box: null,
+  });
+  for (const key of ["id", "name", "version", "position", "max_lines"]) expect(ops[0]).not.toHaveProperty(key);
+  expect(style.position).toEqual({ anchor: "top", offset_x: 0.17, margin_v: 0.12, max_width: 0.65 });
+});
+
+it("applies presets through the selected copy rule and to all styles when requested", async () => {
+  const view = { ...project, styles: [...project.styles, { ...defaultStyle, id: "sty_2" }] };
+  const h = await mount(view, "style");
+  await h.update({ selected: ["cue_1"] });
+  await selectOption(h, "应用到", "selected");
+  await h.click("套用样式：白底黑字");
+  const ops = h.call.mock.lastCall?.[1].ops as Record<string, unknown>[];
+  expect(ops).toHaveLength(2);
+  expect(ops[0]).toMatchObject({
+    op: "add_style",
+    color: "#181818",
+    name: "正文",
+    position: defaultStyle.position,
+    max_lines: 2,
+  });
+  expect(ops[1]).toEqual({ op: "set_cue", cue_id: "cue_1", style_id: ops[0]?.id });
+  expect(h.call.mock.lastCall?.[1].label).toBe("套用样式：白底黑字");
+  await selectOption(h, "应用到", "all");
+  await h.click("套用样式：醒目黄字");
+  expect(h.call.mock.lastCall?.[1].ops).toEqual(
+    ["sty_1", "sty_2"].map((style_id) => expect.objectContaining({ op: "update_style", style_id, color: "#FFD84A" })),
+  );
+});
+
+it("renders presets identically to the contact sheet helper and loops animated hover without writes", async () => {
+  const contexts: ReturnType<typeof recordingCanvas>[] = [];
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => {
+    const record = recordingCanvas();
+    contexts.push(record);
+    return record.context;
+  });
+  const callbacks = new Map<number, FrameRequestCallback>();
+  let sequence = 0;
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    callbacks.set(++sequence, callback);
+    return sequence;
+  });
+  vi.stubGlobal("cancelAnimationFrame", (id: number) => callbacks.delete(id));
+  vi.spyOn(performance, "now").mockReturnValue(0);
+  const h = await mount(project, "style");
+  const expected = recordingCanvas();
+  renderPreset(expected.context, subtitlePresets[0]?.fields ?? defaultStyle, 180, 120);
+  expect(contexts[0]?.calls.filter(([name]) => name !== "clearRect")).toEqual(expected.calls);
+  const cell = h.find("套用样式：弹入强调");
+  await act(async () => cell.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
+  expect(callbacks.size).toBe(1);
+  const record = contexts.at(-1);
+  const frames: unknown[][][] = [];
+  for (const time of [100, 2100]) {
+    if (record) record.calls.length = 0;
+    await act(async () => {
+      const scheduled = [...callbacks.values()];
+      callbacks.clear();
+      for (const callback of scheduled) callback(time);
+    });
+    frames.push([...(record?.calls ?? [])]);
+  }
+  expect(frames[0]).toEqual(frames[1]);
+  expect(frames[0]?.some(([name]) => name === "scale")).toBe(true);
+  await act(async () => cell.dispatchEvent(new MouseEvent("mouseout", { bubbles: true })));
+  expect(callbacks.size).toBe(0);
+  expect(h.call).not.toHaveBeenCalled();
 });

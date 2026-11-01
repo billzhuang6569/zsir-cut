@@ -29,8 +29,7 @@
   border-radius: var(--radius-md);
   color: var(--text-3);
 }
-.zc-sub-terms,
-.zc-sub-presets {
+.zc-sub-terms {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-3);
@@ -104,16 +103,6 @@
 .zc-sub-align button[aria-pressed="true"] {
   color: var(--text);
   border-color: var(--text);
-}
-.zc-sub-sample {
-  container-type: size;
-  position: relative;
-  background-color: var(--bg);
-  background-size: contain;
-  background-repeat: no-repeat;
-  background-position: center;
-  overflow: hidden;
-  border-radius: var(--radius-md);
 }
 
 .zc-sub-setting input[type="range"] {
@@ -312,19 +301,13 @@
   color: var(--text);
 }
 .zc-sub-number {
-  grid-template-columns: minmax(0, 1fr) calc(var(--control-h) * 2);
+  grid-template-columns: 5em minmax(0, 1fr) calc(var(--icon-btn-compact) * 2);
   align-items: center;
-}
-.zc-sub-number > span {
-  grid-column: 1 / -1;
 }
 .zc-sub-number input[type="number"] {
   appearance: textfield;
   padding: 0 var(--space-3);
   text-align: right;
-}
-.zc-sub-number input::-webkit-inner-spin-button {
-  appearance: none;
 }
 .zc-sub-setting input[type="range"] {
   appearance: none;
@@ -389,6 +372,11 @@
   padding-block: var(--space-4);
 }
 .zc-sub-style summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--icon-btn);
+  list-style: none;
   cursor: pointer;
   color: var(--text-2);
   font-size: var(--label-size);
@@ -402,11 +390,155 @@
   color: var(--text);
 }
 .zc-sub-outline {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
   border-bottom: 1px solid var(--line);
   padding-block: var(--space-3);
 }
-.zc-sub-style .zc-sub-presets {
-  min-height: var(--control-h);
+.zc-sub-style summary::-webkit-details-marker {
+  display: none;
+}
+.zc-sub-style details[open] > summary > .zc-icon {
+  transform: rotate(90deg);
+}
+.zc-sub-style summary > .zc-switch {
+  margin-left: auto;
+}
+.zc-sub-style .zc-sub-setting,
+.zc-sub-parameters > .zc-sub-setting:has([aria-label="应用到"]) {
+  grid-template-columns: 5em minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-3);
+  margin-block: var(--space-3);
+}
+.zc-sub-style .zc-sub-number {
+  grid-template-columns: 5em minmax(0, 1fr) calc(var(--icon-btn-compact) * 2);
+}
+.zc-sub-style .zc-input {
+  height: var(--icon-btn);
+  padding-inline: var(--space-3);
+  font-size: var(--label-size);
+}
+.zc-sub-font-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) calc(var(--icon-btn) * 3);
+  gap: var(--space-3);
+}
+.zc-sub-font-row .zc-sub-setting {
+  grid-template-columns: minmax(0, 1fr);
+}
+.zc-sub-font-row .zc-sub-setting > span:first-child:not(.zc-sub-select) {
+  display: none;
+}
+.zc-sub-font-row > .zc-sub-setting:first-child {
+  font-size: 0;
+}
+.zc-sub-font-row .zc-sub-select {
+  min-width: 0;
+}
+.zc-sub-size input[type="number"] {
+  appearance: auto;
+}
+.zc-sub-colors {
+  border: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1);
+  margin-block: var(--space-4);
+}
+.zc-sub-color-chip,
+.zc-sub-style .zc-sub-swatch {
+  box-sizing: border-box;
+  min-width: var(--icon-btn-compact);
+  width: var(--icon-btn-compact);
+  height: var(--icon-btn-compact);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1);
+  cursor: pointer;
+}
+.zc-sub-color-chip[aria-pressed="true"] {
+  outline: 1px solid var(--text);
+  outline-offset: 1px;
+}
+.zc-sub-colors .zc-sub-color,
+.zc-sub-outline .zc-sub-color {
+  position: relative;
+  display: block;
+  margin: 0;
+}
+.zc-sub-colors .zc-sub-color > span,
+.zc-sub-colors .zc-sub-color > .zc-input,
+.zc-sub-outline .zc-sub-color > span,
+.zc-sub-outline .zc-sub-color > .zc-input {
+  display: none;
+}
+.zc-sub-colors .zc-sub-color:focus-within > .zc-input,
+.zc-sub-outline .zc-sub-color:focus-within > .zc-input {
+  display: block;
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  right: 0;
+  width: calc(var(--control-h) * 4);
+  z-index: 1;
+}
+.zc-sub-style .zc-sub-color {
+  grid-template-columns: 5em var(--icon-btn-compact) minmax(0, 1fr);
+}
+.zc-sub-style .zc-sub-color > span:first-child,
+.zc-sub-style .zc-sub-color > .zc-sub-swatch,
+.zc-sub-style .zc-sub-color > .zc-input {
+  grid-column: auto;
+}
+.zc-sub-outline .zc-sub-number {
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr) calc(var(--icon-btn-compact) * 2);
+}
+.zc-sub-outline .zc-sub-number > span {
+  display: none;
+}
+.zc-sub-align {
+  border: 0;
+  padding: 0;
+  margin: var(--space-3) 0;
+  grid-template-columns: repeat(3, var(--icon-btn));
+  gap: var(--space-2);
+}
+.zc-sub-align button {
+  height: var(--icon-btn);
+}
+.zc-sub-align button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+.zc-sub-presets h4 {
+  margin: var(--space-4) 0 var(--space-3);
+  color: var(--text-3);
+  font-size: var(--caption-size);
+  font-weight: 400;
+}
+.zc-sub-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+.zc-sub-preset-cell {
+  position: relative;
+  aspect-ratio: 3 / 2;
+  overflow: hidden;
+  padding: 0;
+}
+.zc-sub-preset-cell > span {
+  position: absolute;
+  inset: auto var(--space-2) var(--space-2);
+  font-size: var(--caption-size);
+  color: var(--text-2);
+}
+.zc-sub-preset-cell canvas {
+  height: 100%;
 }
 .zc-subtitle-hit {
   position: absolute;
@@ -609,4 +741,8 @@ fieldset.zc-sub-list {
 .zc-sub-animation-cell:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+.zc-sub-animation-cell.zc-sub-preset-cell {
+  padding: 0;
 }

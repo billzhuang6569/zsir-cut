@@ -4,7 +4,7 @@ import { Icon, IconButton } from "./components.js";
 import type { ProjectView } from "./connection.js";
 import { DESKTOP_AUTHOR } from "./connection.js";
 import { SubtitleAnimationCell } from "./SubtitleAnimationCell.js";
-import { SubtitleCanvas } from "./SubtitleCanvas.js";
+import { presetGroups, presetPatch, subtitlePresets } from "./subtitle-presets.js";
 import {
   alignment,
   canMerge,
@@ -20,7 +20,6 @@ import {
   subtitleStyleOps,
   tokenSpans,
 } from "./subtitles.js";
-import { mediaUrl } from "./TimelinePreview.js";
 import {
   type CueView,
   ceil,
@@ -35,7 +34,6 @@ import {
   rational,
   type StyleView,
   seekTarget,
-  sourceAt,
   sub,
   timecode,
 } from "./timeline.js";
@@ -164,6 +162,7 @@ function TextSetting({
           type="color"
           className="zc-sub-swatch"
           aria-label={`${label}取色`}
+          title={`${label}自定义取色`}
           value={value.slice(0, 7)}
           onChange={(e) => preview?.(e.target.value + value.slice(7))}
           onPointerUp={(e) => save(e.currentTarget.value + value.slice(7))}
@@ -193,6 +192,7 @@ function NumberSetting({
   step,
   save,
   preview,
+  slider = true,
 }: {
   label: string;
   value: number;
@@ -201,27 +201,30 @@ function NumberSetting({
   step: number;
   save: (value: number) => void;
   preview: (value: number) => void;
+  slider?: boolean;
 }) {
   const commit = (input: HTMLInputElement) => {
     if (input.checkValidity() && input.value !== "") save(Number(input.value));
   };
   return (
-    <label className="zc-sub-setting zc-sub-number">
+    <label className={`zc-sub-setting zc-sub-number${slider ? "" : " zc-sub-size"}`}>
       <span>{label}</span>
+      {slider && (
+        <input
+          aria-label={label}
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          onChange={(e) => preview(Number(e.target.value))}
+          onPointerUp={(e) => commit(e.currentTarget)}
+          onKeyUp={(e) => commit(e.currentTarget)}
+          onBlur={(e) => commit(e.currentTarget)}
+        />
+      )}
       <input
-        aria-label={label}
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => preview(Number(e.target.value))}
-        onPointerUp={(e) => commit(e.currentTarget)}
-        onKeyUp={(e) => commit(e.currentTarget)}
-        onBlur={(e) => commit(e.currentTarget)}
-      />
-      <input
-        aria-label={`${label}数值`}
+        aria-label={slider ? `${label}数值` : label}
         className="zc-input"
         type="number"
         min={min}
@@ -231,6 +234,8 @@ function NumberSetting({
         onChange={(e) => {
           if (e.target.value !== "") preview(Number(e.target.value));
         }}
+        onPointerUp={slider ? undefined : (e) => commit(e.currentTarget)}
+        onKeyUp={slider ? undefined : (e) => commit(e.currentTarget)}
         onBlur={(e) => commit(e.currentTarget)}
       />
     </label>
@@ -463,7 +468,6 @@ export function useSubtitlePanel({
   state,
   update,
   call,
-  config,
 }: {
   project: ProjectView | null;
   state: UiState;
@@ -533,9 +537,6 @@ export function useSubtitlePanel({
   }, [state, cues, editing, update]);
   const styleTrack = subtitleTracks.find((track) => track.id === styleTrackId) ?? subtitleTracks[0];
   const trackCues = cues.filter((cue) => cue.track_id === styleTrack?.id);
-  const sample = selectedOnly
-    ? cues.find((cue) => state.selected.includes(cue.cue_id))
-    : (trackCues.find((cue) => contains(cue.start, cue.end, at)) ?? trackCues[0]);
   const styleId = styleTrack && "default_style_id" in styleTrack ? styleTrack.default_style_id : trackCues[0]?.style_id;
   const selectedCue = cues.find((cue) => state.selected.includes(cue.cue_id));
   const style = project?.styles.find((item) => item.id === (selectedOnly ? selectedCue?.style_id : styleId));
@@ -700,6 +701,7 @@ export function useSubtitlePanel({
   styleContext.current = { project, state, write, selectedOnly };
   const pendingStyle = useRef<{
     control: string;
+    label: string;
     fields: Partial<StyleView>;
     ids: string[];
     selectedOnly: boolean;
@@ -719,7 +721,7 @@ export function useSubtitlePanel({
       const view =
         context.state.project === pending.state.project ? (context.project ?? pending.project) : pending.project;
       const ops = subtitleStyleOps(view, pending.ids, pending.fields, pending.selectedOnly);
-      if (ops.length && !(await pending.write(ops, "修改字幕样式"))) setError("字幕样式未保存，请重试");
+      if (ops.length && !(await pending.write(ops, pending.label))) setError("字幕样式未保存，请重试");
     });
   };
   const flushRef = useRef(flushStyle);
@@ -736,6 +738,7 @@ export function useSubtitlePanel({
     commit: boolean,
     control = Object.keys(patch).join(","),
     ids = state.selected,
+    label = "修改字幕样式",
   ) => {
     const next = { ...styleDraft, ...patch };
     setStyleDraft(next);
@@ -751,6 +754,7 @@ export function useSubtitlePanel({
     const context = styleContext.current;
     pendingStyle.current = {
       control,
+      label,
       fields: { ...pendingStyle.current?.fields, ...patch },
       ids,
       selectedOnly,
@@ -773,9 +777,11 @@ export function useSubtitlePanel({
     max: number,
     step: number,
     patch: (value: number) => Partial<StyleView>,
+    slider = true,
   ) => (
     <NumberSetting
       label={label}
+      slider={slider}
       value={value}
       min={min}
       max={max}
@@ -796,11 +802,6 @@ export function useSubtitlePanel({
       save={(v) => changeStyle(patch(v), true, label)}
     />
   );
-  const clip = project?.tracks
-    .find((track) => track.kind === "video" && track.enabled)
-    ?.clips.find((clip) => clip.enabled && contains(clip.timeline_in.t, clip.timeline_out.t, at));
-  const background =
-    config && clip ? mediaUrl(config, "thumb", clip.media_id, printRational(sourceAt(clip, at), true)) : undefined;
   const passProgress = project?.subtitlePass?.progress ?? [];
   const warnings = project?.subtitlePass?.warnings ?? [];
   const failed = warnings.filter((w) => w.code === "W_SUB_PASS_FALLBACK");
@@ -1522,26 +1523,6 @@ export function useSubtitlePanel({
               ))}
             </fieldset>
           )}
-          <div
-            className="zc-sub-sample"
-            style={{
-              aspectRatio: `${project?.format?.width ?? 1920} / ${project?.format?.height ?? 1080}`,
-              backgroundImage: background ? `url("${background}")` : undefined,
-            }}
-          >
-            <SubtitleCanvas
-              cues={[
-                {
-                  ...sample,
-                  text: sample?.text ?? "字幕样式预览",
-                  style_id: styleDraft.id,
-                },
-              ]}
-              at={at}
-              styles={[styleDraft]}
-              format={project?.format}
-            />
-          </div>
           <SelectSetting
             label="应用到"
             value={selectedOnly ? "selected" : "all"}
@@ -1660,22 +1641,58 @@ export function useSubtitlePanel({
             </fieldset>
           ) : (
             <fieldset className="zc-sub-style" disabled={!style || busy || (selectedOnly && !selectedCue)}>
-              <div className="zc-sub-presets" />
+              <div className="zc-sub-presets">
+                {presetGroups.map((group) => (
+                  <section key={group} aria-label={`${group}预设`}>
+                    <h4>{group}</h4>
+                    <div className="zc-sub-preset-grid">
+                      {subtitlePresets
+                        .filter((preset) => preset.group === group)
+                        .map((preset) => (
+                          <SubtitleAnimationCell
+                            key={preset.name}
+                            preset
+                            label={`套用样式：${preset.name}`}
+                            style={preset.fields}
+                            selected={false}
+                            choose={() => {
+                              flushStyle();
+                              changeStyle(
+                                presetPatch(preset),
+                                true,
+                                "preset",
+                                state.selected,
+                                `套用样式：${preset.name}`,
+                              );
+                              flushStyle();
+                            }}
+                          />
+                        ))}
+                    </div>
+                  </section>
+                ))}
+              </div>
               <details open>
-                <summary>文字</summary>
-                <SelectSetting
-                  label="字体族"
-                  value={
-                    customFont || !fonts.some(([value]) => value === styleDraft.font_family)
-                      ? "other"
-                      : styleDraft.font_family
-                  }
-                  options={[...fonts, ["other", "其他…"]]}
-                  save={(font_family) => {
-                    setCustomFont(font_family === "other");
-                    if (font_family !== "other") changeStyle({ font_family }, true);
-                  }}
-                />
+                <summary>
+                  <Icon name="chevron" />
+                  文字
+                </summary>
+                <div className="zc-sub-font-row">
+                  <SelectSetting
+                    label="字体族"
+                    value={
+                      customFont || !fonts.some(([value]) => value === styleDraft.font_family)
+                        ? "other"
+                        : styleDraft.font_family
+                    }
+                    options={[...fonts, ["other", "其他…"]]}
+                    save={(font_family) => {
+                      setCustomFont(font_family === "other");
+                      if (font_family !== "other") changeStyle({ font_family }, true);
+                    }}
+                  />
+                  {number("字号", styleDraft.font_size, 0.01, 0.2, 0.001, (font_size) => ({ font_size }), false)}
+                </div>
                 {(customFont || !fonts.some(([value]) => value === styleDraft.font_family)) && (
                   <TextSetting
                     label="其他字体"
@@ -1683,54 +1700,72 @@ export function useSubtitlePanel({
                     save={(font_family) => changeStyle({ font_family }, true)}
                   />
                 )}
+                <div className="zc-sub-inline">
+                  <IconButton
+                    icon="bold"
+                    label="粗体"
+                    pressed={(styleDraft.font_weight ?? 400) >= 700}
+                    onClick={() =>
+                      changeStyle({ font_weight: (styleDraft.font_weight ?? 400) >= 700 ? 400 : 700 }, true)
+                    }
+                  />
+                  <IconButton
+                    icon="italic"
+                    label="斜体"
+                    pressed={!!styleDraft.italic}
+                    onClick={() => changeStyle({ italic: !styleDraft.italic }, true)}
+                  />
+                  <IconButton
+                    icon="underline"
+                    label="下划线"
+                    pressed={!!styleDraft.underline}
+                    onClick={() => changeStyle({ underline: !styleDraft.underline }, true)}
+                  />
+                  <span className="zc-grow" />
+                  {(["left", "center", "right"] as const).map((align, i) => (
+                    <IconButton
+                      key={align}
+                      icon={`align-${align}`}
+                      label={["左对齐", "居中", "右对齐"][i] ?? align}
+                      pressed={(styleDraft.align ?? "center") === align}
+                      onClick={() => changeStyle({ align }, true)}
+                    />
+                  ))}
+                </div>
+                <fieldset className="zc-sub-colors" aria-label="常用文字颜色">
+                  {["#FFFFFF", "#000000", "#FFD84A", "#FF994A", "#FF6376", "#8BE36C", "#6BCBFF", "#C79BFF"].map(
+                    (color) => (
+                      <button
+                        key={color}
+                        type="button"
+                        className="zc-sub-color-chip"
+                        style={{ backgroundColor: color }}
+                        title={`文字颜色 ${color}`}
+                        aria-label={`文字颜色 ${color}`}
+                        aria-pressed={styleDraft.color.toUpperCase() === color}
+                        onClick={() => changeStyle({ color }, true)}
+                      />
+                    ),
+                  )}
+                  {color("文字颜色", styleDraft.color, (color) => ({ color }))}
+                </fieldset>
+                {number("字间距", styleDraft.letter_spacing ?? 0, -0.2, 1, 0.01, (letter_spacing) => ({
+                  letter_spacing,
+                }))}
+                {number("行距", styleDraft.line_spacing ?? 1.2, 0.5, 3, 0.1, (line_spacing) => ({ line_spacing }))}
                 <SelectSetting
                   label="字重"
                   value={String(styleDraft.font_weight ?? 400)}
                   options={Array.from({ length: 9 }, (_, i) => [String((i + 1) * 100), String((i + 1) * 100)])}
                   save={(value) => changeStyle({ font_weight: Number(value) }, true)}
                 />
-                {number("字号", styleDraft.font_size, 0.01, 0.2, 0.001, (font_size) => ({ font_size }))}
-                <div className="zc-sub-inline">
-                  <button
-                    type="button"
-                    className="zc-ibtn"
-                    title="斜体"
-                    aria-label="斜体"
-                    aria-pressed={!!styleDraft.italic}
-                    onClick={() => changeStyle({ italic: !styleDraft.italic }, true)}
-                  >
-                    <i>I</i>
-                  </button>
-                  <button
-                    type="button"
-                    className="zc-ibtn"
-                    title="下划线"
-                    aria-label="下划线"
-                    aria-pressed={!!styleDraft.underline}
-                    onClick={() => changeStyle({ underline: !styleDraft.underline }, true)}
-                  >
-                    <u>U</u>
-                  </button>
-                </div>
-                {color("文字颜色", styleDraft.color, (color) => ({ color }))}
-                {number("字间距", styleDraft.letter_spacing ?? 0, -0.2, 1, 0.01, (letter_spacing) => ({
-                  letter_spacing,
-                }))}
-                {number("行距", styleDraft.line_spacing ?? 1.2, 0.5, 3, 0.1, (line_spacing) => ({ line_spacing }))}
-                <SelectSetting
-                  label="对齐"
-                  value={styleDraft.align ?? "center"}
-                  options={[
-                    ["left", "左对齐"],
-                    ["center", "居中"],
-                    ["right", "右对齐"],
-                  ]}
-                  save={(align) => changeStyle({ align: align as NonNullable<StyleView["align"]> }, true)}
-                />
                 {number("最多行数", styleDraft.max_lines ?? 2, 1, 3, 1, (max_lines) => ({ max_lines }))}
               </details>
               <details>
-                <summary>描边</summary>
+                <summary>
+                  <Icon name="chevron" />
+                  描边
+                </summary>
                 {outlines.map((outline, index) => {
                   const patch = (fields: Partial<typeof outline>) => ({
                     outlines: outlines.map((edge, i) => (i === index ? { ...edge, ...fields } : edge)),
@@ -1768,17 +1803,20 @@ export function useSubtitlePanel({
                 const effect = styleDraft[key];
                 return (
                   <details key={key}>
-                    <summary>{label}</summary>
-                    <label className="zc-switch-row">
+                    <summary>
+                      <Icon name="chevron" />
                       {label}
                       <input
                         type="checkbox"
                         role="switch"
                         className="zc-switch"
                         aria-label={`启用${label}`}
+                        title={`启用${label}`}
                         aria-checked={!!effect}
                         checked={!!effect}
-                        onChange={(e) =>
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => {
+                          if (e.target.checked) e.currentTarget.closest("details")?.setAttribute("open", "");
                           changeStyle(
                             {
                               [key]: e.target.checked
@@ -1788,10 +1826,10 @@ export function useSubtitlePanel({
                                 : undefined,
                             },
                             true,
-                          )
-                        }
+                          );
+                        }}
                       />
-                    </label>
+                    </summary>
                     {effect && (
                       <>
                         {color(`${label}颜色`, effect.color, (color) => ({ [key]: { ...effect, color } }))}
@@ -1824,13 +1862,38 @@ export function useSubtitlePanel({
                 );
               })}
               <details>
-                <summary>底板</summary>
-                {color("底板颜色", box.color, (color) => ({ box: { ...box, color } }))}
-                {number("内边距", box.padding ?? 0, 0, 2, 0.05, (padding) => ({ box: { ...box, padding } }))}
-                {number("圆角", box.radius ?? 0, 0, 2, 0.05, (radius) => ({ box: { ...box, radius } }))}
+                <summary>
+                  <Icon name="chevron" />
+                  底板
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    className="zc-switch"
+                    aria-label="启用底板"
+                    title="启用底板"
+                    aria-checked={!!styleDraft.box}
+                    checked={!!styleDraft.box}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => {
+                      if (e.target.checked) e.currentTarget.closest("details")?.setAttribute("open", "");
+                      const box = e.target.checked ? { color: "#000000B3", padding: 0.25, radius: 0.1 } : undefined;
+                      changeStyle(Object.fromEntries([["box", box]]), true);
+                    }}
+                  />
+                </summary>
+                {styleDraft.box && (
+                  <>
+                    {color("底板颜色", box.color, (color) => ({ box: { ...box, color } }))}
+                    {number("内边距", box.padding ?? 0, 0, 2, 0.05, (padding) => ({ box: { ...box, padding } }))}
+                    {number("圆角", box.radius ?? 0, 0, 2, 0.05, (radius) => ({ box: { ...box, radius } }))}
+                  </>
+                )}
               </details>
               <details>
-                <summary>位置</summary>
+                <summary>
+                  <Icon name="chevron" />
+                  位置
+                </summary>
                 <fieldset className="zc-sub-align" aria-label="字幕对齐">
                   {[0, 1, 2].flatMap((row) =>
                     [0, 1, 2].map((column) => {
@@ -1841,7 +1904,8 @@ export function useSubtitlePanel({
                           type="button"
                           key={label}
                           aria-label={label}
-                          title={label}
+                          title={column === 1 ? label : `${label}（暂不支持）`}
+                          disabled={column !== 1}
                           aria-pressed={
                             position?.anchor === mapped.anchor && (position.offset_x ?? 0) === mapped.offset_x
                           }
@@ -1852,7 +1916,7 @@ export function useSubtitlePanel({
                             )
                           }
                         >
-                          ·
+                          <Icon name="anchor" />
                         </button>
                       );
                     }),

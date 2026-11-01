@@ -250,7 +250,7 @@ it("opens the project through inspect and receives UI commands", async () => {
     });
     for (const name of ["菜单栏", "功能区", "预览", "参数区", "工具栏", "时间线"])
       expect(container.querySelector(`[aria-label="${name}"]`)).not.toBeNull();
-    expect(container.querySelector('[aria-label="参数区"] .zc-sub-presets')?.textContent).toBe("");
+    expect(container.querySelectorAll('[aria-label="参数区"] .zc-sub-preset-cell').length).toBeGreaterThanOrEqual(12);
     expect(container.querySelectorAll(".zc-clip-video")).toHaveLength(
       fixture.timelines[0].tracks
         .filter((t: { kind: string }) => t.kind === "video")
