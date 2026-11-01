@@ -84,6 +84,7 @@ export function connectHost(
     const epoch = generation;
     const brief = (await call("inspect", { project: path, view: "brief" })) as {
       project: Pick<ProjectView, "name" | "revision">;
+      transcripts: { id: string }[];
     };
     if (epoch !== generation) return;
     const timeline = (await call("inspect", { project: path, view: "timeline" })) as TimelineView;
@@ -91,14 +92,18 @@ export function connectHost(
     const preview = (await call("preview_data", {})) as PreviewData;
     if (epoch !== generation) return;
     const transcripts = await Promise.all(
-      [...new Set((preview.cues ?? []).map((cue) => cue.transcript_id).filter((id): id is string => !!id))].map(
-        async (id) => {
-          const { entity } = (await call("inspect", { project: path, view: "entity", id })) as {
-            entity: TranscriptView;
-          };
-          return { id: entity.id, media_id: entity.media_id, tokens: entity.tokens, cues: entity.cues };
-        },
-      ),
+      (brief.transcripts ?? []).map(async ({ id }) => {
+        const { entity } = (await call("inspect", { project: path, view: "entity", id })) as {
+          entity: TranscriptView;
+        };
+        return {
+          id: entity.id,
+          media_id: entity.media_id,
+          tokens: entity.tokens,
+          cues: entity.cues,
+          ...(entity.ext ? { ext: entity.ext } : {}),
+        };
+      }),
     );
     if (epoch !== generation) return;
     handlers.project(path, {

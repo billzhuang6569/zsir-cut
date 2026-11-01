@@ -170,7 +170,7 @@ it("opens the project through inspect and receives UI commands", async () => {
               error: null,
               result:
                 message.request.view === "brief"
-                  ? { project: { name: fixture.name, revision: fixture.revision } }
+                  ? { project: { name: fixture.name, revision: fixture.revision }, transcripts: fixture.transcripts }
                   : message.request.view === "entity"
                     ? {
                         parent_id: fixture.id,
@@ -596,6 +596,13 @@ it.each([false, true])("refreshes a conflicting edit before reporting it (refres
   let socket: FakeSocket | undefined;
   let conflict = false;
   const requests: string[] = [];
+  const transcript = {
+    id: "trs_unprojected",
+    media_id: "med_1",
+    tokens: [],
+    cues: [],
+    ext: { zsir: { id_tag: "stored" } },
+  };
   class FakeSocket {
     onmessage: ((event: MessageEvent) => void) | null = null;
     onclose = null;
@@ -617,8 +624,13 @@ it.each([false, true])("refreshes a conflicting edit before reporting it (refres
                 ok: true,
                 result:
                   request?.view === "brief"
-                    ? { project: { name: "工程", revision: { id: conflict ? "r2" : "r1", seq: conflict ? 2 : 1 } } }
-                    : {},
+                    ? {
+                        project: { name: "工程", revision: { id: conflict ? "r2" : "r1", seq: conflict ? 2 : 1 } },
+                        transcripts: [{ id: transcript.id }],
+                      }
+                    : request?.view === "entity"
+                      ? { entity: transcript }
+                      : {},
               };
       queueMicrotask(() => this.receive({ id, envelope }));
     }
@@ -639,14 +651,17 @@ it.each([false, true])("refreshes a conflicting edit before reporting it (refres
   try {
     socket?.receive({ type: "bootstrap", project: "/project" });
     await vi.waitFor(() =>
-      expect(project).toHaveBeenLastCalledWith("/project", expect.objectContaining({ revision: { id: "r1", seq: 1 } })),
+      expect(project).toHaveBeenLastCalledWith(
+        "/project",
+        expect.objectContaining({ revision: { id: "r1", seq: 1 }, transcripts: [transcript] }),
+      ),
     );
     conflict = true;
     requests.length = 0;
     await expect(disconnect.call("edit", {})).rejects.toMatchObject({
       message: fails ? "工程刚被别处改过，刷新失败，请重新打开工程" : "工程刚被别处改过，已刷新，请重试",
     });
-    expect(requests).toEqual(fails ? ["edit", "inspect"] : ["edit", "inspect", "inspect", "preview_data"]);
+    expect(requests).toEqual(fails ? ["edit", "inspect"] : ["edit", "inspect", "inspect", "preview_data", "inspect"]);
     if (!fails)
       expect(project).toHaveBeenLastCalledWith("/project", expect.objectContaining({ revision: { id: "r2", seq: 2 } }));
   } finally {
