@@ -15,6 +15,7 @@ import {
   cueLocked,
   defaultStyle,
   editorText,
+  formatSubtitleTime,
   placeCaret,
   type SubtitleOp,
   subtitleStyleOps,
@@ -35,7 +36,6 @@ import {
   type StyleView,
   seekTarget,
   sub,
-  timecode,
 } from "./timeline.js";
 import "./subtitles.css";
 
@@ -1335,7 +1335,7 @@ export function useSubtitlePanel({
               const nextTo = (direction: number) => ordered[ordered.indexOf(cue) + direction];
               return (
                 <div
-                  className={`zc-sub-row${state.selected.includes(cue.cue_id) ? " is-selected" : ""}${contains(cue.start, cue.end, at) ? " is-current" : ""}${skipped.includes(cue.cue_id) ? " is-skipped" : ""}${running ? " is-running" : ""}`}
+                  className={`zc-sub-row${state.selected.includes(cue.cue_id) ? " is-selected" : ""}${editing === key ? " is-editing" : ""}${contains(cue.start, cue.end, at) ? " is-current" : ""}${skipped.includes(cue.cue_id) ? " is-skipped" : ""}${running ? " is-running" : ""}`}
                   key={key}
                 >
                   <button
@@ -1346,7 +1346,7 @@ export function useSubtitlePanel({
                     aria-pressed={state.selected.includes(cue.cue_id)}
                     onClick={(event) => selectRow(cue, event)}
                   >
-                    <time>{project ? timecode(cue.start, project) : cue.start}</time>
+                    <time>{formatSubtitleTime(cue.start)}</time>
                     {cueLocked(cue) && (
                       <span role="img" aria-label="已锁定">
                         <Icon name="lock" />
