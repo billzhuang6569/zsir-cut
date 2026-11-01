@@ -1,6 +1,15 @@
 import { transcriptIds } from "../../core/src/project/transcript-id.ts";
 import type { ProjectView } from "./connection.js";
 import type { CueView, StyleView, TranscriptView } from "./timeline.js";
+import { floor, parseRational } from "./timeline.js";
+
+export function formatSubtitleTime(start: string): string {
+  const seconds = floor(parseRational(start, true));
+  const hours = seconds / 3600n;
+  const minutes = ((seconds / 60n) % 60n).toString().padStart(2, "0");
+  const remainder = (seconds % 60n).toString().padStart(2, "0");
+  return `${hours > 0n ? `${hours}:` : ""}${minutes}:${remainder}`;
+}
 
 export const defaultStyle: StyleView = {
   id: "",

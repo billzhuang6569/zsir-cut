@@ -21,6 +21,7 @@ import {
   caretOffset,
   cueEdit,
   defaultStyle,
+  formatSubtitleTime,
   placeCaret,
   subtitleStyleOps,
   textEdit,
@@ -202,6 +203,73 @@ async function mount(
     update: async (patch: Partial<UiState>) => act(async () => setUi({ ...state, ...patch })),
   };
 }
+it.each([
+  ["41s", "00:41"],
+  ["3725s", "1:02:05"],
+  ["599/10s", "00:59"],
+  ["3600s", "1:00:00"],
+  ["35999/10s", "59:59"],
+  ["0s", "00:00"],
+])("formats subtitle start %s as %s", (start, expected) => {
+  expect(formatSubtitleTime(start)).toBe(expected);
+});
+
+it("keeps long subtitle text in flow beside seconds-only time and overlays actions only on hover or editing", async () => {
+  const style = document.createElement("style");
+  style.textContent =
+    readFileSync("packages/desktop/src/shell.css", "utf8") + readFileSync("packages/desktop/src/subtitles.css", "utf8");
+  document.head.append(style);
+  cleanups.push(async () => style.remove());
+  const text = `${"这是一条会自动换行的长字幕".repeat(10)}\n${"LongUnbrokenText".repeat(20)}`;
+  const h = await mount({
+    ...project,
+    cues: [
+      { ...cue, start: "599/10s", end: "61s", text, tokens: [{ id: "tok_1", text }] },
+      { ...cue, cue_id: "cue_next", start: "61s", end: "63s", text: "自由字幕" },
+    ],
+  });
+  const row = h.container.querySelector<HTMLElement>(".zc-sub-row") as HTMLElement;
+  const editor = row.querySelector<HTMLElement>(".zc-sub-text") as HTMLElement;
+  const actions = row.querySelector<HTMLElement>(".zc-sub-actions") as HTMLElement;
+  expect([...row.children].map((child) => child.className)).toEqual(["zc-sub-time", "zc-sub-text", "zc-sub-actions"]);
+  expect(row.querySelector("time")?.textContent).toBe("00:59");
+  expect(editor.textContent).toBe(text);
+  expect(editor.getAttribute("contenteditable")).toBe("true");
+  expect(editor.getAttribute("aria-multiline")).toBe("true");
+  expect(row.parentElement?.className).toBe("zc-sub-list");
+  expect(getComputedStyle(row.parentElement as HTMLElement).flexDirection).toBe("column");
+  // jsdom has no layout engine: assert the sizing rules that prevent flex rows from shrinking below their text.
+  expect(getComputedStyle(row).flexShrink).toBe("0");
+  expect(getComputedStyle(row).height).toBe("auto");
+  expect(getComputedStyle(row).gridTemplateColumns).toBe("max-content minmax(0, 1fr)");
+  expect(getComputedStyle(row).position).toBe("relative");
+  expect(getComputedStyle(editor).whiteSpace).toBe("pre-wrap");
+  expect(getComputedStyle(editor).overflowWrap).toBe("anywhere");
+  expect(getComputedStyle(editor).minWidth).toBe("0");
+  expect(getComputedStyle(actions).position).toBe("absolute");
+  expect(getComputedStyle(actions).visibility).toBe("hidden");
+  expect(actions.querySelectorAll("button")).toHaveLength(2);
+  expect(getComputedStyle(h.find("选择字幕 1")).fontWeight).toBe("400");
+  const hover = [...(style.sheet?.cssRules ?? [])].find(
+    (rule) => rule instanceof CSSStyleRule && rule.selectorText.includes(".zc-sub-row:hover .zc-sub-actions"),
+  ) as CSSStyleRule;
+  expect(hover.style.visibility).toBe("visible");
+  await h.click("选择字幕 1");
+  expect(row.classList.contains("is-selected")).toBe(true);
+  expect(getComputedStyle(actions).visibility).toBe("hidden");
+  await act(async () => placeCaret(editor, 0));
+  expect(row.classList.contains("is-editing")).toBe(true);
+  expect(getComputedStyle(actions).visibility).toBe("visible");
+  await h.input("编辑字幕", `${text}\n编辑时新增的一行`);
+  expect(editor.textContent).toBe(`${text}\n编辑时新增的一行`);
+  expect(editor.parentElement).toBe(row);
+  expect(getComputedStyle(row).flexShrink).toBe("0");
+  expect(row.nextElementSibling?.querySelector(".zc-sub-text")?.textContent).toBe("自由字幕");
+  await h.key(editor, "Escape");
+  expect(row.classList.contains("is-editing")).toBe(false);
+  expect(h.call).not.toHaveBeenCalled();
+});
+
 it("submits only changed recognition fields on blur and preserves terms", async () => {
   const h = await mount();
   expect(h.container.textContent).toContain("已识别 · 第 4 版 · 2 条字幕");
