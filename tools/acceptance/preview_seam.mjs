@@ -97,7 +97,8 @@ for (const { at: cut, srcIn, srcOut, rate: mediaRate } of cuts) {
     !events.some(([e]) => e === "seeking") &&
     jump > 0 &&
     Math.abs(firstIn) <= frame + 0.005 &&
-    lastOut <= frame + 0.005;
+    lastOut <= frame + 0.005 &&
+    lastOut >= -2 * frame - 0.005;
   failed ||= !ok;
   console.log(
     JSON.stringify({
