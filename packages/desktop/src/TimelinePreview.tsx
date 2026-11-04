@@ -3,7 +3,7 @@
 // Copyright 2025-2026 OpenCut. See useTimelineGestures.ts and THIRD_PARTY_NOTICES.md.
 // biome-ignore-all lint/suspicious/noArrayIndexKey: Film cells, waveform bars and ruler ticks are fixed geometric slots.
 
-import { memo, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { UiState } from "../../app-host/src/ui.js";
 import { Clip, Icon, IconButton } from "./components.js";
 import { DESKTOP_AUTHOR, type ProjectView } from "./connection.js";
@@ -322,7 +322,19 @@ export function TimelinePreview({
   const [writeErrorDetail, setWriteErrorDetail] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
   const [direction, setDirection] = useState(1n);
-  const video = useRef<HTMLVideoElement>(null);
+  const videos = useRef<(HTMLVideoElement | null)[]>([]);
+  const activeVideo = useRef(0);
+  const [visibleVideo, setVisibleVideo] = useState(0);
+  const preroll = useRef<{
+    clip: ClipView;
+    element: HTMLVideoElement;
+    positioned: boolean;
+    cancel: () => void;
+  } | null>(null);
+  const discardPreroll = useCallback(() => {
+    preroll.current?.cancel();
+    preroll.current = null;
+  }, []);
   const playhead = useRef<HTMLDivElement>(null);
   const clock = useRef<HTMLOutputElement>(null);
   const playbackAt = useRef<string | null>(null);
@@ -393,13 +405,15 @@ export function TimelinePreview({
       if (target !== previous) {
         started = now;
         start = frameAt(target, project.edit_rate);
+        discardPreroll();
       }
+      if (dragging.current) discardPreroll();
       const elapsed = rational(BigInt(Math.max(0, Math.round((now - started) * 1000))), 1_000_000n);
       let frame = start + direction * floor(mul(elapsed, parseRational(project.edit_rate)));
       const active = top?.clips.find(
         (item) => item.enabled && contains(item.timeline_in.t, item.timeline_out.t, target),
       );
-      const element = video.current;
+      const element = videos.current[activeVideo.current];
       const native =
         active &&
         active.speed !== "map" &&
@@ -445,6 +459,72 @@ export function TimelinePreview({
         started = now;
         start = frameAt(next, project.edit_rate);
       }
+      if (looped) discardPreroll();
+      if (native && element && config && !viewerOnly && !dragging.current && !looped) {
+        const upcoming = top?.clips.find(
+          (item) => item.enabled && contains(item.timeline_in.t, item.timeline_out.t, active.timeline_out.t),
+        );
+        const boundary = parseRational(active.timeline_out.t, true);
+        const remaining = sub(boundary, parseRational(next, true));
+        if (
+          upcoming &&
+          upcoming.id !== active.id &&
+          upcoming.speed !== "map" &&
+          sourceSpeed(upcoming, active.timeline_out.t) >= 0.0625 &&
+          sourceSpeed(upcoming, active.timeline_out.t) <= 16 &&
+          project.media.find((item) => item.id === upcoming.media_id)?.kind !== "image" &&
+          compare(remaining, rational(2n)) <= 0 &&
+          compare(remaining, rational(0n)) > 0 &&
+          !preroll.current
+        ) {
+          const hidden = videos.current[1 - activeVideo.current];
+          if (hidden) {
+            hidden.pause();
+            hidden.muted = true;
+            const prepared = {
+              clip: upcoming,
+              element: hidden,
+              positioned: false,
+              cancel: () => hidden.removeEventListener("loadedmetadata", position),
+            };
+            const position = () => {
+              if (preroll.current !== prepared) return;
+              hidden.currentTime = numberOf(sourceAt(upcoming, active.timeline_out.t));
+              prepared.positioned = true;
+            };
+            preroll.current = prepared;
+            hidden.addEventListener("loadedmetadata", position, { once: true });
+            const url = mediaUrl(config, "media", upcoming.media_id);
+            if (hidden.getAttribute("src") !== url) hidden.src = url;
+            else if (hidden.readyState >= 1) position();
+          }
+        }
+        const prepared = preroll.current;
+        if (prepared && compare(parseRational(next, true), boundary) >= 0) {
+          const incoming = prepared.element;
+          if (
+            prepared.positioned &&
+            incoming.readyState >= 2 &&
+            !incoming.seeking &&
+            contains(prepared.clip.timeline_in.t, prepared.clip.timeline_out.t, active.timeline_out.t)
+          ) {
+            element.pause();
+            element.muted = true;
+            element.style.visibility = "hidden";
+            incoming.volume = Math.min(1, 10 ** ((prepared.clip.gain_db ?? 0) / 20));
+            incoming.playbackRate = sourceSpeed(prepared.clip, active.timeline_out.t);
+            incoming.preservesPitch = true;
+            incoming.muted = false;
+            incoming.style.visibility = "visible";
+            activeVideo.current = 1 - activeVideo.current;
+            setVisibleVideo(activeVideo.current);
+            lastClip.current = prepared.clip.id;
+            next = active.timeline_out.t;
+            void incoming.play().catch(() => setWriteError("预览无法播放，请检查素材格式"));
+          }
+          discardPreroll();
+        }
+      }
       subtitleAt.current = next;
       if (playhead.current) playhead.current.style.left = `calc(var(--track-label-w) + ${pixelAt(next, scale)}px)`;
       if (clock.current) clock.current.textContent = timecode(next, project);
@@ -460,11 +540,32 @@ export function TimelinePreview({
       animation = requestAnimationFrame(tick);
     };
     animation = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(animation);
-  }, [state.playing, project, direction, update, hideViewer, scale, top, boundaries]);
+    return () => {
+      cancelAnimationFrame(animation);
+      discardPreroll();
+    };
+  }, [
+    state.playing,
+    project,
+    direction,
+    update,
+    hideViewer,
+    scale,
+    top,
+    boundaries,
+    config,
+    viewerOnly,
+    dragging,
+    discardPreroll,
+  ]);
   useEffect(() => {
-    const element = video.current;
+    if (at !== playbackAt.current) discardPreroll();
+    const element = videos.current[visibleVideo];
     if (!element || hideViewer) return;
+    if (src && element.getAttribute("src") !== src) {
+      lastClip.current = undefined;
+      element.src = src;
+    } else if (!src) element.removeAttribute("src");
     if (!clip) {
       if (element.readyState >= 1) element.pause();
       return;
@@ -492,7 +593,7 @@ export function TimelinePreview({
     if (element.readyState >= 1) sync();
     element.addEventListener("loadedmetadata", sync);
     return () => element.removeEventListener("loadedmetadata", sync);
-  }, [clip, source, speed, state.playing, direction, hideViewer, at]);
+  }, [clip, source, speed, state.playing, direction, hideViewer, at, src, visibleVideo, discardPreroll]);
   const write = async (verb: string, label: string, ops?: unknown[]) => {
     if (!project || busy || readOnly) return;
     setBusy(true);
@@ -688,14 +789,21 @@ export function TimelinePreview({
             {src && media?.kind === "image" ? (
               <img src={src} alt={media.name ?? "预览"} />
             ) : (
-              // biome-ignore lint/a11y/useMediaCaption: Projected, styled captions are rendered immediately below the player.
-              <video
-                ref={video}
-                src={src}
-                playsInline
-                aria-label={viewerOnly ? "素材预览" : "时间线预览"}
-                onError={() => setWriteError("预览无法读取，请检查素材或代理")}
-              />
+              [0, 1].map((index) => (
+                <video
+                  key={index}
+                  ref={(element) => {
+                    videos.current[index] = element;
+                  }}
+                  playsInline
+                  preload="auto"
+                  muted={index !== visibleVideo}
+                  style={{ position: "absolute", inset: 0, visibility: index === visibleVideo ? "visible" : "hidden" }}
+                  aria-hidden={index !== visibleVideo}
+                  aria-label={index === visibleVideo ? (viewerOnly ? "素材预览" : "时间线预览") : undefined}
+                  onError={() => setWriteError("预览无法读取，请检查素材或代理")}
+                />
+              ))
             )}
             {clip?.speed === "map" && (
               <span
