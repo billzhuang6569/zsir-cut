@@ -1,5 +1,6 @@
 // 预览在剪点处是否卡顿：在 WebKit（macOS 上 Tauri 用的内核）里打开桌面版界面，
-// 从每个剪点前 2 秒开始播放 4 秒，记录画面帧之间的最大间隔和 <video> 的 seeking 事件。
+// 从每个剪点前 2 秒开始播放 4 秒，记录上层 <video>（没有 data-preroll 的那个）的帧间隔、seeking 事件，
+// 以及新片段第一帧和旧片段最后一帧离入点、出点有多远。
 // playwright 不是仓库依赖：在装了 playwright 的目录里运行，例如
 //   cd .tmp/pw && node ../../tools/acceptance/preview_seam.mjs <界面URL> <宿主端口> <令牌> <工程>
 // 宿主要先用同一个工程启动：node packages/app-host/dist/index.js --project <工程> --port <端口> --token <令牌>
@@ -20,7 +21,16 @@ const project = JSON.parse(readFileSync(projectPath, "utf8"));
 const timeline = project.timelines[0];
 const rate = seconds(`${timeline.edit_rate ?? project.timelines[0].format?.edit_rate ?? "25"}s`);
 const video = timeline.tracks.find((t) => t.kind === "video");
-const cuts = video.clips.slice(1).map((c) => seconds(c.timeline_start));
+const cuts = video.clips.slice(1).map((c, i) => {
+  const prev = video.clips[i];
+  const speed = (clip) => (clip.speed && clip.speed !== "map" ? seconds(`${clip.speed}s`) : 1);
+  return {
+    at: seconds(c.timeline_start),
+    srcIn: seconds(c.source_start),
+    srcOut: seconds(prev.source_start) + seconds(prev.duration) * speed(prev),
+    rate: seconds(`${project.media.find((m) => m.id === c.media_id)?.video?.rate ?? "30"}s`),
+  };
+});
 
 const browser = await webkit.launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
@@ -47,21 +57,21 @@ const scale = await page.evaluate(() => Number(document.querySelector('input[ari
 const play = () => page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "播放" || b.getAttribute("aria-label") === "暂停")?.click());
 
 let failed = false;
-for (const cut of cuts) {
+for (const { at: cut, srcIn, srcOut, rate: mediaRate } of cuts) {
   const box = await page.locator('[aria-label="时间标尺"]').boundingBox();
   await page.mouse.click(box.x + Math.max(0, cut - 2) * scale, box.y + box.height / 2);
   await page.waitForTimeout(1500);
-  // 每次都重新挂监听：实现可以换用多个 <video>，只看当前可见的那个。
+  // 每次都重新挂监听：实现用多个 <video> 轮流播放时，只记上层的那个（没有 data-preroll）。
   await page.evaluate(() => {
     const log = (window.__seam = { events: [], frames: [] });
+    const top = (v) => !v.hasAttribute("data-preroll");
     for (const v of document.querySelectorAll("video")) {
       for (const e of ["waiting", "seeking", "stalled"])
         v.addEventListener(e, () => {
-          if (getComputedStyle(v).visibility !== "hidden" && getComputedStyle(v).opacity !== "0")
-            log.events.push([e, v.currentTime]);
+          if (top(v)) log.events.push([e, v.currentTime]);
         });
       const f = (now, meta) => {
-        if (getComputedStyle(v).visibility !== "hidden" && getComputedStyle(v).opacity !== "0") log.frames.push([now, meta.mediaTime]);
+        if (top(v)) log.frames.push([now, meta.mediaTime]);
         v.requestVideoFrameCallback(f);
       };
       v.requestVideoFrameCallback(f);
@@ -75,9 +85,29 @@ for (const cut of cuts) {
   let worst = 0;
   // 第一帧前的起播延迟不算，从第 3 帧起看间隔。
   for (let i = 3; i < frames.length; i++) worst = Math.max(worst, frames[i][0] - frames[i - 1][0]);
-  const ok = worst <= (2 / rate) * 1000 + 20 && !events.some(([e]) => e === "seeking");
+  // 素材时间跳变的地方就是剪点：前一帧属于旧片段，后一帧属于新片段。
+  const jump = frames.findIndex((f, i) => i > 0 && Math.abs(f[1] - frames[i - 1][1]) > 0.5);
+  const frame = 1 / mediaRate;
+  const firstIn = jump > 0 ? frames[jump][1] - srcIn : null;
+  const lastOut = jump > 0 ? frames[jump - 1][1] - srcOut : null;
+  const ok =
+    worst <= (2 / rate) * 1000 + 20 &&
+    !events.some(([e]) => e === "seeking") &&
+    jump > 0 &&
+    Math.abs(firstIn) <= frame + 0.005 &&
+    lastOut <= frame + 0.005;
   failed ||= !ok;
-  console.log(JSON.stringify({ cut, ok, frames: frames.length, worstGapMs: Math.round(worst), events }));
+  console.log(
+    JSON.stringify({
+      cut,
+      ok,
+      frames: frames.length,
+      worstGapMs: Math.round(worst),
+      firstFrameFromInMs: firstIn === null ? null : Math.round(firstIn * 1000),
+      lastFrameFromOutMs: lastOut === null ? null : Math.round(lastOut * 1000),
+      events,
+    }),
+  );
 }
 await browser.close();
 process.exit(failed ? 1 : 0);
