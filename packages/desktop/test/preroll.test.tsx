@@ -4,8 +4,9 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ProjectView } from "../src/connection.js";
 import { initialState } from "../src/state.js";
-import { TimelinePreview } from "../src/TimelinePreview.js";
 import { recordingCanvas } from "./canvas.js";
+
+let TimelinePreview: typeof import("../src/TimelinePreview.js").TimelinePreview;
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let host: HTMLDivElement;
@@ -72,6 +73,8 @@ async function metadata(element: HTMLVideoElement, ready = 2) {
 }
 
 beforeEach(async () => {
+  vi.resetModules();
+  ({ TimelinePreview } = await import("../src/TimelinePreview.js"));
   state = { ...initialState(), playing: true };
   now = 0;
   actions.length = 0;
@@ -187,9 +190,11 @@ it("runs muted two seconds ahead and swaps both ways without play or seek at eit
   expect(b.src).toBe(a.src);
   await metadata(b);
   expect(player(b).paused).toBe(false);
-  expect(actions.filter((action) => action.element === b && ["seek", "play"].includes(action.kind))).toMatchObject([
-    { kind: "seek", visible: false, muted: true, time: 18 },
-    { kind: "play", visible: false, muted: true, time: 18 },
+  expect(
+    actions.filter((action) => action.element === b && ["seek", "play", "rate"].includes(action.kind)),
+  ).toMatchObject([
+    { kind: "seek", visible: false, muted: true, time: 18.5 },
+    { kind: "play", visible: false, muted: true, time: 18.5 },
   ]);
   player(b).time = 18.5;
   await tick(12.5);
@@ -212,7 +217,7 @@ it("runs muted two seconds ahead and swaps both ways without play or seek at eit
   expect(host.querySelector('[aria-label="播放时码"]')?.textContent).toBe("00:00:04:10");
   await tick(22);
   // The recycled decoder already has metadata; it still seeks and starts before the cut.
-  expect(player(a).time).toBe(28);
+  expect(player(a).time).toBe(28.5);
   await act(() => {
     player(a).seeking = false;
     a.dispatchEvent(new Event("seeked"));
@@ -222,77 +227,147 @@ it("runs muted two seconds ahead and swaps both ways without play or seek at eit
   const nextCut = actions.length;
   await tick(24);
   expect(a.hasAttribute("data-preroll")).toBe(false);
-  expect(actions.slice(nextCut).filter((action) => ["seek", "play"].includes(action.kind))).toEqual([]);
+  expect(actions.slice(nextCut).filter((action) => ["seek", "play", "rate"].includes(action.kind))).toEqual([]);
   expect(state.playhead).toEqual({ at: "8s" });
 });
 
-it.each([0.12, -0.12])(
-  "corrects offset %s once after playing, then restores the native rate at the cut",
-  async (offset) => {
-    const [, b] = videos();
-    player(b).autoPlaying = false;
+it("never corrects rate or position after starting, even with decoder drift", async () => {
+  const [, b] = videos();
+  await tick(12);
+  await metadata(b);
+  const started = actions.length;
+  for (const [topTime, lowerTime] of [
+    [12.5, 18.7],
+    [13, 19.8],
+    [13.8, 19.9],
+  ] as const) {
+    player(b).time = lowerTime;
+    await tick(topTime);
+  }
+  expect(actions.slice(started).filter((a) => a.element === b && ["seek", "rate", "play"].includes(a.kind))).toEqual(
+    [],
+  );
+  expect(b.hasAttribute("data-preroll")).toBe(true);
+});
+
+it("swaps on the lower clock before the outgoing boundary, even between React publications", async () => {
+  const [a, b] = videos();
+  await tick(12);
+  await metadata(b);
+  player(b).time = 19.99;
+  await tick(13.8);
+  expect(b.hasAttribute("data-preroll")).toBe(true);
+  const cut = actions.length;
+  player(b).time = 20;
+  player(a).time = 13.9;
+  now += 16;
+  await act(() => scheduled?.(now));
+  expect(b.hasAttribute("data-preroll")).toBe(false);
+  expect(state.playhead).toEqual({ at: "4s" });
+  expect(actions.slice(cut).map(({ kind, element }) => [kind, element === a ? "a" : "b"])).toEqual([["pause", "a"]]);
+});
+
+it.each([false, true])(
+  "holds the outgoing frame and playhead at out until lower reaches in (time map: %s)",
+  async (mapped) => {
+    const [a, b] = videos();
+    if (mapped) {
+      const outgoing = project.tracks[0]?.clips[0];
+      if (!outgoing) throw new Error("Missing outgoing clip");
+      outgoing.time_map = [
+        { at: { t: "0s" }, source: { t: "10s" }, interp: "linear" },
+        { at: { t: "4s" }, source: { t: "14s" }, interp: "linear" },
+      ];
+    }
     await tick(12);
     await metadata(b);
-    player(b).time = 18.5 + offset;
-    await tick(12.5);
-    expect(actions.filter((a) => a.element === b && a.kind === "rate")).toHaveLength(0);
-    await act(() => b.dispatchEvent(new Event("playing")));
-    await tick(12.5);
-    expect(b.playbackRate).toBeCloseTo(1 - offset / 1.5);
-    player(b).time = 19 + offset;
-    await tick(13);
-    player(b).time = 19.6 + offset;
-    await tick(13.6);
-    expect(actions.filter((a) => a.element === b && a.kind === "rate")).toHaveLength(1);
-    player(b).time = 20;
+    player(b).time = 19.8;
     const cut = actions.length;
     await tick(14);
-    expect(b.playbackRate).toBe(1);
-    expect(actions.filter((a) => a.element === b && a.kind === "rate")).toHaveLength(2);
-    expect(actions.slice(cut).some((a) => ["seek", "play"].includes(a.kind))).toBe(false);
+    expect(a.hasAttribute("data-preroll")).toBe(false);
+    expect(player(a).paused).toBe(true);
+    expect(state.playhead).toEqual({ at: "4s" });
+    expect(host.querySelector('[aria-label="播放时码"]')?.textContent).toBe("00:00:04:00");
+    await tick(14);
+    expect(player(a).time).toBe(14);
+    player(b).time = 20;
+    await tick(14);
+    expect(b.hasAttribute("data-preroll")).toBe(false);
+    expect(actions.slice(cut).map(({ kind, element }) => [kind, element === a ? "a" : "b"])).toEqual([["pause", "a"]]);
     await tick(20.4);
-    expect(actions.filter((a) => a.element === b && a.kind === "rate")).toHaveLength(2);
+    expect(state.playhead).toEqual({ at: "22/5s" });
   },
 );
 
-it("does not rewind into the old clip when the incoming decoder lands just before its in point", async () => {
-  const [, b] = videos();
+it("falls back if the lower buffers after the top has started holding", async () => {
+  const [a, b] = videos();
   await tick(12);
   await metadata(b);
-  player(b).time = 18.48;
-  await tick(12.5);
-  player(b).time = 19.98;
-  const cut = actions.length;
+  player(b).time = 19.8;
   await tick(14);
-  await tick(19.99);
-  expect(state.playhead).toEqual({ at: "4s" });
-  expect(b.hasAttribute("data-preroll")).toBe(false);
-  expect(actions.slice(cut).some((action) => ["seek", "play"].includes(action.kind))).toBe(false);
-  await tick(20.04);
-  expect(state.playhead).toEqual({ at: "101/25s" });
+  const held = actions.length;
+  await act(() => b.dispatchEvent(new Event("waiting")));
+  await tick(14);
+  expect(a.hasAttribute("data-preroll")).toBe(false);
+  expect(player(b).paused).toBe(true);
+  expect(player(a).paused).toBe(false);
+  expect(actions.slice(held)).toContainEqual(expect.objectContaining({ kind: "seek", element: a, time: 20 }));
 });
 
-it.each(["within a frame", "too late"])("does not adjust playbackRate when %s", async (condition) => {
+it.each(["metadata", "seek"])("falls back if %s completes too late to start preroll", async (delay) => {
+  const [a, b] = videos();
+  await tick(12);
+  if (delay === "seek") {
+    player(b).ready = 2;
+    await act(() => b.dispatchEvent(new Event("loadedmetadata")));
+  }
+  await tick(13.3);
+  await metadata(b);
+  expect(player(b).paused).toBe(true);
+  expect(actions.filter((action) => action.element === b && action.kind === "play")).toEqual([]);
+  await tick(14);
+  expect(a.hasAttribute("data-preroll")).toBe(false);
+  expect(player(a).time).toBe(20);
+});
+
+it.each([
+  { held: 0, left: 0.1, lead: 0.4 },
+  { held: 0.2, left: 0, lead: 0.7 },
+  { held: 2, left: 0, lead: 1 },
+  { held: 0, left: 1, lead: 0.2 },
+])("adapts lead once after a cut and clamps it: %j", async ({ held, left, lead }) => {
+  const [a, b] = videos();
+  await tick(12);
+  await metadata(b);
+  if (held) {
+    player(b).time = 19.9;
+    await tick(14);
+    now += held * 1000 - 100;
+  }
+  player(b).time = 20;
+  await tick(14 - left);
+  await tick(21);
+  await tick(22);
+  expect(player(a).time).toBeCloseTo(28 + lead);
+  const positions = actions.filter((action) => action.element === a && action.kind === "seek");
+  expect(positions).toHaveLength(2);
+  expect(positions[1]?.time).toBeCloseTo(28 + lead);
+});
+
+it("remembers calibrated lead across preview remounts in the app session", async () => {
   const [, b] = videos();
   await tick(12);
   await metadata(b);
-  player(b).time = condition === "too late" ? 19.3 : 18.52;
-  await tick(condition === "too late" ? 13.6 : 12.5);
-  await tick(13.7);
-  expect(actions.filter((a) => a.element === b && a.kind === "rate")).toHaveLength(0);
-});
-
-it("uses the source frame rate for correction and permits one adjustment exactly half a second before the cut", async () => {
-  const [, b] = videos();
-  const media = project.media[0];
-  if (!media?.video) throw new Error("Missing video format");
-  media.video.rate = "100";
+  player(b).time = 20;
+  await tick(13.8);
+  await act(() => root.unmount());
+  root = createRoot(host);
+  state = { ...initialState(), playing: true };
+  await act(render);
+  await metadata(videos()[0]);
   await tick(12);
-  await metadata(b);
-  player(b).time = 19.52;
-  await tick(13.5);
-  expect(b.playbackRate).toBeCloseTo(0.96);
-  expect(actions.filter((action) => action.element === b && action.kind === "rate")).toHaveLength(1);
+  await metadata(videos()[1]);
+  expect(player(videos()[1]).time).toBeCloseTo(18.3);
 });
 
 it("falls back when a jump close to the cut leaves insufficient time to start the lower decoder", async () => {
@@ -302,6 +377,7 @@ it("falls back when a jump close to the cut leaves insufficient time to start th
   player(b).autoPlaying = false;
   await tick(13.8);
   await metadata(b);
+  expect(b.getAttribute("src")).toBeNull();
   const cut = actions.length;
   await tick(14);
   expect(a.hasAttribute("data-preroll")).toBe(false);
@@ -362,7 +438,7 @@ it.each(["running", "loading"])("discards %s preroll on pause and prepares again
   expect(actions).toHaveLength(count);
   await act(() => update({ ...state, playing: true }));
   await tick(12.2);
-  expect(actions.slice(count)).toContainEqual(expect.objectContaining({ kind: "seek", element: b, time: 18.2 }));
+  expect(actions.slice(count)).toContainEqual(expect.objectContaining({ kind: "seek", element: b, time: 18.7 }));
 });
 
 it("uses the remaining decoded time when metadata is delayed", async () => {
@@ -370,7 +446,7 @@ it("uses the remaining decoded time when metadata is delayed", async () => {
   await tick(12);
   await tick(12.6);
   await metadata(b);
-  expect(player(b).time).toBeCloseTo(18.6);
+  expect(player(b).time).toBeCloseTo(19.1);
   expect(player(b).paused).toBe(false);
 });
 
@@ -389,7 +465,7 @@ it("waits for metadata when a recycled player loads different media", async () =
   expect(a.src).toContain("media_id=other");
   expect(actions.filter((action) => action.kind === "seek" && action.element === a)).toHaveLength(count);
   await metadata(a);
-  expect(player(a).time).toBe(28);
+  expect(player(a).time).toBe(28.5);
   expect(player(a).paused).toBe(false);
   player(a).time = 30;
   await tick(24);
@@ -424,7 +500,7 @@ it.each(["map", "0", "-1", "image", "short", "no source handle"])(
   },
 );
 
-it("scales source preroll and correction by both clip speeds and follows the new top clock", async () => {
+it("scales source preroll and lead by both clip speeds and follows the new top clock", async () => {
   const [a, b] = videos();
   const outgoing = project.tracks[0]?.clips[0];
   const upcoming = project.tracks[0]?.clips[1];
@@ -443,18 +519,16 @@ it("scales source preroll and correction by both clip speeds and follows the new
   ];
   await tick(14);
   await metadata(b);
-  expect(player(b).time).toBe(19);
+  expect(player(b).time).toBe(19.25);
   expect(b.playbackRate).toBe(0.5);
   player(b).time = 19.2;
   await tick(15);
-  expect(b.playbackRate).toBeCloseTo(0.5 * (1 + 0.1 / 1.5));
+  expect(b.playbackRate).toBe(0.5);
   player(b).time = 20;
   const cut = actions.length;
   await tick(18);
   expect(b.playbackRate).toBe(0.5);
-  expect(actions.slice(cut).some((action) => action.element === b && ["seek", "play"].includes(action.kind))).toBe(
-    false,
-  );
+  expect(actions.slice(cut).some((action) => ["seek", "play", "rate"].includes(action.kind))).toBe(false);
   expect(a.muted).toBe(true);
   await tick(20.2);
   expect(host.querySelector('[aria-label="播放时码"]')?.textContent).toBe("00:00:04:10");
