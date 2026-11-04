@@ -16,3 +16,4 @@
 | `segment_diff.py` | 随机字词流分别交给 core 的 `resegment` 和 `segment.py`，逐条比较字幕条与换行 | `python3 -I tools/acceptance/segment_diff.py [条数] [种子] [zh\|en]` |
 | `cutlist.py` | 按 handoff-profile 6.0 独立计算工程剪辑表；按 export-fcpxml 独立解析 FCPXML；逐行零帧比较 | `python3 -I tools/acceptance/cutlist.py compare <fcpxml> <工程>` |
 | `fcpxml_dtd.sh` | 用本机 FCP 应用包里的 DTD 校验 FCPXML（DTD 不进仓库；先复制到无空格路径再校验） | `sh tools/acceptance/fcpxml_dtd.sh <fcpxml>` |
+| `preview_seam.mjs` | 在 WebKit 里打开桌面版，从每个剪点前 2 秒播放，量最大帧间隔，看可见的 `<video>` 有没有 `seeking`。要求 playwright 和 WebKit，不进仓库 | `cd .tmp/pw && node ../../tools/acceptance/preview_seam.mjs <界面URL> <宿主端口> <令牌> <工程>` |
