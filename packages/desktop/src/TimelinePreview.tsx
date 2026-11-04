@@ -328,10 +328,15 @@ export function TimelinePreview({
   const preroll = useRef<{
     clip: ClipView;
     element: HTMLVideoElement;
-    positioned: boolean;
+    running: boolean;
+    corrected: boolean;
     cancel: () => void;
   } | null>(null);
   const discardPreroll = useCallback(() => {
+    if (preroll.current) {
+      preroll.current.element.pause();
+      preroll.current.element.muted = true;
+    }
     preroll.current?.cancel();
     preroll.current = null;
   }, []);
@@ -433,6 +438,9 @@ export function TimelinePreview({
             parseRational(project.edit_rate),
           ),
         );
+        // A preroll landing just before its in point must not select the previous clip again.
+        const first = frameAt(active.timeline_in.t, project.edit_rate);
+        if (frame < first) frame = first;
       } else if (native) frame = frameAt(target, project.edit_rate);
       let next = frameTime(frame, project.edit_rate);
       let looped = false;
@@ -465,7 +473,9 @@ export function TimelinePreview({
           (item) => item.enabled && contains(item.timeline_in.t, item.timeline_out.t, active.timeline_out.t),
         );
         const boundary = parseRational(active.timeline_out.t, true);
-        const remaining = sub(boundary, parseRational(next, true));
+        const outgoingRate = sourceSpeed(active, target);
+        const outgoingEnd = numberOf(sourceAt(active, active.timeline_out.t));
+        const remaining = (outgoingEnd - element.currentTime) / outgoingRate;
         if (
           upcoming &&
           upcoming.id !== active.id &&
@@ -473,54 +483,117 @@ export function TimelinePreview({
           sourceSpeed(upcoming, active.timeline_out.t) >= 0.0625 &&
           sourceSpeed(upcoming, active.timeline_out.t) <= 16 &&
           project.media.find((item) => item.id === upcoming.media_id)?.kind !== "image" &&
-          compare(remaining, rational(2n)) <= 0 &&
-          compare(remaining, rational(0n)) > 0 &&
+          compare(sub(parseRational(upcoming.timeline_out.t, true), boundary), rational(2n)) >= 0 &&
+          remaining <= 2 &&
+          remaining > 0 &&
           !preroll.current
         ) {
-          const hidden = videos.current[1 - activeVideo.current];
-          if (hidden) {
-            hidden.pause();
-            hidden.muted = true;
+          const lower = videos.current[1 - activeVideo.current];
+          if (lower) {
+            lower.pause();
+            lower.muted = true;
             const prepared = {
               clip: upcoming,
-              element: hidden,
-              positioned: false,
-              cancel: () => hidden.removeEventListener("loadedmetadata", position),
+              element: lower,
+              running: false,
+              corrected: false,
+              cancel: () => {
+                lower.removeEventListener("loadedmetadata", position);
+                lower.removeEventListener("seeked", run);
+                lower.removeEventListener("playing", playing);
+                lower.removeEventListener("waiting", waiting);
+              },
+            };
+            const rate = sourceSpeed(upcoming, active.timeline_out.t);
+            const playing = () => {
+              if (preroll.current === prepared) prepared.running = true;
+            };
+            const waiting = () => {
+              prepared.running = false;
+            };
+            const run = () => {
+              if (preroll.current !== prepared || lower.seeking) return;
+              void lower.play().catch(() => {
+                if (preroll.current === prepared) discardPreroll();
+              });
             };
             const position = () => {
               if (preroll.current !== prepared) return;
-              hidden.currentTime = numberOf(sourceAt(upcoming, active.timeline_out.t));
-              prepared.positioned = true;
+              const left = (outgoingEnd - element.currentTime) / outgoingRate;
+              const seconds = numberOf(sourceAt(upcoming, active.timeline_out.t)) - left * rate;
+              if (left <= 0 || seconds < 0) {
+                discardPreroll();
+                return;
+              }
+              if (lower.playbackRate !== rate) lower.playbackRate = rate;
+              lower.preservesPitch = true;
+              lower.addEventListener("seeked", run, { once: true });
+              lower.currentTime = seconds;
             };
             preroll.current = prepared;
-            hidden.addEventListener("loadedmetadata", position, { once: true });
+            lower.addEventListener("playing", playing);
+            lower.addEventListener("waiting", waiting);
+            lower.addEventListener("loadedmetadata", position, { once: true });
             const url = mediaUrl(config, "media", upcoming.media_id);
-            if (hidden.getAttribute("src") !== url) hidden.src = url;
-            else if (hidden.readyState >= 1) position();
+            if (lower.getAttribute("src") !== url) lower.src = url;
+            else if (lower.readyState >= 1) position();
           }
         }
         const prepared = preroll.current;
+        if (
+          prepared?.running &&
+          !prepared.element.paused &&
+          !prepared.element.seeking &&
+          !prepared.corrected &&
+          remaining >= 0.5
+        ) {
+          const rate = sourceSpeed(prepared.clip, active.timeline_out.t);
+          const offset =
+            (prepared.element.currentTime - numberOf(sourceAt(prepared.clip, active.timeline_out.t))) / rate +
+            remaining;
+          const mediaRate =
+            project.media.find((item) => item.id === prepared.clip.media_id)?.video?.rate ?? project.edit_rate;
+          prepared.corrected = true;
+          // WebKit stalls on rate changes: absorb startup drift with one adjustment, restored at the cut.
+          if (Math.abs(offset) > 1 / numberOf(parseRational(mediaRate)) / rate) {
+            const corrected = Math.min(16, Math.max(0.0625, rate * (1 - offset / remaining)));
+            if (prepared.element.playbackRate !== corrected) prepared.element.playbackRate = corrected;
+          }
+        }
         if (prepared && compare(parseRational(next, true), boundary) >= 0) {
           const incoming = prepared.element;
           if (
-            prepared.positioned &&
+            prepared.running &&
+            !incoming.paused &&
             incoming.readyState >= 2 &&
             !incoming.seeking &&
             contains(prepared.clip.timeline_in.t, prepared.clip.timeline_out.t, active.timeline_out.t)
           ) {
             element.pause();
             element.muted = true;
-            element.style.visibility = "hidden";
+            element.style.zIndex = "0";
+            element.setAttribute("data-preroll", "");
             incoming.volume = Math.min(1, 10 ** ((prepared.clip.gain_db ?? 0) / 20));
-            incoming.playbackRate = sourceSpeed(prepared.clip, active.timeline_out.t);
+            const rate = sourceSpeed(prepared.clip, active.timeline_out.t);
+            if (incoming.playbackRate !== rate) incoming.playbackRate = rate;
             incoming.preservesPitch = true;
             incoming.muted = false;
-            incoming.style.visibility = "visible";
+            incoming.style.zIndex = "1";
+            incoming.removeAttribute("data-preroll");
             activeVideo.current = 1 - activeVideo.current;
             setVisibleVideo(activeVideo.current);
             lastClip.current = prepared.clip.id;
-            next = active.timeline_out.t;
-            void incoming.play().catch(() => setWriteError("预览无法播放，请检查素材格式"));
+            const decoded = rational(BigInt(Math.round(incoming.currentTime * 1_000_000)), 1_000_000n);
+            const landed = add(
+              boundary,
+              div(sub(decoded, sourceAt(prepared.clip, active.timeline_out.t)), parseRational(prepared.clip.speed)),
+            );
+            next =
+              compare(landed, boundary) < 0
+                ? active.timeline_out.t
+                : frameTime(floor(mul(landed, parseRational(project.edit_rate))), project.edit_rate);
+            prepared.cancel();
+            preroll.current = null;
           }
           discardPreroll();
         }
@@ -583,7 +656,7 @@ export function TimelinePreview({
       const rate = speed * Number(direction);
       const playable = rate >= 0.0625 && rate <= 16;
       if (playable) {
-        element.playbackRate = rate;
+        if (element.playbackRate !== rate) element.playbackRate = rate;
         element.preservesPitch = true;
       }
       if (state.playing && playable) {
@@ -798,7 +871,8 @@ export function TimelinePreview({
                   playsInline
                   preload="auto"
                   muted={index !== visibleVideo}
-                  style={{ position: "absolute", inset: 0, visibility: index === visibleVideo ? "visible" : "hidden" }}
+                  data-preroll={index !== visibleVideo ? "" : undefined}
+                  style={{ position: "absolute", inset: 0, zIndex: index === visibleVideo ? 1 : 0 }}
                   aria-hidden={index !== visibleVideo}
                   aria-label={index === visibleVideo ? (viewerOnly ? "素材预览" : "时间线预览") : undefined}
                   onError={() => setWriteError("预览无法读取，请检查素材或代理")}

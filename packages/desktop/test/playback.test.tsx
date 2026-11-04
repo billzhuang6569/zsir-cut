@@ -41,7 +41,7 @@ it("follows decoded frames without repeated seeks and keeps React updates below 
   vi.spyOn(performance, "now").mockReturnValue(0);
   // This clock regression keeps the standby decoder unready to exercise the seek fallback.
   vi.spyOn(HTMLMediaElement.prototype, "readyState", "get").mockImplementation(function (this: HTMLMediaElement) {
-    return this.style.visibility === "hidden" ? 0 : 2;
+    return this.hasAttribute("data-preroll") ? 0 : 2;
   });
   let decoded = 0;
   let paused = true;
@@ -52,10 +52,10 @@ it("follows decoded frames without repeated seeks and keeps React updates below 
   vi.spyOn(HTMLMediaElement.prototype, "currentTime", "set").mockImplementation(seeks);
   vi.spyOn(HTMLMediaElement.prototype, "paused", "get").mockImplementation(() => paused);
   const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(async function (this: HTMLMediaElement) {
-    if (this.style.visibility !== "hidden") paused = false;
+    if (!this.hasAttribute("data-preroll")) paused = false;
   });
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(function (this: HTMLMediaElement) {
-    if (this.style.visibility !== "hidden") paused = true;
+    if (!this.hasAttribute("data-preroll")) paused = true;
   });
   const canvas = recordingCanvas();
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => canvas.context);
