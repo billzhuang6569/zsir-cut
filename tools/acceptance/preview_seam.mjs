@@ -81,6 +81,8 @@ for (const { at: cut, srcIn, srcOut, rate: mediaRate } of cuts) {
   await page.waitForTimeout(4000);
   await play();
   const { events, frames } = await page.evaluate(() => window.__seam);
+  // 实现若在 <video> 上标了退回旧做法的原因（data-preroll-fallback），一并打印。
+  const fallback = await page.evaluate(() => [...document.querySelectorAll("video")].map((v) => v.dataset.prerollFallback).filter(Boolean));
   frames.sort((a, b) => a[0] - b[0]);
   let worst = 0;
   // 第一帧前的起播延迟不算，从第 3 帧起看间隔。
@@ -106,6 +108,7 @@ for (const { at: cut, srcIn, srcOut, rate: mediaRate } of cuts) {
       firstFrameFromInMs: firstIn === null ? null : Math.round(firstIn * 1000),
       lastFrameFromOutMs: lastOut === null ? null : Math.round(lastOut * 1000),
       events,
+      fallback,
     }),
   );
 }
