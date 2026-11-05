@@ -3,7 +3,7 @@
 // Copyright 2025-2026 OpenCut. See useTimelineGestures.ts and THIRD_PARTY_NOTICES.md.
 // biome-ignore-all lint/suspicious/noArrayIndexKey: Film cells, waveform bars and ruler ticks are fixed geometric slots.
 
-import { memo, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { UiState } from "../../app-host/src/ui.js";
 import { Clip, Icon, IconButton } from "./components.js";
 import { DESKTOP_AUTHOR, type ProjectView } from "./connection.js";
@@ -41,6 +41,8 @@ import { Wave } from "./Wave.js";
 
 export { Wave } from "./Wave.js";
 import "./timeline.css";
+
+let prerollLead = 0.3;
 
 const cueKey = (cue: CueView) => `${cue.track_id}:${cue.cue_id}:${cue.piece}:${cue.start}`;
 
@@ -322,7 +324,39 @@ export function TimelinePreview({
   const [writeErrorDetail, setWriteErrorDetail] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
   const [direction, setDirection] = useState(1n);
-  const video = useRef<HTMLVideoElement>(null);
+  const videos = useRef<(HTMLVideoElement | null)[]>([]);
+  const activeVideo = useRef(0);
+  const [visibleVideo, setVisibleVideo] = useState(0);
+  const topPlayback = useRef({ time: 0, steady: false });
+  const failedPreroll = useRef<string>();
+  const preroll = useRef<{
+    clip: ClipView;
+    element: HTMLVideoElement;
+    running: boolean;
+    outgoing: ClipView;
+    heldAt: number | null;
+    prepare: () => void;
+    cancel: () => void;
+  } | null>(null);
+  const discardPreroll = useCallback((reason?: string) => {
+    failedPreroll.current = reason ? (preroll.current?.outgoing.id ?? lastClip.current) : undefined;
+    const lower = videos.current[1 - activeVideo.current];
+    if (lower) lower.dataset.prerollState = reason ? `fallback:${reason}` : "idle";
+    if (reason) {
+      const top = videos.current[activeVideo.current];
+      if (top) top.dataset.prerollFallback = reason;
+    }
+    if (preroll.current) {
+      preroll.current.element.pause();
+      preroll.current.element.muted = true;
+    }
+    preroll.current?.cancel();
+    preroll.current = null;
+  }, []);
+  const resetTopPlayback = (element: HTMLVideoElement) => {
+    if (element !== videos.current[activeVideo.current]) return;
+    topPlayback.current = { time: element.currentTime, steady: false };
+  };
   const playhead = useRef<HTMLDivElement>(null);
   const clock = useRef<HTMLOutputElement>(null);
   const playbackAt = useRef<string | null>(null);
@@ -393,19 +427,28 @@ export function TimelinePreview({
       if (target !== previous) {
         started = now;
         start = frameAt(target, project.edit_rate);
+        discardPreroll();
       }
+      if (dragging.current) discardPreroll();
       const elapsed = rational(BigInt(Math.max(0, Math.round((now - started) * 1000))), 1_000_000n);
       let frame = start + direction * floor(mul(elapsed, parseRational(project.edit_rate)));
-      const active = top?.clips.find(
-        (item) => item.enabled && contains(item.timeline_in.t, item.timeline_out.t, target),
-      );
-      const element = video.current;
+      const active =
+        preroll.current?.outgoing ??
+        top?.clips.find((item) => item.enabled && contains(item.timeline_in.t, item.timeline_out.t, target));
+      const element = videos.current[activeVideo.current];
+      const playback = topPlayback.current;
+      if (element) {
+        if (element.paused || element.seeking || element.readyState < 2) playback.steady = false;
+        else if (element.currentTime > playback.time) playback.steady = true;
+        playback.time = element.currentTime;
+      }
+      const outgoingRate = active ? sourceSpeed(active, active.timeline_in.t) : 0;
       const native =
         active &&
         active.speed !== "map" &&
         direction > 0n &&
-        sourceSpeed(active, target) >= 0.0625 &&
-        sourceSpeed(active, target) <= 16 &&
+        outgoingRate >= 0.0625 &&
+        outgoingRate <= 16 &&
         project.media.find((item) => item.id === active.media_id)?.kind !== "image";
       // Let decoding/buffering drive forward playback instead of seeking to catch a wall clock.
       if (native && element && element.readyState >= 2 && !element.seeking && lastClip.current === active.id) {
@@ -419,6 +462,9 @@ export function TimelinePreview({
             parseRational(project.edit_rate),
           ),
         );
+        // Source-to-frame rounding must not select the previous clip again.
+        const first = frameAt(active.timeline_in.t, project.edit_rate);
+        if (frame < first) frame = first;
       } else if (native) frame = frameAt(target, project.edit_rate);
       let next = frameTime(frame, project.edit_rate);
       let looped = false;
@@ -445,13 +491,197 @@ export function TimelinePreview({
         started = now;
         start = frameAt(next, project.edit_rate);
       }
+      if (looped) discardPreroll();
+      let swapped = false;
+      let fallback = false;
+      if (native && element && config && !viewerOnly && !dragging.current && !looped) {
+        const upcoming = top?.clips.find(
+          (item) => item.enabled && contains(item.timeline_in.t, item.timeline_out.t, active.timeline_out.t),
+        );
+        const boundary = parseRational(active.timeline_out.t, true);
+        const outgoingEnd = numberOf(sourceAt(active, active.timeline_out.t));
+        const remaining = (outgoingEnd - element.currentTime) / outgoingRate;
+        const upcomingRate = upcoming ? sourceSpeed(upcoming, active.timeline_out.t) : 0;
+        const unsupported =
+          upcoming?.speed === "map" || upcomingRate < 0.0625 || upcomingRate > 16
+            ? "unsupported-speed"
+            : project.media.find((item) => item.id === upcoming?.media_id)?.kind === "image"
+              ? "image"
+              : upcoming && compare(sub(parseRational(upcoming.timeline_out.t, true), boundary), rational(2n)) < 0
+                ? "short-clip"
+                : null;
+        if (
+          upcoming &&
+          upcoming.id !== active.id &&
+          !unsupported &&
+          failedPreroll.current !== active.id &&
+          remaining <= 2 &&
+          remaining > prerollLead + 0.3 &&
+          !preroll.current
+        ) {
+          const lower = videos.current[1 - activeVideo.current];
+          if (lower) {
+            lower.pause();
+            lower.muted = true;
+            lower.dataset.prerollState = "loading";
+            let metadataReady = false;
+            let positioned = false;
+            let starting = false;
+            const lead = prerollLead;
+            const prepared = {
+              clip: upcoming,
+              element: lower,
+              running: false,
+              outgoing: active,
+              heldAt: null as number | null,
+              prepare: () => {
+                if (!positioned && metadataReady) position();
+                else if (positioned && !starting) run();
+              },
+              cancel: () => {
+                lower.removeEventListener("loadedmetadata", loaded);
+                lower.removeEventListener("seeked", run);
+                lower.removeEventListener("playing", playing);
+                lower.removeEventListener("waiting", waiting);
+              },
+            };
+            const rate = sourceSpeed(upcoming, active.timeline_out.t);
+            const playing = () => {
+              if (preroll.current === prepared) {
+                prepared.running = true;
+                lower.dataset.prerollState = "running";
+              }
+            };
+            const waiting = () => {
+              prepared.running = false;
+              lower.dataset.prerollState = "loading";
+            };
+            const run = () => {
+              if (preroll.current !== prepared || lower.seeking || starting) return;
+              if (!topPlayback.current.steady || element.paused || element.seeking || element.readyState < 2) {
+                if ((outgoingEnd - element.currentTime) / outgoingRate <= lead + 0.3) discardPreroll("top-not-steady");
+                return;
+              }
+              if ((outgoingEnd - element.currentTime) / outgoingRate <= lead + 0.3) {
+                discardPreroll("seek-too-late");
+                return;
+              }
+              lower.removeEventListener("seeked", run);
+              starting = true;
+              void lower.play().catch(() => {
+                if (preroll.current === prepared) discardPreroll("play-rejected");
+              });
+            };
+            const position = () => {
+              if (
+                preroll.current !== prepared ||
+                positioned ||
+                !topPlayback.current.steady ||
+                element.paused ||
+                element.seeking ||
+                element.readyState < 2
+              )
+                return;
+              const left = (outgoingEnd - element.currentTime) / outgoingRate;
+              const seconds = numberOf(sourceAt(upcoming, active.timeline_out.t)) + (lead - left) * rate;
+              if (left <= lead + 0.3 || seconds < 0) {
+                discardPreroll(seconds < 0 ? "no-source-handle" : "metadata-too-late");
+                return;
+              }
+              if (lower.playbackRate !== rate) lower.playbackRate = rate;
+              lower.preservesPitch = true;
+              positioned = true;
+              // A queued seeked from before a scrub must not consume the new seek's listener.
+              lower.addEventListener("seeked", run);
+              lower.currentTime = seconds;
+              if (!lower.seeking) run();
+            };
+            const loaded = () => {
+              metadataReady = true;
+              position();
+            };
+            preroll.current = prepared;
+            lower.addEventListener("playing", playing);
+            lower.addEventListener("waiting", waiting);
+            lower.addEventListener("loadedmetadata", loaded, { once: true });
+            const url = mediaUrl(config, "media", upcoming.media_id);
+            if (lower.getAttribute("src") !== url) lower.src = url;
+            else if (lower.readyState >= 1) loaded();
+          }
+        }
+        preroll.current?.prepare();
+        const prepared = preroll.current;
+        if (prepared) {
+          const incoming = prepared.element;
+          const running = prepared.running && !incoming.paused && incoming.readyState >= 2 && !incoming.seeking;
+          if (running && incoming.currentTime >= numberOf(sourceAt(prepared.clip, active.timeline_out.t))) {
+            if (!element.paused) element.pause();
+            const earlyEnd = Math.max(0, (outgoingEnd - element.currentTime) / outgoingRate);
+            const held = prepared.heldAt === null ? 0 : (performance.now() - prepared.heldAt) / 1000;
+            prerollLead = Math.min(1, Math.max(0.2, prerollLead + held - earlyEnd));
+            element.muted = true;
+            element.style.zIndex = "0";
+            element.setAttribute("data-preroll", "");
+            element.dataset.prerollState = "idle";
+            incoming.volume = Math.min(1, 10 ** ((prepared.clip.gain_db ?? 0) / 20));
+            incoming.muted = false;
+            incoming.style.zIndex = "1";
+            incoming.removeAttribute("data-preroll");
+            incoming.dataset.prerollState = "swapped";
+            if (element.dataset.prerollFallback) incoming.dataset.prerollFallback = element.dataset.prerollFallback;
+            topPlayback.current = { time: incoming.currentTime, steady: true };
+            activeVideo.current = 1 - activeVideo.current;
+            setVisibleVideo(activeVideo.current);
+            lastClip.current = prepared.clip.id;
+            const decoded = rational(BigInt(Math.round(incoming.currentTime * 1_000_000)), 1_000_000n);
+            const landed = add(
+              boundary,
+              div(sub(decoded, sourceAt(prepared.clip, active.timeline_out.t)), parseRational(prepared.clip.speed)),
+            );
+            next =
+              compare(landed, boundary) < 0
+                ? active.timeline_out.t
+                : frameTime(floor(mul(landed, parseRational(project.edit_rate))), project.edit_rate);
+            prepared.cancel();
+            preroll.current = null;
+            swapped = true;
+          } else if (remaining <= 0) {
+            if (running) {
+              if (prepared.heldAt === null) {
+                element.pause();
+                prepared.heldAt = performance.now();
+              }
+              next = active.timeline_out.t;
+            } else {
+              fallback = prepared.heldAt !== null;
+              discardPreroll(
+                incoming.seeking
+                  ? "seeking"
+                  : incoming.readyState < 2
+                    ? "loading"
+                    : incoming.paused
+                      ? "paused"
+                      : "not-running",
+              );
+            }
+          }
+        } else if (
+          upcoming &&
+          upcoming.id !== active.id &&
+          remaining <= 2 &&
+          failedPreroll.current !== active.id &&
+          (unsupported || remaining <= prerollLead + 0.3)
+        ) {
+          discardPreroll(unsupported ?? (playback.steady ? "insufficient-time" : "top-not-steady"));
+        }
+      }
       subtitleAt.current = next;
       if (playhead.current) playhead.current.style.left = `calc(var(--track-label-w) + ${pixelAt(next, scale)}px)`;
       if (clock.current) clock.current.textContent = timecode(next, project);
       const from = frameAt(target, project.edit_rate),
         to = frameAt(next, project.edit_rate);
       const boundary = boundaries.some((frame) => (frame > from && frame <= to) || (frame <= from && frame > to));
-      if (next !== target && (now - published >= 100 || boundary || looped)) {
+      if ((next !== target || fallback) && (now - published >= 100 || boundary || looped || swapped || fallback)) {
         playbackAt.current = looped ? null : next;
         previous = next;
         published = now;
@@ -460,11 +690,34 @@ export function TimelinePreview({
       animation = requestAnimationFrame(tick);
     };
     animation = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(animation);
-  }, [state.playing, project, direction, update, hideViewer, scale, top, boundaries]);
+    return () => {
+      cancelAnimationFrame(animation);
+      discardPreroll();
+    };
+  }, [
+    state.playing,
+    project,
+    direction,
+    update,
+    hideViewer,
+    scale,
+    top,
+    boundaries,
+    config,
+    viewerOnly,
+    dragging,
+    discardPreroll,
+  ]);
   useEffect(() => {
-    const element = video.current;
+    if (at !== playbackAt.current) discardPreroll();
+    // Publishing the held boundary must not load or restart the next clip on the paused top.
+    if (state.playing && preroll.current?.heldAt != null) return;
+    const element = videos.current[visibleVideo];
     if (!element || hideViewer) return;
+    if (src && element.getAttribute("src") !== src) {
+      lastClip.current = undefined;
+      element.src = src;
+    } else if (!src) element.removeAttribute("src");
     if (!clip) {
       if (element.readyState >= 1) element.pause();
       return;
@@ -475,24 +728,29 @@ export function TimelinePreview({
         lastClip.current !== clip.id ||
         ((at !== playbackAt.current || clip.speed === "map" || direction < 0n) &&
           Math.abs(element.currentTime - seconds) > 0.001)
-      )
+      ) {
         element.currentTime = seconds;
+        topPlayback.current = { time: seconds, steady: false };
+      }
       lastClip.current = clip.id;
       element.volume = Math.min(1, 10 ** ((clip.gain_db ?? 0) / 20));
       const rate = speed * Number(direction);
       const playable = rate >= 0.0625 && rate <= 16;
       if (playable) {
-        element.playbackRate = rate;
+        if (element.playbackRate !== rate) element.playbackRate = rate;
         element.preservesPitch = true;
       }
       if (state.playing && playable) {
-        if (element.paused) void element.play().catch(() => setWriteError("预览无法播放，请检查素材格式"));
+        if (element.paused) {
+          topPlayback.current = { time: element.currentTime, steady: false };
+          void element.play().catch(() => setWriteError("预览无法播放，请检查素材格式"));
+        }
       } else element.pause();
     };
     if (element.readyState >= 1) sync();
     element.addEventListener("loadedmetadata", sync);
     return () => element.removeEventListener("loadedmetadata", sync);
-  }, [clip, source, speed, state.playing, direction, hideViewer, at]);
+  }, [clip, source, speed, state.playing, direction, hideViewer, at, src, visibleVideo, discardPreroll]);
   const write = async (verb: string, label: string, ops?: unknown[]) => {
     if (!project || busy || readOnly) return;
     setBusy(true);
@@ -688,14 +946,26 @@ export function TimelinePreview({
             {src && media?.kind === "image" ? (
               <img src={src} alt={media.name ?? "预览"} />
             ) : (
-              // biome-ignore lint/a11y/useMediaCaption: Projected, styled captions are rendered immediately below the player.
-              <video
-                ref={video}
-                src={src}
-                playsInline
-                aria-label={viewerOnly ? "素材预览" : "时间线预览"}
-                onError={() => setWriteError("预览无法读取，请检查素材或代理")}
-              />
+              [0, 1].map((index) => (
+                <video
+                  key={index}
+                  ref={(element) => {
+                    videos.current[index] = element;
+                  }}
+                  playsInline
+                  preload="auto"
+                  muted={index !== visibleVideo}
+                  data-preroll={index !== visibleVideo ? "" : undefined}
+                  data-preroll-lead={index === visibleVideo ? prerollLead : undefined}
+                  data-preroll-state="idle"
+                  onWaiting={(event) => resetTopPlayback(event.currentTarget)}
+                  onSeeked={(event) => resetTopPlayback(event.currentTarget)}
+                  style={{ position: "absolute", inset: 0, zIndex: index === visibleVideo ? 1 : 0 }}
+                  aria-hidden={index !== visibleVideo}
+                  aria-label={index === visibleVideo ? (viewerOnly ? "素材预览" : "时间线预览") : undefined}
+                  onError={() => setWriteError("预览无法读取，请检查素材或代理")}
+                />
+              ))
             )}
             {clip?.speed === "map" && (
               <span

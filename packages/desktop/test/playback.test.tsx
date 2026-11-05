@@ -39,7 +39,10 @@ it("follows decoded frames without repeated seeks and keeps React updates below 
     scheduled = undefined;
   });
   vi.spyOn(performance, "now").mockReturnValue(0);
-  vi.spyOn(HTMLMediaElement.prototype, "readyState", "get").mockReturnValue(2);
+  // This clock regression keeps the standby decoder unready to exercise the seek fallback.
+  vi.spyOn(HTMLMediaElement.prototype, "readyState", "get").mockImplementation(function (this: HTMLMediaElement) {
+    return this.hasAttribute("data-preroll") ? 0 : 2;
+  });
   let decoded = 0;
   let paused = true;
   const seeks = vi.fn((value: number) => {
@@ -48,11 +51,11 @@ it("follows decoded frames without repeated seeks and keeps React updates below 
   vi.spyOn(HTMLMediaElement.prototype, "currentTime", "get").mockImplementation(() => decoded);
   vi.spyOn(HTMLMediaElement.prototype, "currentTime", "set").mockImplementation(seeks);
   vi.spyOn(HTMLMediaElement.prototype, "paused", "get").mockImplementation(() => paused);
-  const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(async () => {
-    paused = false;
+  const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(async function (this: HTMLMediaElement) {
+    if (!this.hasAttribute("data-preroll")) paused = false;
   });
-  vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {
-    paused = true;
+  vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(function (this: HTMLMediaElement) {
+    if (!this.hasAttribute("data-preroll")) paused = true;
   });
   const canvas = recordingCanvas();
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => canvas.context);
@@ -61,6 +64,7 @@ it("follows decoded frames without repeated seeks and keeps React updates below 
   const root = createRoot(container);
   let state = { ...initialState(), playing: true };
   const config = { port: 1234, token: "test" };
+  const dragging = { current: false };
   const update = vi.fn((next: typeof state) => {
     state = next;
     render();
@@ -74,7 +78,7 @@ it("follows decoded frames without repeated seeks and keeps React updates below 
         config={config}
         call={async () => ({})}
         error={null}
-        dragging={{ current: false }}
+        dragging={dragging}
       />,
     );
   try {
