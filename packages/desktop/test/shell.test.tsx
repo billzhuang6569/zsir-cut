@@ -14,9 +14,9 @@ import type { ProjectView } from "../src/connection.js";
 import { connectHost } from "../src/connection.js";
 import { applyUi, initialState } from "../src/state.js";
 import { caretOffset } from "../src/subtitles.js";
-import { TimelinePreview } from "../src/TimelinePreview.js";
 import { tokenCss } from "../src/tokens.js";
 import { recordingCanvas } from "./canvas.js";
+import { TimelinePreview } from "./timeline-preview.js";
 
 beforeEach(() => {
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => recordingCanvas().context);

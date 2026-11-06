@@ -3,13 +3,19 @@ import { PANELS, type Panel } from "../../app-host/src/ui.js";
 import { type AiNotice, useAiPanel } from "./AiPanel.js";
 import { useChapterPanel } from "./ChapterPanel.js";
 import { Icon, IconButton } from "./components.js";
-import { connectHost, type PermissionRequest, type ProjectView, type Subscribe } from "./connection.js";
+import {
+  connectHost,
+  type PermissionRequest,
+  type ProjectView,
+  type Subscribe,
+  useTimelinePreferences,
+} from "./connection.js";
 import { ExportPanel } from "./ExportPanel.js";
 import { useHistoryPanel } from "./HistoryPanel.js";
 import { useMediaPanel } from "./MediaPanel.js";
 import { sourceProject } from "./media.js";
 import { ProjectEntry } from "./ProjectEntry.js";
-import { type PrefsResult, SettingsPage } from "./SettingsPage.js";
+import { SettingsPage } from "./SettingsPage.js";
 import { useSubtitlePanel } from "./SubtitlePanel.js";
 import { recordedKey } from "./settings-keymap.js";
 import { applyUi, initialState, type UiState } from "./state.js";
@@ -32,8 +38,6 @@ export function App({ config }: { config?: { port: number; token: string } }) {
   const [previewPercent, setPreviewPercent] = useState(57);
   const [viewerTarget, setViewerTarget] = useState<HTMLDivElement | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsKey, setSettingsKey] = useState<string | null>("⌘,");
-  const acceptPrefs = useCallback((value: PrefsResult) => setSettingsKey(value.keymap.open_settings), []);
   const [state, setState] = useState<UiState>(initialState);
   const current = useRef(state);
   const [project, setProject] = useState<ProjectView | null>(null);
@@ -142,12 +146,8 @@ export function App({ config }: { config?: { port: number; token: string } }) {
       connection.current = null;
     };
   }, [config, update]);
-  useEffect(() => {
-    if (!config || connectionEpoch === 0) return;
-    void rawCall("prefs_get", {})
-      .then((value) => acceptPrefs(value as PrefsResult))
-      .catch(() => {});
-  }, [config, connectionEpoch, rawCall, acceptPrefs]);
+  const preferences = useTimelinePreferences(rawCall, setError, state, update);
+  const settingsKey = preferences.keymap.open_settings;
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing || event.repeat || document.querySelector("dialog[open]")) return;
@@ -336,6 +336,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
               <div className="zc-preview-slot" ref={setViewerTarget}>
                 {source && state.media && (
                   <TimelinePreview
+                    preferences={preferences}
                     onOpenSettings={() => setSettingsOpen(true)}
                     viewerOnly
                     project={source}
@@ -375,6 +376,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
               </section>
             </div>
             <TimelinePreview
+              preferences={preferences}
               onOpenSettings={() => setSettingsOpen(true)}
               viewerTarget={viewerTarget}
               revisionControlsTarget={revisionControls}
@@ -435,7 +437,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
         <SettingsPage
           call={rawCall}
           subscribe={subscribe}
-          onPrefs={acceptPrefs}
+          onPrefs={preferences.acceptPrefs}
           projectPath={state.project}
           close={() => setSettingsOpen(false)}
           openRecognition={() => update(applyUi(current.current, "ui_show_panel", { panel: "subtitles" }))}

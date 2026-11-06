@@ -8,7 +8,7 @@ import { IconButton } from "../src/components.js";
 import type { ProjectView } from "../src/connection.js";
 import { type HistoryEntry, useHistoryPanel } from "../src/HistoryPanel.js";
 import { applyUi, initialState } from "../src/state.js";
-import { TimelinePreview } from "../src/TimelinePreview.js";
+import { TimelinePreview } from "./timeline-preview.js";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 const project: ProjectView = {

@@ -6,7 +6,7 @@ import type { ProjectView } from "../src/connection.js";
 import { initialState } from "../src/state.js";
 import { recordingCanvas } from "./canvas.js";
 
-let TimelinePreview: typeof import("../src/TimelinePreview.js").TimelinePreview;
+let TimelinePreview: typeof import("./timeline-preview.js").TimelinePreview;
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let host: HTMLDivElement;
@@ -74,7 +74,7 @@ async function metadata(element: HTMLVideoElement, ready = 2) {
 
 beforeEach(async () => {
   vi.resetModules();
-  ({ TimelinePreview } = await import("../src/TimelinePreview.js"));
+  ({ TimelinePreview } = await import("./timeline-preview.js"));
   state = { ...initialState(), playing: true };
   now = 0;
   actions.length = 0;

@@ -78,6 +78,7 @@ async function mount(
     failSave?: boolean;
     earlyOutput?: boolean;
     initialPage?: "通用" | "Agent";
+    app?: boolean;
   } = {},
 ) {
   const dir = await mkdtemp(join(tmpdir(), "u312-settings-"));
@@ -152,17 +153,27 @@ async function mount(
   const close = vi.fn();
   const openRecognition = vi.fn();
   const onPrefs = vi.fn();
+  let handlers: Parameters<typeof connection.connectHost>[1] | undefined;
+  if (options.app)
+    vi.spyOn(connection, "connectHost").mockImplementation((_config, next) => {
+      handlers = next;
+      return Object.assign(() => {}, { call, subscribe });
+    });
   await act(async () =>
     root.render(
-      <SettingsPage
-        initialPage={options.initialPage ?? "Agent"}
-        call={call}
-        subscribe={subscribe}
-        close={close}
-        onPrefs={onPrefs}
-        openRecognition={openRecognition}
-        projectPath="/project.json"
-      />,
+      options.app ? (
+        <App config={{ port: 1, token: "test" }} />
+      ) : (
+        <SettingsPage
+          initialPage={options.initialPage ?? "Agent"}
+          call={call}
+          subscribe={subscribe}
+          close={close}
+          onPrefs={onPrefs}
+          openRecognition={openRecognition}
+          projectPath="/project.json"
+        />
+      ),
     ),
   );
   cleanup.push(async () => {
@@ -197,7 +208,7 @@ async function mount(
   const push = async (event: HostPush) => {
     await act(async () => listener?.(event));
   };
-  return { call, container, click, input, find, push, prefs, onPrefs, close, openRecognition, settle };
+  return { call, container, click, input, find, push, prefs, onPrefs, close, openRecognition, settle, handlers };
 }
 it("shows missing Codex, installs with streamed output and reacts to agent changes", async () => {
   const h = await mount({ earlyOutput: true });
@@ -387,7 +398,7 @@ it.each([
 ])("records a supported single chord from %j", (event, expected) => {
   expect(recordedKey(new KeyboardEvent("keydown", event))).toBe(expected);
 });
-it("opens settings from Cmd+, the rail, and a changed open_settings binding", async () => {
+it("opens settings from the loaded open_settings binding and the rail", async () => {
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => recordingCanvas().context);
   const call = vi.fn(async (verb: string) => {
     if (verb === "prefs_get")
@@ -412,7 +423,7 @@ it("opens settings from Cmd+, the rail, and a changed open_settings binding", as
   });
   await act(async () => root.render(<App config={{ port: 1, token: "test" }} />));
   await act(async () =>
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: ",", metaKey: true, cancelable: true })),
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: ".", metaKey: true, cancelable: true })),
   );
   expect(container.querySelector('dialog[aria-label="设置"]')).not.toBeNull();
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="关闭"]')?.click());
@@ -447,6 +458,85 @@ it("opens settings from Cmd+, the rail, and a changed open_settings binding", as
   await act(async () => railSettings?.click());
   expect(container.querySelector("dialog")).not.toBeNull();
   expect(container.querySelector('[aria-current="page"]')?.textContent).toBe("通用");
+});
+it("uses settings saves and external prefs_set refreshes as one live keymap, ignoring stale reads", async () => {
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => recordingCanvas().context);
+  const h = await mount({ app: true });
+  await act(async () =>
+    h.handlers?.project("/project.json", {
+      id: "tl_main",
+      name: "工程",
+      revision: { id: "rev_test", seq: 1 },
+      edit_rate: "25",
+      start_timecode: "00:00:00:00",
+      drop_frame: false,
+      duration: { t: "10s" },
+      tracks: [],
+      media: [],
+      cues: [],
+      styles: [],
+      markers: [],
+    }),
+  );
+  await h.settle();
+  const press = async (key: string, metaKey = false, target: EventTarget = window) => {
+    await act(async () =>
+      target.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key,
+          metaKey,
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+    await h.settle();
+  };
+  const stale = h.prefs.get();
+  let finishRead: (value: unknown) => void = () => {};
+  h.call.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finishRead = resolve;
+      }),
+  );
+  await act(async () => window.dispatchEvent(new Event("focus")));
+  await h.click("设置");
+  await h.click("快捷键");
+  await h.click("修改切割工具");
+  await press("h", false, h.find("修改切割工具"));
+  expect(h.prefs.get().keymap.tool_blade).toBe("H");
+  // The mounted timeline updates while the dialog is still open.
+  expect(h.find("切割 H")).not.toBeNull();
+  await act(async () => finishRead(stale));
+  expect(h.find("切割 H")).not.toBeNull();
+  await h.click("关闭");
+  await press("b");
+  expect(h.find("切割 H").getAttribute("aria-pressed")).toBe("false");
+  await press("h");
+  expect(h.find("切割 H").getAttribute("aria-pressed")).toBe("true");
+  await press(",", true);
+  await h.click("快捷键");
+  await h.click("Premiere使用这套习惯");
+  expect(h.find("切割 C")).not.toBeNull();
+  await h.click("修改设置");
+  await press("k", true, h.find("修改设置"));
+  expect(h.prefs.get().keymap.split_at_playhead).toBeNull();
+  await h.click("关闭");
+  await press(",", true);
+  expect(h.container.querySelector("dialog")).toBeNull();
+  await press("k", true);
+  expect(h.container.querySelector("dialog")).not.toBeNull();
+  await h.click("关闭");
+  // A save outside SettingsPage must update both the App shortcut and timeline.
+  await h.prefs.set({ keymap: { preset: "fcp", overrides: { ...presets.fcp, open_settings: "⌘." } } });
+  await act(async () => window.dispatchEvent(new Event("desktop-prefs-changed")));
+  await h.settle();
+  expect(h.find("切割 B")).not.toBeNull();
+  await press("k", true);
+  expect(h.container.querySelector("dialog")).toBeNull();
+  await press(".", true);
+  expect(h.container.querySelector("dialog")).not.toBeNull();
 });
 it("forwards the three settings pushes, unsubscribes, and preserves manual installation instructions", async () => {
   let socket: FakeSocket | undefined;

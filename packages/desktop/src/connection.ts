@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ProjectChanged } from "../../app-host/src/revision-events.js";
 import { UI_VERBS, type UiState, type UiVerb } from "../../app-host/src/ui.js";
 
@@ -251,19 +251,22 @@ export function useTimelinePreferences(
   const latest = useRef({ state, update });
   latest.current = { state, update };
   const [preferences, setPreferences] = useState<TimelinePreferences | null>(null);
+  const generation = useRef(0);
+  const acceptPrefs = useCallback((value: TimelinePreferences) => {
+    if (!value?.keymap || !value.prefs?.ui) return;
+    generation.current++;
+    setPreferences(value);
+    if (latest.current.state.snap !== value.prefs.ui.snap)
+      latest.current.update({ ...latest.current.state, snap: value.prefs.ui.snap });
+  }, []);
   useEffect(() => {
     let active = true;
-    let generation = 0;
     const refresh = () => {
-      const current = ++generation;
+      const current = ++generation.current;
       void call("prefs_get", {})
         .then((result) => {
           const value = result as TimelinePreferences;
-          if (active && current === generation && value?.keymap && value.prefs?.ui) {
-            setPreferences(value);
-            if (latest.current.state.snap !== value.prefs.ui.snap)
-              latest.current.update({ ...latest.current.state, snap: value.prefs.ui.snap });
-          }
+          if (active && current === generation.current) acceptPrefs(value);
         })
         .catch(() => {
           /* Bootstrap retries after the socket is ready. */
@@ -279,18 +282,19 @@ export function useTimelinePreferences(
       window.removeEventListener("desktop-prefs-changed", refresh);
       window.removeEventListener("focus", refresh);
     };
-  }, [call]);
+  }, [call, acceptPrefs]);
   const setUi = async (patch: Partial<TimelinePreferences["prefs"]["ui"]>) => {
     if (patch.snap !== undefined) update({ ...state, snap: patch.snap });
     try {
       const value = (await call("prefs_set", { patch: { ui: patch } })) as TimelinePreferences;
-      if (value?.keymap && value.prefs?.ui) setPreferences(value);
+      acceptPrefs(value);
     } catch (cause) {
       error(cause instanceof Error ? cause.message : "偏好保存失败，请重试");
     }
   };
   return {
-    keymap: preferences?.keymap ?? {},
+    keymap: preferences?.keymap ?? { open_settings: "⌘," },
+    acceptPrefs,
     snap: state.snap ?? true,
     magnetic: preferences?.prefs.ui.magnetic ?? true,
     trackHeight: preferences?.prefs.ui.track_height ?? "m",

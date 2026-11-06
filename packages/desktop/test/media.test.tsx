@@ -8,8 +8,8 @@ import type { ProjectView } from "../src/connection.js";
 import { useMediaPanel } from "../src/MediaPanel.js";
 import { middle, placeMedia, sourceProject } from "../src/media.js";
 import { initialState } from "../src/state.js";
-import { TimelinePreview } from "../src/TimelinePreview.js";
 import { recordingCanvas } from "./canvas.js";
+import { TimelinePreview } from "./timeline-preview.js";
 
 const native = vi.hoisted(() => ({
   enabled: false,

@@ -5,9 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type Action, mergeKeymap, type presets } from "../../app-host/src/keymap.js";
 import { connectHost, DESKTOP_AUTHOR, type ProjectView } from "../src/connection.js";
 import { applyUi, initialState } from "../src/state.js";
-import { TimelinePreview } from "../src/TimelinePreview.js";
 import { add, compare, frameTime, parseRational, sub } from "../src/timeline.js";
 import { recordingCanvas } from "./canvas.js";
+import { TimelinePreview } from "./timeline-preview.js";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let host: HTMLDivElement;
@@ -456,6 +456,7 @@ it("refreshes the merged keymap after a successful prefs_set reply through the c
     { ui: () => state, project: () => {}, icon: () => {}, error: () => {} },
   );
   try {
+    await act(async () => receive?.({ data: JSON.stringify({ type: "bootstrap", project: null }) }));
     preset = "premiere";
     await act(async () => {
       await connection.call("prefs_set", { patch: { keymap: { preset } } });

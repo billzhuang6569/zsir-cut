@@ -5,8 +5,8 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { mergeKeymap } from "../../app-host/src/keymap.js";
 import { DESKTOP_AUTHOR, type ProjectView } from "../src/connection.js";
 import { applyUi, initialState } from "../src/state.js";
-import { TimelinePreview } from "../src/TimelinePreview.js";
 import { frameTime, pixelAt } from "../src/timeline.js";
+import { TimelinePreview } from "./timeline-preview.js";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let host: HTMLDivElement;
