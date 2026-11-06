@@ -285,6 +285,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
               <div className="zc-preview-slot" ref={setViewerTarget}>
                 {source && state.media && (
                   <TimelinePreview
+                    onOpenSettings={() => setSettingsOpen(true)}
                     viewerOnly
                     project={source}
                     state={{ ...state, playhead: { at: state.media.at }, range: null, loop: false }}
@@ -318,6 +319,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
               </section>
             </div>
             <TimelinePreview
+              onOpenSettings={() => setSettingsOpen(true)}
               viewerTarget={viewerTarget}
               revisionControlsTarget={revisionControls}
               hideViewer={Boolean(source)}

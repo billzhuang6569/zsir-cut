@@ -2,6 +2,7 @@
 import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
+import { mergeKeymap } from "../../app-host/src/keymap.js";
 import type { UiState } from "../../app-host/src/ui.js";
 import type { ProjectView } from "../src/connection.js";
 import { useMediaPanel } from "../src/MediaPanel.js";
@@ -82,6 +83,10 @@ async function mount(nativeMode = false, preview = false, view = project, withCo
   let state: UiState = { ...initialState(), panel: "media", project: "/工程.zcut.json", playhead: { at: "4s" } };
   let change: (next: UiState) => void = () => {};
   let refresh: (next: ProjectView) => void = () => {};
+  const timelineCall = (verb: string, request: Record<string, unknown>) =>
+    verb === "prefs_get"
+      ? Promise.resolve({ prefs: { ui: { snap: true, magnetic: true, track_height: "m" } }, ...mergeKeymap("fcp", {}) })
+      : call(verb, request);
   function Harness() {
     const [ui, update] = useState(state);
     const [currentProject, setProject] = useState(view);
@@ -115,7 +120,7 @@ async function mount(nativeMode = false, preview = false, view = project, withCo
           config={undefined}
           error={null}
           dragging={{ current: false }}
-          call={call}
+          call={timelineCall}
           onMediaDrop={(id, at, track) =>
             panel.place(
               project.media.find((m) => m.id === id),

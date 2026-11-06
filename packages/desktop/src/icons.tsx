@@ -50,6 +50,7 @@ export const ICONS: Record<string, ReactNode> = {
       <path d="M6 3.5l12 7.5-5.2 1.3L10 18z" />
     </>
   ),
+  roll: <path d="M12 3v18M8 7l-4 5 4 5M16 7l4 5-4 5" />,
   blade: (
     <>
       <circle cx="6" cy="6.5" r="2.5" />

@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { act, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
+import { mergeKeymap } from "../../app-host/src/keymap.js";
 import { App } from "../src/App.js";
 import { useChapterPanel } from "../src/ChapterPanel.js";
 import { type ChaptersView, chapterMarkdown, chapterTime } from "../src/chapters.js";
@@ -97,9 +98,11 @@ async function mount(
   let data = structuredClone(chapters);
   const call = vi.fn(async (verb: string, request: Record<string, unknown>): Promise<unknown> => {
     if (verb === "inspect") return data;
-    if (verb === "prefs_get") return { prefs: { ui: { chapters: saved, snap } } };
+    if (verb === "prefs_get") return { prefs: { ui: { chapters: saved, snap } }, ...mergeKeymap("fcp", {}) };
     if (verb === "prefs_set") {
-      Object.assign(saved, (request.patch as { ui: { chapters?: unknown } }).ui.chapters);
+      const patch = (request.patch as { ui: { chapters?: unknown; snap?: boolean } }).ui;
+      Object.assign(saved, patch.chapters);
+      if (patch.snap !== undefined) snap = patch.snap;
       return {};
     }
     if (verb === "ui_seek") {
@@ -168,6 +171,9 @@ async function mount(
       container.remove();
     },
     state: () => state,
+    setSnap: async (snap: boolean) => {
+      await act(async () => updateState({ ...state, snap }));
+    },
     saved,
     refresh: async (next: ChaptersView) => {
       data = next;
@@ -419,21 +425,30 @@ it("routes chapter seeks through the same UI verb handler as host requests", asy
   host();
 });
 
-it("shares the timeline snap toggle with chapter scrubbing", async () => {
+it("shares toolbar, keyboard and chapter state snap changes immediately with chapter scrubbing", async () => {
   const ui = await mount(project, true);
-  await ui.click("吸附");
-  expect(ui.state().snap).toBe(false);
-  expect(ui.call).toHaveBeenCalledWith("prefs_set", { patch: { ui: { snap: false } } });
   await ui.click("时间轴");
-  const start = Number.parseFloat(
-    ui.container.querySelector<HTMLElement>('.zc-chap-block[aria-label="第二章第二节"]')?.style.top ?? "0",
-  );
-  await act(async () =>
-    ui.container
-      .querySelector('[aria-label="章节播放头"]')
-      ?.dispatchEvent(new MouseEvent("click", { bubbles: true, clientY: start * (30.1 / 30) })),
-  );
-  expect(ui.call).toHaveBeenLastCalledWith("ui_seek", { at: "301/10s" });
+  const scrub = async (snap: boolean) => {
+    expect(ui.state().snap).toBe(snap);
+    expect(ui.container.querySelector('[aria-label="吸附"]')?.getAttribute("aria-pressed")).toBe(String(snap));
+    const start = Number.parseFloat(
+      ui.container.querySelector<HTMLElement>('.zc-chap-block[aria-label="第二章第二节"]')?.style.top ?? "0",
+    );
+    await act(async () =>
+      ui.container
+        .querySelector('[aria-label="章节播放头"]')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true, clientY: start * (30.1 / 30) })),
+    );
+    expect(ui.call).toHaveBeenLastCalledWith("ui_seek", { at: snap ? "30s" : "301/10s" });
+  };
+  await ui.click("吸附");
+  expect(ui.call).toHaveBeenCalledWith("prefs_set", { patch: { ui: { snap: false } } });
+  await scrub(false);
+  await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "n", bubbles: true })));
+  expect(ui.call).toHaveBeenCalledWith("prefs_set", { patch: { ui: { snap: true } } });
+  await scrub(true);
+  await ui.setSnap(false);
+  await scrub(false);
 });
 
 it("uses compact chapter controls, a single summary header and semantic outline markers", async () => {

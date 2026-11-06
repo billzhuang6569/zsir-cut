@@ -60,7 +60,7 @@ export function useHistoryPanel({
   const revision = state.history?.revision;
   const change = useCallback((history: NonNullable<UiState["history"]>) => {
     const { state, update } = latest.current;
-    update({ ...state, history, playing: false, preview: "timeline", selected: [] });
+    update({ ...state, history, playing: false, preview: "timeline", selected: [], edit_point: null });
   }, []);
   const close = useCallback(() => change({ open: false, revision: null, label: null }), [change]);
   const present = useCallback(() => change({ open: true, revision: null, label: null }), [change]);
@@ -75,18 +75,10 @@ export function useHistoryPanel({
         event.preventDefault();
         close();
       }
-      if (
-        event.metaKey &&
-        (event.key.toLowerCase() === "y" || (event.altKey && event.code === "KeyH")) &&
-        !(event.target instanceof Element && event.target.closest("input,textarea,select,[contenteditable=true]"))
-      ) {
-        event.preventDefault();
-        toggle();
-      }
     };
     window.addEventListener("keydown", keyboard);
     return () => window.removeEventListener("keydown", keyboard);
-  }, [close, toggle]);
+  }, [close]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: Reset pagination when the project changes.
   useEffect(() => {

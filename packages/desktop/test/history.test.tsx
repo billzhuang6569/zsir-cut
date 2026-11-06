@@ -2,6 +2,7 @@
 import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
+import { mergeKeymap } from "../../app-host/src/keymap.js";
 import type { UiState } from "../../app-host/src/ui.js";
 import { IconButton } from "../src/components.js";
 import type { ProjectView } from "../src/connection.js";
@@ -57,6 +58,8 @@ async function mount(
         entry(30 - i, options.longBatch ? { id: "bat_long", seq: 30 - i, count: 30 } : null),
       );
   const call = vi.fn(async (verb: string, request: Record<string, unknown>): Promise<unknown> => {
+    if (verb === "prefs_get")
+      return { prefs: { ui: { snap: true, magnetic: true, track_height: "m" } }, ...mergeKeymap("fcp", {}) };
     if (verb === "inspect" && request.view === "history") {
       const before = request.before ? entries.findIndex((e) => e.revision === request.before) + 1 : 0;
       return { entries: entries.slice(before, before + Number(request.limit)) };

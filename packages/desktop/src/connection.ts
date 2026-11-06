@@ -1,6 +1,8 @@
+import { useEffect, useRef, useState } from "react";
 import type { ProjectChanged } from "../../app-host/src/revision-events.js";
 import { UI_VERBS, type UiState, type UiVerb } from "../../app-host/src/ui.js";
 
+import type { UiState as DesktopUiState } from "./state.js";
 import type { PreviewData, TimelineView, TranscriptView } from "./timeline.js";
 export interface ProjectView extends TimelineView, PreviewData {
   historyBatches?: string[];
@@ -125,6 +127,7 @@ export function connectHost(
     if (message.type === "bootstrap") {
       generation++;
       project = message.project;
+      window.dispatchEvent(new Event("desktop-host-ready"));
       handlers.icon(message.fcpIcon);
       handlers.project(project, null);
       void refresh().catch((error: Error) =>
@@ -144,15 +147,20 @@ export function connectHost(
       uiQueue = uiQueue
         .then(async () => {
           const result = await handlers.ui(message.verb, message.request);
-          socket.send(JSON.stringify({ type: "ui_result", id: message.id, result }));
+          // shortcut: host uiStateSchema rejects edit_point, remove this filter when the host accepts it.
+          socket.send(
+            JSON.stringify({ type: "ui_result", id: message.id, result: { ...result, edit_point: undefined } }),
+          );
         })
         .catch(() => handlers.error("界面操作失败，请重试"));
     } else if (message.envelope) {
       const item = pending.get(message.id);
       pending.delete(message.id);
       const envelope = message.envelope as ResultEnvelope;
-      if (envelope.ok) item?.resolve(envelope.result);
-      else {
+      if (envelope.ok) {
+        item?.resolve(envelope.result);
+        if (item?.verb === "prefs_set") window.dispatchEvent(new Event("desktop-prefs-changed"));
+      } else {
         const sensitive =
           item?.verb.startsWith("voice_") ||
           item?.verb.startsWith("settings_") ||
@@ -191,4 +199,64 @@ export function connectHost(
     },
     { call },
   );
+}
+
+interface TimelinePreferences {
+  keymap: Record<string, string | null>;
+  prefs: { ui: { snap: boolean; magnetic: boolean; track_height: "s" | "m" | "l" } };
+}
+export function useTimelinePreferences(
+  call: (verb: string, request: Record<string, unknown>) => Promise<unknown>,
+  error: (message: string) => void,
+  state: DesktopUiState,
+  update: (state: DesktopUiState) => void,
+) {
+  const latest = useRef({ state, update });
+  latest.current = { state, update };
+  const [preferences, setPreferences] = useState<TimelinePreferences | null>(null);
+  useEffect(() => {
+    let active = true;
+    let generation = 0;
+    const refresh = () => {
+      const current = ++generation;
+      void call("prefs_get", {})
+        .then((result) => {
+          const value = result as TimelinePreferences;
+          if (active && current === generation && value?.keymap && value.prefs?.ui) {
+            setPreferences(value);
+            if (latest.current.state.snap !== value.prefs.ui.snap)
+              latest.current.update({ ...latest.current.state, snap: value.prefs.ui.snap });
+          }
+        })
+        .catch(() => {
+          /* Bootstrap retries after the socket is ready. */
+        });
+    };
+    refresh();
+    window.addEventListener("desktop-host-ready", refresh);
+    window.addEventListener("desktop-prefs-changed", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      active = false;
+      window.removeEventListener("desktop-host-ready", refresh);
+      window.removeEventListener("desktop-prefs-changed", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [call]);
+  const setUi = async (patch: Partial<TimelinePreferences["prefs"]["ui"]>) => {
+    if (patch.snap !== undefined) update({ ...state, snap: patch.snap });
+    try {
+      const value = (await call("prefs_set", { patch: { ui: patch } })) as TimelinePreferences;
+      if (value?.keymap && value.prefs?.ui) setPreferences(value);
+    } catch (cause) {
+      error(cause instanceof Error ? cause.message : "偏好保存失败，请重试");
+    }
+  };
+  return {
+    keymap: preferences?.keymap ?? {},
+    snap: state.snap ?? true,
+    magnetic: preferences?.prefs.ui.magnetic ?? true,
+    trackHeight: preferences?.prefs.ui.track_height ?? "m",
+    setUi,
+  };
 }
