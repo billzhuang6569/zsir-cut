@@ -7,7 +7,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ProjectChanged } from "../../app-host/src/revision-events.js";
 import type { EntityChange } from "../../core/dist/index.js";
 import { useAiPanel } from "../src/AiPanel.js";
-import type { ProjectView } from "../src/connection.js";
+import { type ProjectView, useTimelinePreferences } from "../src/connection.js";
 import { type ReviewSummary, ReviewView } from "../src/ReviewView.js";
 import { initialState, type UiState } from "../src/state.js";
 import type { ClipView } from "../src/timeline.js";
@@ -214,6 +214,8 @@ function Fixture({
   committed?: (view: ProjectView) => void;
 }) {
   const [state, update] = useState<UiState>({ ...initialState(), project: "/fixture.zcut.json" });
+  const [, setError] = useState<string | null>(null);
+  const preferences = useTimelinePreferences(call, setError, state, update);
   const [target, setTarget] = useState<HTMLElement | null>(null);
   const dragging = useRef(false);
   const ai = useAiPanel({ call, path: state.project, project: original, notices: [], revision });
@@ -222,6 +224,7 @@ function Fixture({
       <aside ref={setTarget} />
       <output data-playhead>{"at" in state.playhead ? state.playhead.at : ""}</output>
       <ReviewView
+        preferences={preferences}
         sessionId="ses_review"
         revision={revision}
         project={original}

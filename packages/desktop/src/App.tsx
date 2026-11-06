@@ -408,6 +408,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
             {reviewSession ? (
               <ReviewView
                 key={`${state.project}-${reviewSession}`}
+                preferences={preferences}
                 sessionId={reviewSession}
                 revision={aiRevision}
                 project={project}

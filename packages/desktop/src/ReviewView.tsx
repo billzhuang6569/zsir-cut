@@ -4,7 +4,7 @@ import type { ProjectChanged } from "../../app-host/src/revision-events.js";
 import type { EntityChange } from "../../core/dist/index.js";
 import { Button, ReviewValue } from "./ai-components.js";
 import { Clip, Icon, IconButton } from "./components.js";
-import type { ProjectView } from "./connection.js";
+import type { ProjectView, useTimelinePreferences } from "./connection.js";
 import type { UiState } from "./state.js";
 import { TimelinePreview } from "./TimelinePreview.js";
 import { compare, div, numberOf, parseRational, printRational, sub, type TimelineView, timecode } from "./timeline.js";
@@ -93,6 +93,7 @@ const geometry = (start: string, end: string, duration: string): CSSProperties =
 });
 
 export function ReviewView({
+  preferences,
   sessionId,
   revision,
   project,
@@ -108,6 +109,7 @@ export function ReviewView({
   close,
   committed,
 }: {
+  preferences: ReturnType<typeof useTimelinePreferences>;
   sessionId: string;
   revision: number;
   project: ProjectView;
@@ -421,6 +423,7 @@ export function ReviewView({
     <>
       {parametersTarget && createPortal(panel, parametersTarget)}
       <TimelinePreview
+        preferences={preferences}
         hideTimeline
         readOnly
         viewerTarget={viewerTarget}
