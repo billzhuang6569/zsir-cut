@@ -166,7 +166,14 @@ it("never advertises or accepts prefs verbs via MCP", async () => {
   try {
     await Promise.all([server.connect(a), client.connect(b)]);
     const names = (await client.listTools()).tools.map((tool) => tool.name);
-    for (const verb of ["prefs_get", "prefs_set"]) {
+    for (const verb of [
+      "prefs_get",
+      "prefs_set",
+      "agents_list",
+      "agents_install",
+      "agents_update",
+      "agents_set_default",
+    ]) {
       expect(names).not.toContain(`zcut_${verb}`);
       await expect(client.callTool({ name: `zcut_${verb}`, arguments: {} })).rejects.toThrow("Unknown tool");
     }
