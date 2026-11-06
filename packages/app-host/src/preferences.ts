@@ -115,7 +115,10 @@ export class DesktopPreferences {
   async set(patch: unknown) {
     const parsed = patchSchema.parse(patch);
     const operation = this.writes.then(async () => {
-      const next = preferences.parse(merge(this.value, parsed));
+      const merged = merge(this.value, parsed);
+      if (parsed.keymap?.overrides !== undefined)
+        (merged.keymap as Preferences["keymap"]).overrides = parsed.keymap.overrides;
+      const next = preferences.parse(merged);
       const content = serialize(next);
       if (content === serialize(this.value)) return { status: "no_op" as const, result: this.get() };
       await mkdir(dirname(this.file), { recursive: true });

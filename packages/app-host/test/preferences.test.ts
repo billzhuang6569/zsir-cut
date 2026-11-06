@@ -256,3 +256,26 @@ it("initializes the selected Agent from persisted default_agent", async () => {
   host = undefined;
   expect(selected).toEqual(["codex"]);
 });
+
+it("replaces overrides wholesale and persists empty overrides when restoring preset defaults", async () => {
+  const prefs = new DesktopPreferences(home);
+  await prefs.load();
+  await prefs.set({ keymap: { overrides: { tool_select: "B", toggle_snap: null } }, ui: { snap: false } });
+  const replaced = await prefs.set({ keymap: { overrides: { tool_blade: "D" } } });
+  expect(replaced.result.prefs.keymap.overrides).toEqual({ tool_blade: "D" });
+  expect(replaced.result.keymap).toEqual(mergeKeymap("fcp", { tool_blade: "D" }).keymap);
+  await prefs.set({ keymap: { preset: "premiere" } });
+  expect(prefs.get().prefs.keymap.overrides).toEqual({ tool_blade: "D" });
+  const reset = await prefs.set({ keymap: { overrides: {} } });
+  expect(reset.status).toBe("applied");
+  expect(reset.result.prefs.keymap).toEqual({ preset: "premiere", overrides: {} });
+  expect(reset.result.keymap).toEqual(presets.premiere);
+  expect(reset.result.unbound).toEqual([]);
+  expect(reset.result.prefs.ui.snap).toBe(false);
+  expect(JSON.parse(await readFile(join(home, "desktop.json"), "utf8")).keymap.overrides).toEqual({});
+  const restarted = new DesktopPreferences(home);
+  await restarted.load();
+  expect(restarted.get().prefs.keymap.overrides).toEqual({});
+  expect(restarted.get().keymap).toEqual(presets.premiere);
+  expect((await prefs.set({ keymap: { overrides: {} } })).status).toBe("no_op");
+});

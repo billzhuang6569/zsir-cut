@@ -1264,10 +1264,17 @@ export function TimelinePreview({
               onClick={marker}
             />
             {revisionControlsTarget ? createPortal(revisionControls, revisionControlsTarget) : revisionControls}
-            <IconButton icon="snap" label="吸附" pressed={snap} onClick={() => void setUi({ snap: !snap })} />
+            <IconButton
+              icon="snap"
+              label="吸附"
+              title={`吸附 ${keymap.toggle_snap ?? ""}`.trim()}
+              pressed={snap}
+              onClick={() => void setUi({ snap: !snap })}
+            />
             <IconButton
               icon="magnet"
               label="磁性"
+              title={`磁性 ${keymap.toggle_magnetic ?? ""}`.trim()}
               pressed={magnetic}
               onClick={() => void setUi({ magnetic: !magnetic })}
             />

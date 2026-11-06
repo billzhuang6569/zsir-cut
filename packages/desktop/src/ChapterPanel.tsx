@@ -24,7 +24,11 @@ export function useChapterPanel({
   canGenerate: boolean;
   generate: () => void;
 }) {
-  const settings = state.chapters ?? { levels: 2, timecodes: true };
+  const settings = {
+    ...state.chapters,
+    levels: state.chapters?.levels ?? 2,
+    timecodes: state.chapters?.timecodes ?? true,
+  };
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);

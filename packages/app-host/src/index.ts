@@ -91,6 +91,8 @@ const uiStateSchema = z.strictObject({
   sub: z.string().nullable(),
   playhead: z.union([z.strictObject({ at: time }), z.strictObject({ id })]),
   selected: z.array(id),
+  edit_point: z.strictObject({ track_id: id, at: time }).nullable().optional(),
+  snap: z.boolean().optional(),
   subtitle_selection: z
     .strictObject({ cue_ids: z.array(id), editing: id.nullable() })
     .nullable()
@@ -98,7 +100,14 @@ const uiStateSchema = z.strictObject({
   playing: z.boolean(),
   range: z.strictObject({ start: time, duration }).nullable(),
   loop: z.boolean(),
-  history: z.strictObject({ open: z.boolean(), revision: id.nullable(), label: z.string().nullable() }).optional(),
+  history: z
+    .strictObject({
+      open: z.boolean(),
+      viewing: id.nullable().optional(),
+      revision: id.nullable().optional(),
+      label: z.string().nullable().optional(),
+    })
+    .optional(),
   export: z
     .strictObject({
       open: z.boolean(),
@@ -111,7 +120,15 @@ const uiStateSchema = z.strictObject({
   subtitleBrowser: z
     .strictObject({ search: z.string(), find: z.string(), replace: z.string(), matchCase: z.boolean() })
     .optional(),
-  chapters: z.strictObject({ levels: z.union([z.literal(1), z.literal(2)]), timecodes: z.boolean() }).optional(),
+  chapters: z
+    .strictObject({
+      view: z.enum(["outline", "timeline"]).optional(),
+      levels: z.union([z.literal(1), z.literal(2)]).optional(),
+      timecodes: z.boolean().optional(),
+      zoom: z.number().min(0.5).max(4).optional(),
+      folded: z.array(id).optional(),
+    })
+    .optional(),
   mediaBrowser: z
     .strictObject({ scope: z.string(), search: z.string(), size: z.number().int().min(110).max(280) })
     .optional(),

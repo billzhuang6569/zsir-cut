@@ -171,9 +171,19 @@ export function connectHost(
       uiQueue = uiQueue
         .then(async () => {
           const result = await handlers.ui(message.verb, message.request);
-          // shortcut: host uiStateSchema rejects edit_point, remove this filter when the host accepts it.
           socket.send(
-            JSON.stringify({ type: "ui_result", id: message.id, result: { ...result, edit_point: undefined } }),
+            JSON.stringify({
+              type: "ui_result",
+              id: message.id,
+              result: {
+                ...result,
+                history: {
+                  ...result.history,
+                  open: result.history?.open ?? false,
+                  viewing: result.history?.revision ?? null,
+                },
+              },
+            }),
           );
         })
         .catch(() => handlers.error("界面操作失败，请重试"));

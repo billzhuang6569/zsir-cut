@@ -5,7 +5,6 @@ import { ICONS } from "./icons.js";
 const aliases: Record<string, string> = {
   human: "user",
   marker: "flag",
-  snap: "magnet",
   spark: "ai",
   "new-chat": "filePlus",
   audio: "volume",
