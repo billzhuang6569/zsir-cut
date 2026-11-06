@@ -305,11 +305,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
                   history.panel
                 ) : (
                   <>
-                    <h2>
-                      {state.panel === "chapters" && state.chapters?.view === "timeline"
-                        ? "章节时间轴"
-                        : parameters[state.panel]}
-                    </h2>
+                    {state.panel !== "chapters" && <h2>{parameters[state.panel]}</h2>}
                     {state.panel === "ai" && ai.parameters}
                     {state.panel === "media" && media.parameters}
                     {state.panel === "chapters" && chapters.outline}

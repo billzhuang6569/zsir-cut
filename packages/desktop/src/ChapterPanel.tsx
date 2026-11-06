@@ -142,24 +142,29 @@ export function useChapterPanel({
   };
   const controls = (
     <div className="zc-chapter-controls">
-      <fieldset className="zc-chapter-views" aria-label="章节视图">
-        {(["outline", "timeline"] as const).map((value) => (
-          <button
-            key={value}
-            type="button"
-            className="zc-chapter-view"
-            aria-pressed={view === value}
-            onClick={() => change({ view: value })}
-          >
-            {value === "outline" ? "大纲" : "时间轴"}
-          </button>
-        ))}
-      </fieldset>
+      <section>
+        <h3>视图</h3>
+        <fieldset className="zc-seg is-block zc-chapter-views" aria-label="章节视图">
+          {(["outline", "timeline"] as const).map((value) => (
+            <button
+              key={value}
+              type="button"
+              className={view === value ? "is-active" : ""}
+              aria-pressed={view === value}
+              onClick={() => change({ view: value })}
+            >
+              <Icon name="chapters" />
+              {value === "outline" ? "大纲" : "时间轴"}
+            </button>
+          ))}
+        </fieldset>
+      </section>
       <section>
         <h3>显示</h3>
         <label className="zc-chapter-setting">
           标题层级
           <select
+            className="zc-select"
             aria-label="标题层级"
             value={settings.levels}
             onChange={(e) => update({ ...state, chapters: { ...settings, levels: e.target.value === "1" ? 1 : 2 } })}
@@ -172,7 +177,7 @@ export function useChapterPanel({
           显示时间码
           <input
             type="checkbox"
-            className="zc-chapter-switch"
+            className={`zc-switch${settings.timecodes ? " is-on" : ""}`}
             role="switch"
             aria-checked={settings.timecodes}
             aria-label="显示时间码"
@@ -181,12 +186,12 @@ export function useChapterPanel({
           />
         </label>
       </section>
-      <section>
+      <section className="zc-chapter-generation">
         <h3>生成</h3>
         <div className="zc-chapter-actions">
           <button
             type="button"
-            className="zc-btn zc-btn-primary"
+            className="zc-btn zc-btn-secondary"
             disabled={!project || !canGenerate}
             title={!project ? "请先打开工程" : !canGenerate ? "暂无可用的 Agent，或 Agent 正在生成中" : undefined}
             onClick={generate}
@@ -195,7 +200,7 @@ export function useChapterPanel({
           </button>
           <button
             type="button"
-            className="zc-btn zc-btn-secondary"
+            className="zc-btn zc-btn-text"
             disabled={!markers.length}
             title={!markers.length ? "暂无可复制的章节" : undefined}
             onClick={() => {
@@ -207,7 +212,7 @@ export function useChapterPanel({
             }}
           >
             <Icon name={copied ? "check" : "md"} />
-            {copied ? "已复制" : "复制 Markdown"}
+            {copied ? "已复制" : "复制为 Markdown"}
           </button>
         </div>
       </section>
@@ -216,20 +221,11 @@ export function useChapterPanel({
   const all = groups.flatMap((g) => [...(g.id ? [g] : []), ...g.sections]);
   const outline = (
     <div className="zc-chapter-outline">
-      <header className="zc-chapter-stats">
-        <span role="img" aria-label={`${all.filter((m) => m.level === 1).length} 章`}>
-          <span aria-hidden="true">#</span>
-          {all.filter((m) => m.level === 1).length}
+      <header className="zc-chapter-header">
+        <h2>{view === "outline" ? "章节大纲" : "章节时间轴"}</h2>
+        <span className="zc-meta">
+          {groups.filter((g) => g.id).length} 章 · {chapterTime(data.total.t).padStart(5, "0")}
         </span>
-        <span role="img" aria-label={`${all.filter((m) => m.level === 2).length} 节`}>
-          <span aria-hidden="true">##</span>
-          {all.filter((m) => m.level === 2).length}
-        </span>
-        <span role="img" aria-label={`总长 ${chapterTime(data.total.t)}`}>
-          <Icon name="play" />
-          {chapterTime(data.total.t)}
-        </span>
-        <span className="zc-grow" />
         <IconButton
           icon="plus"
           label="在播放头加一节"
@@ -280,22 +276,17 @@ export function useChapterPanel({
               aria-label={group.title ?? "未归组的小节"}
               key={group.id ?? "orphans"}
             >
-              {group.id && (
-                <button
-                  type="button"
-                  className="zc-chapter-fold"
-                  aria-label={`折叠：${group.title}`}
-                  aria-expanded={!folded.includes(group.id)}
-                  onClick={() => fold(group.id ?? "")}
-                >
-                  {folded.includes(group.id) ? "▸" : "▾"}
-                </button>
-              )}
               {[
                 ...(group.id ? [group] : []),
                 ...(settings.levels === 2 && !folded.includes(group.id ?? "") ? group.sections : []),
               ].map((m) => (
                 <div className={`zc-chapter-row${m.level === 2 ? " is-section" : ""}`} key={m.id}>
+                  {settings.timecodes && project && (
+                    <time>
+                      {m.start.tc ?? chapterTime(m.start.t)} – {m.end.tc ?? chapterTime(m.end.t)} ·{" "}
+                      {chapterTime(m.duration.t)}
+                    </time>
+                  )}
                   {m.level === 2 ? (
                     <button
                       type="button"
@@ -308,12 +299,18 @@ export function useChapterPanel({
                         )
                       }
                     >
-                      ▾
+                      <Icon name={hiddenDescriptions.includes(m.id ?? "") ? "right" : "down"} />
                     </button>
                   ) : (
-                    <span className="zc-chapter-hash" aria-hidden="true">
-                      #
-                    </span>
+                    <button
+                      type="button"
+                      className="zc-chapter-fold zc-chapter-mark"
+                      aria-label={`折叠：${group.title}`}
+                      aria-expanded={!folded.includes(group.id ?? "")}
+                      onClick={() => fold(group.id ?? "")}
+                    >
+                      <span aria-hidden="true" />
+                    </button>
                   )}
                   {editing === m.id ? (
                     <input
@@ -346,12 +343,6 @@ export function useChapterPanel({
                     >
                       {m.title}
                     </button>
-                  )}
-                  {settings.timecodes && project && (
-                    <time>
-                      {m.start.tc ?? chapterTime(m.start.t)} – {m.end.tc ?? chapterTime(m.end.t)} ·{" "}
-                      {chapterTime(m.duration.t)}
-                    </time>
                   )}
                   <details className="zc-chapter-menu">
                     <summary aria-label={`章节菜单：${m.title}`}>
@@ -454,9 +445,15 @@ function ChapterRail({
   return (
     <div className="zc-chapter-timeline">
       <header className="zc-chapter-rail-header">
-        <fieldset aria-label="时间轴层级">
+        <fieldset className="zc-seg" aria-label="时间轴层级">
           {([1, 2] as const).map((level) => (
-            <button type="button" key={level} aria-pressed={levels === level} onClick={() => change({ levels: level })}>
+            <button
+              type="button"
+              key={level}
+              className={levels === level ? "is-active" : ""}
+              aria-pressed={levels === level}
+              onClick={() => change({ levels: level })}
+            >
               {level === 1 ? "一级" : "二级"}
             </button>
           ))}

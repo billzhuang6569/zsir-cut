@@ -252,15 +252,15 @@ it("copies the filtered outline and briefly reports success; clipboard failures 
   const writeText = vi.fn(async (_text: string) => {});
   vi.stubGlobal("navigator", { clipboard: { writeText } });
   const ui = await mount();
-  await ui.click("复制 Markdown");
+  await ui.click("复制为 Markdown");
   expect(writeText).toHaveBeenCalledWith(chapterMarkdown(flat));
   expect(ui.container.textContent).toContain("已复制");
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 1600));
   });
-  expect(ui.container.textContent).toContain("复制 Markdown");
+  expect(ui.container.textContent).toContain("复制为 Markdown");
   writeText.mockRejectedValueOnce(new Error("denied"));
-  await ui.click("复制 Markdown");
+  await ui.click("复制为 Markdown");
   expect(ui.container.querySelector('[role="alert"]')?.textContent).toContain("复制失败");
 });
 it.each([true, false])(
@@ -291,7 +291,7 @@ it.each([true, false])(
       (n) => n.textContent === "让 AI 重新分章",
     );
     expect(generate?.disabled).toBe(!available);
-    expect(generate?.classList.contains("zc-btn-primary")).toBe(true);
+    expect(generate?.classList.contains("zc-btn-secondary")).toBe(true);
     if (!available) {
       expect(generate?.title).toContain("暂无可用的 Agent");
       expect(call.mock.calls.some(([verb]) => verb === "chat_send")).toBe(false);
@@ -434,4 +434,31 @@ it("shares the timeline snap toggle with chapter scrubbing", async () => {
       ?.dispatchEvent(new MouseEvent("click", { bubbles: true, clientY: start * (30.1 / 30) })),
   );
   expect(ui.call).toHaveBeenLastCalledWith("ui_seek", { at: "301/10s" });
+});
+
+it("uses compact chapter controls, a single summary header and semantic outline markers", async () => {
+  const ui = await mount();
+  expect(ui.container.querySelector(".zc-chapter-controls h3")?.textContent).toBe("视图");
+  expect(ui.container.querySelectorAll(".zc-chapter-views.zc-seg button .zc-icon")).toHaveLength(2);
+  expect(ui.container.querySelector(".zc-chapter-views .is-active")?.textContent).toBe("大纲");
+  expect(ui.container.querySelector("select.zc-select")).not.toBeNull();
+  expect(ui.container.querySelector(".zc-switch.is-on")?.getAttribute("role")).toBe("switch");
+  expect(ui.container.querySelector(".zc-chapter-generation .zc-btn-secondary")?.textContent).toBe("让 AI 重新分章");
+  expect(ui.container.querySelector(".zc-chapter-generation .zc-btn-text")?.textContent).toBe("复制为 Markdown");
+  const header = ui.container.querySelector(".zc-chapter-header");
+  expect(header?.querySelector("h2")?.textContent).toBe("章节大纲");
+  expect(header?.querySelector(".zc-meta")?.textContent).toBe("2 章 · 01:00");
+  expect(header?.querySelector('[aria-label="在播放头加一节"]')).not.toBeNull();
+  expect(ui.container.querySelector(".zc-chapter-stats, .zc-chapter-hash")).toBeNull();
+  expect(ui.container.querySelectorAll(".zc-chapter-mark")).toHaveLength(2);
+  expect(ui.container.querySelector(".zc-chapter-group.is-current")?.getAttribute("aria-label")).toBe("第一章");
+  const row = ui.container.querySelector(".zc-chapter-row:not(.is-section)");
+  expect(row?.firstElementChild?.tagName).toBe("TIME");
+  expect(ui.container.querySelector(".is-section .zc-chapter-fold .zc-icon")).not.toBeNull();
+  await ui.click("时间轴");
+  expect(header?.querySelector("h2")?.textContent).toBe("章节时间轴");
+  const railHeader = ui.container.querySelector(".zc-chapter-rail-header");
+  expect(railHeader?.querySelector(".zc-seg .is-active")?.textContent).toBe("二级");
+  expect(railHeader?.querySelector('[aria-label="章节时间轴缩放"]')).not.toBeNull();
+  expect(ui.container.querySelector(".zc-chap-block.is-section.shade-1")).not.toBeNull();
 });
