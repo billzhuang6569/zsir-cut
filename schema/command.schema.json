@@ -1263,6 +1263,9 @@
             },
             "linked": {
               "type": "boolean"
+            },
+            "ripple": {
+              "type": "boolean"
             }
           },
           "additionalProperties": false
@@ -1349,6 +1352,36 @@
             },
             "ripple": {
               "type": "boolean"
+            },
+            "linked": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "op",
+            "clip_id",
+            "edge",
+            "to"
+          ],
+          "properties": {
+            "op": {
+              "const": "roll"
+            },
+            "clip_id": {
+              "$ref": "#/$defs/id"
+            },
+            "edge": {
+              "enum": [
+                "in",
+                "out"
+              ]
+            },
+            "to": {
+              "$ref": "#/$defs/seconds"
             },
             "linked": {
               "type": "boolean"

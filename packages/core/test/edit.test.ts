@@ -1966,3 +1966,190 @@ it("allows split_token force only in a manual session while preserving approved 
       .tokens.some((token) => token.id === "tok_approved_right"),
   ).toBe(false);
 });
+
+describe("U3.2 ripple remove and roll", () => {
+  async function rippleFixture() {
+    const project = await read();
+    const timeline = project.timelines[0]!;
+    timeline.tracks = timeline.tracks.filter((track) =>
+      ["trk_v1", "trk_a1", "trk_a3", "trk_sub_zh"].includes(track.id),
+    );
+    for (const track of timeline.tracks) {
+      if (track.kind === "subtitle") {
+        track.overrides = [];
+        track.free_cues = [
+          { ...track.free_cues[0]!, timeline_start: rational(4n), duration: rational(1n) },
+          { ...track.free_cues[0]!, id: "cue_inside", timeline_start: rational(2n), duration: rational(1n) },
+          { ...track.free_cues[0]!, id: "cue_cross", timeline_start: rational(1n), duration: rational(3n) },
+        ];
+        continue;
+      }
+      const template = {
+        ...track.clips[0]!,
+        media_id: clips(project, "trk_v1")[0]!.media_id,
+        source_start: rational(12n),
+        occurrence_id: "occ_delete",
+        timeline_start: rational(2n),
+        duration: rational(2n),
+      };
+      track.clips = [
+        template,
+        { ...template, id: `${template.id}_after`, occurrence_id: "occ_after", timeline_start: rational(4n) },
+      ];
+      track.transitions = [];
+    }
+    timeline.markers = [
+      { id: "mrk_after", kind: "note", text: "after", at: rational(4n), duration: rational(0n) },
+      { id: "mrk_inside", kind: "note", text: "inside", at: rational(2n), duration: rational(0n) },
+      { id: "mrk_cross", kind: "note", text: "cross", at: rational(1n), duration: rational(4n) },
+    ];
+    await writeFile(path, serializeProject(project));
+    return read();
+  }
+  it("ripples three tracks and later metadata, preserves earlier metadata and undoes all content bytes", async () => {
+    const before = await rippleFixture();
+    const result = await edit([{ op: "remove", clip_ids: ["clp_v1"], linked: true, ripple: true }]);
+    expect(result.status, JSON.stringify(result)).toBe("applied");
+    const after = await read();
+    for (const id of ["trk_v1", "trk_a1", "trk_a3"]) {
+      expect(clips(after, id)).toHaveLength(1);
+      expect(clips(after, id)[0]!.timeline_start).toEqual(rational(2n));
+    }
+    expect(after.timelines[0]!.markers.find((m) => m.id === "mrk_after")!.at).toEqual(rational(2n));
+    expect(after.timelines[0]!.markers.find((m) => m.id === "mrk_inside")).toEqual(
+      before.timelines[0]!.markers.find((m) => m.id === "mrk_inside"),
+    );
+    expect(after.timelines[0]!.markers.find((m) => m.id === "mrk_cross")).toEqual(
+      before.timelines[0]!.markers.find((m) => m.id === "mrk_cross"),
+    );
+    const subtitle = after.timelines[0]!.tracks.find((t) => t.kind === "subtitle")!;
+    if (subtitle.kind !== "subtitle") throw new Error("Missing subtitles");
+    expect(subtitle.free_cues.find((cue) => cue.id === "cue_title")!.timeline_start).toEqual(rational(2n));
+    expect(subtitle.free_cues.find((cue) => cue.id === "cue_inside")!.timeline_start).toEqual(rational(2n));
+    expect(subtitle.free_cues.find((cue) => cue.id === "cue_cross")!.duration).toEqual(rational(3n));
+    expect(result.changes.every((change) => change.op === "remove")).toBe(true);
+    await validateAndUndo(before);
+  });
+  it("skips ripple for all overlapping blockers and leaves metadata untouched", async () => {
+    const before = await read();
+    const result = await edit([{ op: "remove", clip_ids: ["clp_b1"], ripple: true }]);
+    expect(result.status, JSON.stringify(result)).toBe("applied");
+    expect(result.result).toMatchObject({
+      warnings: [{ code: "W_RIPPLE_SKIPPED", clip_ids: ["clp_v1", "clp_a1", "clp_ext"] }],
+    });
+    const after = await read();
+    expect(after.timelines[0]!.markers).toEqual(before.timelines[0]!.markers);
+    for (const id of ["trk_v1", "trk_a1", "trk_a3"]) expect(clips(after, id)).toEqual(clips(before, id));
+    await validateAndUndo(before);
+  });
+  it("defaults remove to leaving a gap", async () => {
+    const before = await rippleFixture();
+    expect((await edit([{ op: "remove", clip_ids: ["clp_v1"], linked: true }])).status).toBe("applied");
+    expect(clips(await read(), "trk_v1")[0]!.timeline_start).toEqual(rational(4n));
+    expect((await read()).timelines[0]!.markers).toEqual(before.timelines[0]!.markers);
+  });
+  it.each(["in", "out"])("rolls the fixture J/L cut %s edge one frame without moving offset audio", async (edge) => {
+    const before = await read();
+    const result = await edit([{ op: "roll", clip_id: edge === "out" ? "clp_v1" : "clp_v2", edge, to: "502/50s" }]);
+    expect(result.status, JSON.stringify(result)).toBe("applied");
+    const after = await read();
+    const [a, b] = clips(after, "trk_v1");
+    expect(a!.duration).toEqual(rational(251n, 25n));
+    expect(add(a!.duration, b!.duration)).toEqual(rational(22n));
+    expect(add(a!.source_start, a!.duration)).toEqual(
+      add(clips(before, "trk_v1")[0]!.source_start, rational(251n, 25n)),
+    );
+    expect(b!.source_start).toEqual(rational(1001n, 25n));
+    expect(clips(after, "trk_a1")).toEqual(clips(before, "trk_a1"));
+    expect(clips(after, "trk_v1").slice(2)).toEqual(clips(before, "trk_v1").slice(2));
+    await validateAndUndo(before);
+  });
+  it("rolls same-instant linked audio and preserves the transition", async () => {
+    const before = await read();
+    const result = await edit([{ op: "roll", clip_id: "clp_v2", edge: "out", to: "551/25s" }]);
+    expect(result.status, JSON.stringify(result)).toBe("applied");
+    const after = await read();
+    for (const track of ["trk_v1", "trk_a1"]) {
+      expect(clips(after, track)[1]!.duration).toEqual(add(clips(before, track)[1]!.duration, rational(1n, 25n)));
+      expect(clips(after, track)[2]!.source_start).toEqual(rational(2001n, 25n));
+    }
+    const track = after.timelines[0]!.tracks[0]!;
+    if (track.kind !== "subtitle")
+      expect(track.transitions).toEqual((before.timelines[0]!.tracks[0] as typeof track).transitions);
+    await validateAndUndo(before);
+  });
+  it("honors linked false", async () => {
+    const before = await read();
+    expect((await edit([{ op: "roll", clip_id: "clp_v2", edge: "out", to: "551/25s", linked: false }])).status).toBe(
+      "applied",
+    );
+    expect(clips(await read(), "trk_a1")).toEqual(clips(before, "trk_a1"));
+  });
+  it.each([
+    ["clp_v1", "out", "22s"],
+    ["clp_v1", "out", "23s"],
+    ["clp_v1", "out", "0s"],
+    ["clp_v1", "out", "1001/100s"],
+    ["clp_v1", "in", "1s"],
+    ["clp_v3", "out", "33s"],
+  ])("rejects invalid roll %s %s %s atomically", async (clip_id, edge, to) => {
+    const before = await readFile(path, "utf8");
+    expect((await edit([{ op: "roll", clip_id, edge, to }])).error?.code).toBe("E_VALIDATION");
+    expect(await readFile(path, "utf8")).toBe(before);
+  });
+  it("rejects time maps and missing clips", async () => {
+    expect((await edit([{ op: "roll", clip_id: "clp_v8", edge: "in", to: "1351/25s" }])).error?.code).toBe(
+      "E_UNSUPPORTED",
+    );
+    expect((await edit([{ op: "roll", clip_id: "clp_missing", edge: "in", to: "1s" }])).error?.code).toBe(
+      "E_NOT_FOUND",
+    );
+  });
+  it.each(["left", "right"])("rejects %s source bounds atomically", async (side) => {
+    const project = await read();
+    const [left, right] = clips(project, "trk_v1");
+    if (side === "right") right!.source_start = rational(0n);
+    else left!.source_start = sub(project.media.find((media) => media.id === left!.media_id)!.duration, left!.duration);
+    await writeFile(path, serializeProject(project));
+    const before = await readFile(path, "utf8");
+    expect(
+      (
+        await edit([
+          { op: "roll", clip_id: "clp_v1", edge: "out", to: side === "right" ? "249/25s" : "251/25s", linked: false },
+        ])
+      ).error?.code,
+    ).toBe("E_VALIDATION");
+    expect(await readFile(path, "utf8")).toBe(before);
+  });
+  it("closes the full extent of disjoint deleted clips including the empty gap", async () => {
+    const before = await rippleFixture();
+    for (const id of ["trk_v1", "trk_a1", "trk_a3"]) {
+      const track = before.timelines[0]!.tracks.find((item) => item.id === id)!;
+      if (track.kind === "subtitle") throw new Error("Missing track");
+      track.clips[1]!.timeline_start = rational(6n);
+      track.clips.push({
+        ...track.clips[1]!,
+        id: `clp_${id}_tail`,
+        occurrence_id: "occ_tail",
+        timeline_start: rational(8n),
+      });
+    }
+    await writeFile(path, serializeProject(before));
+    const result = await edit([{ op: "remove", clip_ids: ["clp_v1", "clp_v1_after"], linked: true, ripple: true }]);
+    expect(result.status, JSON.stringify(result)).toBe("applied");
+    for (const id of ["trk_v1", "trk_a1", "trk_a3"])
+      expect(clips(await read(), id)[0]!.timeline_start).toEqual(rational(2n));
+    await validateAndUndo(before);
+  });
+  it("rejects a same-instant linked edge without an adjacent partner", async () => {
+    const project = await read();
+    clips(project, "trk_a1")[2]!.timeline_start = rational(23n);
+    clips(project, "trk_a1")[2]!.duration = rational(48n, 5n);
+    await writeFile(path, serializeProject(project));
+    const before = await readFile(path, "utf8");
+    expect((await edit([{ op: "roll", clip_id: "clp_v2", edge: "out", to: "551/25s" }])).error?.code).toBe(
+      "E_VALIDATION",
+    );
+    expect(await readFile(path, "utf8")).toBe(before);
+  });
+});

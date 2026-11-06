@@ -385,6 +385,7 @@ function applyOne(
   op: Op,
   generate: (prefix: string) => string,
   authorKind: Author["kind"],
+  warnings: Record<string, unknown>[],
 ): void {
   const t = (field: string) => time(op[field]);
   switch (op.op) {
@@ -453,7 +454,18 @@ function applyOne(
       if (op.linked === true)
         for (const item of mediaTracks(timeline).flatMap((entry) => entry.clips))
           if (targets.some((target) => target.occurrence_id === item.occurrence_id)) ids.add(item.id);
+      const all = mediaTracks(timeline).flatMap((item) => item.clips);
+      const removed = all.filter((item) => ids.has(item.id));
+      const start = removed.reduce((value, item) => min(value, item.timeline_start), targets[0]!.timeline_start);
+      const stop = removed.reduce((value, item) => (lt(value, end(item)) ? end(item) : value), start);
       for (const item of mediaTracks(timeline)) item.clips = item.clips.filter((entry) => !ids.has(entry.id));
+      if (op.ripple === true) {
+        const blocking = all.filter(
+          (item) => !ids.has(item.id) && lt(item.timeline_start, stop) && lt(start, end(item)),
+        );
+        if (blocking.length) warnings.push({ code: "W_RIPPLE_SKIPPED", clip_ids: blocking.map((item) => item.id) });
+        else shift(timeline, stop, sub(start, stop));
+      }
       cleanTransitions(timeline);
       break;
     }
@@ -552,6 +564,59 @@ function applyOne(
           at,
           item.id === target.id ? id(op.new_id, "clp_", generate) : generate("clp_"),
         );
+      break;
+    }
+    case "roll": {
+      const { clip: target, track: owner } = clip(timeline, op.clip_id);
+      const out = op.edge === "out";
+      const from = out ? end(target) : target.timeline_start;
+      const to = t("to");
+      onGrid(to, timeline);
+      const neighbor =
+        owner.clips.find((item) => item !== target && eq(out ? item.timeline_start : end(item), from)) ??
+        fail("E_VALIDATION", "Roll requires adjacent clips");
+      const left = out ? target : neighbor;
+      const right = out ? neighbor : target;
+      if (left.time_map || right.time_map) fail("E_UNSUPPORTED", "Roll of time-mapped clip is unsupported");
+      const pairs = new Map<Clip, Clip>([[left, right]]);
+      if (op.linked !== false) {
+        for (const item of mediaTracks(timeline)) {
+          const lefts = item.clips.filter(
+            (entry) => entry.occurrence_id === left.occurrence_id && eq(end(entry), from),
+          );
+          const rights = item.clips.filter(
+            (entry) => entry.occurrence_id === right.occurrence_id && eq(entry.timeline_start, from),
+          );
+          for (const entry of lefts) {
+            const partner =
+              rights.find((candidate) => candidate !== entry) ??
+              fail("E_VALIDATION", "Linked roll requires adjacent partners");
+            pairs.set(entry, partner);
+          }
+          for (const entry of rights)
+            if (!lefts.some((candidate) => candidate !== entry))
+              fail("E_VALIDATION", "Linked roll requires adjacent partners");
+        }
+      }
+      if ([...pairs].some(([a, b]) => a.time_map || b.time_map))
+        fail("E_UNSUPPORTED", "Roll of time-mapped clip is unsupported");
+      const delta = sub(to, from);
+      for (const [a, b] of pairs) {
+        const stop = end(b);
+        if (!lt(a.timeline_start, to) || !lt(to, stop)) fail("E_VALIDATION", "Roll would make an empty clip");
+        a.duration = sub(to, a.timeline_start);
+        b.timeline_start = to;
+        b.duration = sub(stop, to);
+        b.source_start = add(b.source_start, delta);
+        for (const entry of [a, b]) {
+          const media = project.media.find((item) => item.id === entry.media_id)!;
+          if (
+            media.kind !== "image" &&
+            (lt(entry.source_start, zero) || lt(media.duration, add(entry.source_start, entry.duration)))
+          )
+            fail("E_VALIDATION", "Roll source range is outside media");
+        }
+      }
       break;
     }
     case "move": {
@@ -768,7 +833,7 @@ export function applyEdit(
   for (const op of ops) {
     const before = structuredClone(project);
     if (SUBTITLE_OPS.has(op.op)) applySubtitleEdit(project, timeline, op, generate, allowForce, warnings, authorName);
-    else applyOne(project, timeline, op, generate, authorKind);
+    else applyOne(project, timeline, op, generate, authorKind, warnings);
     const oldClips = before.timelines.flatMap((item) => mediaTracks(item).flatMap((track) => track.clips));
     const oldById = new Map(oldClips.map((clip) => [clip.id, clip]));
     const liveClips = project.timelines.flatMap((item) => mediaTracks(item).flatMap((track) => track.clips));
