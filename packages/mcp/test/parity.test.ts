@@ -45,6 +45,71 @@ afterEach(async () => {
 });
 
 describe("CLI and MCP", () => {
+  it("shares reason validation, session steps and approved history", async () => {
+    const server = createServer();
+    const client = new Client({ name: "review-steps", version: "1" });
+    const [left, right] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(left), client.connect(right)]);
+    const compare = async (verb: string, input: Record<string, unknown>, replay = false) => {
+      let cli = invokeCli(verb, input).envelope;
+      if (replay) cli = invokeCli(verb, input).envelope;
+      const mcp = (await client.callTool({ name: `zcut_${verb}`, arguments: { project, ...input } }))
+        .structuredContent as Record<string, unknown>;
+      expect(validateEnvelope(mcp).valid).toBe(true);
+      expect(withoutRequestId(mcp)).toEqual(withoutRequestId(cli));
+      return cli;
+    };
+    try {
+      const base = { base_revision: "rev_fixture_1", author };
+      const begun = await compare("session_begin", {
+        ...base,
+        idempotency_key: "begin",
+        approval: "manual",
+        intent: "审阅步骤",
+      });
+      const session_id = (begun.result as { session_id: string }).session_id;
+      const edit = {
+        ...base,
+        session_id,
+        idempotency_key: "draft",
+        label: "重点",
+        reason: "保留重点",
+        ops: [{ op: "set_clip", clip_id: "clp_v1", label: "重点" }],
+      };
+      const invalid = await compare("edit", { ...edit, reason: "字".repeat(201) });
+      expect(invalid.error).toMatchObject({ code: "E_VALIDATION" });
+      const written = await compare("edit", edit, true);
+      const revision = (written.receipt as { after: string }).after;
+      const review = await compare("session_review", {
+        ...base,
+        base_revision: revision,
+        session_id,
+        idempotency_key: "review",
+      });
+      expect(review.result).toMatchObject({
+        steps: [
+          {
+            revision: { seq: 2, id: revision },
+            label: "重点",
+            reason: "保留重点",
+            batch: null,
+            summary: { clip: { added: 0, removed: 0, changed: 1 } },
+            keys: ["clp_v1"],
+          },
+        ],
+      });
+      await compare("inspect", { session_id, view: "history" });
+      const approved = await compare("session_approve", { ...base, session_id, idempotency_key: "approve" }, true);
+      expect(approved.status).toBe("applied");
+      const history = await compare("inspect", { view: "history" });
+      expect(history.result).toMatchObject({ entries: [{ session_id, reason: null }] });
+      await compare("inspect", { view: "session", session_id });
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  }, 30000);
+
   it("shares mark_proofread dry-run, writes and replay envelopes", async () => {
     const server = createServer();
     const client = new Client({ name: "proofread-parity", version: "1" });
