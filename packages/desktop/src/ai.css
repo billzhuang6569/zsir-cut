@@ -512,3 +512,37 @@
   background: var(--raised-2);
   color: var(--text);
 }
+
+.zc-agent-selector {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  position: relative;
+  min-width: 0;
+}
+.zc-agent-selector select {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--label-size);
+  width: 112px;
+  padding: var(--space-1);
+  cursor: pointer;
+}
+.zc-agent-selector select option {
+  background: var(--panel);
+}
+.zc-chat-input {
+  background: var(--bg);
+  margin-top: auto;
+}
+.zc-chat-input textarea {
+  resize: none;
+}
+.zc-chat-input .zc-icon-btn {
+  background: var(--primary);
+  color: var(--on-primary);
+  border-radius: var(--radius-full);
+}

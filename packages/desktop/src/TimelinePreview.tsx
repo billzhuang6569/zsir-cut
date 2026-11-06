@@ -102,6 +102,7 @@ export function TimelinePreview({
   readOnly = false,
   historyBanner,
   revisionControlsTarget,
+  viewerTarget,
   viewerOnly = false,
   hideViewer = false,
   onMediaDrop,
@@ -119,6 +120,7 @@ export function TimelinePreview({
   readOnly?: boolean;
   historyBanner?: ReactNode;
   revisionControlsTarget?: HTMLElement | null;
+  viewerTarget?: HTMLElement | null;
   viewerOnly?: boolean;
   hideViewer?: boolean;
   onMediaDrop?: (id: string, at: string, track: string) => void;
@@ -921,6 +923,178 @@ export function TimelinePreview({
       />
     </>
   );
+  function jumpCut(direction: -1 | 1) {
+    if (!project) return;
+    const cuts = [
+      "0s",
+      project.duration.t,
+      ...project.tracks.flatMap((track) => track.clips.flatMap((clip) => [clip.timeline_in.t, clip.timeline_out.t])),
+    ].sort((a, b) => compare(parseRational(a, true), parseRational(b, true)));
+    const candidates = cuts.filter((cut) => compare(parseRational(cut, true), parseRational(at, true)) === direction);
+    seek((direction === -1 ? candidates.at(-1) : candidates[0]) ?? at);
+  }
+  const viewer = (
+    <section aria-label="预览" className="zc-viewer zc-panel">
+      {(error || writeError) && (
+        <p role="alert" title={error ? errorDetail : writeErrorDetail}>
+          {error || writeError}
+        </p>
+      )}
+      <div className="zc-preview-head">
+        <span className="zc-chip is-sm">
+          <Icon name="media" size={12} />
+          {viewerOnly ? "素材" : "时间线"}
+        </span>
+        <span className="zc-meta">
+          {project?.format?.width ?? 1920}×{project?.format?.height ?? 1080} · {project?.edit_rate ?? "25"} fps
+        </span>
+        <span className="zc-grow" />
+        <span className="zc-meta">适合窗口</span>
+      </div>
+      <div
+        className="zc-picture"
+        style={{ aspectRatio: `${project?.format?.width ?? 1920} / ${project?.format?.height ?? 1080}` }}
+      >
+        {src && media?.kind === "image" ? (
+          <img src={src} alt={media.name ?? "预览"} />
+        ) : (
+          [0, 1].map((index) => (
+            <video
+              key={index}
+              ref={(element) => {
+                videos.current[index] = element;
+              }}
+              playsInline
+              preload="auto"
+              muted={index !== visibleVideo}
+              data-preroll={index !== visibleVideo ? "" : undefined}
+              data-preroll-lead={index === visibleVideo ? prerollLead : undefined}
+              data-preroll-state="idle"
+              onWaiting={(event) => resetTopPlayback(event.currentTarget)}
+              onSeeked={(event) => resetTopPlayback(event.currentTarget)}
+              style={{ position: "absolute", inset: 0, zIndex: index === visibleVideo ? 1 : 0 }}
+              aria-hidden={index !== visibleVideo}
+              aria-label={index === visibleVideo ? (viewerOnly ? "素材预览" : "时间线预览") : undefined}
+              onError={() => setWriteError("预览无法读取，请检查素材或代理")}
+            />
+          ))
+        )}
+        {clip?.speed === "map" && (
+          <span
+            className="zc-approx"
+            title="近似：平滑变速按线性映射；倒放与静帧逐帧定位，倒放声音按采样近似；无转场混合或画面变换"
+          >
+            近似
+          </span>
+        )}
+        <SubtitleCanvas
+          cues={captions}
+          at={at}
+          playback={subtitleAt}
+          playing={state.playing}
+          styles={project?.styles ?? []}
+          preview={subtitlePreview ?? (subtitleDraft ? { fields: subtitleDraft } : undefined)}
+          format={project?.format}
+          selected={state.selected}
+          dragging={dragging}
+          select={
+            viewerOnly
+              ? undefined
+              : (cue) =>
+                  update({
+                    ...latest.current.state,
+                    selected: [cue.cue_id],
+                    subtitle_selection: { cue_ids: [cue.cue_id], editing: null },
+                  })
+          }
+          edit={(cue) => {
+            if (readOnly) return;
+            update({
+              ...latest.current.state,
+              panel: "subtitles",
+              sub: "subtitles",
+              selected: [cue.cue_id],
+              subtitle_selection: { cue_ids: [cue.cue_id], editing: cue.cue_id },
+              subtitleBrowser: {
+                ...latest.current.state.subtitleBrowser,
+                search: "",
+                find: latest.current.state.subtitleBrowser?.find ?? "",
+                replace: latest.current.state.subtitleBrowser?.replace ?? "",
+                matchCase: latest.current.state.subtitleBrowser?.matchCase ?? false,
+              },
+              history: { open: false, revision: null, label: null },
+            });
+            onEditSubtitle?.(cue);
+          }}
+          change={
+            readOnly || viewerOnly
+              ? undefined
+              : (onSubtitleStyle ??
+                ((cue, patch, commit) => {
+                  setSubtitleDraft(patch);
+                  if (commit && project)
+                    void write("edit", "调整字幕样式", subtitleStyleOps(project, [cue.cue_id], patch, false));
+                }))
+          }
+        />
+      </div>
+      <div className="zc-player">
+        <IconButton icon="inOut" label="设入点 I" />
+        <output ref={clock} aria-label="播放时码">
+          {project ? timecode(at, project) : "00:00:00:00"}
+        </output>
+        <span className="zc-meta">/ {project ? timecode(project.duration.t, project) : "00:00:00:00"}</span>
+        <span className="zc-grow" />
+        <IconButton icon="back" label="上一个剪点" onClick={() => jumpCut(-1)} disabled={!project} />
+        <button
+          type="button"
+          className="zc-icon-btn zc-play-button"
+          aria-label={state.playing ? "暂停" : "播放"}
+          onClick={() => update({ ...state, playing: !state.playing })}
+        >
+          <Icon name={state.playing ? "pause" : "play"} />
+        </button>
+        <IconButton icon="fwd" label="下一个剪点" onClick={() => jumpCut(1)} disabled={!project} />
+        <span className="zc-grow" />
+        <IconButton
+          icon="volume"
+          label="音量"
+          onClick={() => {
+            const video = videos.current[visibleVideo];
+            if (video) video.muted = !video.muted;
+          }}
+        />
+        <IconButton
+          icon="fit"
+          label="全屏"
+          onClick={(event) => {
+            void event.currentTarget.closest(".zc-viewer")?.requestFullscreen?.();
+          }}
+        />
+      </div>
+      {viewerOnly && project && (
+        <div className="zc-source-scrub">
+          <input
+            type="range"
+            aria-label="素材进度"
+            min={0}
+            max={Number(frameAt(project.duration.t, project.edit_rate))}
+            value={Number(frameAt(at, project.edit_rate))}
+            onChange={(e) => seek(frameTime(BigInt(e.target.value), project.edit_rate))}
+          />
+          {state.media && (
+            <span
+              className="zc-source-range"
+              style={{
+                left: `${pixelAt(state.media.in ?? "0s", 100) / pixelAt(project.duration.t, 1)}%`,
+                width: `${(pixelAt(state.media.out ?? project.duration.t, 100) - pixelAt(state.media.in ?? "0s", 100)) / pixelAt(project.duration.t, 1)}%`,
+              }}
+            />
+          )}
+        </div>
+      )}
+    </section>
+  );
   return (
     <>
       {cueMenu && (
@@ -948,138 +1122,10 @@ export function TimelinePreview({
           />
         </div>
       )}
-      {!hideViewer && (
-        <section aria-label="预览" className="zc-viewer">
-          {(error || writeError) && (
-            <p role="alert" title={error ? errorDetail : writeErrorDetail}>
-              {error || writeError}
-            </p>
-          )}
-          {viewerOnly && <h3>{project?.name}</h3>}
-          <div
-            className="zc-picture"
-            style={{ aspectRatio: `${project?.format?.width ?? 1920} / ${project?.format?.height ?? 1080}` }}
-          >
-            {src && media?.kind === "image" ? (
-              <img src={src} alt={media.name ?? "预览"} />
-            ) : (
-              [0, 1].map((index) => (
-                <video
-                  key={index}
-                  ref={(element) => {
-                    videos.current[index] = element;
-                  }}
-                  playsInline
-                  preload="auto"
-                  muted={index !== visibleVideo}
-                  data-preroll={index !== visibleVideo ? "" : undefined}
-                  data-preroll-lead={index === visibleVideo ? prerollLead : undefined}
-                  data-preroll-state="idle"
-                  onWaiting={(event) => resetTopPlayback(event.currentTarget)}
-                  onSeeked={(event) => resetTopPlayback(event.currentTarget)}
-                  style={{ position: "absolute", inset: 0, zIndex: index === visibleVideo ? 1 : 0 }}
-                  aria-hidden={index !== visibleVideo}
-                  aria-label={index === visibleVideo ? (viewerOnly ? "素材预览" : "时间线预览") : undefined}
-                  onError={() => setWriteError("预览无法读取，请检查素材或代理")}
-                />
-              ))
-            )}
-            {clip?.speed === "map" && (
-              <span
-                className="zc-approx"
-                title="近似：平滑变速按线性映射；倒放与静帧逐帧定位，倒放声音按采样近似；无转场混合或画面变换"
-              >
-                近似
-              </span>
-            )}
-            <SubtitleCanvas
-              cues={captions}
-              at={at}
-              playback={subtitleAt}
-              playing={state.playing}
-              styles={project?.styles ?? []}
-              preview={subtitlePreview ?? (subtitleDraft ? { fields: subtitleDraft } : undefined)}
-              format={project?.format}
-              selected={state.selected}
-              dragging={dragging}
-              select={
-                viewerOnly
-                  ? undefined
-                  : (cue) =>
-                      update({
-                        ...latest.current.state,
-                        selected: [cue.cue_id],
-                        subtitle_selection: { cue_ids: [cue.cue_id], editing: null },
-                      })
-              }
-              edit={(cue) => {
-                if (readOnly) return;
-                update({
-                  ...latest.current.state,
-                  panel: "subtitles",
-                  sub: "subtitles",
-                  selected: [cue.cue_id],
-                  subtitle_selection: { cue_ids: [cue.cue_id], editing: cue.cue_id },
-                  subtitleBrowser: {
-                    ...latest.current.state.subtitleBrowser,
-                    search: "",
-                    find: latest.current.state.subtitleBrowser?.find ?? "",
-                    replace: latest.current.state.subtitleBrowser?.replace ?? "",
-                    matchCase: latest.current.state.subtitleBrowser?.matchCase ?? false,
-                  },
-                  history: { open: false, revision: null, label: null },
-                });
-                onEditSubtitle?.(cue);
-              }}
-              change={
-                readOnly || viewerOnly
-                  ? undefined
-                  : (onSubtitleStyle ??
-                    ((cue, patch, commit) => {
-                      setSubtitleDraft(patch);
-                      if (commit && project)
-                        void write("edit", "调整字幕样式", subtitleStyleOps(project, [cue.cue_id], patch, false));
-                    }))
-              }
-            />
-          </div>
-          <div className="zc-player">
-            <IconButton
-              icon={state.playing ? "stop" : "play"}
-              label={state.playing ? "暂停" : "播放"}
-              onClick={() => update({ ...state, playing: !state.playing })}
-            />
-            <output ref={clock} aria-label="播放时码">
-              {project ? timecode(at, project) : "00:00:00:00"}
-            </output>
-          </div>
-          {viewerOnly && project && (
-            <div className="zc-source-scrub">
-              <input
-                type="range"
-                aria-label="素材进度"
-                min={0}
-                max={Number(frameAt(project.duration.t, project.edit_rate))}
-                value={Number(frameAt(at, project.edit_rate))}
-                onChange={(e) => seek(frameTime(BigInt(e.target.value), project.edit_rate))}
-              />
-              {state.media && (
-                <span
-                  className="zc-source-range"
-                  style={{
-                    left: `${pixelAt(state.media.in ?? "0s", 100) / pixelAt(project.duration.t, 1)}%`,
-                    width: `${(pixelAt(state.media.out ?? project.duration.t, 100) - pixelAt(state.media.in ?? "0s", 100)) / pixelAt(project.duration.t, 1)}%`,
-                  }}
-                />
-              )}
-            </div>
-          )}
-        </section>
-      )}
+      {!hideViewer && (viewerTarget ? createPortal(viewer, viewerTarget) : viewer)}
       {!viewerOnly && (
-        <>
+        <section className="zc-timeline-card zc-panel" aria-label="时间线卡片">
           <section aria-label="工具栏" className="zc-toolbar">
-            {historyBanner}
             <IconButton icon="select" label="选择 A" pressed={tool === "select"} onClick={() => setTool("select")} />
             <IconButton
               icon="blade"
@@ -1094,6 +1140,7 @@ export function TimelinePreview({
             <IconButton icon="marker" label="加标记 M" disabled={!project || busy || readOnly} onClick={marker} />
             {revisionControlsTarget ? createPortal(revisionControls, revisionControlsTarget) : revisionControls}
             <IconButton icon="snap" label="吸附" pressed={snap} onClick={() => setSnap(!snap)} />
+            <span className="zc-review-slot">{historyBanner}</span>
             <span className="zc-grow" />
             <span className="zc-count" title="片段">
               <Icon name="clip" />
@@ -1215,8 +1262,8 @@ export function TimelinePreview({
                 </div>
                 {previewTracks?.map((track) => (
                   <div key={track.id} className={`zc-track zc-track-${track.kind}`}>
-                    <span className="zc-track-name" title={track.name}>
-                      {track.name}
+                    <span className="zc-track-name zc-track-head" role="img" title={track.name} aria-label={track.name}>
+                      <Icon name={track.kind === "video" ? "eye" : track.kind === "audio" ? "volume" : "subtitles"} />
                     </span>
                     {/* biome-ignore lint/a11y/useSemanticElements: A timeline drop lane is not a form fieldset. */}
                     <div
@@ -1375,7 +1422,7 @@ export function TimelinePreview({
                                 cueKey={cueKey(cue)}
                                 selectionId={cue.cue_id}
                                 kind="subtitle"
-                                label={organizing.has(cue.transcript_id ?? "") ? "" : cue.text.replaceAll("\n", " ")}
+                                label={cue.text.replaceAll("\n", " ")}
                                 selected={state.selected.includes(cue.cue_id)}
                                 dimmed={
                                   !track.enabled || (state.selected.length > 0 && !state.selected.includes(cue.cue_id))
@@ -1463,7 +1510,7 @@ export function TimelinePreview({
               </div>
             )}
           </section>
-        </>
+        </section>
       )}
     </>
   );

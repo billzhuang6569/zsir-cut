@@ -146,7 +146,7 @@
   background: var(--panel);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-xl);
-  box-shadow: 0 0 0 100vmax #0009;
+  box-shadow: 0 0 0 100vmax var(--scrim);
 }
 .zc-export-confirm h3,
 .zc-export-confirm label,

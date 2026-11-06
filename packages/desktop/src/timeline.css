@@ -125,10 +125,6 @@
   flex-direction: column;
   overflow: hidden;
 }
-.zc-parameters {
-  grid-column: 4;
-  grid-row: 2;
-}
 .zc-toolbar {
   grid-row: 3;
 }
@@ -351,4 +347,90 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--panel);
+}
+
+.zc-viewer {
+  padding: var(--space-4) var(--space-4) var(--space-2);
+  background: var(--panel);
+  border-radius: var(--radius-lg);
+}
+.zc-preview-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  height: 24px;
+  margin-bottom: 10px;
+  flex-shrink: 0;
+}
+.zc-picture {
+  border-radius: var(--radius-md);
+  background: var(--bg-viewer);
+}
+.zc-viewer .zc-player {
+  padding: var(--space-1) 0 0;
+  gap: var(--space-1);
+}
+.zc-player output {
+  font-size: var(--mono-sm-size);
+  white-space: nowrap;
+}
+.zc-player .zc-play-button {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--primary);
+  color: var(--on-primary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.zc-timeline-card {
+  grid-row: 3;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  padding: 0 var(--space-4) var(--space-3);
+}
+.zc-timeline-card .zc-toolbar {
+  flex-shrink: 0;
+  height: var(--toolbar-h);
+  padding: 0;
+  border: 0;
+}
+.zc-timeline-card .zc-timeline {
+  flex: 1;
+  background: var(--panel);
+}
+.zc-timeline-card .zc-track-name,
+.zc-timeline-card .zc-ruler-row {
+  background: var(--panel);
+}
+.zc-track-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px 0 0;
+}
+.zc-track-lane .zc-clip-subtitle {
+  padding-inline: var(--space-2);
+  color: var(--track-subtitle-ink);
+  text-overflow: ellipsis;
+}
+.zc-playhead {
+  width: 1px;
+  background: var(--primary);
+}
+.zc-playhead button {
+  width: 11px;
+  height: 14px;
+  border-radius: 3px;
+  background: var(--primary);
+  color: transparent;
 }

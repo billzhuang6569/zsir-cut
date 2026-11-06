@@ -65,7 +65,14 @@ export function IconButton({
   ...rest
 }: ButtonHTMLAttributes<HTMLButtonElement> & { icon: string; label: string; pressed?: boolean }) {
   return (
-    <button type="button" className="zc-ibtn" title={label} aria-label={label} aria-pressed={pressed} {...rest}>
+    <button
+      type="button"
+      className="zc-ibtn zc-icon-btn"
+      title={label}
+      aria-label={label}
+      aria-pressed={pressed}
+      {...rest}
+    >
       <Icon name={icon} />
     </button>
   );
@@ -105,7 +112,7 @@ export function Clip({
       onClick={onClick}
       onDoubleClick={onDoubleClick}
       onContextMenu={onContextMenu}
-      className={`zc-clip zc-clip-${kind}${selected ? " is-selected" : ""}${dimmed ? " is-dimmed" : ""}`}
+      className={`zc-clip zc-clip-${kind} is-${kind}${selected ? " is-selected" : ""}${dimmed ? " is-dimmed" : ""}`}
       style={style}
     >
       {children}

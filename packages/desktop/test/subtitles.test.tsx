@@ -785,7 +785,7 @@ it.each([
   );
   const clips = [...container.querySelectorAll(".zc-clip-subtitle")];
   expect(clips).toHaveLength(2);
-  expect(clips[0]?.textContent).toBe(shown ? cue.text : "");
+  expect(clips[0]?.textContent).toBe(cue.text);
   expect(clips[1]?.textContent).toBe(other.text);
   expect(container.querySelector(".zc-subtitle-canvas")?.getAttribute("aria-label")).toBe(
     shown ? `${cue.text}\n${other.text}` : other.text,

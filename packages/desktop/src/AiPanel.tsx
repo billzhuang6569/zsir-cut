@@ -239,6 +239,7 @@ export function useAiPanel({
   const decisions = [...(session?.decisions ?? [])].sort((a, b) => a.seq - b.seq);
   const pending = decisions.filter((item) => item.state === "pending");
   const decision = pending[0];
+  const draftSession = session ?? ai.sessions.at(-1);
   const answer = async (value: { option_id: string } | { text: string } | { skip: true }) => {
     if (!session || !decision || saving || generating) return;
     setSaving(true);
@@ -352,6 +353,45 @@ export function useAiPanel({
     }
   }
   const available = agents.filter((item) => item.available);
+  const header = (
+    <div className="zc-panel-head">
+      <h2>AI</h2>
+      <div className="zc-agent-selector">
+        <Icon name="bot" />
+        <select
+          aria-label="Agent"
+          disabled={generating}
+          value={agent}
+          onChange={(e) => {
+            setAgent(e.target.value as AgentKind);
+            chatSelection.current++;
+            currentChat.current = undefined;
+            setChatId(undefined);
+            setEvents([]);
+          }}
+        >
+          {available.map((item) => (
+            <option key={item.agent} value={item.agent}>
+              {item.agent === "claude" ? "Claude Code" : "Codex"} {item.version}
+            </option>
+          ))}
+        </select>
+        <Icon name="down" size={12} />
+      </div>
+      <IconButton
+        icon="plus"
+        label="新对话"
+        disabled={generating}
+        onClick={() => {
+          chatSelection.current++;
+          currentChat.current = undefined;
+          setChatId(undefined);
+          setEvents([]);
+          setHistory(null);
+        }}
+      />
+    </div>
+  );
   const chat = (
     <div className="zc-ai-chat">
       {!available.length ? (
@@ -365,18 +405,6 @@ export function useAiPanel({
         <>
           <div className="zc-chat-actions">
             <span className="zc-grow" />
-            <IconButton
-              icon="new-chat"
-              label="新对话"
-              disabled={generating}
-              onClick={() => {
-                chatSelection.current++;
-                currentChat.current = undefined;
-                setChatId(undefined);
-                setEvents([]);
-                setHistory(null);
-              }}
-            />
             <IconButton
               icon="list"
               label="历史对话"
@@ -551,24 +579,6 @@ export function useAiPanel({
               </fieldset>
             )}
             <div className="zc-chat-actions">
-              <select
-                aria-label="Agent"
-                disabled={generating}
-                value={agent}
-                onChange={(e) => {
-                  setAgent(e.target.value as AgentKind);
-                  chatSelection.current++;
-                  currentChat.current = undefined;
-                  setChatId(undefined);
-                  setEvents([]);
-                }}
-              >
-                {available.map((item) => (
-                  <option key={item.agent} value={item.agent}>
-                    {item.agent === "claude" ? "Claude Code" : "Codex"} {item.version}
-                  </option>
-                ))}
-              </select>
               <span className="zc-grow" />
               <IconButton
                 icon={generating ? "stop" : "send"}
@@ -639,6 +649,13 @@ export function useAiPanel({
   );
   return {
     chat,
+    header,
+    draftStatus: draftSession ? (
+      <span className="zc-chip is-sm is-attention">
+        <span className="zc-dot is-attention" />
+        AI 草稿 · {draftSession.pending_count} 件待定
+      </span>
+    ) : null,
     generating,
     parameters,
     send,
