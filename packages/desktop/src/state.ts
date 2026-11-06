@@ -13,6 +13,7 @@ export function initialState(): UiState {
     playing: false,
     range: null,
     loop: false,
+    history: { open: false, revision: null, viewing: null, label: null },
     chapters: { levels: 2, timecodes: true, view: "outline", zoom: 1, folded: [] },
   };
 }
@@ -20,7 +21,17 @@ export function initialState(): UiState {
 export function applyUi(state: UiState, verb: UiVerb, request: Record<string, unknown>): UiState {
   switch (verb) {
     case "ui_show_panel":
-      if (request.panel === "history") return { ...state, history: { open: true, revision: null, label: null } };
+      if (request.panel === "history")
+        return {
+          ...state,
+          history: {
+            revision: null,
+            label: null,
+            ...state.history,
+            open: !state.history?.open,
+            viewing: state.history?.revision ?? null,
+          },
+        };
       if (request.panel === "export")
         return {
           ...state,

@@ -78,7 +78,11 @@ it("exposes revision events to subscribers while refreshing the project and subt
       changes: [{ key: "mrk_test", entity: "marker" }],
       truncated: false,
     };
+    const subscriber = vi.fn();
+    const unsubscribe = disconnect.subscribe(subscriber);
     socket?.receive(payload);
+    expect(subscriber).toHaveBeenCalledExactlyOnceWith(payload);
+    unsubscribe();
     expect(projectChanged).toHaveBeenCalledExactlyOnceWith(payload);
     await vi.waitFor(() => expect(project).toHaveBeenCalledTimes(1));
     expect(requests).toEqual(["inspect", "inspect", "preview_data"]);

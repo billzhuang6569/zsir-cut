@@ -1,18 +1,30 @@
-.zc-parameters[data-panel="history"] {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
+.zc-history-anchor {
+  position: relative;
+  display: inline-flex;
+}
+.zc-history-popover {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  right: calc(0px - var(--space-2));
+  width: calc(var(--inspector-w) + var(--space-5));
+  max-width: calc(100vw - var(--space-6));
+  max-height: calc(100vh - var(--topbar-h) - var(--space-6));
+  padding: var(--space-3);
+  box-shadow: var(--shadow-popover);
+}
+.zc-history-popover .zc-popover-caret {
+  right: var(--space-5);
 }
 .zc-history-heading,
 .zc-history-progress,
-.zc-history-banner {
+.zc-history-footer {
   display: flex;
   align-items: center;
   gap: var(--space-4);
 }
 .zc-history-heading {
   justify-content: space-between;
+  padding: var(--space-2);
 }
 .zc-history-list {
   flex: 1;
@@ -26,27 +38,65 @@
   background: var(--raised);
 }
 .zc-history-step time,
-.zc-history-step small {
+.zc-history-step small,
+.zc-history-draft small,
+.zc-history-report small {
   color: var(--text-3);
   font-size: var(--caption-size);
+}
+.zc-history-step time,
+.zc-history-step small {
   white-space: nowrap;
 }
 .zc-history-group {
   padding-left: var(--space-5);
 }
 .zc-history-banner {
-  width: 100%;
-  flex-wrap: wrap;
   color: var(--attention);
+  font-size: var(--caption-size);
 }
-.zc-history-progress {
-  padding-block: var(--space-5);
+.zc-history-progress,
+.zc-history-footer {
+  padding-block: var(--space-3);
 }
-.zc-editor .zc-toolbar:has(.zc-history-banner) {
-  flex-wrap: nowrap;
+.zc-history-footer > :first-child {
+  flex: 1;
 }
-.zc-history-banner {
-  width: auto;
-  flex: none;
-  flex-wrap: nowrap;
+.zc-history-draft small,
+.zc-history-report-heading small,
+.zc-history-report-heading time,
+.zc-history-report-row small {
+  display: block;
+}
+.zc-history-report {
+  overflow: auto;
+}
+.zc-history-report-heading,
+.zc-history-report-section {
+  margin-bottom: var(--space-6);
+}
+.zc-history-report-section h3,
+.zc-history-report-row {
+  display: flex;
+  align-items: start;
+  gap: var(--space-2);
+  font-size: var(--caption-size);
+  line-height: var(--body-line);
+}
+.zc-history-report-row {
+  padding-block: var(--space-2);
+  overflow-wrap: anywhere;
+  color: var(--text-2);
+}
+.zc-history-report-row del {
+  color: var(--text-3);
+}
+.zc-history-report-row.is-attention {
+  color: var(--attention);
+  background: var(--attention-soft);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+}
+.zc-functions .zc-function-panel[hidden] {
+  display: none;
 }

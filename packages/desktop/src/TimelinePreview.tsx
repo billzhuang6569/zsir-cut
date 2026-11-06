@@ -3,7 +3,7 @@
 // Copyright 2025-2026 OpenCut. See useTimelineGestures.ts and THIRD_PARTY_NOTICES.md.
 // biome-ignore-all lint/suspicious/noArrayIndexKey: Film cells, waveform bars and ruler ticks are fixed geometric slots.
 
-import { memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Clip, Icon, IconButton } from "./components.js";
 import { DESKTOP_AUTHOR, type ProjectView, type useTimelinePreferences } from "./connection.js";
@@ -103,7 +103,6 @@ export function TimelinePreview({
   errorDetail,
   dragging,
   readOnly = false,
-  historyBanner,
   revisionControlsTarget,
   viewerTarget,
   viewerOnly = false,
@@ -124,7 +123,6 @@ export function TimelinePreview({
     commit: boolean,
   ) => void;
   readOnly?: boolean;
-  historyBanner?: ReactNode;
   revisionControlsTarget?: HTMLElement | null;
   viewerTarget?: HTMLElement | null;
   viewerOnly?: boolean;
@@ -897,11 +895,13 @@ export function TimelinePreview({
       if (action === "toggle_history") {
         update({
           ...state,
-          playing: false,
-          preview: "timeline",
-          selected: [],
-          edit_point: null,
-          history: { open: !state.history?.open, revision: null, label: null },
+          history: {
+            revision: null,
+            label: null,
+            ...state.history,
+            open: !state.history?.open,
+            viewing: state.history?.revision ?? null,
+          },
         });
         return;
       }
@@ -1354,7 +1354,6 @@ export function TimelinePreview({
               pressed={tool === "roll"}
               onClick={() => setTool("roll")}
             />
-            <span className="zc-review-slot">{historyBanner}</span>
             <span className="zc-grow" />
             <span className="zc-count" title="片段">
               <Icon name="clip" />
