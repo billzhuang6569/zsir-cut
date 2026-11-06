@@ -7,6 +7,13 @@ export type UiState = Omit<HostUiState, "chapters"> & {
     | undefined;
 };
 
+// Desktop-only presentation state, also returned through ui_state.
+declare module "../../app-host/src/ui.js" {
+  interface UiState {
+    edit_point?: { track_id: string; at: string } | null;
+  }
+}
+
 export function initialState(): UiState {
   return {
     project: null,
@@ -14,6 +21,7 @@ export function initialState(): UiState {
     sub: null,
     playhead: { at: "0s" },
     selected: [],
+    edit_point: null,
     playing: false,
     range: null,
     loop: false,
@@ -67,7 +75,7 @@ export function applyUi(state: UiState, verb: UiVerb, request: Record<string, un
     case "ui_seek":
       return { ...state, playhead: typeof request.at === "string" ? { at: request.at } : { id: request.id as string } };
     case "ui_select":
-      return { ...state, selected: request.ids as string[] };
+      return { ...state, selected: request.ids as string[], edit_point: null };
     case "ui_play":
       return {
         ...state,

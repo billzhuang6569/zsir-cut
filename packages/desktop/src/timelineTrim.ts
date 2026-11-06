@@ -45,6 +45,7 @@ export function trimTarget(
   scale: number,
   snap: boolean,
   playhead: string,
+  ripple = false,
 ) {
   const clips = trimGroup(project, anchor, edge, linked);
   const origin = parseRational(edgeTime(anchor, edge), true);
@@ -91,7 +92,7 @@ export function trimTarget(
       );
     }
     const track = project.tracks.find((track) => track.clips.some((item) => item.id === clip.id));
-    for (const other of track?.clips ?? []) {
+    for (const other of ripple ? [] : (track?.clips ?? [])) {
       if (clips.some((item) => item.id === other.id)) continue;
       const otherStart = parseRational(other.timeline_in.t, true);
       const otherEnd = parseRational(other.timeline_out.t, true);
@@ -115,13 +116,15 @@ export function trimTarget(
   );
   const requested = parseRational(target.to, true);
   const to = compare(requested, lower) < 0 ? lower : compare(requested, maximum) > 0 ? maximum : requested;
-  const overlap = clips.some((clip) => {
-    const start = edge === "in" ? requested : parseRational(clip.timeline_in.t, true);
-    const end = edge === "out" ? requested : parseRational(clip.timeline_out.t, true);
-    return project.tracks
-      .find((track) => track.clips.some((item) => item.id === clip.id))
-      ?.clips.some((other) => !clips.some((item) => item.id === other.id) && clipsOverlap(start, end, other));
-  });
+  const overlap =
+    !ripple &&
+    clips.some((clip) => {
+      const start = edge === "in" ? requested : parseRational(clip.timeline_in.t, true);
+      const end = edge === "out" ? requested : parseRational(clip.timeline_out.t, true);
+      return project.tracks
+        .find((track) => track.clips.some((item) => item.id === clip.id))
+        ?.clips.some((other) => !clips.some((item) => item.id === other.id) && clipsOverlap(start, end, other));
+    });
   if (overlap) reason = "这里修剪不了：会和其他片段重叠";
   const blocked = raw.numerator < 0n || compare(to, requested) !== 0 || compare(lower, maximum) > 0 || overlap;
   return {

@@ -142,7 +142,13 @@ export function useTimelineGestures({
   };
   const select = (ids: string[], keys: Modifiers) => {
     const { state, update } = latest.current;
-    update({ ...state, preview: "timeline", playing: false, selected: selectionIds(state.selected, ids, keys) });
+    update({
+      ...state,
+      preview: "timeline",
+      playing: false,
+      edit_point: null,
+      selected: selectionIds(state.selected, ids, keys),
+    });
   };
   const zoom = useCallback(
     (value: number, clientX?: number) => {
@@ -226,7 +232,9 @@ export function useTimelineGestures({
     handlers: {
       onPointerDown(event: PointerEvent<HTMLElement>) {
         const target = event.target as Element;
-        if (target.closest("input,textarea,select,[contenteditable=true],.zc-ruler,.zc-playhead,.zc-track-name"))
+        if (
+          target.closest("input,textarea,select,[contenteditable=true],.zc-seam,.zc-ruler,.zc-playhead,.zc-track-name")
+        )
           return;
         const clip = target.closest<HTMLElement>(".zc-clip");
         if (clip) {
@@ -254,7 +262,7 @@ export function useTimelineGestures({
                 hits.push(item.dataset.selectionId as string);
             }
             const { state, update } = latest.current;
-            update({ ...state, selected: selectionIds(previous, hits, keys) });
+            update({ ...state, edit_point: null, selected: selectionIds(previous, hits, keys) });
           },
         });
       },

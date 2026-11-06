@@ -2,6 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { mergeKeymap } from "../../app-host/src/keymap.js";
 import { DESKTOP_AUTHOR, type ProjectView } from "../src/connection.js";
 import { applyUi, initialState } from "../src/state.js";
 import { TimelinePreview } from "../src/TimelinePreview.js";
@@ -14,7 +15,17 @@ let state = initialState();
 let project: ProjectView;
 let readOnly = false;
 const dragging = { current: false };
-const call = vi.fn(async () => ({}));
+const call = vi.fn(async (_verb: string, _request: Record<string, unknown>) => ({}));
+let prefsUi = { snap: true, magnetic: false, track_height: "m" };
+const hostCall = async (verb: string, request: Record<string, unknown>) => {
+  if (verb === "prefs_set") prefsUi = { ...prefsUi, ...(request.patch as { ui: Partial<typeof prefsUi> }).ui };
+  if (verb === "prefs_get" || verb === "prefs_set") return { prefs: { ui: prefsUi }, ...mergeKeymap("fcp", {}) };
+  return call(verb, request);
+};
+async function magneticOn() {
+  prefsUi.magnetic = true;
+  await act(async () => window.dispatchEvent(new Event("desktop-prefs-changed")));
+}
 const captures = new Map<number, HTMLElement>();
 const get = (selector: string) => host.querySelector<HTMLElement>(selector) as HTMLElement;
 const timeline = () => get(".zc-timeline");
@@ -29,7 +40,7 @@ const render = () =>
         render();
       }}
       config={undefined}
-      call={call}
+      call={hostCall}
       error={null}
       dragging={dragging}
       hideViewer
@@ -67,6 +78,7 @@ async function slider(value: number) {
   });
 }
 beforeEach(async () => {
+  prefsUi = { snap: true, magnetic: false, track_height: "m" };
   state = initialState();
   readOnly = false;
   captures.clear();
@@ -161,7 +173,7 @@ beforeEach(async () => {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
-  await act(render);
+  await act(async () => render());
   Object.defineProperty(timeline(), "clientWidth", { configurable: true, value: 500 });
   Object.defineProperty(timeline(), "clientHeight", { configurable: true, value: 200 });
 });
@@ -253,7 +265,9 @@ it("scrubs through the shared seek state at 30000/1001, with threshold and cance
   expect(state.playhead).toEqual({ at: frameTime(60n, "30000/1001") });
   await pointer(head, "lostpointercapture", 176, 55);
   expect(dragging.current).toBe(false);
-  expect(call).toHaveBeenCalledExactlyOnceWith("prefs_set", { patch: { ui: { snap: false } } });
+  expect(prefsUi.snap).toBe(false);
+  expect(state.snap).toBe(false);
+  expect(call).not.toHaveBeenCalled();
 });
 it("keeps the visible playhead fixed for slider, reset, keyboard, wheel and trackpad pinch", async () => {
   state = applyUi(state, "ui_seek", { at: frameTime(300n, "30000/1001") });
@@ -405,7 +419,7 @@ it("drags the selected media group from a later clip with grab offset and one la
       label: "移动片段",
       base_revision: "revision",
       timeline_id: "timeline",
-      ops: [{ op: "move", clip_ids: ["c1", "c2"], to: "4s" }],
+      ops: [{ op: "move", mode: "place", clip_ids: ["c1", "c2"], to: "4s" }],
     }),
   );
   expect(clip.style.opacity).toBe("");
@@ -433,7 +447,7 @@ it("previews linked audio at its relative offset and bases to on the earliest li
   expect(call).toHaveBeenCalledWith(
     "edit",
     expect.objectContaining({
-      ops: [{ op: "move", clip_ids: ["c1"], to: "2s" }],
+      ops: [{ op: "move", mode: "place", clip_ids: ["c1"], to: "2s" }],
     }),
   );
 });
@@ -482,7 +496,7 @@ it("submits the target lane to core, including disallowed cross-track groups", a
   expect(call).toHaveBeenLastCalledWith(
     "edit",
     expect.objectContaining({
-      ops: [{ op: "move", clip_ids: ["c1"], to: "3s", track_id: "v2" }],
+      ops: [{ op: "move", mode: "place", clip_ids: ["c1"], to: "3s", track_id: "v2" }],
     }),
   );
   state = { ...state, selected: ["c1", "c2"] };
@@ -493,7 +507,7 @@ it("submits the target lane to core, including disallowed cross-track groups", a
   expect(call).toHaveBeenLastCalledWith(
     "edit",
     expect.objectContaining({
-      ops: [{ op: "move", clip_ids: ["c1", "c2"], to: "3s", track_id: "v2" }],
+      ops: [{ op: "move", mode: "place", clip_ids: ["c1", "c2"], to: "3s", track_id: "v2" }],
     }),
   );
   expect(host.textContent).toContain("Track change requires a single requested clip");
@@ -518,7 +532,7 @@ it("shows nearest edge snap distance/line and obeys the toggle during a drag", a
   await pointer(clip, "pointerup", 286, 85);
   expect(call).toHaveBeenCalledWith(
     "edit",
-    expect.objectContaining({ ops: [{ op: "move", clip_ids: ["c1"], to: "99/25s" }] }),
+    expect.objectContaining({ ops: [{ op: "move", mode: "place", clip_ids: ["c1"], to: "99/25s" }] }),
   );
 });
 
@@ -556,7 +570,10 @@ it("includes scroll displacement, freezes the gesture revision, and cancels on t
   await pointer(clip, "pointerup", 240, 85);
   expect(call).toHaveBeenCalledWith(
     "edit",
-    expect.objectContaining({ base_revision: "revision", ops: [{ op: "move", clip_ids: ["c1"], to: "3s" }] }),
+    expect.objectContaining({
+      base_revision: "revision",
+      ops: [{ op: "move", mode: "place", clip_ids: ["c1"], to: "3s" }],
+    }),
   );
   expect(clip.style.left).toBe("96px");
   call.mockClear();
@@ -573,6 +590,7 @@ it.each([
   { x: 480, to: "8s", line: "384px", moved: "384px" },
   { x: 544, to: "10s", line: "480px", moved: "288px" },
 ])("inserts at the nearest hovered edge and previews gap closure and pushing: $to", async ({ x, to, line, moved }) => {
+  await magneticOn();
   const clip = get('[data-selection-id="c1"]');
   await pointer(clip, "pointerdown", 192, 85);
   await pointer(clip, "pointermove", x, 85);
@@ -593,6 +611,7 @@ it.each([
 });
 
 it("checks the final release position even without a preceding insert preview", async () => {
+  await magneticOn();
   const clip = get('[data-selection-id="c1"]');
   await pointer(clip, "pointerdown", 192, 85);
   await pointer(clip, "pointermove", 240, 85);
@@ -606,6 +625,7 @@ it("checks the final release position even without a preceding insert preview", 
 });
 
 it("blocks multiple occurrence groups with the insertion prompt", async () => {
+  await magneticOn();
   const first = project.tracks[0]?.clips[0];
   if (!first) throw new Error("fixture");
   project.tracks[0]?.clips.push({ ...first, id: "c3", timeline_in: { t: "14s" }, timeline_out: { t: "16s" } });
@@ -622,6 +642,7 @@ it("blocks multiple occurrence groups with the insertion prompt", async () => {
 });
 
 it("cancels an insertion preview on Escape and restores it after rejection", async () => {
+  await magneticOn();
   const clip = get('[data-selection-id="c1"]');
   await pointer(clip, "pointerdown", 192, 85);
   await pointer(clip, "pointermove", 480, 85);

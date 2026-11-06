@@ -10,6 +10,7 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { mergeKeymap } from "../../app-host/src/keymap.js";
 import type { UiState } from "../../app-host/src/ui.js";
 import { transcriptIds } from "../../core/src/project/id.ts";
 import { renderSubtitle as exportRenderer } from "../../exporters/src/subtitle-render.ts";
@@ -108,6 +109,10 @@ async function mount(
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
+  const timelineCall = (verb: string, request: Record<string, unknown>) =>
+    verb === "prefs_get"
+      ? Promise.resolve({ prefs: { ui: { snap: true, magnetic: true, track_height: "m" } }, ...mergeKeymap("fcp", {}) })
+      : call(verb, request);
   function Harness() {
     const [ui, update] = useState(state);
     const [current, updateView] = useState(view);
@@ -124,7 +129,7 @@ async function mount(
             project={view}
             state={ui}
             update={update}
-            call={call}
+            call={timelineCall}
             config={undefined}
             error={null}
             dragging={{ current: false }}

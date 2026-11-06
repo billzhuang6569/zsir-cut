@@ -6,6 +6,7 @@ import { URL as NodeURL } from "node:url";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mergeKeymap } from "../../app-host/src/keymap.js";
 import type { UiState } from "../../app-host/src/ui.js";
 import { App } from "../src/App.js";
 import { Icon } from "../src/components.js";
@@ -178,7 +179,18 @@ it("opens the project through inspect and receives UI commands", async () => {
       if (message.type === "ui_ready") {
         this.receive({ type: "bootstrap", project: "/interview.zcut.json", fcpIcon: null });
       } else if (message.type === "ui_result") replies.push(message);
-      else if (message.verb === "inspect") {
+      else if (message.verb === "prefs_get") {
+        queueMicrotask(() =>
+          this.receive({
+            id: message.id,
+            envelope: {
+              ok: true,
+              error: null,
+              result: { prefs: { ui: { snap: true, magnetic: true, track_height: "m" } }, ...mergeKeymap("fcp", {}) },
+            },
+          }),
+        );
+      } else if (message.verb === "inspect") {
         expect(message.request.project).toBe("/interview.zcut.json");
         if (message.request.view === "entity") inspectedTranscripts.push(message.request.id);
         queueMicrotask(() =>
@@ -339,6 +351,7 @@ it("opens the project through inspect and receives UI commands", async () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[aria-label="切割 B"]')?.click();
     });
+    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "b", metaKey: true })));
     expect(writes.at(-1)).toMatchObject({
       verb: "edit",
       request: {
