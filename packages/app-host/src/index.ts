@@ -18,6 +18,7 @@ import type { DispatchOptions, Envelope, SubtitleStyle, Verb } from "../../core/
 import { Agents } from "./agents.js";
 import { exportPreferences } from "./export-preferences.js";
 import { mediaChannel, runFfmpeg } from "./media.js";
+import { DesktopPreferences } from "./preferences.js";
 import { RecentProjects } from "./recent.js";
 import { SubtitlePass, type SubtitlePassParams } from "./subtitle-pass.js";
 import { DESKTOP_VERBS, type DesktopVerb, PANELS, SUBTITLE_VERBS, type SubtitleVerb, type UiEnvelope } from "./ui.js";
@@ -261,6 +262,8 @@ export async function startHost(
   const token = options.token ?? randomBytes(32).toString("hex");
   if (!token) throw new Error("Token must not be empty");
   const recent = new RecentProjects(options.appDataDir);
+  const prefs = new DesktopPreferences(options.appDataDir);
+  await prefs.load();
   const loadPath = async (path: string) => {
     let text: string;
     try {
@@ -455,6 +458,48 @@ export async function startHost(
           // Publish the UI only after bootstrap so background notifications cannot overtake it.
           client.send(JSON.stringify({ type: "bootstrap", project: options.project ?? null, fcpIcon }));
           ui = client;
+          if (prefs.warning) {
+            client.send(JSON.stringify(prefs.warning));
+            prefs.warning = undefined;
+          }
+          return;
+        }
+        if (typeof message.id === "string" && ["prefs_get", "prefs_set"].includes(message.verb)) {
+          if (client !== ui) throw new Error("界面未连接");
+          let envelope: Record<string, unknown>;
+          const base = {
+            verb: message.verb,
+            request_id: newId("req_"),
+            changes: [],
+          };
+          try {
+            const request =
+              message.verb === "prefs_get"
+                ? z.strictObject({}).parse(message.request ?? {})
+                : z.strictObject({ patch: z.unknown().refine((value) => value !== undefined) }).parse(message.request);
+            const reply =
+              message.verb === "prefs_get"
+                ? { status: "no_op", result: prefs.get() }
+                : await prefs.set("patch" in request ? request.patch : undefined);
+            envelope = {
+              ...base,
+              ok: true,
+              ...reply,
+              verification: { level: "none", passed: true, issues: [] },
+              error: null,
+            };
+          } catch (error) {
+            const code = error instanceof z.ZodError ? "E_VALIDATION" : "E_IO";
+            envelope = {
+              ...base,
+              ok: false,
+              status: code === "E_VALIDATION" ? "rejected" : "failed",
+              result: null,
+              verification: { level: "none", passed: false, issues: [] },
+              error: { code, message: String(error), retryable: false },
+            };
+          }
+          client.send(JSON.stringify({ type: "result", id: message.id, envelope }));
           return;
         }
         if (
@@ -737,7 +782,8 @@ export async function startHost(
       });
     if (options.project && agents) {
       const currentAgents = agents;
-      currentAgents.selected = (await currentAgents.list().catch(() => []))[0]?.agent;
+      currentAgents.selected =
+        prefs.get().prefs.default_agent ?? (await currentAgents.detect()).find((agent) => agent.available)?.agent;
       const project = options.project;
       subtitlePass = new SubtitlePass({
         project,
