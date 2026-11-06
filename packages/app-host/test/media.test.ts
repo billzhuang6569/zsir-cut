@@ -295,3 +295,45 @@ it("serves only registered voice samples with token, range, HEAD and symlink che
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+it("serves authenticated cache segments with Range and rejects missing keys", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "zcut-cache-route-"));
+  try {
+    const file = join(directory, "segment.mp4");
+    await writeFile(file, "0123456789");
+    const key = "a".repeat(32);
+    const resolveCache = vi.fn(async (project: string, requested: string) =>
+      project === "prj_test" && requested === key ? file : undefined,
+    );
+    const serve = mediaChannel(
+      undefined,
+      "secret",
+      async () => {
+        throw new Error("No project needed");
+      },
+      undefined,
+      resolveCache,
+    );
+    async function request(path: string, range = "bytes=2-5", method = "GET") {
+      const response = new Response();
+      const finished = new Promise<void>((done) => response.on("finish", done));
+      await serve({ url: path, method, headers: { range } } as IncomingMessage, response as unknown as ServerResponse);
+      await finished;
+      return response;
+    }
+    const path = `/cache/prj_test/${key}.mp4`;
+    expect((await request(path)).status).toBe(401);
+    expect(resolveCache).not.toHaveBeenCalled();
+    const response = await request(`${path}?token=secret`);
+    expect(response.status).toBe(206);
+    expect(response.headers["Content-Range"]).toBe("bytes 2-5/10");
+    expect(response.headers["Content-Type"]).toBe("video/mp4");
+    expect(response.bytes.toString()).toBe("2345");
+    expect((await request(`${path}?token=secret`, "bytes=99-")).status).toBe(416);
+    expect((await request(`${path}?token=secret`, "bytes=2-5", "HEAD")).bytes.length).toBe(0);
+    expect((await request(`/cache/prj_other/${key}.mp4?token=secret`)).status).toBe(404);
+    expect((await request(`/cache/prj_test/../../secret?token=secret`)).status).toBe(404);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

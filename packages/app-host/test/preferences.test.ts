@@ -39,9 +39,22 @@ async function connect() {
   return socket;
 }
 async function send(socket: WebSocket, verb: string, request: unknown = {}) {
-  const reply = once(socket, "message", { signal: AbortSignal.timeout(3000) });
+  const reply = new Promise<ReturnType<typeof JSON.parse>>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      socket.off("message", receive);
+      reject(new Error("Missing prefs response"));
+    }, 3000);
+    const receive = (data: Buffer) => {
+      const message = JSON.parse(data.toString());
+      if (message.id !== "prefs") return;
+      clearTimeout(timer);
+      socket.off("message", receive);
+      resolve(message);
+    };
+    socket.on("message", receive);
+  });
   socket.send(JSON.stringify({ id: "prefs", verb, request }));
-  const response = JSON.parse((await reply)[0].toString());
+  const response = await reply;
   expect(response).toMatchObject({ type: "result", id: "prefs" });
   expect(response.envelope).not.toHaveProperty("receipt");
   return response.envelope;
@@ -173,6 +186,11 @@ it("never advertises or accepts prefs verbs via MCP", async () => {
       "agents_install",
       "agents_update",
       "agents_set_default",
+      "permission_answer",
+      "preview_cache_status",
+      "preview_cache_clear",
+      "preview_cache_move",
+      "preview_cache_playhead",
     ]) {
       expect(names).not.toContain(`zcut_${verb}`);
       await expect(client.callTool({ name: `zcut_${verb}`, arguments: {} })).rejects.toThrow("Unknown tool");
