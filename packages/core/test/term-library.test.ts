@@ -20,11 +20,21 @@ import {
 } from "../src/index.ts";
 
 let home: string;
+const previewJobs: { project: string; job_id: string }[] = [];
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), "zcut-terms-"));
   vi.stubEnv("HOME", home);
 });
 afterEach(async () => {
+  // session_review returns before its preview worker's final job.json write.
+  for (const input of previewJobs.splice(0)) {
+    while (true) {
+      const status = await dispatch("job_status", input);
+      expect(status.ok, JSON.stringify(status)).toBe(true);
+      if (status.result?.state === "succeeded" || status.result?.state === "failed") break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
   vi.unstubAllEnvs();
   await rm(home, { recursive: true, force: true });
 });
@@ -264,7 +274,10 @@ it.each([
       idempotency_key: "review",
       base_revision: draft.receipt?.after,
     });
+    if (typeof reviewed.result?.preview_job === "string")
+      previewJobs.push({ project: path, job_id: reviewed.result.preview_job });
     expect(reviewed.ok).toBe(true);
+    expect(reviewed.result?.preview_job).toMatch(/^job_/);
     expect(await readFile(termLibraryPath(), "utf8")).toBe(initial);
     if (rebase) {
       const other = await dispatch("edit", {
