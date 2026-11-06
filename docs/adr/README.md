@@ -22,6 +22,11 @@
 | [0016](0016-desktop-architecture.md) | 桌面版架构：Tauri 窗口 + Node 宿主进程 | 已采纳 |
 | [0017](0017-steps-and-subtitle-overlay.md) | 步骤管理器与字幕叠层进一期 | 已采纳 |
 | [0018](0018-global-term-library.md) | 全局名词库：工程里出现两次的专有名词自动收录 | 已采纳 |
+| [0019](0019-voice-fish-audio.md) | 语音：用 fish.audio 克隆音色和生成配音 | 已采纳 |
+| [0020](0020-semantic-subtitle-pass.md) | 字幕按意思断句：识别后自动跑一轮 AI 整理 | 已采纳 |
+| [0021](0021-ai-decides-all-breaks.md) | 字幕断点全部由 AI 决定 | 已采纳 |
+| [0022](0022-subtitle-experience-capcut.md) | 字幕体验对标剪映 | 已采纳 |
+| [0023](0023-preview-cache.md) | 预览缓存：按片段生成代理段，播放时接成一条流 | 已采纳 |
 
 模板：
 

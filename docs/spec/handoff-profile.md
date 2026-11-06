@@ -87,6 +87,7 @@ profile ID 的格式是「宿主-最低宿主版本-格式-格式版本」。
 | 倒放 | 保留 | 保留 | 保留 |
 | 标记 | 保留 | 保留 | 保留 |
 | 章节层级（`level`） | 近似：章节标记不分级，`feature` 为 `marker_level` | 近似：同左 | 近似：同左 |
+| 章节描述（`description`） | 保留：写进 `<chapter-marker>` 的 `note` 属性 | 近似：写进 marker 的 `metadata.zsir.description`，Resolve 不显示，`feature` 为 `marker_description` | 近似：写进 `<marker>` 的 `<comment>`，`feature` 为 `marker_description` |
 | 字幕文字与时间 | 保留 | 近似：文字和时间不变，但需手动导入 SRT | 近似：同左 |
 | 字幕样式 | 近似：用字幕默认外观 | 近似 | 近似 |
 | 字幕的序列层例外 | 保留，写进文字 | 保留，写进 SRT | 保留，写进 SRT |

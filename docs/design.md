@@ -2,6 +2,8 @@
 
 状态：v2 · 2026-10-29 · 取代 v1（v1 是手写的 Markdown 规范）
 
+**第 3 版（2026-11-06）**：设计系统 v3「黑底浮卡」[庄Sir剪辑助手 设计系统 v3](https://claude.ai/artifact/TSP7nbUeS5MgrfEEwNjse7)，设计稿 [UI 设计工作台](https://claude.ai/artifact/2cz57o7WFBCD2kcNpEA3n8)。文件已同步到 `design/v3/`，U3.10 换皮后取代下面的 v2。组件清单：Buttons、Fields、Navigation、ListRow、Status、DecisionCard、FileBadge、Overlays（对话框、悬浮窗）、Timeline（轨道槽、片段、剪点、缓存细线）、Icons、Cover。
+
 设计规范以 Claude Design 的设计系统为准：**[庄Sir剪辑助手 设计系统](https://claude.ai/artifact/15p6YuU4UfgJEGWU6tUDtX)**。它包含：
 
 - 品牌手册（README）：三条设计哲学、文案、颜色、字体、间距、布局、图标、交互。

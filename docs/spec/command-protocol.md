@@ -154,6 +154,8 @@
 | `changes` | 实体级快照：每个改动的实体一条，含 `key`、`entity`、`before`、`after`、`before_parent`、`after_parent`、`before_index`、`after_index` |
 | `target` | `undo`、`redo`、`restore` 条目指向的修订 |
 | `label` | 这一步的说明，给人看（6.1）。写请求带了 `label` 就照抄；界面操作由界面填 |
+| `reason` | 为什么这么做，一句话（6.1），没有为 null |
+| `session_id` | `session_approve` 条目写被批准的会话 ID，草稿日志的条目写所属会话 ID，其余为 null。历史里的一步据此找回它的会话和决定 |
 | `batch` | 属于批次时为 `{id, seq, count}`，否则为 null |
 
 **实体与键**：
@@ -184,6 +186,8 @@
 产品说明见 `product.md` 6.1。一个修订就是历史面板里的一「步」。
 
 **说明**：所有写请求（`edit`、`undo`、`redo`、`restore`、`session_approve`）可以带 `label`，一句给人看的话，不超过 80 个字。Agent 发的 `edit` 必须带，缺了返回 `E_VALIDATION`；人在界面上的操作由界面生成。CLI 手工调用可以省略，日志里记为 null。
+
+**理由**：`edit` 可以带 `reason`，一句话说明为什么这么做，不超过 200 个字，超过返回 `E_VALIDATION`。只给 Agent 用，可选；人在界面上的操作不写（2026-11-06 Bill 定）。日志照抄，审方案（7.3 的 `steps`）和历史里显示。
 
 **批次参数**：`edit` 可以带 `batch: {id, seq, count}`。
 
@@ -259,6 +263,7 @@
 - `base_revision`、`draft_revision`。
 - `timeline_changes` 和 `subtitle_changes`：从会话基础到草稿当前状态的实体级差异，分开列出。剪辑域包括媒体、时间线、轨道、片段、转场、标记；字幕域包括母稿、识别运行、字词、字幕条、覆盖值、独立字幕条、样式，以及字幕轨。
 - `ops`：草稿日志里全部写入的操作原文，按顺序。
+- `steps`：草稿日志里每个还有效的写入一项（会话内被撤销的不列），按顺序：`revision`（`seq`、`id`）、`label`、`reason`、`batch`、`summary`（按实体类型数增删改个数，例如 `{"clip": {"added": 1, "removed": 2, "changed": 0}}`）、`keys`（这一步改到的实体键）。界面按它在审方案里逐步列出改动，不自己算。
 - `verification`：对草稿做 L1 校验的结果。
 - `decisions`：会话里全部决定（7.6），以及 `pending_count`。
 - `preview_job`：对草稿当前修订自动启动的 `render_preview` 任务 ID，输出到 `.zcut/<project_id>/sessions/<session_id>/preview/`。审阅的人可以直接看这段预览。
@@ -318,7 +323,7 @@
 
 | 动词 | 类型 | 作用 |
 |---|---|---|
-| `inspect` | 读 | 按视图读工程：`brief`、`timeline`、`entity`、`history` |
+| `inspect` | 读 | 按视图读工程：`brief`、`timeline`、`entity`、`history`、`session`、`chapters` |
 | `read_transcript` | 读 | 读打包后的转写文本，可按时间线投影 |
 | `validate` | 读 | 跑 L1 校验，`media: true` 时加跑 L2 |
 | `diff` | 读 | 比较两个修订，输出实体级差异 |
@@ -356,6 +361,16 @@
 | `entity` | 按 `id` 返回一个实体的原始 JSON，以及它的上级 ID |
 | `history` | 日志条目，按修订序号倒序，可选 `limit`（默认 20，最大 200）和 `before`（从这个修订之前开始） |
 | `session` | 必须带 `session_id`：会话的状态、`approval`、`intent`、`base_revision`、草稿当前修订，和全部决定 |
+| `chapters` | 章节树，见下文。可选 `timeline_id`，可带 `session_id`、`at_revision` |
+
+**`chapters` 视图**（2026-11-06 加）：大纲视图和时间轴视图读同一份数据，界面不自己算结束时间和颜色。
+
+- `result.chapters`：一级章节的数组，每项 `id`、`level`（1）、`start`、`end`、`duration`、`title`（标记的 `text`）、`description`（没有为 null）、`user_edited`（布尔）、`hue`，以及 `sections`：它下面的二级章节，字段相同（`level` 为 2，没有 `sections`）。
+- 第一个一级章节之前的二级章节放进一个 `id` 为 null、`title` 为 null 的一级项里，`start` 为第一个二级的 `at`，`hue` 为 0，其余一级从 1 起编号；没有这种情况时一级从 0 起编号。
+- `start` 是标记的 `at`。一级的 `end` 是下一个一级的 `at`，最后一个到时间线结尾（所有视频、音频轨片段出点的最大值）；二级的 `end` 是下一个二级或一级的 `at`，取较早的，最后一个到所属一级的 `end`。`duration = end − start`。时间都用 9.1 的 `{t, tc}` 形式。
+- `hue`：一级章节按顺序的编号，二级跟它所属的一级相同。界面把编号映射到设计系统的颜色，编号本身不是颜色。
+- `at` 相同的两个章节标记按 ID 排序，`duration` 为 0 的照常列出。
+- `result.total`：时间线总长。没有章节标记时 `chapters` 为空数组。
 
 **`brief` 的字段：**
 
@@ -474,8 +489,8 @@
 
 | 动词 | 参数 | 作用 |
 |---|---|---|
-| `ui_state` | 无 | 读当前界面：打开的工程、当前标签（`ai`、`media`、`chapters`、`subtitles`、`voice`）、参数区子标签、历史面板是否打开、播放头位置、选中对象、是否在播放 |
-| `ui_show_panel` | `panel`，可选 `sub` | 切换功能区标签，例如 `subtitles` 加 `sub: "style"`（字幕面板的 `sub` 取 `subtitles`、`style`；语音面板的 `sub` 取 `clone`、`generate`、`results`）；`panel` 取 `history` 时在参数区打开历史面板，不改功能区标签 |
+| `ui_state` | 无 | 读当前界面：打开的工程、当前标签（`ai`、`media`、`chapters`、`subtitles`、`voice`）、参数区子标签、`history`（`{open, viewing}`：历史悬浮窗是否打开，正在看的修订 ID 或 null）、播放头位置、选中对象、`edit_point`（选中的剪点 `{track_id, at}` 或 null）、`chapters`（`{view}`：`outline` 或 `timeline`）、是否在播放 |
+| `ui_show_panel` | `panel`，可选 `sub` | 切换功能区标签，例如 `subtitles` 加 `sub: "style"`（字幕面板的 `sub` 取 `subtitles`、`style`；语音面板的 `sub` 取 `clone`、`generate`、`results`；章节面板的 `sub` 取 `outline`、`timeline`）；`panel` 取 `history` 时打开顶栏的历史悬浮窗，不改功能区标签和右栏 |
 | `ui_seek` | `at`（序列时间）或 `id`（片段、标记、字幕条、章节） | 把播放头移到那里并滚动到可见 |
 | `ui_select` | `ids` | 选中这些对象，空数组表示取消选中 |
 | `ui_play` | `range`（可选）、`loop`（可选） | 播放一段；不带 `range` 从播放头开始 |
@@ -484,6 +499,8 @@
 这些动词不写日志、不需要 `base_revision` 和幂等键，返回结果信封，`status` 为 `no_op`。
 
 `ui_state` 还返回 `subtitle_pass`（正在跑或刚跑完的字幕整理、校对）和 `subtitle_selection`（字幕列表的选中条和正在编辑的条），见 `subtitle-editing.md` 第 2、10 节。
+
+宿主和界面之间的通道动词（偏好、Agent 管理、许可、预览缓存）和推送不是 MCP 工具，见 `desktop-host.md`。
 
 桌面版还提供两个会写工程的字幕动词 `subtitle_tidy`（AI 重新分行）和 `subtitle_proofread`（AI 校对），同样只在桌面版有，见 `subtitle-editing.md` 第 2 节。用户正在操作时（例如正在拖动），`ui_seek`、`ui_select` 等用户松手后再执行。
 
@@ -496,10 +513,11 @@
 | 操作 | 主要参数 | 说明 |
 |---|---|---|
 | `place` | `media_id`、`source_start` 和 `duration` 或 `tokens`、`at`、`video_track`、`audio_track`、`mode` | 把一段素材放上时间线，新建一个 `occurrence_id` 和对应的视音频片段。`mode` 取 `insert` 或 `overwrite`。`tokens` 按字词选段，`at` 可写 `"end"` |
-| `remove` | `clip_ids`、`linked` | 删片段，留下空隙，不合拢；要合拢用 `remove_span` |
+| `remove` | `clip_ids`、`linked`、`ripple` | 删片段；`ripple` 为 true 时后面的内容跟上来（删除并合拢），默认留下空隙 |
 | `remove_span` | `range` 或 `tokens`、`tracks`、`ripple`、`snap` | 删一段序列区间。可以用 token 范围指定，内核按投影换算成序列时间。`tracks` 默认全部轨道，保持同步。`snap` 取 `out`、`in`、`nearest`，默认 `out`，保证说过的字被完整删掉 |
 | `trim` | `clip_id`、`edge`、`to`、`ripple`、`linked` | 改入点或出点。`linked` 为 true 时同一次使用的视音频一起改；J/L cut 就是只改其中一个 |
 | `split` | `clip_id`、`at`、`new_id` | 在序列时刻切开，后半段拿新 ID |
+| `roll` | `clip_id`、`edge`、`to`、`linked` | 移动剪点：前一段出点和后一段入点一起变，总时长不变 |
 | `move` | `clip_ids`、`to`、`track_id` | 移动片段 |
 | `set_clip` | `clip_id`、`gain_db`、`enabled`、`transform`、`time_map`、`label`、`sync_broken` | 改片段属性 |
 | `add_transition` / `remove_transition` | | |
@@ -540,6 +558,7 @@
 | `E_IO` | `failed` | 读写文件失败，`retryable` 说明能否重试 |
 | `E_INTERNAL` | `failed` | 内核错误 |
 | `E_APP_NOT_RUNNING` | `failed` | 调用了界面动词（9.6），但桌面版没在运行；`retryable` 为 true |
+| `E_PERMISSION_DENIED` | `rejected` | 桌面版里 Agent 调用了需要许可的动词，用户拒绝了；`details.message` 是用户的话。只由桌面版宿主返回，见 `desktop-host.md` 第 5 节 |
 | `E_SUB_PASS_RUNNING` | `failed` | 同一份母稿上已有 AI 整理或校对在跑；`retryable` 为 true（`subtitle-editing.md` 第 2 节） |
 | `E_BATCH_OPEN` | `failed` | 同一目标上有一个批次还没执行完，这次写入要等；`retryable` 为 true（6.1） |
 | `E_BATCH_SEQ_TAKEN` | `rejected` | 同一批次的这个序号已经收到过另一个不同的请求（6.1） |
@@ -548,7 +567,7 @@
 | `E_VOICE_PAYMENT` | `failed` | fish.audio 余额不足 |
 | `E_VOICE_UPSTREAM` | `failed` | fish.audio 出错或连不上，`retryable` 说明能否重试 |
 
-警告码（写在结果信封的 `result.warnings` 数组里，每项 `{code, …}`，不改变 `status`；信封顶层没有 `warnings` 字段）：`W_FONT_FALLBACK`、`W_SUB_OVERFLOW` 见 `handoff-profile.md` 第 9 节；本文新增的还有 `W_DECISIONS_PENDING`（批准时还有没回答的决定，7.4）、`W_REPLACE_SKIPPED_LOCKED`（查找替换跳过了锁定的字幕条，见 `edit-ops.md`）、`W_FILLERS_HIDDEN`（识别后自动隐藏了水词，附个数，见 `asr-worker.md` 第 6 节）、`W_SUB_PASS_FALLBACK`（AI 字幕整理失败、这次没有写入，附原因，见 `subtitle-rules.md` 11.1）、`W_SUB_PROOFREAD_FAILED`（AI 校对失败、这次没有写入，附原因）、`W_SUB_PROOFREAD_SKIPPED`（AI 校对有几条改动没通过检查、没有采用，附条数），见 `subtitle-editing.md` 第 1、2 节；`W_TERMS_LIBRARY`（工程名词没能更新到全局名词库，附原因，见 `term-library.md` 第 3 节）、`W_VOICE_SAMPLE_TRIMMED`（克隆参考音频超过 60 秒，只用了前 60 秒，见 `voice.md` 第 3 节）。校验类警告见 `timeline-schema.md` 第 8 节。
+警告码（写在结果信封的 `result.warnings` 数组里，每项 `{code, …}`，不改变 `status`；信封顶层没有 `warnings` 字段）：`W_FONT_FALLBACK`、`W_SUB_OVERFLOW` 见 `handoff-profile.md` 第 9 节；本文新增的还有 `W_DECISIONS_PENDING`（批准时还有没回答的决定，7.4）、`W_RIPPLE_SKIPPED`（`remove` 带 `ripple` 但区间里有别的片段，没有合拢，见 `edit-ops.md`）、`W_REPLACE_SKIPPED_LOCKED`（查找替换跳过了锁定的字幕条，见 `edit-ops.md`）、`W_FILLERS_HIDDEN`（识别后自动隐藏了水词，附个数，见 `asr-worker.md` 第 6 节）、`W_SUB_PASS_FALLBACK`（AI 字幕整理失败、这次没有写入，附原因，见 `subtitle-rules.md` 11.1）、`W_SUB_PROOFREAD_FAILED`（AI 校对失败、这次没有写入，附原因）、`W_SUB_PROOFREAD_SKIPPED`（AI 校对有几条改动没通过检查、没有采用，附条数），见 `subtitle-editing.md` 第 1、2 节；`W_TERMS_LIBRARY`（工程名词没能更新到全局名词库，附原因，见 `term-library.md` 第 3 节）、`W_VOICE_SAMPLE_TRIMMED`（克隆参考音频超过 60 秒，只用了前 60 秒，见 `voice.md` 第 3 节）。校验类警告见 `timeline-schema.md` 第 8 节。
 
 ## 12. 一期不做
 
