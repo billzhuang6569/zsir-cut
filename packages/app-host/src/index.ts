@@ -19,6 +19,7 @@ import { AgentManagement, type AgentManagementOptions } from "./agent-management
 import { Agents } from "./agents.js";
 import { exportPreferences } from "./export-preferences.js";
 import { mediaChannel, runFfmpeg } from "./media.js";
+import { type HostEnvelope, Permissions, permissionDenied } from "./permissions.js";
 import { DesktopPreferences } from "./preferences.js";
 import { RecentProjects } from "./recent.js";
 import { SubtitlePass, type SubtitlePassParams } from "./subtitle-pass.js";
@@ -132,7 +133,7 @@ function uiEnvelope(verb: DesktopVerb, code?: string, message = "", retryable = 
 export function createMcpServer(
   callUi: (verb: DesktopVerb, input: unknown) => Promise<UiEnvelope> = async (verb) =>
     uiEnvelope(verb, "E_APP_NOT_RUNNING", "桌面界面未连接", true),
-  kernel: (verb: Verb, input: unknown) => Promise<Envelope> = (verb, input) => dispatch(verb, input),
+  kernel: (verb: Verb, input: unknown) => Promise<HostEnvelope> = (verb, input) => dispatch(verb, input),
 ): Server {
   const mcp = new Server({ name: "zsir-cut-desktop", version: "0.0.0" }, { capabilities: { tools: {} } });
   mcp.setRequestHandler(ListToolsRequestSchema, () => ({
@@ -150,7 +151,7 @@ export function createMcpServer(
   mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (!request.params.name.startsWith("zcut_")) throw new Error(`Unknown tool: ${request.params.name}`);
     const verb = request.params.name.slice("zcut_".length);
-    let envelope: Envelope | UiEnvelope;
+    let envelope: HostEnvelope | UiEnvelope;
     if (DESKTOP_VERBS.includes(verb as DesktopVerb)) {
       const parsed = uiSchemas[verb as DesktopVerb].safeParse(request.params.arguments ?? {});
       envelope = parsed.success
@@ -360,6 +361,9 @@ export async function startHost(
     },
     options.agentOptions,
   );
+  const permissions = new Permissions(() =>
+    ui?.readyState === WebSocket.OPEN ? (request) => ui?.send(JSON.stringify(request)) : undefined,
+  );
   const pending = new Map<string, { resolve: (value: UiEnvelope) => void; timer: NodeJS.Timeout; verb: DesktopVerb }>();
   const disconnected = () => {
     for (const [key, item] of pending) {
@@ -392,13 +396,26 @@ export async function startHost(
   };
   const agentKernel = async (verb: Verb, input: unknown) => {
     if (!options.project) throw new Error("No current project");
+    const projectPath = options.project;
+    const epoch = projectEpoch;
     const request = input as Record<string, unknown>;
+    const global = ["record_handoff_check", "terms_edit", "voice_edit", "voice_clone"].includes(verb);
     if (
-      typeof request.project !== "string" ||
-      resolve(dirname(resolve(options.project)), request.project) !== resolve(options.project)
+      !global &&
+      (typeof request.project !== "string" ||
+        resolve(dirname(resolve(projectPath)), request.project) !== resolve(projectPath))
     )
       throw new Error("Agent must use the current project");
-    return kernel(verb, { ...request, project: options.project });
+    const message = await permissions.request(
+      verb,
+      request,
+      projectPath,
+      () => loadPath(projectPath),
+      agents?.activeChat,
+    );
+    if (message !== null) return permissionDenied(verb, message);
+    if (epoch !== projectEpoch) return permissionDenied(verb, "工程已切换");
+    return kernel(verb, global ? request : { ...request, project: projectPath });
   };
   const callUi = async (verb: DesktopVerb, input: unknown): Promise<UiEnvelope> => {
     if (!ui || ui.readyState !== WebSocket.OPEN) return uiEnvelope(verb, "E_APP_NOT_RUNNING", "桌面界面未连接", true);
@@ -467,6 +484,7 @@ export async function startHost(
           // Publish the UI only after bootstrap so background notifications cannot overtake it.
           client.send(JSON.stringify({ type: "bootstrap", project: options.project ?? null, fcpIcon }));
           ui = client;
+          permissions.replay();
           if (prefs.warning) {
             client.send(JSON.stringify(prefs.warning));
             prefs.warning = undefined;
@@ -485,7 +503,7 @@ export async function startHost(
             client.send(JSON.stringify({ type: "result", id: message.id, envelope }));
           return;
         }
-        if (typeof message.id === "string" && ["prefs_get", "prefs_set"].includes(message.verb)) {
+        if (typeof message.id === "string" && ["prefs_get", "prefs_set", "permission_answer"].includes(message.verb)) {
           if (client !== ui) throw new Error("界面未连接");
           let envelope: Record<string, unknown>;
           const base = {
@@ -497,11 +515,17 @@ export async function startHost(
             const request =
               message.verb === "prefs_get"
                 ? z.strictObject({}).parse(message.request ?? {})
-                : z.strictObject({ patch: z.unknown().refine((value) => value !== undefined) }).parse(message.request);
+                : message.verb === "permission_answer"
+                  ? message.request
+                  : z
+                      .strictObject({ patch: z.unknown().refine((value) => value !== undefined) })
+                      .parse(message.request);
             const reply =
               message.verb === "prefs_get"
                 ? { status: "no_op", result: prefs.get() }
-                : await prefs.set("patch" in request ? request.patch : undefined);
+                : message.verb === "permission_answer"
+                  ? await permissions.answer(request)
+                  : await prefs.set("patch" in request ? request.patch : undefined);
             envelope = {
               ...base,
               ok: true,
@@ -722,6 +746,7 @@ export async function startHost(
             else if (message.verb === "chat_send")
               result = await agents.send(request.agent, request.text, request.chat_id);
             else if (message.verb === "chat_stop") {
+              permissions.denyChat(agents.activeChat);
               await agents.stop();
               result = {};
             } else throw new Error("Unknown chat request");
@@ -780,6 +805,7 @@ export async function startHost(
   const bind = async (path: string | null) => {
     const next = path ? await loadPath(path) : undefined;
     if (path && next) await recent.add(path, next.name);
+    permissions.clear();
     await subtitlePass?.stop();
     subtitlePass = undefined;
     await agents?.stop();
@@ -840,6 +866,7 @@ export async function startHost(
     token,
     mcp,
     close: async () => {
+      permissions.clear();
       await subtitlePass?.stop();
       await agents?.stop();
       await Promise.all([...httpServers].map((server) => server.close()));
