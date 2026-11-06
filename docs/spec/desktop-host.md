@@ -199,7 +199,7 @@ Agent 通过宿主的 MCP 调用会碰到工程外面的动词时，宿主先停
 - 每个**启用的视频片段**一段（纯音频片段和静帧图片不做缓存，播放时照旧）。
 - 键：`sha256(素材指纹 + "|" + 源入点 + "|" + 源出点 + "|" + 速度 + "|" + 画质 + "|" + "v1")` 的前 32 个十六进制字符。源入点、源出点用规范时间字符串；速度无时间映射为 `"1"`，有时间映射为映射的规范 JSON。
 - 文件：`<缓存目录>/<project_id>/<键>.mp4`，写临时文件再改名。
-- 编码：`ffmpeg -ss <源入点> -t <时长> -i <素材>`，视频 `h264_videotoolbox`（没有时 `libx264 -preset veryfast`），短边按画质（540、720、1080），关键帧间隔 0.5 秒（`-g` 按素材帧率算），声音 AAC 48 kHz 单声道，`-movflags +frag_keyframe+empty_moov+default_base_moof`，`-map_metadata -1 -fflags +bitexact`，不写时间戳。变速和倒放按片段的映射生成，画面和预览看到的一致。
+- 编码：`ffmpeg -ss <源入点> -t <时长> -i <素材>`，视频 `h264_videotoolbox`（没有时 `libx264 -preset veryfast`），短边按画质（540、720、1080），关键帧间隔 0.5 秒（`-g` 按素材帧率算），声音 AAC 48 kHz 单声道，`-movflags +frag_keyframe+empty_moov+default_base_moof`，`-map_metadata -1 -fflags +bitexact`，不写时间戳。不要求两次编出的字节相同（硬件编码器做不到），只要求键相同。变速和倒放按片段的映射生成，画面和预览看到的一致。
 - 索引：`<缓存目录>/<project_id>/index.json`：`{project_path, last_opened, segments: {键: {bytes}}}`。
 
 ### 6.2 队列
@@ -207,7 +207,8 @@ Agent 通过宿主的 MCP 调用会碰到工程外面的动词时，宿主先停
 - 打开工程且 `auto` 为 true 时开始；工程变了（`project_changed`）后重新算需要哪些键，已有的不重做。
 - 顺序：播放头所在片段，然后往后，然后往前。同时只编码一段。
 - `pause_on_battery` 为 true 且在用电池时暂停（用 `pmset -g batt` 判断，查不到按插电处理）。
-- 缓存目录不存在或写不进去时不报错：所有段按 `missing`，队列停下，状态里 `directory_ok: false`。
+- 缓存目录不存在时先建它（含上级目录），建不了才算不可用。例外：路径在 `/Volumes/<卷名>/` 下而这个卷没挂上（外接盘拔了），不建，免得在启动盘上建出一个同名目录（2026-11-06 补）。
+- 缓存目录不可用或写不进去时不报错：所有段按 `missing`，队列停下，状态里 `directory_ok: false`；卷重新挂上后下一次状态检查恢复。
 
 ### 6.3 上限与清理
 
