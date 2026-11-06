@@ -71,7 +71,16 @@ async function mount(
     if (verb === "export")
       return request.dry_run
         ? (options.report ?? {
-            items: options.losses ? [{ severity: options.losses, consequence: "变速需要近似" }] : [],
+            items: options.losses
+              ? [
+                  {
+                    feature: "speed_segmented",
+                    status: "approximated",
+                    severity: options.losses,
+                    consequence: "变速需要近似",
+                  },
+                ]
+              : [],
           })
         : { job_id: "job_one" };
     if (verb === "job_status") {
@@ -432,25 +441,48 @@ it("selects a destination before exporting and lays out the summary, report and 
   expect(h.container.querySelector(".zc-export-footer .is-primary")?.textContent).toContain("导出到 DaVinci Resolve");
 });
 
-it("labels report dispositions independently of severity and reads preserved counts without showing feature IDs", async () => {
+it("groups four marker level losses into exactly one capability row", async () => {
   const h = await mount({
     report: {
-      summary: { preserved_by_feature: { clip_cut: 3, subtitle_text_timing: 2 } },
+      items: Array.from({ length: 4 }, (_, index) => ({
+        entity_id: `mrk_${index}`,
+        feature: "marker_level",
+        status: "approximated",
+        severity: "warning",
+        consequence: "目标格式的章节标记不区分层级",
+      })),
+    },
+  });
+  await h.click("选择 Final Cut Pro");
+  const rows = h.container.querySelectorAll(".zc-export-losses .zc-row");
+  expect(rows).toHaveLength(1);
+  expect(rows[0]?.textContent).toBe("章节层级 4 个目标格式的章节标记不区分层级近似");
+  expect(rows[0]?.querySelector("small")?.textContent).toBe("目标格式的章节标记不区分层级");
+  expect(rows[0]?.querySelector(".zc-meta")?.textContent).toBe("近似");
+});
+
+it("groups by feature and status, puts errors first and reads preserved counts without showing feature IDs", async () => {
+  const h = await mount({
+    report: {
+      summary: { preserved_by_feature: { clip_cut: 3, subtitle_text_timing: 67, marker: 0, future_feature: 1 } },
       items: [
-        { status: "approximated", severity: "info", consequence: "时间需要对齐到帧" },
-        { status: "unsupported", severity: "warning", consequence: "字幕样式无法带入" },
-        { status: "baked", severity: "info", consequence: "透明字幕已渲染" },
+        { feature: "clip_cut", status: "approximated", severity: "info", consequence: "时间需要对齐到帧" },
+        { feature: "subtitle_style", status: "unsupported", severity: "warning", consequence: "字幕样式无法带入" },
+        { feature: "subtitle_style", status: "baked", severity: "info", consequence: "透明字幕已渲染" },
+        { feature: "subtitle_style", status: "unsupported", severity: "error", consequence: "字幕动画无法带入" },
       ],
     },
   });
   await h.click("选择 Final Cut Pro");
   const rows = [...h.container.querySelectorAll(".zc-export-losses .zc-row")].map((row) => row.textContent);
   expect(rows).toEqual([
-    "时间需要对齐到帧近似",
-    "字幕样式无法带入带不过去",
-    "透明字幕已渲染近似 · 已烘焙",
-    "剪辑点与顺序 · 3 项保留",
-    "字幕文字与时间 · 2 项保留",
+    "字幕样式 2 项字幕样式无法带入；字幕动画无法带入带不过去",
+    "剪辑点与顺序 1 项时间需要对齐到帧近似",
+    "字幕样式 1 项透明字幕已渲染近似 · 已烘焙",
+    "剪辑点与顺序 3 项原样",
+    "67 条字幕原样",
+    "其他内容 1 项原样",
   ]);
-  expect(h.container.textContent).not.toMatch(/clip_cut|subtitle_text_timing/);
+  expect(h.container.querySelector(".zc-export-losses .zc-row .is-danger")).not.toBeNull();
+  expect(h.container.textContent).not.toMatch(/clip_cut|subtitle_text_timing|subtitle_style|future_feature/);
 });

@@ -48,7 +48,12 @@ const destinations = [
   },
 ] as const;
 type Destination = (typeof destinations)[number];
-type Loss = { severity: string; consequence: string; status?: "approximated" | "baked" | "unsupported" };
+type Loss = {
+  feature: string;
+  severity: string;
+  consequence: string;
+  status: "approximated" | "baked" | "unsupported";
+};
 type Report = { items: Loss[]; summary?: { preserved_by_feature: Record<string, number> } };
 const featureNames: Record<string, string> = {
   clip_cut: "剪辑点与顺序",
@@ -71,6 +76,26 @@ const featureNames: Record<string, string> = {
   ext_data: "扩展信息",
   media: "素材引用",
 };
+function featureLabel(feature: string, count: number) {
+  return feature === "subtitle_text_timing"
+    ? `${count} 条字幕`
+    : `${featureNames[feature] ?? "其他内容"} ${count} ${feature.startsWith("marker") ? "个" : "项"}`;
+}
+function groupLosses(items: Loss[]) {
+  const groups = new Map<string, Loss & { count: number; consequences: Set<string> }>();
+  for (const item of items) {
+    const key = `${item.feature}-${item.status}`;
+    const group = groups.get(key);
+    if (group) {
+      group.count++;
+      group.consequences.add(item.consequence);
+      if (item.severity === "error") group.severity = "error";
+    } else {
+      groups.set(key, { ...item, count: 1, consequences: new Set([item.consequence]) });
+    }
+  }
+  return [...groups.values()].sort((a, b) => Number(b.severity === "error") - Number(a.severity === "error"));
+}
 type Call = (verb: string, request: Record<string, unknown>) => Promise<unknown>;
 type Result = { path: string; done: boolean; progress: number; error?: string; files?: string[] };
 const logos = {
@@ -703,16 +728,17 @@ export function ExportPanel({
                   {!report ? (
                     <p className="zc-hint">{checks[destination.key] ?? "正在检查交接损失…"}</p>
                   ) : report.items.length ? (
-                    report.items.map((loss, index) => (
-                      <div className="zc-row" key={`${index}-${loss.consequence}`}>
+                    groupLosses(report.items).map((loss) => (
+                      <div className="zc-row" key={`${loss.feature}-${loss.status}`}>
                         <span
                           className={`zc-dot ${loss.status === "unsupported" || loss.severity === "error" ? "is-danger" : "is-attention"}`}
                         />
-                        <span className="text">{loss.consequence}</span>
+                        <span className="text">
+                          {featureLabel(loss.feature, loss.count)}
+                          <small>{[...loss.consequences].join("；")}</small>
+                        </span>
                         <span className="zc-meta">
-                          {loss.status === "unsupported" || (!loss.status && loss.severity === "error")
-                            ? "带不过去"
-                            : "近似"}
+                          {loss.status === "unsupported" ? "带不过去" : "近似"}
                           {loss.status === "baked" ? " · 已烘焙" : ""}
                         </span>
                       </div>
@@ -728,10 +754,8 @@ export function ExportPanel({
                     .map(([feature, count]) => (
                       <div className="zc-row" key={feature}>
                         <span className="zc-dot is-approved" />
-                        <span className="text">
-                          {featureNames[feature] ?? "其他内容"} · {count} 项
-                        </span>
-                        <span className="zc-meta">保留</span>
+                        <span className="text">{featureLabel(feature, count)}</span>
+                        <span className="zc-meta">原样</span>
                       </div>
                     ))}
                 </section>

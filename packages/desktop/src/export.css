@@ -221,6 +221,11 @@
 .zc-export-losses .text {
   flex: 1;
 }
+.zc-export-losses .text small {
+  display: block;
+  color: var(--text-3);
+  font-size: var(--label-size);
+}
 .zc-export-losses .zc-meta {
   flex: none;
   color: var(--text-3);
