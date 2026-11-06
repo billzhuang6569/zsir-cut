@@ -21,7 +21,6 @@ import {
   printRational,
   seekTarget,
   sourceAt,
-  timecode,
 } from "./timeline.js";
 import "./export.css";
 
@@ -49,8 +48,54 @@ const destinations = [
   },
 ] as const;
 type Destination = (typeof destinations)[number];
-type Loss = { severity: string; consequence: string };
-type Report = { items: Loss[] };
+type Loss = {
+  feature: string;
+  severity: string;
+  consequence: string;
+  status: "approximated" | "baked" | "unsupported";
+};
+type Report = { items: Loss[]; summary?: { preserved_by_feature: Record<string, number> } };
+const featureNames: Record<string, string> = {
+  clip_cut: "剪辑点与顺序",
+  timecode: "时间码",
+  av_sync: "音画同步",
+  clip_enabled: "片段开关",
+  gain: "音量",
+  transform: "画面变换",
+  cross_dissolve: "叠化转场",
+  speed_constant: "固定变速",
+  speed_segmented: "分段变速",
+  speed_smooth: "平滑变速",
+  reverse: "倒放",
+  marker: "标记",
+  marker_level: "章节层级",
+  marker_description: "章节描述",
+  subtitle_text_timing: "字幕文字与时间",
+  subtitle_style: "字幕样式",
+  subtitle_override: "字幕单条样式",
+  ext_data: "扩展信息",
+  media: "素材引用",
+};
+function featureLabel(feature: string, count: number) {
+  return feature === "subtitle_text_timing"
+    ? `${count} 条字幕`
+    : `${featureNames[feature] ?? "其他内容"} ${count} ${feature.startsWith("marker") ? "个" : "项"}`;
+}
+function groupLosses(items: Loss[]) {
+  const groups = new Map<string, Loss & { count: number; consequences: Set<string> }>();
+  for (const item of items) {
+    const key = `${item.feature}-${item.status}`;
+    const group = groups.get(key);
+    if (group) {
+      group.count++;
+      group.consequences.add(item.consequence);
+      if (item.severity === "error") group.severity = "error";
+    } else {
+      groups.set(key, { ...item, count: 1, consequences: new Set([item.consequence]) });
+    }
+  }
+  return [...groups.values()].sort((a, b) => Number(b.severity === "error") - Number(a.severity === "error"));
+}
 type Call = (verb: string, request: Record<string, unknown>) => Promise<unknown>;
 type Result = { path: string; done: boolean; progress: number; error?: string; files?: string[] };
 const logos = {
@@ -335,28 +380,6 @@ export function ExportPanel({
     setTrack(overlay?.subtitle_track_id ?? project.subtitleTracks?.[0]?.id ?? "");
     setOutput(overlay?.output_path ?? "");
   };
-  const location = (key: string) => (
-    <div className="zc-export-location">
-      {isTauri() ? (
-        <Button
-          disabled={Boolean(settings.active)}
-          onClick={() => void choose(key).catch(() => setError("无法选择保存位置"))}
-        >
-          更改保存位置
-        </Button>
-      ) : (
-        <input
-          className="zc-input"
-          aria-label={`${key === "direct" ? "直接导出" : destinations.find((d) => d.key === key)?.name}保存位置`}
-          placeholder="导出文件夹的绝对路径"
-          value={paths[key] ?? ""}
-          disabled={Boolean(settings.active)}
-          onChange={(event) => setPaths({ ...paths, [key]: event.target.value })}
-        />
-      )}
-      {isTauri() && paths[key] && <span className="zc-export-path">{paths[key]}</span>}
-    </div>
-  );
   const status = (key: string) => {
     const result = results[key];
     if (!result) return null;
@@ -416,11 +439,27 @@ export function ExportPanel({
           .replace(/0$/, "")}`
       : ""
   }`;
+  const selected = destinations.find((destination) => destination.key === settings.sub);
+  const selectedKey =
+    selected?.key ?? (settings.sub === "overlays" ? "overlays" : settings.sub === "direct" ? "direct" : "fcp");
+  const destination = selected ?? destinations[0];
+  const title = selectedKey === "direct" ? "只要文件" : selectedKey === "overlays" ? "字幕叠层" : destination.name;
+  const report = reports[destination.key];
+  const exportSelected = () => {
+    if (selectedKey === "overlays") {
+      begin();
+      return;
+    }
+    if (selectedKey === "direct") {
+      void run("direct", [...(settings.srt ? ["direct-srt"] : []), ...(settings.wav ? ["direct-audio-wav"] : [])]);
+    } else if (report?.items.some((item) => item.severity === "error")) setConfirm(destination);
+    else void run(destination.key, [destination.profile]);
+  };
   if (!settings.open) return null;
   return (
-    <div className="zc-export-backdrop">
+    <div className="zc-scrim zc-export-backdrop">
       <div
-        className="zc-export-panel"
+        className="zc-dialog zc-export-panel"
         role="dialog"
         aria-modal="true"
         aria-label="导出"
@@ -428,200 +467,210 @@ export function ExportPanel({
         ref={dialog}
         onKeyDown={(event) => event.stopPropagation()}
       >
-        <header>
-          <h2>导出</h2>
+        <header className="zc-export-header">
+          <div>
+            <h2>导出</h2>
+            <p className="zc-hint">把这一版交给剪辑软件继续做，或者只存成文件。</p>
+          </div>
           <IconButton icon="close" label="关闭导出" onClick={() => change({ open: false })} />
         </header>
-        <section className="zc-export-summary" aria-label="成片信息">
-          <div className="zc-export-summary-main">
-            <div className="zc-export-thumbnail">
-              {poster ? <img src={poster} alt="成片缩略图" /> : <Icon name="media" />}
-              <span>{chapterTime(project.duration.t).padStart(5, "0")}</span>
-            </div>
-            <div className="zc-export-summary-title">
-              <strong>{project.name}</strong>
-              <span className="zc-export-saved">
-                <span className="zc-dot is-approved" />第 {project.revision.seq} 版 · 已保存
-              </span>
-            </div>
-          </div>
-          <div className="zc-export-summary-chips">
-            <span className="zc-chip">
-              <Icon name="clock" size={12} />
-              {seconds / 60n > 0n ? `${seconds / 60n} 分 ` : ""}
-              {String(seconds % 60n)} 秒
-            </span>
-            <span className="zc-chip">
-              <Icon name="media" size={12} />
-              {project.format?.height ?? 1080}p
-            </span>
-            <span className="zc-chip">
-              <Icon name="play" size={12} />
-              {fps} 帧/秒
-            </span>
-            <span className="zc-chip">
-              <Icon name="subtitle" size={12} />
-              {project.cues.length} 条字幕
-            </span>
-          </div>
-        </section>
         {error && <p role="alert">{error}</p>}
-        <fieldset className="zc-export-graph" disabled={Boolean(editing || confirm)} aria-label="导出去处与预览">
-          <div className="zc-export-preview">
-            <h3>成片预览</h3>
-            <div
-              className="zc-picture"
-              style={{ aspectRatio: `${project.format?.width ?? 1920} / ${project.format?.height ?? 1080}` }}
-              role="slider"
-              tabIndex={0}
-              aria-label="快速浏览成片"
-              aria-valuemin={0}
-              aria-valuemax={Number(frameCount)}
-              aria-valuenow={Number(frameAt(at, project.edit_rate))}
-              onMouseMove={(event) => {
-                const rect = event.currentTarget.getBoundingClientRect();
-                const fraction = BigInt(
-                  Math.round(Math.max(0, Math.min(1, (event.clientX - rect.left) / Math.max(1, rect.width))) * 10000),
-                );
-                setAt(frameTime(((frameCount > 0n ? frameCount - 1n : 0n) * fraction) / 10000n, project.edit_rate));
-              }}
-              onKeyDown={(event) => {
-                if (["ArrowLeft", "ArrowRight"].includes(event.key)) {
-                  event.preventDefault();
-                  const next = frameAt(at, project.edit_rate) + (event.key === "ArrowLeft" ? -1n : 1n);
-                  setAt(
-                    frameTime(next >= frameCount ? (frameCount > 0n ? frameCount - 1n : 0n) : next, project.edit_rate),
-                  );
-                }
-              }}
-            >
-              {src ? <img src={src} alt="成片画面" /> : <span className="zc-muted">暂无画面</span>}
-              <SubtitleCanvas
-                at={at}
-                cues={project.cues.filter((cue) => contains(cue.start, cue.end, at))}
-                styles={project.styles}
-                format={project.format}
-              />
-            </div>
-            <span>{timecode(at, project)}</span>
-            <p>
-              时长 {timecode(project.duration.t, { ...project, start_timecode: "00:00:00:00" })} ·{" "}
-              {project.format?.width ?? 1920} × {project.format?.height ?? 1080} · {project.edit_rate} 帧/秒
-            </p>
-          </div>
-          <div className="zc-export-destinations">
-            {destinations.map((destination) => {
-              const losses =
-                reports[destination.key]?.items.filter((item) =>
-                  ["warn", "warning", "error"].includes(item.severity),
-                ) ?? [];
-              const logo = destination.key === "fcp" ? fcpIcon : logos[destination.key];
-              return (
-                <section className="zc-export-node" key={destination.key} data-destination={destination.key}>
+        <fieldset className="zc-export-body" disabled={Boolean(editing || confirm)} aria-label="导出去处与预览">
+          <div className="zc-export-left">
+            <h3>
+              <span className="zc-export-step">1</span>交给谁
+            </h3>
+            <div className="zc-export-destinations">
+              {destinations.map((item) => {
+                const losses = reports[item.key]?.items ?? [];
+                const logo = item.key === "fcp" ? fcpIcon : logos[item.key];
+                return (
                   <button
                     type="button"
-                    className="zc-dest"
-                    title={destination.note}
-                    aria-label={`导出到 ${destination.name}`}
-                    disabled={Boolean(settings.active) || !reports[destination.key]}
-                    onClick={() =>
-                      losses.some((item) => item.severity === "error")
-                        ? setConfirm(destination)
-                        : void run(destination.key, [destination.profile])
-                    }
+                    key={item.key}
+                    className={`zc-dest${selectedKey === item.key ? " is-selected" : ""}`}
+                    aria-label={`选择 ${item.name}`}
+                    aria-pressed={selectedKey === item.key}
+                    disabled={Boolean(settings.active)}
+                    onClick={() => change({ sub: item.key })}
                   >
                     {logo ? (
-                      <img className="zc-app-logo" src={logo} alt="" width={40} height={40} />
+                      <img className="zc-app-logo" src={logo} alt="" />
                     ) : (
-                      <span className="zc-app-tile">剪辑</span>
-                    )}
-                    <span className="zc-dest-name">
-                      <strong>{destination.name}</strong>
-                      {losses.length > 0 && (
-                        <span
-                          className="zc-warn"
-                          role="img"
-                          aria-label="导出有损失"
-                          title={losses.map((loss) => loss.consequence).join("\n")}
-                        >
-                          !
-                        </span>
-                      )}
-                    </span>
-                    <span className="zc-dest-files">
-                      {destination.files.map((ext) => (
-                        <FileIcon key={ext} ext={ext} />
-                      ))}
-                    </span>
-                    <Icon name="chevron" />
-                  </button>
-                  <small>
-                    {checks[destination.key] ?? (!reports[destination.key] ? "正在检查交接损失…" : destination.note)}
-                  </small>
-                  {location(destination.key)}
-                  {status(destination.key)}
-                </section>
-              );
-            })}
-            <section className="zc-export-node" data-destination="direct">
-              <button
-                type="button"
-                className="zc-dest"
-                aria-label="直接导出"
-                disabled={Boolean(settings.active)}
-                onClick={() =>
-                  void run("direct", [
-                    ...(settings.srt ? ["direct-srt"] : []),
-                    ...(settings.wav ? ["direct-audio-wav"] : []),
-                  ])
-                }
-              >
-                <span className="zc-app-tile">
-                  <Icon name="export" />
-                </span>
-                <strong>直接导出</strong>
-                <span className="zc-dest-files">
-                  {settings.srt && <FileIcon ext="srt" />}
-                  {settings.wav && <FileIcon ext="wav" />}
-                </span>
-                <Icon name="chevron" />
-              </button>
-              <div className="zc-files">
-                {(["srt", "wav"] as const).map((ext) => (
-                  <button
-                    type="button"
-                    key={ext}
-                    className={`zc-file-toggle ${settings[ext] ? "is-on" : ""}`}
-                    aria-label={`导出 ${ext.toUpperCase()}`}
-                    aria-pressed={settings[ext]}
-                    disabled={Boolean(settings.active) || (settings[ext] && !settings[ext === "srt" ? "wav" : "srt"])}
-                    onClick={() => change({ [ext]: !settings[ext], sub: "direct" })}
-                  >
-                    <FileIcon ext={ext} />
-                    {settings[ext] && (
-                      <span className="zc-file-check">
-                        <Icon name="check" size={10} />
+                      <span className="zc-app-tile">
+                        <Icon name="media" />
                       </span>
                     )}
+                    <span className="zc-dest-name">
+                      <strong>{item.name}</strong>
+                      <small>{item.note}</small>
+                    </span>
+                    <span
+                      className={`zc-dot ${checks[item.key] || losses.some((loss) => loss.severity === "error") ? "is-danger" : losses.length ? "is-attention" : reports[item.key] ? "is-approved" : ""}`}
+                      role="img"
+                      aria-label={losses.length ? "导出有损失" : reports[item.key] ? "检查完成" : "等待检查"}
+                      title={
+                        checks[item.key] ??
+                        (losses.map((loss) => loss.consequence).join("\n") ||
+                          (reports[item.key] ? "全部原样" : "正在检查交接损失…"))
+                      }
+                    />
                   </button>
-                ))}
-                <span className="zc-export-later">
-                  <FileIcon ext="mp4">二期</FileIcon>
+                );
+              })}
+              {[
+                ["overlays", "字幕叠层", "只有字幕的透明视频，放在最上层", "subtitle"],
+                ["direct", "只要文件", "字幕 SRT、音频 WAV", "file"],
+              ].map(([key, name, note, icon]) => (
+                <button
+                  type="button"
+                  className={`zc-dest${selectedKey === key ? " is-selected" : ""}`}
+                  key={key}
+                  aria-pressed={selectedKey === key}
+                  disabled={Boolean(settings.active)}
+                  onClick={() => change({ sub: key ?? null })}
+                >
+                  <span className="zc-app-tile">
+                    <Icon name={icon ?? "file"} />
+                  </span>
+                  <span className="zc-dest-name">
+                    <strong>{name}</strong>
+                    <small>{note}</small>
+                  </span>
+                </button>
+              ))}
+            </div>
+            <section className="zc-card zc-export-summary" aria-label="成片信息">
+              <div className="zc-export-summary-main">
+                <div
+                  className="zc-picture zc-export-thumbnail"
+                  style={{ aspectRatio: `${project.format?.width ?? 1920} / ${project.format?.height ?? 1080}` }}
+                  role="slider"
+                  tabIndex={0}
+                  aria-label="快速浏览成片"
+                  aria-valuemin={0}
+                  aria-valuemax={Number(frameCount)}
+                  aria-valuenow={Number(frameAt(at, project.edit_rate))}
+                  onMouseMove={(event) => {
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    const fraction = BigInt(
+                      Math.round(
+                        Math.max(0, Math.min(1, (event.clientX - rect.left) / Math.max(1, rect.width))) * 10000,
+                      ),
+                    );
+                    setAt(frameTime(((frameCount > 0n ? frameCount - 1n : 0n) * fraction) / 10000n, project.edit_rate));
+                  }}
+                  onKeyDown={(event) => {
+                    if (["ArrowLeft", "ArrowRight"].includes(event.key)) {
+                      event.preventDefault();
+                      const next = frameAt(at, project.edit_rate) + (event.key === "ArrowLeft" ? -1n : 1n);
+                      setAt(
+                        frameTime(
+                          next >= frameCount ? (frameCount > 0n ? frameCount - 1n : 0n) : next,
+                          project.edit_rate,
+                        ),
+                      );
+                    }
+                  }}
+                >
+                  {(src ?? poster) ? <img src={src ?? poster} alt="成片缩略图" /> : <Icon name="media" />}
+                  <span>{chapterTime(project.duration.t).padStart(5, "0")}</span>
+                  <SubtitleCanvas
+                    at={at}
+                    cues={project.cues.filter((cue) => contains(cue.start, cue.end, at))}
+                    styles={project.styles}
+                    format={project.format}
+                  />
+                </div>
+                <div className="zc-export-summary-title">
+                  <strong>{project.name}</strong>
+                  <span className="zc-export-saved">
+                    <span className="zc-dot is-approved" />第 {project.revision.seq} 版 · 已保存
+                  </span>
+                </div>
+              </div>
+              <div className="zc-export-summary-chips">
+                <span className="zc-chip is-sm">
+                  <Icon name="clock" size={12} />
+                  {seconds / 60n > 0n ? `${seconds / 60n} 分 ` : ""}
+                  {String(seconds % 60n)} 秒
+                </span>
+                <span className="zc-chip is-sm">
+                  <Icon name="media" size={12} />
+                  {project.format?.height ?? 1080}p
+                </span>
+                <span className="zc-chip is-sm">
+                  <Icon name="play" size={12} />
+                  {fps} 帧/秒
+                </span>
+                <span className="zc-chip is-sm">
+                  <Icon name="subtitle" size={12} />
+                  {project.cues.length} 条字幕
                 </span>
               </div>
-              {location("direct")}
-              {status("direct")}
             </section>
-            <section className="zc-export-node" data-destination="overlays">
-              <div className="zc-dest zc-overlay-heading">
-                <span className="zc-app-tile">
-                  <Icon name="subtitle" size={24} />
-                </span>
-                <strong>字幕叠层</strong>
-                <span className="zc-dest-files">
-                  <FileIcon ext="mov" />
-                </span>
+          </div>
+          <div className="zc-export-right" data-destination={selectedKey}>
+            <h3>
+              <span className="zc-export-step">2</span>交给 {title} 会得到什么
+            </h3>
+            <div className="zc-card zc-export-file-card">
+              <div className="zc-files">
+                {(selectedKey === "overlays"
+                  ? ["mov"]
+                  : selectedKey === "direct"
+                    ? [...(settings.srt ? ["srt"] : []), ...(settings.wav ? ["wav"] : [])]
+                    : destination.files
+                ).map((ext) => (
+                  <FileIcon key={ext} ext={ext} />
+                ))}
               </div>
+              <div>
+                <strong>
+                  {project.name}
+                  {selectedKey === "overlays"
+                    ? ".mov"
+                    : selectedKey === "direct"
+                      ? " · 字幕与音频"
+                      : `.${destination.files[0]}`}
+                </strong>
+                <p className="zc-hint">
+                  {selectedKey === "overlays"
+                    ? "带透明通道的字幕视频，样式与预览一致。"
+                    : selectedKey === "direct"
+                      ? "按需选择字幕 SRT 和音频 WAV。"
+                      : "时间线文件，素材不复制，原地引用。"}
+                </p>
+              </div>
+            </div>
+            {selectedKey === "direct" ? (
+              <>
+                <div className="zc-files">
+                  {(["srt", "wav"] as const).map((ext) => (
+                    <button
+                      type="button"
+                      key={ext}
+                      className={`zc-file-toggle ${settings[ext] ? "is-on" : ""}`}
+                      aria-label={`导出 ${ext.toUpperCase()}`}
+                      aria-pressed={settings[ext]}
+                      disabled={Boolean(settings.active) || (settings[ext] && !settings[ext === "srt" ? "wav" : "srt"])}
+                      onClick={() => change({ [ext]: !settings[ext], sub: "direct" })}
+                    >
+                      <FileIcon ext={ext} />
+                      {settings[ext] && (
+                        <span className="zc-file-check">
+                          <Icon name="check" size={10} />
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                  <span className="zc-export-later">
+                    <FileIcon ext="mp4">二期</FileIcon>
+                  </span>
+                </div>
+                {status("direct")}
+              </>
+            ) : selectedKey === "overlays" ? (
               <div className="zc-overlay-content">
                 <p>剪辑线定稿后再出；改字幕后点这里覆盖同一个文件</p>
                 {(project.subtitleOverlays ?? [])
@@ -672,9 +721,108 @@ export function ExportPanel({
                   新建叠层
                 </Button>
               </div>
+            ) : (
+              <>
+                <section className="zc-export-losses" aria-label="带过去的情况">
+                  <h4 className="zc-overline">带过去的情况</h4>
+                  {!report ? (
+                    <p className="zc-hint">{checks[destination.key] ?? "正在检查交接损失…"}</p>
+                  ) : report.items.length ? (
+                    groupLosses(report.items).map((loss) => (
+                      <div className="zc-row" key={`${loss.feature}-${loss.status}`}>
+                        <span
+                          className={`zc-dot ${loss.status === "unsupported" || loss.severity === "error" ? "is-danger" : "is-attention"}`}
+                        />
+                        <span className="text">
+                          {featureLabel(loss.feature, loss.count)}
+                          <small>{[...loss.consequences].join("；")}</small>
+                        </span>
+                        <span className="zc-meta">
+                          {loss.status === "unsupported" ? "带不过去" : "近似"}
+                          {loss.status === "baked" ? " · 已烘焙" : ""}
+                        </span>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="zc-row">
+                      <span className="zc-dot is-approved" />
+                      <span>保留 · 检查完成，未发现交接损失</span>
+                    </div>
+                  )}
+                  {Object.entries(report?.summary?.preserved_by_feature ?? {})
+                    .filter(([, count]) => count > 0)
+                    .map(([feature, count]) => (
+                      <div className="zc-row" key={feature}>
+                        <span className="zc-dot is-approved" />
+                        <span className="text">{featureLabel(feature, count)}</span>
+                        <span className="zc-meta">原样</span>
+                      </div>
+                    ))}
+                </section>
+                {status(destination.key)}
+              </>
+            )}
+            <section className="zc-export-import">
+              <h4 className="zc-overline">导入方法</h4>
+              <p>
+                {selectedKey === "fcp"
+                  ? "在 Final Cut Pro 里选「文件 › 导入 › XML…」，选择导出的 FCPXML 文件。"
+                  : selectedKey === "resolve"
+                    ? "在 DaVinci Resolve 中导入 OTIO 时间线，再单独导入 SRT 字幕。"
+                    : selectedKey === "premiere"
+                      ? "在 Premiere Pro 中导入 XML 时间线，再单独导入 SRT 字幕。"
+                      : selectedKey === "overlays"
+                        ? "把透明字幕视频放到剪辑软件时间线的最上层。"
+                        : "SRT 可导入剪辑软件作为字幕；WAV 可作为音频素材使用。"}
+              </p>
             </section>
           </div>
         </fieldset>
+        <footer className="zc-export-footer">
+          <h3>
+            <span className="zc-export-step">3</span>存到
+          </h3>
+          {selectedKey === "overlays" ? (
+            <span className="zc-hint zc-export-location">使用各叠层的保存位置；点叠层覆盖导出。</span>
+          ) : (
+            <div className="zc-export-location">
+              <input
+                className="zc-input"
+                aria-label={`${selectedKey === "direct" ? "直接导出" : destination.name}保存位置`}
+                placeholder="导出文件夹的绝对路径"
+                value={paths[selectedKey] ?? ""}
+                disabled={Boolean(settings.active)}
+                onChange={(event) => setPaths({ ...paths, [selectedKey]: event.target.value })}
+              />
+              <Button
+                icon="folder"
+                className="is-secondary"
+                disabled={Boolean(settings.active) || !isTauri()}
+                onClick={() => void choose(selectedKey).catch(() => setError("无法选择保存位置"))}
+              >
+                选择
+              </Button>
+            </div>
+          )}
+          <Button variant="text" onClick={() => change({ open: false })}>
+            取消
+          </Button>
+          <Button
+            variant="primary"
+            className="is-primary is-lg"
+            icon="export"
+            aria-label={
+              selectedKey === "direct" ? "直接导出" : selectedKey === "overlays" ? "新建叠层" : `导出到 ${title}`
+            }
+            disabled={
+              Boolean(settings.active || editing || confirm) ||
+              (selectedKey === "overlays" ? !project.subtitleTracks?.length : selectedKey !== "direct" && !report)
+            }
+            onClick={exportSelected}
+          >
+            {selectedKey === "overlays" ? "新建叠层" : `导出到 ${title}`}
+          </Button>
+        </footer>
         {confirm && (
           <div className="zc-export-confirm" role="alertdialog" aria-label="确认交接损失">
             <h3>有内容无法完整带入 {confirm.name}</h3>

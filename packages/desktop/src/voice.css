@@ -76,3 +76,58 @@
 .zc-voice-dialog .zc-ibtn:focus:not(:focus-visible) {
   outline: none;
 }
+
+.zc-voice-slot > .zc-voice-form.zc-panel-body {
+  gap: var(--space-4);
+  overflow: auto;
+}
+.zc-voice-form.zc-panel-body > .zc-tabs {
+  flex-shrink: 0;
+}
+.zc-voice-form.zc-panel-body .zc-tab.is-active {
+  color: var(--text);
+}
+.zc-voice-form.zc-panel-body > form {
+  flex: 1;
+}
+.zc-voice-form.zc-panel-body > form > fieldset {
+  flex: 1;
+  gap: var(--space-3);
+}
+.zc-voice-form.zc-panel-body .zc-textarea {
+  min-height: 120px;
+  padding: var(--space-3);
+}
+.zc-voice-form.zc-panel-body .zc-slider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.zc-voice-form.zc-panel-body .zc-slider input {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+.zc-voice-form.zc-panel-body .zc-slider output {
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+  color: var(--text-2);
+  font-size: var(--mono-sm-size);
+}
+.zc-voice-form.zc-panel-body > form > fieldset > button[type="submit"] {
+  margin-top: auto;
+  flex-shrink: 0;
+}
+.zc-voice-results {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.zc-voice-results .zc-card {
+  padding: var(--space-3);
+  border: 0;
+}
+.zc-voice-results audio {
+  width: 100%;
+}

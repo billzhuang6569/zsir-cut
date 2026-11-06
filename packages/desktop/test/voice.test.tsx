@@ -23,7 +23,11 @@ afterEach(async () => {
   for (const close of cleanup.splice(0)) await close();
   vi.restoreAllMocks();
 });
-async function mount(responder: (verb: string, request: Record<string, unknown>) => unknown, settingsPage = false) {
+async function mount(
+  responder: (verb: string, request: Record<string, unknown>) => unknown,
+  settingsPage = false,
+  projectView = { revision: { id: "rev_1", seq: 1 } } as ProjectView,
+) {
   const call = vi.fn(async (verb: string, request: Record<string, unknown>) => responder(verb, request));
   let state: UiState = { ...initialState(), project: "/project.zcut.json", panel: "voice", sub: "clone" };
   const container = document.createElement("div");
@@ -36,10 +40,17 @@ async function mount(responder: (verb: string, request: Record<string, unknown>)
       call,
       state: ui,
       update,
-      project: { revision: { id: "rev_1", seq: 1 } } as ProjectView,
+      project: projectView,
       config: { port: 1234, token: "test-token" },
     });
-    return settingsPage ? <SettingsPage call={call} close={() => {}} /> : controls;
+    return settingsPage ? (
+      <SettingsPage call={call} close={() => {}} />
+    ) : (
+      <>
+        {controls.controls}
+        {controls.parameters}
+      </>
+    );
   }
   await act(async () => root.render(<Harness />));
   cleanup.push(async () => {
@@ -52,9 +63,9 @@ async function mount(responder: (verb: string, request: Record<string, unknown>)
     return element;
   };
   const click = async (label: string) => {
-    const element = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
-      (button) => button.textContent === label || button.getAttribute("aria-label") === label,
-    );
+    const element = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .reverse()
+      .find((button) => button.textContent === label || button.getAttribute("aria-label") === label);
     if (!element) throw new Error(`Missing ${label}`);
     await act(async () => element.click());
   };
@@ -84,13 +95,13 @@ it("exposes all voice sub-pages through UI state and defaults to clone", () => {
 it("marks only the current voice sub-tab selected using the subtitle tab style", async () => {
   const h = await mount(respond);
   const tabs = () => [...h.container.querySelectorAll<HTMLButtonElement>('[role="tablist"] [role="tab"]')];
-  for (const label of ["克隆", "生成", "结果", "克隆"]) {
+  for (const label of ["克隆音色页", "生成", "克隆音色页"]) {
     await h.click(label);
     expect(
       tabs()
         .filter((tab) => tab.getAttribute("aria-selected") === "true")
         .map((tab) => tab.textContent),
-    ).toEqual([label]);
+    ).toEqual([label.replace("页", "")]);
     expect(tabs().every((tab) => tab.classList.contains("zc-tab"))).toBe(true);
   }
 });
@@ -109,7 +120,7 @@ it("explains missing clone inputs and enables cloning only with a file and nonbl
   expect(button.title).toBe("请输入音色名称");
   await h.input("音色名称", "新音色");
   expect(button.disabled).toBe(false);
-  expect(button.classList.contains("zc-btn-primary")).toBe(true);
+  expect(button.classList.contains("is-secondary")).toBe(true);
   expect(button.hasAttribute("aria-describedby")).toBe(false);
   expect(button.title).toBe("");
   await h.input("参考音频路径", "");
@@ -139,7 +150,7 @@ it("requires nonblank text in every item and updates the generation hint when it
   expect(button.disabled).toBe(true);
   await h.input("配音文字 1", "第一段");
   expect(button.disabled).toBe(false);
-  expect(button.classList.contains("zc-btn-primary")).toBe(true);
+  expect(button.classList.contains("is-secondary")).toBe(true);
   expect(button.hasAttribute("aria-describedby")).toBe(false);
   await h.click("添加文字");
   expect(button.disabled).toBe(true);
@@ -224,7 +235,7 @@ it("generates free items with a human revision request, omitted defaults, and pr
     }),
   );
   await h.click("结果");
-  expect(h.container.textContent).toContain("V1.4");
+  expect(h.container.textContent).toContain("配音结果在右侧");
 });
 it("renders long-job progress and safe failure text without displaying upstream messages", async () => {
   let finish: (value: unknown) => void = () => {};
@@ -328,3 +339,117 @@ it.each(["settings_set", "voice_clone", "voice_generate"])(
     }
   },
 );
+
+it("lays out generation text, voice and speed in canvas order and preserves advanced controls", async () => {
+  const h = await mount(respond);
+  await h.click("生成");
+  expect(h.container.querySelector(".zc-panel-body.zc-voice-form .zc-tab.is-active")?.textContent).toBe("生成");
+  const form = h.container.querySelector(".zc-voice-form form");
+  expect(form?.querySelector("textarea.zc-textarea")?.getAttribute("aria-label")).toBe("配音文字 1");
+  expect(h.find("配音文字 1").compareDocumentPosition(h.find("音色")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(h.find("语速").getAttribute("type")).toBe("range");
+  expect(form?.querySelector("details [aria-label='温度']")).not.toBeNull();
+  expect(form?.querySelector("button[type='submit'].is-secondary")?.textContent).toContain("生成配音");
+  expect(h.container.querySelector(".zc-voice-results .zc-voice-library")?.textContent).toContain("示例音色");
+  await h.click("查看配音素材");
+  expect(h.state()).toMatchObject({ panel: "media", sub: "grid" });
+});
+
+it("reads real voice metadata, plays authenticated audio and reuses media placement without displaying IDs", async () => {
+  const view: ProjectView = {
+    name: "配音工程",
+    start_timecode: "00:00:00:00",
+    drop_frame: false,
+    markers: [],
+    styles: [],
+    id: "tl_main",
+    revision: { id: "rev_1", seq: 1 },
+    edit_rate: "25",
+    duration: { t: "8s" },
+    cues: [],
+    tracks: [
+      {
+        id: "trk_audio",
+        kind: "audio",
+        name: "声音 A",
+        enabled: true,
+        clips: [
+          {
+            id: "clp_used",
+            media_id: "med_used",
+            label: null,
+            enabled: true,
+            timeline_in: { t: "0s" },
+            timeline_out: { t: "4s" },
+            source_in: { t: "0s" },
+            source_out: { t: "4s" },
+            speed: "1",
+          },
+        ],
+      },
+    ],
+    media: [
+      { id: "med_free", kind: "audio", duration: "6s", audio: { sample_rate: "48000", channels: 1 } },
+      { id: "med_used", kind: "audio", duration: "4s", audio: { sample_rate: "48000", channels: 1 } },
+      { id: "med_music", kind: "audio", duration: "8s" },
+    ],
+  };
+  const h = await mount(
+    (verb, request) =>
+      verb === "inspect"
+        ? {
+            entity: {
+              ext:
+                request.id === "med_music"
+                  ? {}
+                  : { "zsir.voice": { text: request.id === "med_free" ? "第一段配音" : "已使用的配音" } },
+            },
+          }
+        : respond(verb),
+    false,
+    view,
+  );
+  expect(h.call).toHaveBeenCalledWith("inspect", { project: "/project.zcut.json", view: "entity", id: "med_free" });
+  const panel = h.container.querySelector(".zc-voice-results");
+  expect(panel?.querySelectorAll("section.zc-card")).toHaveLength(2);
+  expect(panel?.textContent).toContain("第一段配音");
+  expect(panel?.querySelector(".is-approved")?.textContent).toBe("在时间线");
+  expect(panel?.querySelector<HTMLAudioElement>("audio")?.src).toContain("/media?token=test-token&media_id=med_free");
+  expect(panel?.textContent).not.toMatch(/med_|trk_|voc_/);
+  await h.click("加到时间线");
+  expect(h.call).toHaveBeenCalledWith(
+    "edit",
+    expect.objectContaining({
+      project: "/project.zcut.json",
+      timeline_id: "tl_main",
+      base_revision: "rev_1",
+      author: { kind: "human", name: "桌面用户" },
+      ops: [
+        expect.objectContaining({
+          op: "place",
+          media_id: "med_free",
+          audio_track: "trk_audio",
+          source_start: "0s",
+          duration: "6s",
+          mode: "insert",
+        }),
+      ],
+    }),
+  );
+});
+
+it("reports a voice-result read failure without inventing result cards", async () => {
+  const h = await mount(
+    (verb) => {
+      if (verb === "inspect") throw new Error("read failed");
+      return respond(verb);
+    },
+    false,
+    {
+      revision: { id: "rev_1", seq: 1 },
+      media: [{ id: "med_audio", kind: "audio" }],
+    } as ProjectView,
+  );
+  expect(h.container.querySelector(".zc-voice-results [role='alert']")?.textContent).toContain("无法读取配音结果");
+  expect(h.container.querySelectorAll(".zc-voice-results section.zc-card")).toHaveLength(0);
+});

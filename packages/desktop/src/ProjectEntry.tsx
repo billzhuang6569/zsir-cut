@@ -45,6 +45,7 @@ export function ProjectEntry({
 }) {
   const modal = useRef<HTMLDivElement>(null);
   const [confirmation, setConfirmation] = useState<{ resolve: (value: boolean) => void } | null>(null);
+  const [search, setSearch] = useState("");
   const [recent, setRecent] = useState<Recent[]>([]);
   const [menu, setMenu] = useState(false);
   const [form, setForm] = useState<"new" | "open" | null>(null);
@@ -168,50 +169,52 @@ export function ProjectEntry({
   );
   const actions = (
     <div className="zc-entry-actions">
-      <Button icon="plus" onClick={() => newForm()} disabled={busy}>
+      <Button variant="primary" className="is-primary is-lg" icon="plus" onClick={() => newForm()} disabled={busy}>
         新建工程
       </Button>
-      <Button icon="folder" onClick={() => void chooseOpen()} disabled={busy}>
+      <Button className="is-secondary is-lg" icon="folder" onClick={() => void chooseOpen()} disabled={busy}>
         打开工程
       </Button>
     </div>
   );
   const rows = (
     <ul className="zc-entry-recents">
-      {recent.map((row) => (
-        <li key={row.path} className={row.exists ? "" : "is-missing"} title={row.path}>
-          <Button disabled={!row.exists || busy} onClick={() => void run(() => switchTo(row.path))}>
-            <span className="zc-entry-cover">
-              <Icon name="clip" size={28} />
-              {row.exists && config ? (
-                <img
-                  alt=""
-                  src={`http://127.0.0.1:${config.port}/recent-thumb?token=${encodeURIComponent(config.token)}&path=${encodeURIComponent(row.path)}`}
-                  onError={(event) => {
-                    event.currentTarget.style.display = "none";
-                  }}
-                />
-              ) : null}
-            </span>
-            <span className="zc-entry-caption">
-              {row.name}
-              <small>
-                {leaf(folder(row.path))} · {row.exists ? relativeTime(row.openedAt) : "文件已不存在"}
-              </small>
-            </span>
-          </Button>
-          {!row.exists && (
-            <IconButton
-              icon="trash"
-              label={`移除${row.name}`}
-              disabled={busy}
-              onClick={() =>
-                void run(async () => setRecent((await call("recent_remove", { path: row.path })) as Recent[]))
-              }
-            />
-          )}
-        </li>
-      ))}
+      {recent
+        .filter((row) => row.name.toLocaleLowerCase().includes(search.toLocaleLowerCase()))
+        .map((row) => (
+          <li key={row.path} className={row.exists ? "" : "is-missing"} title={row.path}>
+            <Button disabled={!row.exists || busy} onClick={() => void run(() => switchTo(row.path))}>
+              <span className="zc-entry-cover">
+                <Icon name="clip" size={28} />
+                {row.exists && config ? (
+                  <img
+                    alt=""
+                    src={`http://127.0.0.1:${config.port}/recent-thumb?token=${encodeURIComponent(config.token)}&path=${encodeURIComponent(row.path)}`}
+                    onError={(event) => {
+                      event.currentTarget.style.display = "none";
+                    }}
+                  />
+                ) : null}
+              </span>
+              <span className="zc-entry-caption">
+                {row.name}
+                <small>
+                  {leaf(folder(row.path))} · {row.exists ? relativeTime(row.openedAt) : "文件已不存在"}
+                </small>
+              </span>
+            </Button>
+            {!row.exists && (
+              <IconButton
+                icon="trash"
+                label={`移除${row.name}`}
+                disabled={busy}
+                onClick={() =>
+                  void run(async () => setRecent((await call("recent_remove", { path: row.path })) as Recent[]))
+                }
+              />
+            )}
+          </li>
+        ))}
     </ul>
   );
   return (
@@ -248,12 +251,12 @@ export function ProjectEntry({
         >
           <div className="zc-start-content">
             <header className="zc-entry-brand">
-              <span>
-                <Icon name="clip" size={28} />
-              </span>
-              <h1>庄Sir剪辑助手</h1>
+              <div>
+                <h1>开始剪辑</h1>
+                <p className="zc-hint">新建或打开一个工程；也可以把素材直接拖进来。</p>
+              </div>
+              {actions}
             </header>
-            {actions}
             <section
               className={`zc-entry-drop${dragging ? " is-dragging" : ""}`}
               aria-label="拖入素材"
@@ -266,7 +269,8 @@ export function ProjectEntry({
               }}
             >
               <Icon name="export" size={28} />
-              <p>拖入视频或音频，新建工程</p>
+              <p>把视频、音频拖到这里</p>
+              <span className="zc-hint">按第一个视频的帧率和尺寸新建工程，素材全部导入；不会移动或改写原文件</span>
               {!isTauri() && (
                 <>
                   <Button aria-expanded={pathInput} onClick={() => setPathInput(!pathInput)}>
@@ -297,7 +301,19 @@ export function ProjectEntry({
             </section>
             {recent.length > 0 && (
               <section className="zc-entry-recent-section">
-                <h2>最近</h2>
+                <div className="zc-entry-recent-head">
+                  <h2 className="zc-overline">最近打开</h2>
+                  <label className="zc-search">
+                    <Icon name="search" />
+                    <input
+                      className="zc-input"
+                      aria-label="搜索工程"
+                      placeholder="搜索工程"
+                      value={search}
+                      onChange={(event) => setSearch(event.target.value)}
+                    />
+                  </label>
+                </div>
                 {rows}
               </section>
             )}

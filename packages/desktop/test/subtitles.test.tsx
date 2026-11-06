@@ -220,7 +220,7 @@ it.each([
   expect(formatSubtitleTime(start)).toBe(expected);
 });
 
-it("keeps long subtitle text in flow beside seconds-only time and overlays actions only on hover or editing", async () => {
+it("keeps long subtitle text in flow beside seconds-only time and overlays actions on hover, selection or editing", async () => {
   const style = document.createElement("style");
   style.textContent =
     readFileSync("packages/desktop/src/shell.css", "utf8") + readFileSync("packages/desktop/src/subtitles.css", "utf8");
@@ -237,12 +237,16 @@ it("keeps long subtitle text in flow beside seconds-only time and overlays actio
   const row = h.container.querySelector<HTMLElement>(".zc-sub-row") as HTMLElement;
   const editor = row.querySelector<HTMLElement>(".zc-sub-text") as HTMLElement;
   const actions = row.querySelector<HTMLElement>(".zc-sub-actions") as HTMLElement;
-  expect([...row.children].map((child) => child.className)).toEqual(["zc-sub-time", "zc-sub-text", "zc-sub-actions"]);
+  expect([...row.children].map((child) => child.className)).toEqual([
+    "time zc-sub-time",
+    "zc-sub-text",
+    "actions zc-sub-actions",
+  ]);
   expect(row.querySelector("time")?.textContent).toBe("00:59");
   expect(editor.textContent).toBe(text);
   expect(editor.getAttribute("contenteditable")).toBe("true");
   expect(editor.getAttribute("aria-multiline")).toBe("true");
-  expect(row.parentElement?.className).toBe("zc-sub-list");
+  expect(row.parentElement?.className).toBe("zc-list zc-sub-list");
   expect(getComputedStyle(row.parentElement as HTMLElement).flexDirection).toBe("column");
   // jsdom has no layout engine: assert the sizing rules that prevent flex rows from shrinking below their text.
   expect(getComputedStyle(row).flexShrink).toBe("0");
@@ -262,7 +266,7 @@ it("keeps long subtitle text in flow beside seconds-only time and overlays actio
   expect(hover.style.visibility).toBe("visible");
   await h.click("选择字幕 1");
   expect(row.classList.contains("is-selected")).toBe(true);
-  expect(getComputedStyle(actions).visibility).toBe("hidden");
+  expect(getComputedStyle(actions).visibility).toBe("visible");
   await act(async () => placeCaret(editor, 0));
   expect(row.classList.contains("is-editing")).toBe(true);
   expect(getComputedStyle(actions).visibility).toBe("visible");
@@ -597,7 +601,7 @@ it("opens filler chips separately from the switch and supports adding and removi
   expect(h.find("去除水词").closest("label")?.title).toContain("时间不动");
   expect(h.container.querySelector('[aria-label="水词"]')).toBeNull();
   await h.click("编辑水词表");
-  expect(h.container.querySelectorAll('[aria-label="水词"] .zc-tag')).toHaveLength(8);
+  expect(h.container.querySelectorAll('[aria-label="水词"] .zc-chip')).toHaveLength(8);
   await h.click("添加水词");
   await h.input("添加水词", "那个");
   await h.key(h.find("添加水词"), "Enter");
@@ -642,17 +646,12 @@ it("shows the selected track style and applies edits to every style when scope i
 });
 it("shows presets and displays the animation groups with shared renderer thumbnails", async () => {
   const h = await mount(project, "style");
-  expect(h.container.querySelector('[aria-label="字幕样式轨道"]')).toBeNull();
+  expect(h.container.querySelector('.zc-sub-controls [aria-label="字幕样式轨道"]')).not.toBeNull();
   expect(h.container.querySelectorAll(".zc-sub-preset-cell")).toHaveLength(subtitlePresets.length);
-  expect([...h.container.querySelectorAll("summary")].map((item) => item.textContent?.trim())).toEqual([
-    "文字",
-    "描边",
-    "阴影",
-    "发光",
-    "底板",
-    "位置",
-  ]);
-  expect(h.container.querySelector("details")?.open).toBe(true);
+  expect(
+    [...h.container.querySelectorAll(".zc-sub-style > details > summary")].map((item) => item.textContent?.trim()),
+  ).toEqual(["文字", "描边", "阴影", "发光", "底板", "位置"]);
+  expect(h.container.querySelector<HTMLDetailsElement>(".zc-sub-style > details")?.open).toBe(true);
   await h.click("动画");
   expect([...h.container.querySelectorAll(".zc-sub-animation h4")].map((item) => item.textContent)).toEqual([
     "入场",
@@ -1820,12 +1819,12 @@ it("preassigns only referenced IDs and shares core's stored-tag and collision ru
   expect(transcript.ext).toBeUndefined();
 });
 
-it("shows the compact style layout with only text expanded and a single track hidden", async () => {
+it("shows the compact style layout with text expanded and the track in the left column", async () => {
   const h = await mount(project, "style");
   expect(h.container.querySelector(".zc-sub-sample")).toBeNull();
   expect(h.container.textContent).not.toContain("▼");
-  expect(h.container.querySelector('[aria-label="字幕样式轨道"]')).toBeNull();
-  const open = [...h.container.querySelectorAll(".zc-sub-style details[open] > summary")];
+  expect(h.container.querySelector('.zc-sub-controls [aria-label="字幕样式轨道"]')).not.toBeNull();
+  const open = [...h.container.querySelectorAll(".zc-sub-style > details[open] > summary")];
   expect(open.map((summary) => summary.textContent?.trim())).toEqual(["文字"]);
   expect(h.container.querySelectorAll(".zc-sub-style summary > .zc-icon")).toHaveLength(6);
   expect(h.container.querySelectorAll(".zc-sub-preset-grid")).toHaveLength(5);
@@ -1981,4 +1980,24 @@ it("reveals the selected subtitle track overlay in Finder only in the desktop ap
   expect(desktop.container.textContent).toContain("字幕A.mov");
   await desktop.click("在访达中显示");
   expect(revealItemInDir).toHaveBeenCalledWith("/tmp/叠层/字幕A.mov");
+});
+
+it("uses design-system subtitle rows and keeps overlay controls in the left style column", async () => {
+  const h = await mount(project);
+  expect(h.container.querySelector(".zc-sub-controls.zc-panel-body .zc-card")).not.toBeNull();
+  expect(h.container.querySelector(".zc-list .zc-row .time")).not.toBeNull();
+  expect(h.container.querySelector(".zc-search input[aria-label='搜索字幕']")).not.toBeNull();
+  await h.click("样式");
+  expect(h.container.querySelector(".zc-sub-controls [aria-label='叠层导出']")).not.toBeNull();
+  expect(h.container.querySelector(".zc-sub-parameters [aria-label='叠层导出']")).toBeNull();
+  expect(h.container.querySelector(".zc-sub-parameters .zc-tab.is-active")?.textContent).toBe("样式");
+  await h.click("导出字幕叠层");
+  expect(h.state().export).toMatchObject({ open: true, sub: "overlays" });
+});
+
+it("starts the search-bar AI action for all subtitles when there is no selection", async () => {
+  const h = await mount(listProject);
+  await h.click("AI 重新分行");
+  await h.click("开始");
+  expect(h.call).toHaveBeenCalledWith("subtitle_tidy", {});
 });

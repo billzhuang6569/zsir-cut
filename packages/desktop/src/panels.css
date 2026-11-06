@@ -1,0 +1,139 @@
+/* Shared design-system primitives, scoped to the panels in this pass. */
+:is(
+    .zc-export-panel,
+    .zc-media-library,
+    .zc-media-info,
+    .zc-sub-controls,
+    .zc-sub-parameters,
+    .zc-voice-form.zc-panel-body,
+    .zc-voice-results,
+    .zc-start
+  )
+  .zc-hint {
+  color: var(--text-4);
+  font-size: var(--label-size);
+  line-height: var(--label-line);
+}
+:is(
+    .zc-export-panel,
+    .zc-media-library,
+    .zc-media-info,
+    .zc-sub-controls,
+    .zc-sub-parameters,
+    .zc-voice-form.zc-panel-body,
+    .zc-voice-results,
+    .zc-start
+  )
+  .zc-card {
+  background: var(--panel-2);
+  border-radius: var(--radius-md);
+}
+:is(
+    .zc-export-panel,
+    .zc-media-library,
+    .zc-media-info,
+    .zc-sub-controls,
+    .zc-sub-parameters,
+    .zc-voice-form.zc-panel-body,
+    .zc-start
+  )
+  :is(.zc-input, .zc-select, .zc-textarea) {
+  background-color: var(--raised);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  min-width: 0;
+  color: var(--text);
+  font: inherit;
+}
+:is(
+    .zc-export-panel,
+    .zc-media-library,
+    .zc-media-info,
+    .zc-sub-controls,
+    .zc-sub-parameters,
+    .zc-voice-form.zc-panel-body,
+    .zc-start
+  )
+  :is(.zc-input, .zc-select):focus {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+:is(
+    .zc-export-panel,
+    .zc-media-library,
+    .zc-media-info,
+    .zc-sub-controls,
+    .zc-sub-parameters,
+    .zc-voice-form.zc-panel-body,
+    .zc-start
+  )
+  .zc-btn.is-secondary {
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  color: var(--text);
+}
+:is(.zc-export-panel, .zc-start) .zc-btn.is-primary {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+:is(.zc-export-panel, .zc-sub-controls, .zc-voice-form.zc-panel-body, .zc-start) .zc-btn.is-lg {
+  height: 36px;
+  padding-inline: var(--space-4);
+}
+:is(
+    .zc-export-panel,
+    .zc-media-library,
+    .zc-media-info,
+    .zc-sub-controls,
+    .zc-sub-parameters,
+    .zc-voice-form.zc-panel-body,
+    .zc-start
+  )
+  .zc-btn:disabled {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--text-off);
+}
+:is(.zc-media-library, .zc-start) .zc-search {
+  position: relative;
+  min-width: 0;
+  flex: 1;
+}
+:is(.zc-media-library, .zc-start) .zc-search > svg {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-3);
+  color: var(--text-4);
+}
+:is(.zc-media-library, .zc-start) .zc-search input {
+  width: 100%;
+  height: var(--control-h);
+  padding-left: var(--space-8);
+}
+:is(.zc-export-panel, .zc-media-info, .zc-sub-controls, .zc-sub-parameters, .zc-voice-results, .zc-start) .zc-overline {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--label-size);
+  font-weight: 600;
+}
+.zc-media-library,
+.zc-sub-controls,
+.zc-voice-slot:not([hidden]),
+.zc-voice-slot > .zc-voice-form {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.zc-voice-slot[hidden] {
+  display: none;
+}
+.zc-function-panel:has(> .zc-voice-slot:not([hidden])) > .zc-panel-head {
+  display: none;
+}
+.zc-parameters[data-panel="subtitles"] {
+  padding-top: 0;
+}
+.zc-function-panel:has(> .zc-sub-controls) {
+  overflow: auto;
+}
