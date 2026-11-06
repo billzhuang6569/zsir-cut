@@ -3,11 +3,23 @@ import { createPortal } from "react-dom";
 import type { ProjectChanged } from "../../app-host/src/revision-events.js";
 import type { EntityChange } from "../../core/dist/index.js";
 import { Button, ReviewValue } from "./ai-components.js";
+import { chapterTime } from "./chapters.js";
 import { Clip, Icon, IconButton } from "./components.js";
 import type { ProjectView, useTimelinePreferences } from "./connection.js";
 import type { UiState } from "./state.js";
-import { TimelinePreview } from "./TimelinePreview.js";
-import { compare, div, numberOf, parseRational, printRational, sub, type TimelineView, timecode } from "./timeline.js";
+import { mediaUrl, TimelinePreview, Wave } from "./TimelinePreview.js";
+import {
+  compare,
+  div,
+  mul,
+  numberOf,
+  parseRational,
+  printRational,
+  rational,
+  sub,
+  type TimelineView,
+  timecode,
+} from "./timeline.js";
 import "./review.css";
 
 // Shared entry point for the AI panel and the history popover.
@@ -140,6 +152,16 @@ export function ReviewView({
   const [freshSteps, setFreshSteps] = useState<string[]>([]);
   const [settled, setSettled] = useState<ProjectView | null>(null);
   const [finishing, setFinishing] = useState(false);
+  const [ruler, setRuler] = useState<HTMLDivElement | null>(null);
+  const [timelineWidth, setTimelineWidth] = useState(1);
+  useEffect(() => {
+    if (!ruler) return;
+    const measure = () => setTimelineWidth(Math.max(1, ruler.clientWidth));
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(measure);
+    observer?.observe(ruler);
+    return () => observer?.disconnect();
+  }, [ruler]);
   const [reduced, setReduced] = useState(
     () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false,
   );
@@ -190,8 +212,18 @@ export function ReviewView({
       else if (added.length) setPhase("updating");
       setData({
         summary,
-        original: { ...latest.current.project, ...(original as TimelineView), ...(preview as ProjectView) },
-        plan: { ...latest.current.project, ...(plan as TimelineView), ...(draftPreview as ProjectView) },
+        original: {
+          ...latest.current.project,
+          ...(original as TimelineView),
+          ...(preview as ProjectView),
+          duration: (original as TimelineView).duration,
+        },
+        plan: {
+          ...latest.current.project,
+          ...(plan as TimelineView),
+          ...(draftPreview as ProjectView),
+          duration: (plan as TimelineView).duration,
+        },
         session: session as ReviewData["session"],
       });
       setError("");
@@ -275,6 +307,7 @@ export function ReviewView({
         ...latest.current.project,
         ...(timeline as TimelineView),
         ...(preview as ProjectView),
+        duration: (timeline as TimelineView).duration,
         ...brief.project,
       };
       setSettled(view);
@@ -301,6 +334,7 @@ export function ReviewView({
     visibleDuration && compare(parseRational(visibleDuration, true), parseRational("0s", true)) > 0
       ? visibleDuration
       : "1s";
+  const scale = div(rational(BigInt(timelineWidth)), parseRational(span, true));
   const view = settled ?? (mode === "original" ? data?.original : data?.plan) ?? null;
   const tracks = data
     ? mode === "original"
@@ -470,7 +504,7 @@ export function ReviewView({
           <span className="zc-grow" />
           {data && (
             <span className="zc-meta">
-              {data.original.duration.t} → {data.plan.duration.t}
+              {chapterTime(data.original.duration.t)} → {chapterTime(data.plan.duration.t)}
             </span>
           )}
           <IconButton icon="up" label="上一处改动 ↑" onClick={() => jump(-1)} disabled={!jumps.length || finishing} />
@@ -478,7 +512,7 @@ export function ReviewView({
         </div>
         {data ? (
           <div className="zc-review-scroll">
-            <div className="zc-review-ruler">
+            <div className="zc-review-ruler" ref={setRuler}>
               <span>{timecode("0s", data.original)}</span>
               <span>{timecode(span, data.original)}</span>
             </div>
@@ -514,7 +548,44 @@ export function ReviewView({
                                   ...geometry(clip.timeline_in.t, clip.timeline_out.t, span),
                                   ...appear(clip.id),
                                 }}
-                              />
+                              >
+                                {track.kind === "audio" && (
+                                  <Wave
+                                    clip={clip}
+                                    width={numberOf(
+                                      mul(
+                                        sub(
+                                          parseRational(clip.timeline_out.t, true),
+                                          parseRational(clip.timeline_in.t, true),
+                                        ),
+                                        scale,
+                                      ),
+                                    )}
+                                    scale={scale}
+                                    config={config}
+                                    hasAudio={source.media.some(
+                                      (media) =>
+                                        media.id === clip.media_id && (media.kind === "audio" || !!media.audio),
+                                    )}
+                                  />
+                                )}
+                                {track.kind === "video" && (
+                                  <span
+                                    className="zc-film"
+                                    aria-hidden="true"
+                                    style={
+                                      config
+                                        ? {
+                                            // shortcut: repeat the source-in thumbnail; share Film when review needs time-sampled thumbnails.
+                                            backgroundImage: `url("${mediaUrl(config, "thumb", clip.media_id, clip.source_in.t)}")`,
+                                            backgroundSize: "auto 100%",
+                                            backgroundRepeat: "repeat-x",
+                                          }
+                                        : {}
+                                    }
+                                  />
+                                )}
+                              </Clip>
                             ))}
                             {source.cues
                               .filter((cue) => cue.track_id === track.id)

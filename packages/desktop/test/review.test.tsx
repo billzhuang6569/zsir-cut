@@ -204,12 +204,14 @@ function Fixture({
   call,
   change = null,
   revision = 0,
+  config,
   close = vi.fn(),
   committed = vi.fn(),
 }: {
   call: ReturnType<typeof host>["call"];
   change?: ProjectChanged | null;
   revision?: number;
+  config?: { port: number; token: string };
   close?: () => void;
   committed?: (view: ProjectView) => void;
 }) {
@@ -235,7 +237,7 @@ function Fixture({
         actions={ai.reviewActions}
         parametersTarget={target}
         viewerTarget={null}
-        config={undefined}
+        config={config}
         dragging={dragging}
         close={close}
         committed={committed}
@@ -243,6 +245,88 @@ function Fixture({
     </>
   );
 }
+it("formats summary durations from each inspected timeline even when preview data has the main duration", async () => {
+  const { call } = host();
+  const handle = call.getMockImplementation();
+  call.mockImplementation(async (verb, request) => {
+    const result = await handle?.(verb, request);
+    if (verb === "inspect" && request.view === "timeline")
+      return { ...(result as ProjectView), duration: { t: request.session_id ? "578/25s" : "753/25s" } };
+    if (verb === "preview_data") return { ...(result as ProjectView), duration: { t: "753/25s" } };
+    return result;
+  });
+  await act(async () => root.render(<Fixture call={call} />));
+  const toolbar = node.querySelector(".zc-review-timeline > .zc-toolbar");
+  expect(toolbar?.textContent).not.toMatch(/\d+\/\d+s/);
+  expect(toolbar?.textContent).toContain("0:30 → 0:23");
+  expect(call).toHaveBeenCalledWith("inspect", {
+    project: "/fixture.zcut.json",
+    view: "timeline",
+    session_id: "ses_review",
+    at_revision: "rev_draft",
+  });
+});
+it("fills both half lanes with normal clips and keeps only the original faded", async () => {
+  const { call } = host();
+  const fetcher = vi.fn(async () => ({ ok: true, json: async () => Array(1000).fill(0.5) }));
+  vi.stubGlobal("fetch", fetcher);
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1000);
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+    x: 0,
+    y: 0,
+    left: 0,
+    top: 0,
+    right: 1000,
+    bottom: 48,
+    width: 1000,
+    height: 48,
+    toJSON: () => ({}),
+  });
+  const handle = call.getMockImplementation();
+  call.mockImplementation(async (verb, request) => {
+    const result = await handle?.(verb, request);
+    if (verb === "preview_data") return { ...(result as ProjectView), media: [{ id: "med_interview", kind: "audio" }] };
+    if (verb === "inspect" && request.view === "timeline") {
+      const view = result as ProjectView;
+      return {
+        ...view,
+        tracks: [
+          ...view.tracks,
+          { id: "trk_audio", name: "声音 A", kind: "audio", enabled: true, clips: [clip("clp_audio", "0s", "10s")] },
+        ],
+      };
+    }
+    return result;
+  });
+  const style = document.createElement("style");
+  style.textContent = ["timeline.css", "review.css"]
+    .map((file) => readFileSync(new NodeURL(`../src/${file}`, import.meta.url), "utf8"))
+    .join("\n");
+  document.head.append(style);
+  try {
+    await act(async () => root.render(<Fixture call={call} config={{ port: 1, token: "review-test" }} />));
+    for (const side of ["original", "plan"]) {
+      for (const kind of ["video", "audio", "subtitle"]) {
+        const item = node.querySelector<HTMLElement>(`.zc-review-lane.is-${side} .zc-clip-${kind}`);
+        expect(item, `${side} ${kind}`).not.toBeNull();
+        if (!item) continue;
+        expect(getComputedStyle(item).position).toBe("absolute");
+        expect(getComputedStyle(item).height).toBe("100%");
+        expect(getComputedStyle(item).opacity).toBe(side === "original" ? "0.38" : "");
+        if (kind !== "subtitle") expect(item.querySelector(".zc-clip-name")?.textContent).not.toBe("");
+        if (kind === "audio") {
+          expect(item.querySelector<HTMLElement>(".zc-wave")?.style.width).toBe("1000px");
+          expect(item.querySelectorAll(".zc-wave canvas").length).toBeGreaterThan(0);
+        }
+        if (kind === "video")
+          expect(item.querySelector<HTMLElement>(".zc-film")?.style.backgroundImage).toContain("/thumb?");
+      }
+    }
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  } finally {
+    style.remove();
+  }
+});
 it("uses read-only host views; outlines match each change and only-original uses the base view", async () => {
   const { call } = host();
   await act(async () => root.render(<Fixture call={call} />));

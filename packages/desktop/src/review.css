@@ -80,12 +80,20 @@
   transform-origin: center top;
 }
 .zc-review-lane .zc-clip {
+  position: absolute;
   top: 0;
   bottom: 0;
-  height: auto;
+  height: 100%;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
   transition:
     left var(--review-duration) ease-out,
     width var(--review-duration) ease-out;
+}
+.zc-review-timeline[data-mode="compare"] .zc-wave {
+  top: 50%;
+  transform: translateY(-50%) scaleY(0.5);
 }
 .zc-review-lane.is-original .zc-clip {
   opacity: 0.38;
