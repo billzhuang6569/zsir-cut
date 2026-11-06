@@ -576,6 +576,11 @@ it("preserves create and open rejection reasons instead of blaming the project f
   class FakeSocket {
     onmessage: ((event: MessageEvent) => void) | null = null;
     onclose = null;
+    constructor() {
+      queueMicrotask(() =>
+        this.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ type: "bootstrap", project: null }) })),
+      );
+    }
     send(raw: string) {
       const request = JSON.parse(raw);
       queueMicrotask(() =>
@@ -641,6 +646,11 @@ it.each([
   class FakeSocket {
     onmessage: ((event: MessageEvent) => void) | null = null;
     onclose = null;
+    constructor() {
+      queueMicrotask(() =>
+        this.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ type: "bootstrap", project: null }) })),
+      );
+    }
     send(raw: string) {
       const request = JSON.parse(raw);
       queueMicrotask(() =>

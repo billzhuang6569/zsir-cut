@@ -61,6 +61,7 @@ export function SettingsPage({
   onPrefs,
   openRecognition,
   projectPath,
+  initialPage = "通用",
 }: {
   call: Call;
   subscribe: Subscribe;
@@ -68,10 +69,12 @@ export function SettingsPage({
   onPrefs: (value: PrefsResult) => void;
   openRecognition: () => void;
   projectPath: string | null;
+  initialPage?: (typeof pages)[number][0];
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const [page, setPage] = useState<string>("Agent");
+  const [page, setPage] = useState<string>(initialPage);
   const [prefs, setPrefs] = useState<PrefsResult | null>(null);
+  const [agentsLoading, setAgentsLoading] = useState(true);
   const [agents, setAgents] = useState<AgentList | null>(null);
   const [cache, setCache] = useState<CacheStatus | null>(null);
   const [directory, setDirectory] = useState("");
@@ -113,6 +116,7 @@ export function SettingsPage({
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     dialog.current?.showModal();
+    dialog.current?.querySelector<HTMLButtonElement>('[aria-current="page"]')?.focus();
     return () => previous?.focus();
   }, []);
   useEffect(() => {
@@ -131,7 +135,10 @@ export function SettingsPage({
       .then((value) => {
         if (!disposed) setAgents(value as AgentList);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (!disposed) setAgentsLoading(false);
+      });
     void refreshCache();
     return () => {
       disposed = true;
@@ -272,7 +279,7 @@ export function SettingsPage({
                 </button>
               </div>
               {!agents ? (
-                <p className="zc-muted">暂时无法读取 Agent</p>
+                <p className="zc-muted">{agentsLoading ? "正在读取 Agent…" : "暂时无法读取 Agent"}</p>
               ) : (
                 <>
                   <div className="zc-settings-card">
@@ -288,7 +295,9 @@ export function SettingsPage({
                             {agent.update_available && <span className="zc-chip is-sm">有新版</span>}
                           </div>
                           <p className="zc-meta">
-                            {agent.found ? `已找到${agent.version ? ` · ${agent.version}` : ""}` : "没有找到"}
+                            {agent.found
+                              ? `已找到${agent.version ? ` · ${agent.version.match(/\b\d+\.\d+\.\d+\b/)?.[0] ?? agent.version}` : ""}`
+                              : "没有找到"}
                           </p>
                           {agent.path && <p className="zc-meta zc-settings-path">{agent.path}</p>}
                         </div>
@@ -314,7 +323,7 @@ export function SettingsPage({
                           aria-label={`${agent.found ? "更新" : "安装"} ${agent.name}`}
                           onClick={() => void install(agent)}
                         >
-                          {agent.found ? "更新" : "安装"}
+                          {agent.found ? "更新" : "一键安装"}
                         </button>
                       </article>
                     ))}
@@ -472,10 +481,16 @@ export function SettingsPage({
                     className="zc-input"
                     aria-label="缓存位置"
                     value={directory}
+                    disabled={busy || !cache}
                     readOnly={isTauri()}
                     onChange={(event) => setDirectory(event.target.value)}
                   />
-                  <button type="button" className="zc-btn" disabled={busy || !prefs} onClick={() => void move()}>
+                  <button
+                    type="button"
+                    className="zc-btn"
+                    disabled={busy || !prefs || !cache}
+                    onClick={() => void move()}
+                  >
                     换位置…
                   </button>
                   <button
@@ -508,7 +523,7 @@ export function SettingsPage({
                     <select
                       className="zc-input"
                       aria-label="缓存上限"
-                      disabled={busy}
+                      disabled={busy || !cache}
                       value={prefs.prefs.preview_cache.limit_gb}
                       onChange={(event) =>
                         void run(async () => {
@@ -545,7 +560,7 @@ export function SettingsPage({
                 />
               )}
               {prefs && (
-                <fieldset className="zc-settings-options" disabled={busy}>
+                <fieldset className="zc-settings-options" disabled={busy || !cache}>
                   <div className="zc-settings-row">
                     <span className="zc-grow">预览画质</span>
                     <fieldset className="zc-seg" aria-label="预览画质">

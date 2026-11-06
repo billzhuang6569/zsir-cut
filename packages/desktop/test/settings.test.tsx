@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { URL as NodeURL } from "node:url";
 import { isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
@@ -75,6 +77,7 @@ async function mount(
     failMove?: boolean;
     failSave?: boolean;
     earlyOutput?: boolean;
+    initialPage?: "通用" | "Agent";
   } = {},
 ) {
   const dir = await mkdtemp(join(tmpdir(), "u312-settings-"));
@@ -152,6 +155,7 @@ async function mount(
   await act(async () =>
     root.render(
       <SettingsPage
+        initialPage={options.initialPage ?? "Agent"}
         call={call}
         subscribe={subscribe}
         close={close}
@@ -343,15 +347,20 @@ it("uses the native directory picker and Finder, and treats cancellation as no c
   await h.click("换位置…");
   expect(h.call.mock.calls).toHaveLength(count);
 });
-it("degrades quietly when cache verbs are unavailable and retains the current location on move failure", async () => {
-  const h = await mount({ cacheUnavailable: true, failMove: true });
+it("disables cache controls with one short message when cache verbs are unavailable", async () => {
+  const h = await mount({ cacheUnavailable: true });
   await h.click("预览与缓存");
-  expect(h.container.textContent).toContain("缓存暂不可用");
+  expect(h.container.textContent?.match(/缓存暂不可用/g)).toHaveLength(1);
   expect(h.container.textContent).not.toContain("NaN");
-  await h.click("1080p");
-  expect(h.prefs.get().prefs.preview_cache.quality).toBe("1080p");
-  await h.input("缓存上限", "50");
-  expect(h.prefs.get().prefs.preview_cache.limit_gb).toBe(50);
+  for (const control of h.container.querySelectorAll<HTMLInputElement>(
+    ".zc-settings-body input, .zc-settings-body select, .zc-settings-body button",
+  ))
+    expect(control.matches(":disabled")).toBe(true);
+  expect(h.container.querySelector('[role="alert"]')).toBeNull();
+});
+it("retains the current location on move failure", async () => {
+  const h = await mount({ failMove: true });
+  await h.click("预览与缓存");
   await h.input("缓存位置", "/unavailable");
   await h.click("换位置…");
   expect(h.prefs.get().prefs.preview_cache.directory).toBe("/cache");
@@ -437,6 +446,7 @@ it("opens settings from Cmd+, the rail, and a changed open_settings binding", as
   expect(railSettings).not.toBeNull();
   await act(async () => railSettings?.click());
   expect(container.querySelector("dialog")).not.toBeNull();
+  expect(container.querySelector('[aria-current="page"]')?.textContent).toBe("通用");
 });
 it("forwards the three settings pushes, unsubscribes, and preserves manual installation instructions", async () => {
   let socket: FakeSocket | undefined;
@@ -472,6 +482,7 @@ it("forwards the three settings pushes, unsubscribes, and preserves manual insta
     { port: 1, token: "test" },
     { ui: initialState, project: vi.fn(), icon: vi.fn(), error: vi.fn() },
   );
+  socket?.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ type: "bootstrap", project: null }) }));
   const listener = vi.fn();
   const stop = host.subscribe(listener);
   for (const type of ["agents_changed", "agents_output", "preview_cache"])
@@ -485,5 +496,99 @@ it("forwards the three settings pushes, unsubscribes, and preserves manual insta
   socket?.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ type: "agents_output" }) }));
   expect(listener).toHaveBeenCalledTimes(3);
   await expect(host.call("agents_install", { id: "codex" })).rejects.toMatchObject({ manual: "手动安装说明" });
+  host();
+});
+
+it("queues settings reads until bootstrap and renders the exact captured agents_list frame", async () => {
+  const frame = readFileSync(new NodeURL("./fixtures/agents_list-response.json", import.meta.url), "utf8");
+  let socket: FakeSocket | undefined;
+  class FakeSocket {
+    readyState = 0;
+    onopen: (() => void) | null = null;
+    onmessage: ((event: MessageEvent) => void) | null = null;
+    onclose: (() => void) | null = null;
+    send = vi.fn();
+    constructor() {
+      socket = this;
+    }
+    close() {
+      this.readyState = 3;
+      this.onclose?.();
+    }
+  }
+  vi.stubGlobal("WebSocket", FakeSocket);
+  const host = connection.connectHost(
+    { port: 1, token: "test" },
+    { ui: initialState, project: vi.fn(), icon: vi.fn(), error: vi.fn() },
+  );
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  cleanup.push(async () => {
+    await act(async () => root.unmount());
+    host();
+    container.remove();
+  });
+  const call = (verb: string, request: Record<string, unknown>) => {
+    if (verb === "prefs_get")
+      return Promise.resolve({ prefs: defaultPreferences, keymap: presets.fcp, preview_cache_directory: "/cache" });
+    if (verb === "preview_cache_status") return Promise.reject(new Error("unsupported"));
+    return host.call(verb, request);
+  };
+  await act(async () =>
+    root.render(
+      <SettingsPage
+        initialPage="Agent"
+        call={call}
+        subscribe={host.subscribe}
+        close={vi.fn()}
+        onPrefs={vi.fn()}
+        openRecognition={vi.fn()}
+        projectPath={null}
+      />,
+    ),
+  );
+  expect(container.textContent).toContain("正在读取 Agent");
+  expect(socket?.send).not.toHaveBeenCalled();
+  if (!socket) throw new Error("Missing socket");
+  socket.readyState = 1;
+  socket.onopen?.();
+  expect(socket.send.mock.calls.map(([raw]) => JSON.parse(raw))).toEqual([{ type: "ui_ready" }]);
+  socket.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ type: "bootstrap", project: null }) }));
+  expect(JSON.parse(socket.send.mock.calls[1]?.[0] as string)).toEqual({ id: "1", verb: "agents_list", request: {} });
+  await act(async () => socket?.onmessage?.(new MessageEvent("message", { data: frame })));
+  expect(container.textContent).not.toContain("暂时无法读取 Agent");
+  expect(container.textContent).toContain("已找到 · 2.1.318");
+  expect(container.textContent).toContain("已找到 · 0.167.0");
+  expect(container.textContent).not.toContain("(Claude Code)");
+  expect(container.textContent).not.toContain("codex-cli");
+  expect(container.textContent).toContain("/Users/billzhuang/.nvm/versions/node/v24.14.1/bin/claude");
+  expect(container.querySelector('[aria-current="page"]')?.textContent).toBe("Agent");
+  expect(document.activeElement).toBe(container.querySelector('[aria-current="page"]'));
+  expect(container.querySelector(".zc-settings-agent .zc-chip")?.textContent).toBe("默认");
+});
+it.each(["close", "disconnect"])("rejects queued requests on %s before bootstrap", async (action) => {
+  let socket: FakeSocket | undefined;
+  class FakeSocket {
+    readyState = 0;
+    onclose: (() => void) | null = null;
+    constructor() {
+      socket = this;
+    }
+    close() {
+      this.readyState = 3;
+      this.onclose?.();
+    }
+  }
+  vi.stubGlobal("WebSocket", FakeSocket);
+  const host = connection.connectHost(
+    { port: 1, token: "test" },
+    { ui: initialState, project: vi.fn(), icon: vi.fn(), error: vi.fn() },
+  );
+  const pending = host.call("agents_list", {});
+  if (action === "close") socket?.close();
+  else host();
+  await expect(pending).rejects.toThrow("宿主连接已断开");
+  await expect(host.call("agents_list", {})).rejects.toThrow("宿主连接已断开");
   host();
 });

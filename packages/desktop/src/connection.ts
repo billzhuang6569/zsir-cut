@@ -73,6 +73,9 @@ export function connectHost(
 ): (() => void) & { call: (verb: string, request: Record<string, unknown>) => Promise<unknown>; subscribe: Subscribe } {
   const socket = new WebSocket(`ws://127.0.0.1:${config.port}/?token=${encodeURIComponent(config.token)}`);
   const listeners = new Set<(message: HostPush) => void>();
+  // The host accepts UI-only verbs after bootstrap, not merely after socket open.
+  let ready = false;
+  const queued: string[] = [];
   let sequence = 0;
   let project: string | null = null;
   let generation = 0;
@@ -83,19 +86,19 @@ export function connectHost(
   const call = (verb: string, request: Record<string, unknown>): Promise<unknown> => {
     if (UI_VERBS.includes(verb as UiVerb)) return Promise.resolve().then(() => handlers.ui(verb as UiVerb, request));
     return new Promise<unknown>((resolve, reject) => {
-      if (socket.readyState === 0) {
-        reject(new Error("宿主正在连接"));
+      if (socket.readyState > 1) {
+        reject(new Error("宿主连接已断开"));
         return;
       }
       const id = String(++sequence);
       pending.set(id, { resolve, reject, verb });
-      socket.send(
-        JSON.stringify(
-          verb === "preview_data"
-            ? { id, type: "preview_data", at_revision: request.at_revision }
-            : { id, verb, request },
-        ),
+      const message = JSON.stringify(
+        verb === "preview_data"
+          ? { id, type: "preview_data", at_revision: request.at_revision }
+          : { id, verb, request },
       );
+      if (ready) socket.send(message);
+      else queued.push(message);
     });
   };
   async function refresh() {
@@ -142,6 +145,8 @@ export function connectHost(
       for (const listener of listeners) listener(message);
     }
     if (message.type === "bootstrap") {
+      ready = true;
+      for (const request of queued.splice(0)) socket.send(request);
       generation++;
       project = message.project;
       window.dispatchEvent(new Event("desktop-host-ready"));
@@ -210,11 +215,15 @@ export function connectHost(
   socket.onclose = () => {
     for (const item of pending.values()) item.reject(new Error("宿主连接已断开"));
     pending.clear();
+    queued.length = 0;
     handlers.error("宿主连接已断开");
   };
   return Object.assign(
     () => {
       socket.onclose = null;
+      for (const item of pending.values()) item.reject(new Error("宿主连接已断开"));
+      pending.clear();
+      queued.length = 0;
       socket.close();
     },
     {

@@ -49,6 +49,7 @@
 .zc-settings-content {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   padding: var(--space-5) var(--space-6);
@@ -73,6 +74,17 @@
 }
 .zc-settings .zc-input {
   min-width: 0;
+  height: var(--control-h);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+  color: var(--text);
+  font: inherit;
+}
+.zc-settings-field .zc-input {
+  flex: 1;
+  width: 0;
 }
 .zc-settings .zc-btn {
   flex: none;
@@ -107,7 +119,10 @@
 }
 .zc-settings-path {
   overflow-wrap: anywhere;
+  white-space: normal;
   font-family: var(--font-mono);
+  font-size: var(--mono-sm-size);
+  line-height: var(--mono-sm-line);
 }
 .zc-settings-presets {
   display: flex;
@@ -244,7 +259,9 @@
   overflow: hidden;
   clip-path: inset(50%);
 }
-.zc-settings button:disabled {
+.zc-settings button:disabled,
+.zc-settings input:disabled,
+.zc-settings select:disabled {
   cursor: default;
   opacity: 0.45;
 }
@@ -261,12 +278,6 @@
   }
 }
 
-.zc-settings[data-page="快捷键"] {
-  height: 820px;
-}
-.zc-settings[data-page="预览与缓存"] {
-  height: 780px;
-}
 .zc-settings-nav h2 {
   font-size: var(--headline-size);
   line-height: var(--headline-line);
