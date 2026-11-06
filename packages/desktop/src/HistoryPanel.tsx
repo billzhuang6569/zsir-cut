@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { UiState } from "../../app-host/src/ui.js";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import type { EntityChange } from "../../core/dist/project/entities.js";
 import { Button, DecisionProgress } from "./ai-components.js";
 import { Icon } from "./components.js";
-import type { ProjectView } from "./connection.js";
+import type { ProjectView, Subscribe } from "./connection.js";
 import { DESKTOP_AUTHOR } from "./connection.js";
+import { type HistoryDecision, HistoryDecisions, HistoryReport } from "./HistoryReport.js";
+import type { UiState } from "./state.js";
 import "./history.css";
 
 export interface HistoryEntry {
@@ -15,6 +18,9 @@ export interface HistoryEntry {
   author?: { kind: string; name: string };
   batch: { id: string; seq: number; count: number } | null;
   target?: string;
+  reason?: string | null;
+  session_id?: string | null;
+  changes?: EntityChange[];
 }
 interface BatchStatus {
   state: string;
@@ -34,7 +40,9 @@ export function useHistoryPanel({
   state,
   update,
   call,
+  subscribe,
 }: {
+  subscribe?: Subscribe;
   project: ProjectView | null;
   state: UiState;
   update: (next: UiState) => void;
@@ -42,6 +50,11 @@ export function useHistoryPanel({
 }) {
   const latest = useRef({ project, state, update });
   latest.current = { project, state, update };
+  const anchor = useRef<HTMLDivElement>(null);
+  const popover = useRef<HTMLElement>(null);
+  const [drafts, setDrafts] = useState<{ session_id: string; intent?: string; revision_count: number }[]>([]);
+  const [decisions, setDecisions] = useState<{ revision: string; items: HistoryDecision[] } | null>(null);
+  const [refreshVersion, setRefreshVersion] = useState(0);
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
@@ -57,28 +70,88 @@ export function useHistoryPanel({
   const loaded = useRef(false);
   const generation = useRef(0);
   const open = state.history?.open === true;
+  useLayoutEffect(() => {
+    if (!open) return;
+    const position = () => {
+      const button = anchor.current?.getBoundingClientRect();
+      const panel = popover.current;
+      if (!button || !panel) return;
+      const right = Math.max(8, window.innerWidth - button.right - 12);
+      panel.style.top = `${button.bottom + 6}px`;
+      panel.style.right = `${right}px`;
+      panel.style.maxHeight = `min(600px, calc(100dvh - ${button.bottom + 18}px))`;
+      panel.style.setProperty(
+        "--history-caret-right",
+        `${window.innerWidth - right - button.left - button.width / 2 - 5}px`,
+      );
+    };
+    position();
+    window.addEventListener("resize", position);
+    window.addEventListener("scroll", position, true);
+    return () => {
+      window.removeEventListener("resize", position);
+      window.removeEventListener("scroll", position, true);
+    };
+  }, [open]);
   const revision = state.history?.revision;
   const change = useCallback((history: NonNullable<UiState["history"]>) => {
     const { state, update } = latest.current;
-    update({ ...state, history, playing: false, preview: "timeline", selected: [], edit_point: null });
+    update({
+      ...state,
+      history: { ...history, viewing: history.revision },
+      playing: false,
+      preview: "timeline",
+      selected: [],
+      edit_point: null,
+    });
   }, []);
-  const close = useCallback(() => change({ open: false, revision: null, label: null }), [change]);
+  const setOpen = useCallback((open: boolean) => {
+    const { state, update } = latest.current;
+    update({
+      ...state,
+      history: { revision: null, label: null, ...state.history, open, viewing: state.history?.revision ?? null },
+    });
+  }, []);
+  const close = useCallback(() => setOpen(false), [setOpen]);
   const present = useCallback(() => change({ open: true, revision: null, label: null }), [change]);
   const toggle = useCallback(() => {
     if (latest.current.state.history?.open) close();
-    else present();
-  }, [close, present]);
+    else setOpen(true);
+  }, [close, setOpen]);
   useEffect(() => {
     const keyboard = (event: KeyboardEvent) => {
       if (latest.current.state.export?.open) return;
       if (event.key === "Escape" && latest.current.state.history?.open) {
         event.preventDefault();
         close();
+        anchor.current?.querySelector<HTMLButtonElement>("button")?.focus();
       }
     };
     window.addEventListener("keydown", keyboard);
     return () => window.removeEventListener("keydown", keyboard);
   }, [close]);
+
+  useEffect(() => {
+    const outside = (event: PointerEvent) => {
+      if (
+        latest.current.state.history?.open &&
+        event.target instanceof Node &&
+        !anchor.current?.contains(event.target) &&
+        !popover.current?.contains(event.target)
+      )
+        close();
+    };
+    document.addEventListener("pointerdown", outside);
+    return () => document.removeEventListener("pointerdown", outside);
+  }, [close]);
+  useEffect(
+    () =>
+      subscribe?.((message) => {
+        if (message.type === "project_changed" || message.type === "ai_changed")
+          setRefreshVersion((value) => value + 1);
+      }),
+    [subscribe],
+  );
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: Reset pagination when the project changes.
   useEffect(() => {
@@ -87,6 +160,11 @@ export function useHistoryPanel({
     setBatches({});
     setExpanded([]);
     setMore(false);
+    setDrafts([]);
+    setSnapshot(null);
+    setDecisions(null);
+    setError("");
+    setReadError("");
   }, [state.project]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: Refresh immediately on project_changed as well as polling batches.
@@ -124,6 +202,13 @@ export function useHistoryPanel({
           setMore(result.entries.length === 20);
           loaded.current = true;
         }
+        const ai = (await call("ai_state", {})) as {
+          sessions?: { session_id: string; state: string; intent?: string; revision_count: number }[];
+        };
+        if (generation.current !== epoch) return;
+        setDrafts(
+          (ai.sessions ?? []).filter((item) => ["open", "in_review"].includes(item.state) && item.revision_count > 0),
+        );
         const ids = [
           ...new Set([
             ...(latest.current.project?.historyBatches ?? []),
@@ -149,7 +234,7 @@ export function useHistoryPanel({
       ++generation.current;
       clearInterval(timer);
     };
-  }, [open, state.project, project?.revision.id, call]);
+  }, [open, state.project, project?.revision.id, refreshVersion, call]);
 
   useEffect(() => {
     setSnapshot(null);
@@ -172,6 +257,26 @@ export function useHistoryPanel({
       cancelled = true;
     };
   }, [revision, state.project, call]);
+
+  const selected = entries.find((entry) => entry.revision === revision);
+  const sessionId = selected?.session_id;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Session decisions can change without a main revision.
+  useEffect(() => {
+    setDecisions(null);
+    if (!revision || !sessionId || !state.project) return;
+    let active = true;
+    void call("inspect", { project: state.project, view: "session", session_id: sessionId })
+      .then((result) => {
+        if (active) setDecisions({ revision, items: (result as { decisions: HistoryDecision[] }).decisions });
+      })
+      .catch(() => {
+        if (active) setError("决定读取失败，请重试");
+      });
+    return () => {
+      active = false;
+    };
+  }, [revision, sessionId, state.project, call, refreshVersion]);
+  const selectedDecisions = decisions && decisions.revision === revision ? decisions.items : [];
 
   const loadMore = useCallback(async () => {
     if (!more || pageBusy.current || !entries.length) return;
@@ -215,6 +320,7 @@ export function useHistoryPanel({
         label: `回到：${state.history.label ?? "工程修改"}`.slice(0, 80),
       });
       present();
+      setRefreshVersion((value) => value + 1);
     } catch (cause) {
       setError(
         String(cause instanceof Error ? cause.cause : cause).includes("E_BATCH_OPEN")
@@ -232,7 +338,10 @@ export function useHistoryPanel({
       key={entry.revision}
       aria-pressed={revision === entry.revision}
       title={entry.author?.name}
-      onClick={() => change({ open: true, revision: entry.revision, label: stepLabel(entry) })}
+      onClick={() => {
+        setError("");
+        change({ open: true, revision: entry.revision, label: stepLabel(entry) });
+      }}
     >
       <span role="img" aria-label={entry.kind === "restore" ? "恢复" : entry.author?.kind === "agent" ? "Agent" : "人"}>
         <Icon name={entry.kind === "restore" ? "undo" : entry.author?.kind === "agent" ? "spark" : "human"} />
@@ -280,56 +389,82 @@ export function useHistoryPanel({
     toggle,
     viewing: Boolean(revision),
     view: revision ? (snapshot?.revision === revision ? snapshot.view : null) : project,
+    anchor,
+    report: <HistoryReport entry={selected} decisions={selectedDecisions} />,
+    decisions: <HistoryDecisions decisions={selectedDecisions} />,
     banner: revision && (
-      <div className="zc-history-banner" aria-live="polite">
-        <span className="zc-grow">正在看：{state.history?.label}</span>
-        <Button
-          icon="undo"
-          disabled={busy || batchOpen || snapshot?.revision !== revision}
-          title={batchOpen ? "AI 批次尚未完成，暂时不能恢复" : undefined}
-          onClick={() => void restore()}
-        >
-          回到这一步
-        </Button>
-        <Button icon="history" disabled={busy} onClick={present}>
-          返回现在
-        </Button>
-        {batchOpen && <small>AI 批次尚未完成，暂时不能恢复</small>}
-      </div>
+      <span className="zc-history-banner" aria-live="polite">
+        正在看：{state.history?.label}
+      </span>
     ),
-    panel: (
-      <>
-        <div className="zc-history-heading">
-          <h2>历史</h2>
-          <Button icon="close" onClick={close}>
-            关闭
-          </Button>
-        </div>
-        {Object.entries(batches)
-          .filter(([, batch]) => batch.state === "open")
-          .map(([id, batch]) => (
-            <output className="zc-history-progress" key={id}>
-              <DecisionProgress done={batch.applied.length} total={batch.count} />
-              AI 正在做第 {Math.min(batch.applied.length + 1, batch.count)} / {batch.count} 步
-            </output>
-          ))}
-        {(error || readError) && <p role="alert">{error || readError}</p>}
-        <div
-          className="zc-history-list"
-          onScroll={(event) => {
-            const node = event.currentTarget;
-            if (node.scrollHeight - node.scrollTop - node.clientHeight < 32) void loadMore();
-          }}
-        >
-          {list}
-          {!entries.length && <p className="zc-muted">还没有历史步骤</p>}
-          {more && (
-            <Button disabled={loading} onClick={() => void loadMore()}>
-              {loading ? "正在加载…" : "加载更早的步骤"}
+    panel:
+      open &&
+      createPortal(
+        <section ref={popover} className="zc-popover zc-history-popover" role="dialog" aria-label="历史">
+          <span className="zc-popover-caret" />
+          <div className="zc-history-heading">
+            <h2>历史</h2>
+            <Button icon="close" onClick={close}>
+              关闭
             </Button>
-          )}
-        </div>
-      </>
-    ),
+          </div>
+          {Object.entries(batches)
+            .filter(([, batch]) => batch.state === "open")
+            .map(([id, batch]) => (
+              <output className="zc-history-progress" key={id}>
+                <DecisionProgress done={batch.applied.length} total={batch.count} />
+                AI 正在做第 {Math.min(batch.applied.length + 1, batch.count)} / {batch.count} 步
+              </output>
+            ))}
+          {(error || readError) && <p role="alert">{error || readError}</p>}
+          <div
+            className="zc-history-list"
+            onScroll={(event) => {
+              const node = event.currentTarget;
+              if (node.scrollHeight - node.scrollTop - node.clientHeight < 32) void loadMore();
+            }}
+          >
+            {drafts.map((draft) => (
+              <button
+                type="button"
+                className="zc-step zc-history-draft"
+                key={draft.session_id}
+                onClick={() => {
+                  change({ open: false, revision: null, label: null });
+                  window.dispatchEvent(new CustomEvent("desktop-open-review", { detail: draft.session_id }));
+                }}
+              >
+                <Icon name="spark" />
+                <span className="zc-grow">
+                  {draft.intent || "AI 草稿"}
+                  <small>{draft.revision_count} 步</small>
+                </span>
+                <span className="zc-chip is-sm is-attention">待审 ›</span>
+              </button>
+            ))}
+            {list}
+            {!entries.length && !drafts.length && <p className="zc-muted">还没有历史步骤</p>}
+            {more && (
+              <Button disabled={loading} onClick={() => void loadMore()}>
+                {loading ? "正在加载…" : "加载更早的步骤"}
+              </Button>
+            )}
+          </div>
+          <footer className="zc-history-footer">
+            <Button
+              icon="undo"
+              disabled={!revision || busy || batchOpen || snapshot?.revision !== revision}
+              title={batchOpen ? "AI 批次尚未完成，暂时不能恢复" : undefined}
+              onClick={() => void restore()}
+            >
+              回到这一步
+            </Button>
+            <Button disabled={busy} onClick={present}>
+              回到最新
+            </Button>
+          </footer>
+        </section>,
+        document.body,
+      ),
   };
 }

@@ -1,52 +1,162 @@
-.zc-parameters[data-panel="history"] {
+/* Popover primitives from design/reference/components.css; keep unrelated reference styles out of the app. */
+.zc-popover {
+  z-index: 30;
   display: flex;
   flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.45);
+  animation: zc-pop-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+  transform-origin: top right;
+}
+.zc-popover-caret {
+  position: absolute;
+  top: -6px;
+  width: 10px;
+  height: 10px;
+  background: var(--panel);
+  border-left: 1px solid var(--line-strong);
+  border-top: 1px solid var(--line-strong);
+  transform: rotate(45deg);
+}
+@keyframes zc-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .zc-popover {
+    animation: none;
+  }
+}
+.zc-history-anchor {
+  position: relative;
+  display: inline-flex;
+}
+.zc-history-popover {
+  position: fixed;
+  width: 360px;
+  max-width: calc(100vw - 16px);
+  padding: var(--space-2);
+}
+.zc-history-popover .zc-popover-caret {
+  right: var(--history-caret-right);
 }
 .zc-history-heading,
 .zc-history-progress,
-.zc-history-banner {
+.zc-history-footer {
   display: flex;
   align-items: center;
   gap: var(--space-4);
 }
 .zc-history-heading {
   justify-content: space-between;
+  flex-shrink: 0;
+  padding: var(--space-2) var(--space-2) var(--space-3);
 }
 .zc-history-list {
   flex: 1;
   min-height: 0;
   overflow: auto;
 }
-.zc-history-step {
+.zc-history-list .zc-step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 50px;
+  padding: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
   text-align: left;
+  cursor: pointer;
 }
-.zc-history-step[aria-pressed="true"] {
+.zc-history-list .zc-step > :not(.zc-grow) {
+  flex-shrink: 0;
+}
+.zc-history-list .zc-grow {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.zc-history-list .zc-step:hover {
+  background: var(--panel-2);
+}
+.zc-history-list .zc-step[aria-pressed="true"] {
   background: var(--raised);
 }
 .zc-history-step time,
-.zc-history-step small {
+.zc-history-step small,
+.zc-history-draft small,
+.zc-history-report small {
   color: var(--text-3);
   font-size: var(--caption-size);
+}
+.zc-history-step time,
+.zc-history-step small {
   white-space: nowrap;
 }
 .zc-history-group {
   padding-left: var(--space-5);
 }
 .zc-history-banner {
-  width: 100%;
-  flex-wrap: wrap;
   color: var(--attention);
+  font-size: var(--caption-size);
 }
-.zc-history-progress {
-  padding-block: var(--space-5);
+.zc-history-progress,
+.zc-history-footer {
+  padding-block: var(--space-3);
+  flex-shrink: 0;
 }
-.zc-editor .zc-toolbar:has(.zc-history-banner) {
-  flex-wrap: nowrap;
+.zc-history-footer {
+  gap: var(--space-2);
+  margin: var(--space-2) var(--space-1) var(--space-1);
+  padding: var(--space-2);
+  background: var(--panel-2);
+  border-radius: var(--radius-sm);
 }
-.zc-history-banner {
-  width: auto;
-  flex: none;
-  flex-wrap: nowrap;
+.zc-history-footer > :first-child {
+  flex: 1;
+}
+.zc-history-draft small,
+.zc-history-report-heading small,
+.zc-history-report-heading time,
+.zc-history-report-row small {
+  display: block;
+}
+.zc-history-report {
+  overflow: auto;
+}
+.zc-history-report-heading,
+.zc-history-report-section {
+  margin-bottom: var(--space-6);
+}
+.zc-history-report-section h3,
+.zc-history-report-row {
+  display: flex;
+  align-items: start;
+  gap: var(--space-2);
+  font-size: var(--caption-size);
+  line-height: var(--body-line);
+}
+.zc-history-report-row {
+  padding-block: var(--space-2);
+  overflow-wrap: anywhere;
+  color: var(--text-2);
+}
+.zc-history-report-row del {
+  color: var(--text-3);
+}
+.zc-history-report-row.is-attention {
+  color: var(--attention);
+  background: var(--attention-soft);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+}
+.zc-functions .zc-function-panel[hidden] {
+  display: none;
 }

@@ -159,7 +159,9 @@ export function App({ config }: { config?: { port: number; token: string } }) {
     };
   }, [config, update]);
   const preferences = useTimelinePreferences(rawCall, setError, state, update);
+  const history = useHistoryPanel({ project, state, update, call: rawCall, subscribe });
   const settingsKey = preferences.keymap.open_settings;
+  const historyKey = preferences.keymap.toggle_history;
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing || event.repeat || document.querySelector("dialog[open]")) return;
@@ -171,7 +173,11 @@ export function App({ config }: { config?: { port: number; token: string } }) {
         event.target.closest("input, textarea, [contenteditable=true]")
       )
         return;
-      if (settingsKey && recordedKey(event) === settingsKey) {
+      if (historyKey && recordedKey(event) === historyKey && current.current.project) {
+        event.preventDefault();
+        event.stopPropagation();
+        history.toggle();
+      } else if (settingsKey && recordedKey(event) === settingsKey) {
         event.preventDefault();
         event.stopPropagation();
         setSettingsOpen(true);
@@ -179,7 +185,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
     };
     window.addEventListener("keydown", keydown, true);
     return () => window.removeEventListener("keydown", keydown, true);
-  }, [settingsKey]);
+  }, [settingsKey, historyKey, history.toggle]);
   useEffect(() => {
     const open = (event: Event) => {
       const id = (event as CustomEvent<string>).detail;
@@ -197,7 +203,6 @@ export function App({ config }: { config?: { port: number; token: string } }) {
     window.addEventListener("desktop-open-review", open);
     return () => window.removeEventListener("desktop-open-review", open);
   }, [update]);
-  const history = useHistoryPanel({ project, state, update, call: rawCall });
   const media = useMediaPanel({ project, state, update, call, config });
   const chapters = useChapterPanel({
     project,
@@ -254,6 +259,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
           }}
         />
         {ai.draftStatus}
+        {history.banner}
         <span className="zc-grow" />
         {project && (
           <span className="zc-meta zc-save-status">
@@ -271,13 +277,18 @@ export function App({ config }: { config?: { port: number; token: string } }) {
         </span>
         {!project && <IconButton icon="settings" label="设置" onClick={() => setSettingsOpen(true)} />}
         <IconButton icon="search" label="命令面板 ⌘K" />
-        <IconButton
-          icon="history"
-          label="历史 ⌥⌘H"
-          disabled={!project}
-          pressed={state.history?.open === true}
-          onClick={history.toggle}
-        />
+        <div className="zc-history-anchor" ref={history.anchor}>
+          <IconButton
+            icon="history"
+            label="历史 ⌥⌘H"
+            aria-haspopup="dialog"
+            aria-expanded={state.history?.open === true}
+            disabled={!project}
+            pressed={state.history?.open === true}
+            onClick={history.toggle}
+          />
+          {history.panel}
+        </div>
         <button
           type="button"
           className="zc-btn zc-btn-primary is-primary"
@@ -326,7 +337,9 @@ export function App({ config }: { config?: { port: number; token: string } }) {
             </button>
           </nav>
           <section aria-label="功能区" className="zc-functions zc-panel">
+            {history.viewing && <div className="zc-pad zc-history-report">{history.report}</div>}
             <div
+              hidden={history.viewing}
               id={`${uniqueId}-function-panel`}
               role="tabpanel"
               aria-labelledby={`${uniqueId}-tab-${state.panel}`}
@@ -382,10 +395,10 @@ export function App({ config }: { config?: { port: number; token: string } }) {
                 ref={setReviewTarget}
                 aria-label="参数区"
                 className="zc-parameters zc-panel zc-pad"
-                data-panel={state.history?.open ? "history" : state.panel}
+                data-panel={history.viewing ? "history" : state.panel}
               >
-                {reviewSession ? null : state.history?.open ? (
-                  history.panel
+                {reviewSession ? null : history.viewing ? (
+                  history.decisions
                 ) : (
                   <>
                     {state.panel === "ai" ? (
@@ -436,7 +449,6 @@ export function App({ config }: { config?: { port: number; token: string } }) {
                   if (item && !history.viewing) media.place(item, at, track);
                 }}
                 project={history.view}
-                historyBanner={history.banner}
                 onEditSubtitle={subtitles.editCue}
                 readOnly={history.viewing}
                 state={state}

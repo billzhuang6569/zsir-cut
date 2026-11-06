@@ -253,15 +253,37 @@ it("opens the project through inspect and receives UI commands", async () => {
     expect(rail?.textContent).not.toContain("历史");
     expect(rail?.querySelector('[aria-label="设置"]')).not.toBeNull();
     const historyButton = container.querySelector<HTMLButtonElement>('[aria-label="历史 ⌥⌘H"]');
-    expect(historyButton?.nextElementSibling?.textContent).toBe("导出");
+    expect(historyButton?.parentElement?.nextElementSibling?.textContent).toBe("导出");
     expect(
       [...container.querySelectorAll(".zc-menubar .zc-ibtn")].map((node) => node.getAttribute("aria-label")),
     ).toEqual(["撤销", "重做", "命令面板 ⌘K", "历史 ⌥⌘H"]);
     expect(container.querySelector('[aria-label="工具栏"] [aria-label^="历史"]')).toBeNull();
+    const parametersBefore = container.querySelector('[aria-label="参数区"]')?.innerHTML;
     await act(async () => historyButton?.click());
-    expect(container.querySelector('[aria-label="参数区"]')?.getAttribute("data-panel")).toBe("history");
-    expect(container.querySelector('[aria-label="参数区"]')?.textContent).toContain("历史");
+    expect(document.body.querySelector('[role="dialog"][aria-label="历史"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="参数区"]')?.innerHTML).toBe(parametersBefore);
     await act(async () => historyButton?.click());
+    await act(async () =>
+      socket?.receive({ type: "ui_request", id: "history", verb: "ui_show_panel", request: { panel: "history" } }),
+    );
+    expect(document.body.querySelector('[role="dialog"][aria-label="历史"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="参数区"]')?.innerHTML).toBe(parametersBefore);
+    expect(replies.at(-1)).toMatchObject({ id: "history", result: { history: { open: true } } });
+    await act(() =>
+      document.body
+        .querySelector('[role="dialog"][aria-label="历史"] button')
+        ?.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "˙", code: "KeyH", metaKey: true, altKey: true, bubbles: true }),
+        ),
+    );
+    expect(document.body.querySelector('[role="dialog"][aria-label="历史"]')).toBeNull();
+    await act(() =>
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "˙", code: "KeyH", metaKey: true, altKey: true })),
+    );
+    expect(document.body.querySelector('[role="dialog"][aria-label="历史"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="参数区"]')?.innerHTML).toBe(parametersBefore);
+    await act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
+    expect(document.body.querySelector('[role="dialog"][aria-label="历史"]')).toBeNull();
     const divider = container.querySelector<HTMLElement>('[aria-label="预览与时间线分界"]');
     await act(() => divider?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true })));
     expect(divider?.getAttribute("aria-valuenow")).toBe("52");
@@ -281,7 +303,7 @@ it("opens the project through inspect and receives UI commands", async () => {
     const saved = container.querySelector(".zc-save-status");
     expect(saved?.querySelector(".zc-dot.is-approved")).not.toBeNull();
     expect(saved?.nextElementSibling?.className).toBe("zc-revision-controls");
-    expect(historyButton?.nextElementSibling?.querySelector("svg")).not.toBeNull();
+    expect(historyButton?.parentElement?.nextElementSibling?.querySelector("svg")).not.toBeNull();
     expect([...container.querySelectorAll(".zc-player button")].map((node) => node.getAttribute("aria-label"))).toEqual(
       ["设入点 I", "上一个剪点", "播放", "下一个剪点", "音量", "全屏"],
     );
