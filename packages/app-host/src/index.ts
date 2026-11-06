@@ -15,6 +15,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import { WebSocket, WebSocketServer } from "ws";
 import { z } from "zod";
 import type { DispatchOptions, Envelope, SubtitleStyle, Verb } from "../../core/dist/index.js";
+import { AgentManagement, type AgentManagementOptions } from "./agent-management.js";
 import { Agents } from "./agents.js";
 import { exportPreferences } from "./export-preferences.js";
 import { mediaChannel, runFfmpeg } from "./media.js";
@@ -257,6 +258,7 @@ export async function startHost(
     token?: string;
     dispatchOptions?: DispatchOptions;
     appDataDir?: string;
+    agentOptions?: AgentManagementOptions;
   } = {},
 ) {
   const token = options.token ?? randomBytes(32).toString("hex");
@@ -351,6 +353,13 @@ export async function startHost(
   });
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
   let ui: WebSocket | undefined;
+  const agentManagement = new AgentManagement(
+    prefs,
+    (event) => {
+      if (ui?.readyState === WebSocket.OPEN) ui.send(JSON.stringify(event));
+    },
+    options.agentOptions,
+  );
   const pending = new Map<string, { resolve: (value: UiEnvelope) => void; timer: NodeJS.Timeout; verb: DesktopVerb }>();
   const disconnected = () => {
     for (const [key, item] of pending) {
@@ -462,6 +471,18 @@ export async function startHost(
             client.send(JSON.stringify(prefs.warning));
             prefs.warning = undefined;
           }
+          return;
+        }
+        if (
+          typeof message.id === "string" &&
+          ["agents_list", "agents_install", "agents_update", "agents_set_default"].includes(message.verb)
+        ) {
+          if (client !== ui) throw new Error("界面未连接");
+          const envelope = await agentManagement.handle(message.verb, message.request ?? {});
+          if (envelope.ok && message.verb === "agents_set_default" && agents)
+            agents.selected = prefs.get().prefs.default_agent ?? undefined;
+          if (client.readyState === WebSocket.OPEN)
+            client.send(JSON.stringify({ type: "result", id: message.id, envelope }));
           return;
         }
         if (typeof message.id === "string" && ["prefs_get", "prefs_set"].includes(message.verb)) {

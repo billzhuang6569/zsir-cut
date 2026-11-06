@@ -480,3 +480,27 @@ describe.each(["claude", "codex"] as const)("%s next-step suggestions", (agent) 
     ).toBe("你好\n");
   });
 });
+
+it("launches a PATH-discovered absolute executable after changing working directory", async () => {
+  const { directory, capture } = await fixture("claude");
+  const originalPath = process.env.PATH;
+  process.env.PATH = directory;
+  try {
+    const events: ChatEvent[] = [];
+    const manager = new Agents({
+      project: join(directory, "project.zcut.json"),
+      projectId: "prj_test",
+      url: "http://unused",
+      token: "test",
+      emit: (_chat, event) => events.push(event),
+    });
+    managers.push(manager);
+    await manager.send("claude", "hello");
+    await vi.waitFor(() => expect(events.at(-1)?.type).toBe("end"));
+    expect(JSON.parse(await readFile(capture, "utf8")).cwd).toBe(await realpath(directory));
+    expect(events.some((event) => event.type === "text")).toBe(true);
+  } finally {
+    if (originalPath === undefined) delete process.env.PATH;
+    else process.env.PATH = originalPath;
+  }
+});

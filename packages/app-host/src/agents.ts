@@ -1,12 +1,12 @@
-import { type ChildProcess, execFile, spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 import { type AgentKind, agentParser, type ChatEvent } from "./agent-events.js";
+import { findProgram, programVersion } from "./agent-management.js";
 
 export interface Chat {
   id: string;
@@ -30,21 +30,17 @@ export class Agents {
       commands?: Record<AgentKind, string>;
     },
   ) {}
-  private command(agent: AgentKind) {
-    return this.options.commands?.[agent] ?? agent;
+  private async command(agent: AgentKind) {
+    const path = this.options.commands?.[agent] ?? (await findProgram(agent));
+    if (!path) throw new Error(`没有找到 ${agent}`);
+    return path;
   }
   async detect() {
     return Promise.all(
       (["claude", "codex"] as const).map(async (agent) => {
-        try {
-          const { stdout } = await promisify(execFile)(this.command(agent), ["--version"], {
-            timeout: 3000,
-            maxBuffer: 65536,
-          });
-          return { agent, available: true, version: stdout.trim() };
-        } catch {
-          return { agent, available: false, version: null };
-        }
+        const path = await this.command(agent).catch(() => null);
+        const version = await programVersion(path);
+        return { agent, available: version !== null, version };
       }),
     );
   }
@@ -169,8 +165,9 @@ export class Agents {
               ...(resume ? ["resume", resume] : []),
               "-",
             ];
+      const command = await this.command(agent);
       if (this.cancelRequested) throw new Error("已停止");
-      const child = spawn(this.command(agent), args, {
+      const child = spawn(command, args, {
         cwd: dirname(this.options.project),
         stdio: ["pipe", "pipe", "pipe"],
         env: { ...process.env, ZCUT_MCP_TOKEN: this.options.token },
@@ -190,7 +187,7 @@ export class Agents {
           void (async () => {
             try {
               parse.finish();
-              if (code && !signal) emit({ type: "error", text: `Agent 退出（${code}），请检查登录状态和 CLI 版本` });
+              if (code && !signal) emit({ type: "error", text: `Agent 退出（${code}），请检查 CLI 输出和版本` });
               await rm(temp, { recursive: true, force: true });
               await this.writes;
             } catch (error) {
@@ -274,8 +271,9 @@ export class Agents {
               join(directory, "output.json"),
               "-",
             ];
+      const command = await this.command(agent);
       const output = await new Promise<string>((resolve, reject) => {
-        const child = spawn(this.command(agent), args, {
+        const child = spawn(command, args, {
           cwd: directory,
           stdio: ["pipe", "pipe", "pipe"],
           detached: process.platform !== "win32",
@@ -321,7 +319,7 @@ export class Agents {
               const parsed = JSON.parse(stdout);
               if (typeof parsed.result === "string") detail += ` ${parsed.result}`;
             } catch {}
-            reject(new Error(detail || `Agent 退出（${code}），请检查登录状态和 CLI 版本`));
+            reject(new Error(detail || `Agent 退出（${code}），请检查 CLI 输出和版本`));
           } else resolve(stdout);
         });
         child.stdin.on("error", () => {});
