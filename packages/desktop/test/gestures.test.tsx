@@ -253,7 +253,7 @@ it("scrubs through the shared seek state at 30000/1001, with threshold and cance
   expect(state.playhead).toEqual({ at: frameTime(60n, "30000/1001") });
   await pointer(head, "lostpointercapture", 176, 55);
   expect(dragging.current).toBe(false);
-  expect(call).not.toHaveBeenCalled();
+  expect(call).toHaveBeenCalledExactlyOnceWith("prefs_set", { patch: { ui: { snap: false } } });
 });
 it("keeps the visible playhead fixed for slider, reset, keyboard, wheel and trackpad pinch", async () => {
   state = applyUi(state, "ui_seek", { at: frameTime(300n, "30000/1001") });

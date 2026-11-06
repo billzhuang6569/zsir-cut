@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { PANELS, type Panel, type UiState } from "../../app-host/src/ui.js";
+import { PANELS, type Panel } from "../../app-host/src/ui.js";
 import { type AiNotice, useAiPanel } from "./AiPanel.js";
 import { useChapterPanel } from "./ChapterPanel.js";
 import { Icon, IconButton } from "./components.js";
@@ -10,7 +10,7 @@ import { useMediaPanel } from "./MediaPanel.js";
 import { sourceProject } from "./media.js";
 import { ProjectEntry } from "./ProjectEntry.js";
 import { useSubtitlePanel } from "./SubtitlePanel.js";
-import { applyUi, initialState } from "./state.js";
+import { applyUi, initialState, type UiState } from "./state.js";
 import { TimelinePreview } from "./TimelinePreview.js";
 import { seekTarget } from "./timeline.js";
 import { SettingsPage, useVoicePanel } from "./VoicePanel.js";
@@ -47,7 +47,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
     (verb: string, request: Record<string, unknown>) => {
       if (
         current.current.history?.revision &&
-        !["inspect", "batch_status", "preview_data", "job_status"].includes(verb)
+        !["inspect", "batch_status", "preview_data", "job_status", "prefs_get", "prefs_set", "ui_seek"].includes(verb)
       )
         return Promise.reject(new Error("正在看历史，请先返回现在"));
       return rawCall(verb, request);
@@ -305,7 +305,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
                   history.panel
                 ) : (
                   <>
-                    <h2>{parameters[state.panel]}</h2>
+                    {state.panel !== "chapters" && <h2>{parameters[state.panel]}</h2>}
                     {state.panel === "ai" && ai.parameters}
                     {state.panel === "media" && media.parameters}
                     {state.panel === "chapters" && chapters.outline}
