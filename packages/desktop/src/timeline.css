@@ -44,7 +44,7 @@
   display: inline-flex;
   flex-shrink: 0;
   box-sizing: border-box;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-xs);
   white-space: nowrap;
   font-size: 11px;
 }
@@ -106,7 +106,7 @@
   overflow: hidden;
   border-radius: var(--radius-sm);
   background: var(--track-subtitle);
-  color: var(--text-2);
+  color: var(--track-subtitle-ink);
 }
 .zc-clip.is-selected {
   box-shadow: 0 0 0 2px var(--text);
@@ -116,17 +116,17 @@
   opacity: 0.45;
 }
 .zc-functions {
-  grid-column: 1;
+  grid-column: 2;
   grid-row: 2;
 }
 .zc-viewer {
-  grid-column: 2;
-  grid-row: 2;
+  grid-column: 1;
+  grid-row: 1;
   flex-direction: column;
   overflow: hidden;
 }
 .zc-parameters {
-  grid-column: 3;
+  grid-column: 4;
   grid-row: 2;
 }
 .zc-toolbar {
@@ -182,6 +182,8 @@
 }
 .zc-track {
   gap: 0;
+  margin-bottom: 6px;
+  border-bottom: none;
 }
 .zc-track-name {
   position: sticky;
@@ -199,12 +201,12 @@
   position: relative;
   height: 100%;
   flex-shrink: 0;
-  background: var(--panel);
+  background: var(--lane);
+  border-radius: var(--radius-xs);
 }
 .zc-track-lane .zc-clip {
   border: 0;
   padding: 0;
-  color: inherit;
   position: absolute;
   top: 0;
   text-align: left;

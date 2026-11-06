@@ -5,7 +5,7 @@ export function tokenCss(): string {
   const tokens = JSON.parse(readFileSync(new NodeURL("../../../design/tokens.json", import.meta.url), "utf8"));
   const variables: string[] = [];
   for (const token of tokens.color.tokens) variables.push(`--${token.name}: ${token.value.dark};`);
-  for (const group of [tokens.spacing, tokens.radius, tokens.size]) {
+  for (const group of [tokens.spacing, tokens.radius, tokens.shadow]) {
     for (const token of group.tokens) variables.push(`--${token.name}: ${token.value};`);
   }
   for (const [name, value] of Object.entries(tokens.type.families)) variables.push(`--font-${name}: ${value};`);

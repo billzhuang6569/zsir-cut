@@ -4,6 +4,7 @@
 // biome-ignore-all lint/suspicious/noArrayIndexKey: Film cells, waveform bars and ruler ticks are fixed geometric slots.
 
 import { memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { UiState } from "../../app-host/src/ui.js";
 import { Clip, Icon, IconButton } from "./components.js";
 import { DESKTOP_AUTHOR, type ProjectView } from "./connection.js";
@@ -100,7 +101,7 @@ export function TimelinePreview({
   dragging,
   readOnly = false,
   historyBanner,
-  onHistory,
+  revisionControlsTarget,
   viewerOnly = false,
   hideViewer = false,
   onMediaDrop,
@@ -117,7 +118,7 @@ export function TimelinePreview({
   ) => void;
   readOnly?: boolean;
   historyBanner?: ReactNode;
-  onHistory?: () => void;
+  revisionControlsTarget?: HTMLElement | null;
   viewerOnly?: boolean;
   hideViewer?: boolean;
   onMediaDrop?: (id: string, at: string, track: string) => void;
@@ -904,6 +905,22 @@ export function TimelinePreview({
         : [clip],
     ),
   }));
+  const revisionControls = (
+    <>
+      <IconButton
+        icon="undo"
+        label="撤销"
+        disabled={!project || busy || readOnly}
+        onClick={() => void write("undo", "撤销")}
+      />
+      <IconButton
+        icon="redo"
+        label="重做"
+        disabled={!project || busy || readOnly}
+        onClick={() => void write("redo", "重做")}
+      />
+    </>
+  );
   return (
     <>
       {cueMenu && (
@@ -1075,19 +1092,7 @@ export function TimelinePreview({
               }}
             />
             <IconButton icon="marker" label="加标记 M" disabled={!project || busy || readOnly} onClick={marker} />
-            <IconButton
-              icon="undo"
-              label="撤销"
-              disabled={!project || busy || readOnly}
-              onClick={() => void write("undo", "撤销")}
-            />
-            <IconButton
-              icon="redo"
-              label="重做"
-              disabled={!project || busy || readOnly}
-              onClick={() => void write("redo", "重做")}
-            />
-            <IconButton icon="history" label="历史 ⌘ Y" pressed={state.history?.open === true} onClick={onHistory} />
+            {revisionControlsTarget ? createPortal(revisionControls, revisionControlsTarget) : revisionControls}
             <IconButton icon="snap" label="吸附" pressed={snap} onClick={() => setSnap(!snap)} />
             <span className="zc-grow" />
             <span className="zc-count" title="片段">
