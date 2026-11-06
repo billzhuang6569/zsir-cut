@@ -1,0 +1,233 @@
+import { once } from "node:events";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { WebSocket } from "ws";
+import { Agents } from "../src/agents.js";
+import { createMcpServer, startHost } from "../src/index.js";
+import { actions, keyNotation, mergeKeymap, presets } from "../src/keymap.js";
+import { DesktopPreferences, defaultPreferences } from "../src/preferences.js";
+
+let home: string;
+let host: Awaited<ReturnType<typeof startHost>> | undefined;
+const sockets: WebSocket[] = [];
+beforeEach(async () => {
+  home = await mkdtemp(join(tmpdir(), "zcut-prefs-"));
+  vi.stubEnv("HOME", home);
+  vi.stubEnv("XDG_DATA_HOME", join(home, ".local/share"));
+  vi.spyOn(Agents.prototype, "detect").mockResolvedValue([]);
+});
+afterEach(async () => {
+  for (const socket of sockets.splice(0)) socket.terminate();
+  await host?.close();
+  host = undefined;
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+  await rm(home, { recursive: true, force: true });
+});
+async function connect() {
+  host = await startHost();
+  const socket = new WebSocket(`ws://127.0.0.1:${host.port}/?token=${host.token}`);
+  sockets.push(socket);
+  await once(socket, "open");
+  const bootstrap = once(socket, "message");
+  socket.send(JSON.stringify({ type: "ui_ready" }));
+  expect(JSON.parse((await bootstrap)[0].toString()).type).toBe("bootstrap");
+  return socket;
+}
+async function send(socket: WebSocket, verb: string, request: unknown = {}) {
+  const reply = once(socket, "message", { signal: AbortSignal.timeout(3000) });
+  socket.send(JSON.stringify({ id: "prefs", verb, request }));
+  const response = JSON.parse((await reply)[0].toString());
+  expect(response).toMatchObject({ type: "result", id: "prefs" });
+  expect(response.envelope).not.toHaveProperty("receipt");
+  return response.envelope;
+}
+it("defines every action exactly once in both presets using canonical notation", () => {
+  expect(actions).toHaveLength(35);
+  expect(keyNotation.test("A\n")).toBe(false);
+  for (const preset of Object.values(presets)) {
+    expect(Object.keys(preset).sort()).toEqual([...actions].sort());
+    expect(new Set(Object.values(preset)).size).toBe(actions.length);
+    for (const key of Object.values(preset)) expect(key).toMatch(keyNotation);
+  }
+  expect(mergeKeymap("fcp", { tool_select: "B" })).toMatchObject({
+    keymap: { tool_select: "B", tool_blade: null },
+    unbound: ["tool_blade"],
+  });
+  expect(mergeKeymap("fcp", { tool_select: null }).keymap.tool_select).toBeNull();
+  expect(mergeKeymap("fcp", { tool_select: "B", tool_blade: "B" })).toEqual(
+    mergeKeymap("fcp", { tool_blade: "B", tool_select: "B" }),
+  );
+});
+it("persists nested patches across host restarts, replaces arrays and rejects invalid updates without writes", async () => {
+  let socket = await connect();
+  const initial = await send(socket, "prefs_get");
+  expect(initial.result.prefs).toEqual(defaultPreferences);
+  expect(initial.result.preview_cache_directory).toBe(join(home, "Movies/庄Sir剪辑助手/预览缓存"));
+  expect(
+    await send(socket, "prefs_set", {
+      patch: {
+        default_agent: "codex",
+        ui: { snap: false, chapters: { folded: ["mrk_one", "mrk_two"] } },
+        keymap: { overrides: { tool_select: "B" } },
+      },
+    }),
+  ).toMatchObject({ status: "applied", result: { unbound: ["tool_blade"] } });
+  expect(await send(socket, "prefs_set", { patch: { ui: { chapters: { folded: ["mrk_two"] } } } })).toMatchObject({
+    result: { prefs: { ui: { snap: false, magnetic: true, chapters: { folded: ["mrk_two"], zoom: 1 } } } },
+  });
+  socket.terminate();
+  await host?.close();
+  host = undefined;
+  socket = await connect();
+  expect(await send(socket, "prefs_get")).toMatchObject({
+    result: {
+      prefs: { default_agent: "codex", ui: { snap: false, chapters: { folded: ["mrk_two"] } } },
+      keymap: { tool_select: "B", tool_blade: null },
+    },
+  });
+  const directory =
+    process.platform === "darwin"
+      ? join(home, "Library/Application Support/zsir-cut")
+      : join(home, ".local/share/zsir-cut");
+  const file = join(directory, "desktop.json");
+  const before = await readFile(file, "utf8");
+  const assertSorted = (value: unknown) => {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      expect(Object.keys(value)).toEqual(Object.keys(value).sort());
+      for (const child of Object.values(value)) assertSorted(child);
+    }
+  };
+  assertSorted(JSON.parse(before));
+  for (const patch of [
+    null,
+    [],
+    { unknown: true },
+    { ui: null },
+    { ui: { chapters: { zoom: 5 } } },
+    { keymap: { overrides: { unknown: "A" } } },
+    { keymap: { overrides: { tool_select: "⌘⇧A" } } },
+    { preview_cache: { limit_gb: 0 } },
+    { preview_cache: { directory: "relative" } },
+    { default_agent: "other" },
+  ]) {
+    expect(await send(socket, "prefs_set", { patch })).toMatchObject({
+      status: "rejected",
+      error: { code: "E_VALIDATION" },
+    });
+  }
+  expect(await send(socket, "prefs_set", { patch: { ui: { snap: false } } })).toMatchObject({ status: "no_op" });
+  expect(await readFile(file, "utf8")).toBe(before);
+});
+it.each(["{broken", JSON.stringify({ ...defaultPreferences, version: 2 })])(
+  "recovers corrupt or invalid files and pushes a UI warning: %s",
+  async (content) => {
+    const directory = join(home, "data");
+    await mkdir(directory);
+    await writeFile(join(directory, "desktop.json"), content);
+    host = await startHost({ appDataDir: directory });
+    const socket = new WebSocket(`ws://127.0.0.1:${host.port}/?token=${host.token}`);
+    sockets.push(socket);
+    await once(socket, "open");
+    const messages: unknown[] = [];
+    const warning = new Promise<void>((resolve) =>
+      socket.on("message", (raw) => {
+        const message = JSON.parse(raw.toString());
+        messages.push(message);
+        if (message.type === "warning") resolve();
+      }),
+    );
+    socket.send(JSON.stringify({ type: "ui_ready" }));
+    await warning;
+    expect(messages).toMatchObject([
+      { type: "bootstrap" },
+      { type: "warning", code: "W_PREFS_RESET", message: expect.any(String) },
+    ]);
+    expect((await send(socket, "prefs_get")).result.prefs).toEqual(defaultPreferences);
+    expect(await readFile(join(directory, "desktop.json.broken"), "utf8")).toBe(content);
+  },
+);
+it("serializes concurrent patches without losing fields", async () => {
+  const prefs = new DesktopPreferences(home);
+  await prefs.load();
+  await Promise.all([prefs.set({ ui: { snap: false } }), prefs.set({ ui: { magnetic: false } })]);
+  const restarted = new DesktopPreferences(home);
+  await restarted.load();
+  expect(restarted.get().prefs.ui).toMatchObject({ snap: false, magnetic: false });
+});
+it("never advertises or accepts prefs verbs via MCP", async () => {
+  const server = createMcpServer();
+  const client = new Client({ name: "prefs-test", version: "1" });
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  try {
+    await Promise.all([server.connect(a), client.connect(b)]);
+    const names = (await client.listTools()).tools.map((tool) => tool.name);
+    for (const verb of ["prefs_get", "prefs_set"]) {
+      expect(names).not.toContain(`zcut_${verb}`);
+      await expect(client.callTool({ name: `zcut_${verb}`, arguments: {} })).rejects.toThrow("Unknown tool");
+    }
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+it("validates and restores the single-file store without a listener", async () => {
+  const store = new DesktopPreferences(home);
+  await store.load();
+  expect(store.get().prefs).toEqual(defaultPreferences);
+  expect(store.get().preview_cache_directory).toBe(join(home, "Movies/庄Sir剪辑助手/预览缓存"));
+  await store.set({
+    default_agent: "codex",
+    keymap: { overrides: { tool_select: "B" } },
+    ui: { snap: false, chapters: { folded: ["one", "two"] } },
+  });
+  await store.set({ ui: { chapters: { folded: ["two"] } } });
+  const file = join(home, "desktop.json");
+  const content = await readFile(file, "utf8");
+  const restarted = new DesktopPreferences(home);
+  await restarted.load();
+  expect(restarted.get()).toMatchObject({
+    prefs: { default_agent: "codex", ui: { snap: false, magnetic: true, chapters: { folded: ["two"], zoom: 1 } } },
+    keymap: { tool_select: "B", tool_blade: null },
+    unbound: ["tool_blade"],
+  });
+  expect((await restarted.set({ ui: { snap: false } })).status).toBe("no_op");
+  for (const patch of [
+    null,
+    [],
+    { unknown: true },
+    { ui: null },
+    { preview_cache: { limit_gb: 2001 } },
+    { keymap: { overrides: { tool_select: "⌘⇧A" } } },
+  ]) {
+    await expect(restarted.set(patch)).rejects.toThrow();
+  }
+  expect(await readFile(file, "utf8")).toBe(content);
+  for (const broken of ["{broken", JSON.stringify({ ...defaultPreferences, version: 2 })]) {
+    await writeFile(file, broken);
+    const recovered = new DesktopPreferences(home);
+    await recovered.load();
+    expect(recovered.get().prefs).toEqual(defaultPreferences);
+    expect(recovered.warning).toMatchObject({ type: "warning", code: "W_PREFS_RESET" });
+    expect(await readFile(`${file}.broken`, "utf8")).toBe(broken);
+  }
+});
+it("initializes the selected Agent from persisted default_agent", async () => {
+  const prefs = new DesktopPreferences(home);
+  await prefs.set({ default_agent: "codex" });
+  const selected: (string | undefined)[] = [];
+  vi.spyOn(Agents.prototype, "stop").mockImplementation(async function (this: Agents) {
+    selected.push(this.selected);
+  });
+  const project = join(home, "project.zcut.json");
+  await writeFile(project, await readFile(new URL("../../../examples/interview.zcut.json", import.meta.url)));
+  host = await startHost({ project, appDataDir: home });
+  await host.close();
+  host = undefined;
+  expect(selected).toEqual(["codex"]);
+});
