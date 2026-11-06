@@ -67,7 +67,7 @@ function SelectSetting({
   save: (value: string) => void;
 }) {
   return (
-    <label className="zc-sub-setting">
+    <label className="zc-field zc-sub-setting">
       {label}
       <span className="zc-sub-select">
         <select className="zc-input" aria-label={label} value={value} onChange={(e) => save(e.target.value)}>
@@ -89,7 +89,7 @@ function Terms({ label, values, save }: { label: string; values: string[]; save:
   return (
     <fieldset className="zc-sub-terms" aria-label={label}>
       {values.map((value) => (
-        <span className="zc-tag" key={value}>
+        <span className="zc-chip is-sm" key={value}>
           {value}
           <button
             type="button"
@@ -157,7 +157,7 @@ function TextSetting({
     },
   };
   return (
-    <label className={`zc-sub-setting${color ? " zc-sub-color" : ""}`} htmlFor={id}>
+    <label className={`zc-field zc-sub-setting${color ? " zc-sub-color" : ""}`} htmlFor={id}>
       <span>{label}</span>
       {color && (
         <input
@@ -209,7 +209,7 @@ function NumberSetting({
     if (input.checkValidity() && input.value !== "") save(Number(input.value));
   };
   return (
-    <label className={`zc-sub-setting zc-sub-number${slider ? "" : " zc-sub-size"}`}>
+    <label className={`zc-field zc-sub-setting zc-sub-number${slider ? "" : " zc-sub-size"}`}>
       <span>{label}</span>
       {slider && (
         <input
@@ -816,8 +816,8 @@ export function useSubtitlePanel({
   const done = manual?.done ?? passProgress.reduce((sum, item) => sum + item.done, 0);
   const total = manual?.total ?? passProgress.reduce((sum, item) => sum + item.total, 0);
   const controls = (
-    <div className="zc-sub-controls">
-      <p className={`zc-sub-status${project?.recognized ? " is-recognized" : ""}`}>
+    <div className="zc-panel-body zc-sub-controls">
+      <p className={`zc-card zc-sub-status${project?.recognized ? " is-recognized" : ""}`}>
         <span className="zc-dot" aria-hidden="true" />
         {running
           ? proofreading
@@ -845,63 +845,137 @@ export function useSubtitlePanel({
           </span>
         )}
       </p>
-      <fieldset disabled={!project || busy}>
-        <SelectSetting
-          label="语言"
-          value={recognition.language ?? "zh"}
-          options={languages}
-          save={(language) => setRecognition({ language })}
-        />
-        <TextSetting
-          label="参考文本"
-          placeholder="粘贴采访提纲、文稿或人名表，AI 会从里面找专有名词"
-          multiline
-          value={recognition.reference_text ?? ""}
-          save={(reference_text) => setRecognition({ reference_text })}
-        />
-        <h3>专有名词</h3>
-        <Terms label="专有名词" values={recognition.terms ?? []} save={(terms) => setRecognition({ terms })} />
-        <label className="zc-switch-row" title="嗯、啊、呃……整个字词是语气词时，字幕里不显示，时间不动">
-          去除水词
-          <input
-            type="checkbox"
-            aria-label="去除水词"
-            role="switch"
-            aria-checked={removeFillers}
-            className="zc-switch"
-            checked={removeFillers}
-            onChange={(e) => setRemoveFillers(e.target.checked)}
-            onBlur={() => {
-              if (removeFillers !== (recognition.remove_fillers ?? true))
-                setRecognition({ remove_fillers: removeFillers });
-            }}
-          />
-        </label>
-        <button
-          type="button"
-          className="zc-btn zc-btn-ghost"
-          aria-expanded={fillersOpen}
-          onClick={() => setFillersOpen(!fillersOpen)}
-        >
-          编辑水词表
-        </button>
-        {fillersOpen && (
-          <Terms
-            label="水词"
-            values={recognition.filler_words ?? ["嗯", "啊", "呃", "额", "哦", "唉", "哎", "诶"]}
-            save={(filler_words) => setRecognition({ filler_words })}
-          />
-        )}
-      </fieldset>
-      <button
-        type="button"
-        className="zc-btn zc-btn-primary zc-sub-recognize"
-        disabled={!project?.media.some((m) => m.audio) || busy}
-        onClick={() => void transcribe()}
-      >
-        <Icon name="refresh" />
-        {progress === null ? "重新识别" : `识别中 ${Math.round(progress * 100)}%`}
-      </button>
+      {state.sub === "style" ? (
+        <>
+          <p className="zc-hint">在画面上拖字幕改位置，拖角改大小；靠近中线会吸附。</p>
+          {subtitleTracks.length > 0 && (
+            <fieldset className="zc-seg zc-sub-tracks" aria-label="字幕样式轨道">
+              {subtitleTracks.map((track) => (
+                <button
+                  type="button"
+                  className="zc-btn zc-btn-ghost"
+                  key={track.id}
+                  aria-pressed={track.id === styleTrack?.id}
+                  onClick={() => {
+                    setStyleTrackId(track.id);
+                    setCustomFont(false);
+                  }}
+                >
+                  {track.name}
+                </button>
+              ))}
+            </fieldset>
+          )}
+          <section aria-label="叠层导出" className="zc-sub-overlays">
+            <span className="zc-muted">叠层导出</span>
+            {(project?.subtitleOverlays ?? [])
+              .filter((overlay) => overlay.timeline_id === project?.id && overlay.subtitle_track_id === styleTrack?.id)
+              .map((overlay) => (
+                <div className="zc-sub-overlay-row" key={overlay.id}>
+                  <span title={overlay.output_path}>{overlay.output_path.split(/[\\/]/).at(-1)}</span>
+                  <span className="zc-meta">
+                    {overlay.last_export
+                      ? `${new Date(overlay.last_export.created_at).toLocaleDateString("zh-CN")} 导出`
+                      : "尚未导出"}
+                  </span>
+                  {isTauri() && (
+                    <IconButton
+                      icon="folderOpen"
+                      label="在访达中显示"
+                      onClick={() =>
+                        void revealItemInDir(overlay.output_path).catch(() => setError("无法在访达中显示"))
+                      }
+                    />
+                  )}
+                </div>
+              ))}
+          </section>
+          <p className="zc-hint zc-sub-overlay-hint">
+            叠层是一条只有字幕的透明视频，放在剪辑软件最上层；改了字幕再导出会覆盖同一个文件。
+          </p>
+          <button
+            type="button"
+            className="zc-btn is-secondary is-lg"
+            disabled={!project}
+            onClick={() =>
+              update({
+                ...state,
+                export: {
+                  srt: true,
+                  wav: false,
+                  active: null,
+                  ...state.export,
+                  open: true,
+                  sub: "overlays",
+                },
+              })
+            }
+          >
+            <Icon name="export" />
+            导出字幕叠层
+          </button>
+        </>
+      ) : (
+        <>
+          <fieldset disabled={!project || busy}>
+            <SelectSetting
+              label="语言"
+              value={recognition.language ?? "zh"}
+              options={languages}
+              save={(language) => setRecognition({ language })}
+            />
+            <TextSetting
+              label="参考文本"
+              placeholder="粘贴采访提纲、文稿或人名表，AI 会从里面找专有名词"
+              multiline
+              value={recognition.reference_text ?? ""}
+              save={(reference_text) => setRecognition({ reference_text })}
+            />
+            <h3>专有名词</h3>
+            <Terms label="专有名词" values={recognition.terms ?? []} save={(terms) => setRecognition({ terms })} />
+            <label className="zc-switch-row" title="嗯、啊、呃……整个字词是语气词时，字幕里不显示，时间不动">
+              去除水词
+              <input
+                type="checkbox"
+                aria-label="去除水词"
+                role="switch"
+                aria-checked={removeFillers}
+                className="zc-switch"
+                checked={removeFillers}
+                onChange={(e) => setRemoveFillers(e.target.checked)}
+                onBlur={() => {
+                  if (removeFillers !== (recognition.remove_fillers ?? true))
+                    setRecognition({ remove_fillers: removeFillers });
+                }}
+              />
+            </label>
+            <button
+              type="button"
+              className="zc-btn zc-btn-ghost"
+              aria-expanded={fillersOpen}
+              onClick={() => setFillersOpen(!fillersOpen)}
+            >
+              编辑水词表
+            </button>
+            {fillersOpen && (
+              <Terms
+                label="水词"
+                values={recognition.filler_words ?? ["嗯", "啊", "呃", "额", "哦", "唉", "哎", "诶"]}
+                save={(filler_words) => setRecognition({ filler_words })}
+              />
+            )}
+          </fieldset>
+          <button
+            type="button"
+            className="zc-btn zc-btn-primary zc-sub-recognize"
+            disabled={!project?.media.some((m) => m.audio) || busy}
+            onClick={() => void transcribe()}
+          >
+            <Icon name="refresh" />
+            {progress === null ? "重新识别" : `识别中 ${Math.round(progress * 100)}%`}
+          </button>
+        </>
+      )}
       {progress !== null && <progress aria-label="识别进度" max={1} value={progress} />}
       {error && <p role="alert">{error}</p>}
     </div>
@@ -1060,13 +1134,13 @@ export function useSubtitlePanel({
     </button>
   );
   const parameters = (
-    <div className="zc-sub-parameters">
+    <div className="zc-panel-body zc-sub-parameters">
       <div className="zc-tabs" role="tablist" aria-label="字幕参数">
         {["subtitles", "style"].map((sub) => (
           <button
             type="button"
             role="tab"
-            className="zc-tab"
+            className={`zc-tab${(state.sub ?? "subtitles") === sub ? " is-active" : ""}`}
             key={sub}
             aria-selected={(state.sub ?? "subtitles") === sub}
             onClick={() => update({ ...state, sub })}
@@ -1148,7 +1222,7 @@ export function useSubtitlePanel({
       ) : state.sub !== "style" ? (
         <>
           <div className="zc-sub-search-row">
-            <label className="zc-sub-search">
+            <label className="zc-search zc-sub-search">
               <Icon name="search" />
               <input
                 className="zc-input"
@@ -1158,6 +1232,18 @@ export function useSubtitlePanel({
                 onChange={(e) => setBrowser({ search: e.target.value })}
               />
             </label>
+            <IconButton
+              icon="spark"
+              label="AI 重新分行"
+              disabled={aiStarting || running || busy || !project}
+              onClick={() => openAi("subtitle_tidy", selected.length ? selected : undefined)}
+            />
+            <IconButton
+              icon="edit"
+              label="AI 校对"
+              disabled={aiStarting || running || busy || !project}
+              onClick={() => openAi("subtitle_proofread", selected.length ? selected : undefined)}
+            />
             <IconButton
               icon="replace"
               label="查找替换"
@@ -1258,8 +1344,18 @@ export function useSubtitlePanel({
                 onClick={() => deleteRows(selected)}
               />
               <IconButton icon="subtitle" label="样式" onClick={() => setStylePicker(!stylePicker)} />
-              <IconButton icon="spark" label="AI 重新分行" onClick={() => openAi("subtitle_tidy", selected)} />
-              <IconButton icon="check" label="AI 校对" onClick={() => openAi("subtitle_proofread", selected)} />
+              <IconButton
+                icon="spark"
+                label="AI 重新分行"
+                disabled={aiStarting || running || busy || !project}
+                onClick={() => openAi("subtitle_tidy", selected.length ? selected : undefined)}
+              />
+              <IconButton
+                icon="check"
+                label="AI 校对"
+                disabled={aiStarting || running || busy || !project}
+                onClick={() => openAi("subtitle_proofread", selected.length ? selected : undefined)}
+              />
               <IconButton icon="close" label="取消选择" onClick={() => selection([])} />
             </div>
           )}
@@ -1299,7 +1395,7 @@ export function useSubtitlePanel({
             </div>
           )}
           <fieldset
-            className="zc-sub-list"
+            className="zc-list zc-sub-list"
             aria-label="字幕列表"
             // biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard selection needs a focusable list outside editing.
             tabIndex={0}
@@ -1337,12 +1433,12 @@ export function useSubtitlePanel({
               const nextTo = (direction: number) => ordered[ordered.indexOf(cue) + direction];
               return (
                 <div
-                  className={`zc-sub-row${state.selected.includes(cue.cue_id) ? " is-selected" : ""}${editing === key ? " is-editing" : ""}${contains(cue.start, cue.end, at) ? " is-current" : ""}${skipped.includes(cue.cue_id) ? " is-skipped" : ""}${running ? " is-running" : ""}`}
+                  className={`zc-row zc-sub-row${state.selected.includes(cue.cue_id) ? " is-selected" : ""}${editing === key ? " is-editing" : ""}${contains(cue.start, cue.end, at) ? " is-current" : ""}${skipped.includes(cue.cue_id) ? " is-skipped" : ""}${running ? " is-running" : ""}`}
                   key={key}
                 >
                   <button
                     type="button"
-                    className="zc-sub-time"
+                    className="time zc-sub-time"
                     aria-label={`选择字幕 ${index + 1}`}
                     title={reasons.join("；")}
                     aria-pressed={state.selected.includes(cue.cue_id)}
@@ -1399,7 +1495,7 @@ export function useSubtitlePanel({
                       setMenu({ cue, offset, ...(token ? { token } : {}), x: event.clientX, y: event.clientY });
                     }}
                   />
-                  <span className="zc-sub-actions">
+                  <span className="actions zc-sub-actions">
                     <IconButton
                       icon="plus"
                       label="在后面加一条"
@@ -1507,24 +1603,6 @@ export function useSubtitlePanel({
         </>
       ) : (
         <>
-          {subtitleTracks.length > 1 && (
-            <fieldset className="zc-seg zc-sub-tracks" aria-label="字幕样式轨道">
-              {subtitleTracks.map((track) => (
-                <button
-                  type="button"
-                  className="zc-btn zc-btn-ghost"
-                  key={track.id}
-                  aria-pressed={track.id === styleTrack?.id}
-                  onClick={() => {
-                    setStyleTrackId(track.id);
-                    setCustomFont(false);
-                  }}
-                >
-                  {track.name}
-                </button>
-              ))}
-            </fieldset>
-          )}
           <SelectSetting
             label="应用到"
             value={selectedOnly ? "selected" : "all"}
@@ -1538,30 +1616,6 @@ export function useSubtitlePanel({
               setSelectedOnly(v === "selected");
             }}
           />
-          <section aria-label="叠层导出" className="zc-sub-overlays">
-            <span className="zc-muted">叠层导出</span>
-            {(project?.subtitleOverlays ?? [])
-              .filter((overlay) => overlay.timeline_id === project?.id && overlay.subtitle_track_id === styleTrack?.id)
-              .map((overlay) => (
-                <div className="zc-sub-overlay-row" key={overlay.id}>
-                  <span title={overlay.output_path}>{overlay.output_path.split(/[\\/]/).at(-1)}</span>
-                  <span className="zc-meta">
-                    {overlay.last_export
-                      ? `${new Date(overlay.last_export.created_at).toLocaleDateString("zh-CN")} 导出`
-                      : "尚未导出"}
-                  </span>
-                  {isTauri() && (
-                    <IconButton
-                      icon="folderOpen"
-                      label="在访达中显示"
-                      onClick={() =>
-                        void revealItemInDir(overlay.output_path).catch(() => setError("无法在访达中显示"))
-                      }
-                    />
-                  )}
-                </div>
-              ))}
-          </section>
           <div className="zc-tabs" role="tablist" aria-label="字幕样式设置">
             {[
               ["style", "样式"],
@@ -1571,7 +1625,7 @@ export function useSubtitlePanel({
                 key={id}
                 type="button"
                 role="tab"
-                className="zc-tab"
+                className={`zc-tab${styleTab === id ? " is-active" : ""}`}
                 aria-selected={styleTab === id}
                 onClick={() => setStyleTab(id ?? "style")}
               >
@@ -1668,35 +1722,39 @@ export function useSubtitlePanel({
           ) : (
             <fieldset className="zc-sub-style" disabled={!style || busy || (selectedOnly && !selectedCue)}>
               <div className="zc-sub-presets">
-                {presetGroups.map((group) => (
-                  <section key={group} aria-label={`${group}预设`}>
-                    <h4>{group}</h4>
-                    <div className="zc-sub-preset-grid">
-                      {subtitlePresets
-                        .filter((preset) => preset.group === group)
-                        .map((preset) => (
-                          <SubtitleAnimationCell
-                            key={preset.name}
-                            preset
-                            label={`套用样式：${preset.name}`}
-                            style={preset.fields}
-                            selected={false}
-                            choose={() => {
-                              flushStyle();
-                              changeStyle(
-                                presetPatch(preset),
-                                true,
-                                "preset",
-                                state.selected,
-                                `套用样式：${preset.name}`,
-                              );
-                              flushStyle();
-                            }}
-                          />
-                        ))}
-                    </div>
-                  </section>
-                ))}
+                {presetGroups.map((group) => {
+                  const featured = group === "基础" || group === "综艺";
+                  const Group = featured ? "section" : "details";
+                  return (
+                    <Group key={group} aria-label={`${group}预设`}>
+                      {featured ? <h4>{group}</h4> : <summary>{group}</summary>}
+                      <div className="zc-sub-preset-grid">
+                        {subtitlePresets
+                          .filter((preset) => preset.group === group)
+                          .map((preset) => (
+                            <SubtitleAnimationCell
+                              key={preset.name}
+                              preset
+                              label={`套用样式：${preset.name}`}
+                              style={preset.fields}
+                              selected={false}
+                              choose={() => {
+                                flushStyle();
+                                changeStyle(
+                                  presetPatch(preset),
+                                  true,
+                                  "preset",
+                                  state.selected,
+                                  `套用样式：${preset.name}`,
+                                );
+                                flushStyle();
+                              }}
+                            />
+                          ))}
+                      </div>
+                    </Group>
+                  );
+                })}
               </div>
               <details open>
                 <summary>

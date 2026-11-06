@@ -14,6 +14,7 @@ import { applyUi, initialState, type UiState } from "./state.js";
 import { TimelinePreview } from "./TimelinePreview.js";
 import { seekTarget } from "./timeline.js";
 import { SettingsPage, useVoicePanel } from "./VoicePanel.js";
+import "./panels.css";
 
 const labels: Record<Panel, string> = { ai: "AI", media: "素材", chapters: "章节", subtitles: "字幕", voice: "语音" };
 const parameters: Record<Panel, string> = {
@@ -21,7 +22,7 @@ const parameters: Record<Panel, string> = {
   media: "素材信息",
   chapters: "章节大纲",
   subtitles: "字幕",
-  voice: "语音",
+  voice: "配音",
 };
 export function App({ config }: { config?: { port: number; token: string } }) {
   const uniqueId = useId();
@@ -263,9 +264,12 @@ export function App({ config }: { config?: { port: number; token: string } }) {
               ) : (
                 <div className="zc-panel-head">
                   <h2>{labels[state.panel]}</h2>
+                  {state.panel === "media" && media.header}
                 </div>
               )}
-              <div hidden={state.panel !== "voice"}>{voice}</div>
+              <div className="zc-voice-slot" hidden={state.panel !== "voice"}>
+                {voice.controls}
+              </div>
               {state.panel === "media" && media.library}
               {state.panel === "chapters" && chapters.controls}
               {state.panel === "subtitles" && subtitles.controls}
@@ -305,14 +309,12 @@ export function App({ config }: { config?: { port: number; token: string } }) {
                   history.panel
                 ) : (
                   <>
-                    {state.panel !== "chapters" && <h2>{parameters[state.panel]}</h2>}
+                    {state.panel !== "chapters" && state.panel !== "subtitles" && <h2>{parameters[state.panel]}</h2>}
                     {state.panel === "ai" && ai.parameters}
                     {state.panel === "media" && media.parameters}
                     {state.panel === "chapters" && chapters.outline}
                     {state.panel === "subtitles" && subtitles.parameters}
-                    {state.panel === "voice" && (
-                      <p className="zc-muted">在左侧克隆音色或生成配音，生成后可在「素材」中查看。</p>
-                    )}
+                    {state.panel === "voice" && voice.parameters}
                   </>
                 )}
               </section>

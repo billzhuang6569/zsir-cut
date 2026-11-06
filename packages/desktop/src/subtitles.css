@@ -766,3 +766,133 @@ fieldset.zc-sub-list {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+.zc-sub-controls {
+  gap: var(--space-3);
+}
+.zc-sub-controls .zc-sub-status {
+  margin: 0 0 var(--space-1);
+  padding: var(--space-3);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text);
+}
+.zc-sub-controls .zc-sub-status.is-recognized .zc-dot {
+  background: var(--approved);
+}
+.zc-sub-controls > fieldset {
+  flex: 1;
+}
+.zc-sub-controls .zc-sub-recognize {
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  margin-top: auto;
+}
+.zc-sub-controls .zc-sub-overlay-hint {
+  margin-top: auto;
+}
+.zc-sub-controls .zc-sub-tracks {
+  flex: none;
+}
+.zc-sub-controls .zc-sub-overlays {
+  border: 0;
+  padding: 0;
+}
+.zc-sub-controls .zc-sub-overlay-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.zc-sub-controls .zc-sub-overlay-row > span:first-child {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+.zc-sub-controls .zc-sub-tracks button[aria-pressed="true"] {
+  background: var(--raised-2);
+}
+.zc-sub-parameters {
+  gap: var(--space-3);
+}
+.zc-sub-parameters > .zc-tabs {
+  flex-shrink: 0;
+}
+.zc-sub-heading {
+  margin: 0;
+}
+.zc-sub-heading > span {
+  display: none;
+}
+.zc-sub-heading {
+  align-self: flex-end;
+  height: 0;
+  position: relative;
+  top: var(--space-3);
+  z-index: 1;
+}
+.zc-sub-search-row {
+  padding-right: var(--space-6);
+}
+.zc-sub-search-row .zc-icon-btn {
+  flex-shrink: 0;
+  width: 24px;
+}
+.zc-sub-row {
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+  min-height: 36px;
+  background: transparent;
+  gap: var(--space-2);
+}
+.zc-sub-row .zc-sub-time {
+  font-size: var(--mono-sm-size);
+  color: var(--text-4);
+}
+.zc-sub-row.is-current .zc-sub-time {
+  color: var(--accent);
+}
+.zc-sub-row .zc-sub-text {
+  padding: 0;
+  line-height: 20px;
+}
+.zc-sub-row.is-selected {
+  padding-right: 64px;
+}
+.zc-sub-row.is-selected .zc-sub-actions,
+.zc-sub-row:focus-within .zc-sub-actions {
+  visibility: visible;
+}
+.zc-sub-presets {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+.zc-sub-presets > section,
+.zc-sub-presets > section > .zc-sub-preset-grid {
+  display: contents;
+}
+.zc-sub-presets > section > h4 {
+  display: none;
+}
+.zc-sub-presets > details {
+  min-width: 0;
+  grid-column: 1 / -1;
+}
+.zc-sub-presets > details > summary {
+  font-size: var(--label-size);
+  color: var(--text-4);
+}
+.zc-sub-preset-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-1);
+}
+.zc-sub-style > details {
+  border-top: 1px solid var(--line);
+}
+.zc-sub-style > details > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-block: var(--space-2);
+}

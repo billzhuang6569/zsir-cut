@@ -4,8 +4,12 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
 import type { UiState } from "../../app-host/src/ui.js";
 import type { Voice, VoiceSettings } from "../../core/src/voice-storage.js";
+import { chapterTime } from "./chapters.js";
 import { Icon, IconButton } from "./components.js";
 import { DESKTOP_AUTHOR, type ProjectView, requestError } from "./connection.js";
+import { placeMedia } from "./media.js";
+import { mediaUrl } from "./TimelinePreview.js";
+import { type MediaView, seekTarget } from "./timeline.js";
 import "./subtitles.css";
 import "./voice.css";
 
@@ -180,6 +184,36 @@ export function useVoicePanel({
   config?: { port: number; token: string } | undefined;
 }) {
   const hintId = useId();
+  const [takes, setTakes] = useState<{ project: ProjectView | null; rows: { media: MediaView; text: string }[] }>({
+    project: null,
+    rows: [],
+  });
+  const [resultError, setResultError] = useState("");
+  useEffect(() => {
+    if (state.panel !== "voice" || !state.project || !project) return;
+    let cancelled = false;
+    setResultError("");
+    void Promise.all(
+      (project.media ?? [])
+        .filter((media) => media.kind === "audio")
+        .map(async (media) => {
+          const result = (await call("inspect", { project: state.project, view: "entity", id: media.id })) as {
+            entity?: { ext?: Record<string, unknown> };
+          };
+          const info = result.entity?.ext?.["zsir.voice"] as { text?: unknown } | undefined;
+          return typeof info?.text === "string" ? { media, text: info.text } : null;
+        }),
+    )
+      .then((rows) => {
+        if (!cancelled) setTakes({ project, rows: rows.filter((row) => row !== null) });
+      })
+      .catch(() => {
+        if (!cancelled) setResultError("无法读取配音结果，请切换标签后重试");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [call, project, state.panel, state.project]);
   const [voices, setVoices] = useState<Voice[]>([]);
   const [voiceId, setVoiceId] = useState("");
   const [file, setFile] = useState("");
@@ -316,18 +350,18 @@ export function useVoicePanel({
           ? "请填写每段配音文字"
           : "";
   const controls = (
-    <div className="zc-voice-form">
+    <div className="zc-panel-body zc-voice-form">
       <div className="zc-tabs" role="tablist" aria-label="语音子页">
         {[
-          ["clone", "克隆"],
           ["generate", "生成"],
-          ["results", "结果"],
+          ["clone", "克隆音色"],
         ].map(([value, label]) => (
           <button
             key={value}
-            className="zc-tab"
+            className={`zc-tab${sub === value ? " is-active" : ""}`}
             type="button"
             role="tab"
+            aria-label={value === "clone" ? "克隆音色页" : label}
             aria-selected={sub === value}
             onClick={() => update({ ...state, sub: value ?? "clone" })}
           >
@@ -343,7 +377,7 @@ export function useVoicePanel({
           <section
             aria-label="参考音频"
             ref={area}
-            className="zc-voice-drop"
+            className="zc-card zc-voice-drop"
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {
               e.preventDefault();
@@ -404,7 +438,7 @@ export function useVoicePanel({
               />
             </label>
             <button
-              className="zc-btn zc-btn-primary"
+              className="zc-btn is-secondary is-lg"
               type="submit"
               disabled={!!cloneHint}
               title={cloneHint || undefined}
@@ -422,7 +456,7 @@ export function useVoicePanel({
           <h3>音色库</h3>
           {voices.length === 0 && <p className="zc-muted">还没有音色，先克隆一个吧</p>}
           {voices.map((voice) => (
-            <div className="zc-voice-card" key={voice.id}>
+            <div className="zc-card zc-voice-card" key={voice.id}>
               <div className="zc-voice-row">
                 <strong>{voice.name}</strong>
                 <span className="zc-grow" />
@@ -479,33 +513,12 @@ export function useVoicePanel({
           }}
         >
           <fieldset disabled={busy}>
-            <label>
-              音色
-              <span className="zc-sub-select">
-                <select
-                  className="zc-input"
-                  aria-label="音色"
-                  value={voiceId}
-                  onChange={(e) => setVoiceId(e.target.value)}
-                >
-                  <option value="" disabled>
-                    请选择音色
-                  </option>
-                  {voices.map((voice) => (
-                    <option key={voice.id} value={voice.id}>
-                      {voice.name}
-                    </option>
-                  ))}
-                </select>
-                <Icon name="down" />
-              </span>
-            </label>
             {items.map((item, index) => (
               <div key={item.id}>
                 <label>
-                  配音文字 {index + 1}
+                  {index === 0 ? "要说的话" : `配音文字 ${index + 1}`}
                   <textarea
-                    className="zc-input"
+                    className="zc-textarea zc-input"
                     aria-label={`配音文字 ${index + 1}`}
                     required
                     maxLength={2000}
@@ -530,6 +543,42 @@ export function useVoicePanel({
               disabled={items.length >= 50}
               onClick={() => setItems([...items, { id: crypto.randomUUID(), text: "" }])}
             />
+            <label>
+              音色
+              <span className="zc-sub-select">
+                <select
+                  className="zc-input"
+                  aria-label="音色"
+                  value={voiceId}
+                  onChange={(e) => setVoiceId(e.target.value)}
+                >
+                  <option value="" disabled>
+                    请选择音色
+                  </option>
+                  {voices.map((voice) => (
+                    <option key={voice.id} value={voice.id}>
+                      {voice.name}
+                    </option>
+                  ))}
+                </select>
+                <Icon name="down" />
+              </span>
+            </label>
+            <label className="zc-field">
+              语速
+              <span className="zc-slider">
+                <input
+                  aria-label="语速"
+                  type="range"
+                  min="0.5"
+                  max="2"
+                  step="0.1"
+                  value={Number(params.speed ?? 1)}
+                  onChange={(event) => setParams({ ...params, speed: Number(event.target.value) })}
+                />
+                <output>{Number(params.speed ?? 1).toFixed(1)}×</output>
+              </span>
+            </label>
             <details>
               <summary>细调</summary>
               <label>
@@ -550,7 +599,6 @@ export function useVoicePanel({
                 </span>
               </label>
               {[
-                ["speed", "语速", 0.5, 2, 1],
                 ["volume", "音量（dB）", undefined, undefined, 0],
                 ["temperature", "温度", 0, 1, 0.7],
                 ["top_p", "采样范围", 0, 1, 0.7],
@@ -602,7 +650,7 @@ export function useVoicePanel({
               </label>
             </details>
             <button
-              className="zc-btn zc-btn-primary"
+              className="zc-btn is-secondary is-lg"
               type="submit"
               disabled={!!generateHint}
               title={generateHint || undefined}
@@ -619,7 +667,7 @@ export function useVoicePanel({
           </fieldset>
         </form>
       )}
-      {sub === "results" && <p className="zc-muted">结果页将在 V1.4 开放，当前生成的配音可在「素材」中查看。</p>}
+      {sub === "results" && <p className="zc-muted">配音结果在右侧，可试听或加到时间线。</p>}
       {renaming && (
         <Modal
           title="音色改名"
@@ -672,5 +720,98 @@ export function useVoicePanel({
       )}
     </div>
   );
-  return controls;
+  const parameters = (
+    <div className="zc-panel-body zc-voice-results">
+      <span className="zc-meta">{takes.project === project ? takes.rows.length : 0} 段</span>
+      {resultError && <p role="alert">{resultError}</p>}
+      {takes.project === project &&
+        takes.rows.map(({ media, text }, index) => {
+          const used = project?.tracks?.some((track) => track.clips.some((clip) => clip.media_id === media.id));
+          const name = `配音 ${String(index + 1).padStart(2, "0")}`;
+          return (
+            <section
+              aria-label={name}
+              className="zc-card zc-voice-card"
+              key={media.id}
+              draggable
+              onDragStart={(event) => {
+                event.dataTransfer.setData("application/x-zcut-media", media.id);
+                event.dataTransfer.effectAllowed = "copy";
+              }}
+            >
+              <div className="zc-voice-row">
+                <strong>{name}</strong>
+                <span className="zc-meta">{chapterTime(media.duration ?? "0s")}</span>
+                {used ? (
+                  <span className="zc-chip is-sm is-approved">在时间线</span>
+                ) : (
+                  <button
+                    className="zc-btn"
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      if (!project || !state.project) return;
+                      const op = placeMedia(
+                        project,
+                        media,
+                        { ...state, media: { id: media.id, at: "0s", in: null, out: null } },
+                        seekTarget(project, project.cues, state.playhead),
+                      );
+                      if (!("audio_track" in op)) {
+                        setError("没有可用的目标轨道");
+                        return;
+                      }
+                      void run(
+                        "edit",
+                        {
+                          project: state.project,
+                          timeline_id: project.id,
+                          base_revision: project.revision.id,
+                          idempotency_key: crypto.randomUUID(),
+                          author: DESKTOP_AUTHOR,
+                          label: `把${name}加到时间线`,
+                          ops: [op],
+                        },
+                        "配音已加入时间线",
+                      );
+                    }}
+                  >
+                    <Icon name="plus" />
+                    加到时间线
+                  </button>
+                )}
+              </div>
+              <p className="zc-hint">{text}</p>
+              {config && (
+                // biome-ignore lint/a11y/useMediaCaption: The spoken text is displayed above the player.
+                <audio
+                  controls
+                  preload="none"
+                  aria-label={`播放${name}`}
+                  src={mediaUrl(config, "media", media.id)}
+                  onError={() => setError("配音无法播放，请重试")}
+                />
+              )}
+            </section>
+          );
+        })}
+      <p className="zc-hint">生成的配音会存入工程，可在素材中试听并加到时间线。</p>
+      <button
+        className="zc-btn is-secondary"
+        type="button"
+        onClick={() => update({ ...state, panel: "media", sub: "grid" })}
+      >
+        <Icon name="audio" />
+        查看配音素材
+      </button>
+      <button className="zc-btn" type="button" onClick={() => update({ ...state, sub: "results" })}>
+        结果
+      </button>
+      <p className="zc-hint zc-voice-library">
+        <Icon name="audio" />
+        音色库：{voices.map((voice) => voice.name).join(" · ") || "还没有音色"}
+      </p>
+    </div>
+  );
+  return { controls, parameters };
 }

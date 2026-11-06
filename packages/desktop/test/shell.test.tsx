@@ -307,8 +307,8 @@ it("opens the project through inspect and receives UI commands", async () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[role="tab"][id$="-voice"]')?.click();
     });
-    expect(container.querySelector('[aria-label="参数区"] .zc-muted')?.textContent).toBe(
-      "在左侧克隆音色或生成配音，生成后可在「素材」中查看。",
+    expect(container.querySelector('[aria-label="参数区"] .zc-voice-results .zc-hint')?.textContent).toBe(
+      "生成的配音会存入工程，可在素材中试听并加到时间线。",
     );
     await act(async () => {
       socket?.receive({

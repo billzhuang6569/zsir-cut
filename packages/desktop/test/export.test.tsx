@@ -9,6 +9,7 @@ import type { UiState } from "../../app-host/src/ui.js";
 import type { ProjectView } from "../src/connection.js";
 import { ExportPanel } from "../src/ExportPanel.js";
 import { applyUi, initialState } from "../src/state.js";
+import { recordingCanvas } from "./canvas.js";
 
 vi.mock("@tauri-apps/api/core", () => ({ isTauri: vi.fn(() => false) }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
@@ -59,15 +60,19 @@ async function mount(
     fail?: boolean;
     project?: ProjectView;
     config?: { port: number; token: string };
+    report?: unknown;
   } = {},
 ) {
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => recordingCanvas().context);
   let poll = 0;
   const call = vi.fn(async (verb: string, request: Record<string, unknown>): Promise<unknown> => {
     if (verb === "export_preferences")
       return request.value ?? { fcp: "/tmp/交接", resolve: "/tmp/交接", premiere: "/tmp/交接", direct: "/tmp/直接" };
     if (verb === "export")
       return request.dry_run
-        ? { items: options.losses ? [{ severity: options.losses, consequence: "变速需要近似" }] : [] }
+        ? (options.report ?? {
+            items: options.losses ? [{ severity: options.losses, consequence: "变速需要近似" }] : [],
+          })
         : { job_id: "job_one" };
     if (verb === "job_status") {
       if (options.fail) return { state: "failed", progress: 1, envelope: { ok: false, error: { message: "失败" } } };
@@ -103,9 +108,23 @@ async function mount(
     container.remove();
   });
   const click = async (label: string) => {
-    const button = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
-      (b) => b.getAttribute("aria-label") === label || b.textContent === label,
-    );
+    if (label.startsWith("导出到 ")) {
+      const selector = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+        (button) => button.getAttribute("aria-label") === label.replace("导出到 ", "选择 "),
+      );
+      if (selector?.disabled) return;
+      await act(async () => selector?.click());
+    }
+    if (label === "新建叠层" || label.startsWith("编辑叠层") || label.startsWith("删除叠层")) {
+      const selector = [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) =>
+        button.textContent?.includes("只有字幕的透明视频"),
+      );
+      await act(async () => selector?.click());
+    }
+
+    const button = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .reverse()
+      .find((b) => b.getAttribute("aria-label") === label || b.textContent === label);
     if (!button) throw new Error(label);
     await act(async () => button.click());
   };
@@ -193,11 +212,10 @@ it.each(["srt", "wav", "both"])(
 );
 it("creates, updates and removes overlays through labeled human edits, and exports to the original path", async () => {
   const ui = await mount();
-  const overlayCard = ui.container.querySelector('[data-destination="overlays"]');
-  expect(overlayCard?.querySelector(".zc-dest .zc-app-tile svg")).not.toBeNull();
-  expect(overlayCard?.querySelector(".zc-dest .zc-dest-files")?.textContent).toContain("MOV");
-  expect(overlayCard?.querySelector(".zc-overlay-content .zc-overlay-row")).not.toBeNull();
   await ui.click("新建叠层");
+  const overlayCard = ui.container.querySelector('[data-destination="overlays"]');
+  expect(overlayCard?.querySelector(".zc-file")?.textContent).toContain("MOV");
+  expect(overlayCard?.querySelector(".zc-overlay-content .zc-overlay-row")).not.toBeNull();
   const form = ui.container.querySelector("form");
   expect(form?.querySelector(".zc-btn-secondary .zc-icon")).not.toBeNull();
   expect(form?.querySelector(".zc-btn-primary .zc-icon")).not.toBeNull();
@@ -282,8 +300,8 @@ it("uses native folder/save dialogs and reveals the actual exported file", async
   vi.mocked(open).mockResolvedValue("/tmp/另存");
   vi.mocked(save).mockResolvedValue("/tmp/新叠层.mov");
   const ui = await mount();
-  const change = ui.container.querySelector<HTMLButtonElement>('[data-destination="fcp"] .zc-export-location button');
-  await act(async () => change?.click());
+  await ui.click("选择 Final Cut Pro");
+  await ui.click("选择");
   expect(open).toHaveBeenCalledWith(expect.objectContaining({ directory: true, multiple: false }));
   expect(ui.call).toHaveBeenCalledWith("export_preferences", { value: expect.objectContaining({ fcp: "/tmp/另存" }) });
   await ui.click("新建叠层");
@@ -296,6 +314,7 @@ it("uses native folder/save dialogs and reveals the actual exported file", async
     "edit",
     expect.objectContaining({ ops: [expect.objectContaining({ op: "add_overlay", output_path: "/tmp/新叠层.mov" })] }),
   );
+  await ui.click("只要文件字幕 SRT、音频 WAV");
   await ui.click("直接导出");
   await ui.click("在访达中显示");
   expect(revealItemInDir).toHaveBeenCalledWith("/tmp/直接/主时间线_r1.srt");
@@ -395,4 +414,43 @@ it("formats fractional fps and duration without the project's starting timecode"
   expect(summary?.textContent).toContain("00:10");
   expect(summary?.textContent).toContain("0 条字幕");
   expect(summary?.querySelector("img")).toBeNull();
+});
+
+it("selects a destination before exporting and lays out the summary, report and location in canvas order", async () => {
+  const h = await mount({ losses: "warning" });
+  expect(h.container.querySelector(".zc-dialog .zc-export-header h2")?.textContent).toBe("导出");
+  expect(h.container.querySelectorAll(".zc-export-left .zc-dest")).toHaveLength(5);
+  expect(h.container.querySelector(".zc-export-left > [aria-label='成片信息']")).not.toBeNull();
+  await h.click("选择 DaVinci Resolve");
+  expect(h.call.mock.calls.filter(([verb, request]) => verb === "export" && !request.dry_run)).toHaveLength(0);
+  expect(h.container.querySelector(".zc-export-right h3")?.textContent).toContain("DaVinci Resolve");
+  expect(h.container.querySelector(".zc-export-right .zc-export-file-card")?.textContent).toContain("OTIO");
+  expect(h.container.querySelector(".zc-export-losses")?.textContent).toContain("近似");
+  expect(h.container.querySelector(".zc-export-footer input")?.getAttribute("aria-label")).toBe(
+    "DaVinci Resolve保存位置",
+  );
+  expect(h.container.querySelector(".zc-export-footer .is-primary")?.textContent).toContain("导出到 DaVinci Resolve");
+});
+
+it("labels report dispositions independently of severity and reads preserved counts without showing feature IDs", async () => {
+  const h = await mount({
+    report: {
+      summary: { preserved_by_feature: { clip_cut: 3, subtitle_text_timing: 2 } },
+      items: [
+        { status: "approximated", severity: "info", consequence: "时间需要对齐到帧" },
+        { status: "unsupported", severity: "warning", consequence: "字幕样式无法带入" },
+        { status: "baked", severity: "info", consequence: "透明字幕已渲染" },
+      ],
+    },
+  });
+  await h.click("选择 Final Cut Pro");
+  const rows = [...h.container.querySelectorAll(".zc-export-losses .zc-row")].map((row) => row.textContent);
+  expect(rows).toEqual([
+    "时间需要对齐到帧近似",
+    "字幕样式无法带入带不过去",
+    "透明字幕已渲染近似 · 已烘焙",
+    "剪辑点与顺序 · 3 项保留",
+    "字幕文字与时间 · 2 项保留",
+  ]);
+  expect(h.container.textContent).not.toMatch(/clip_cut|subtitle_text_timing/);
 });

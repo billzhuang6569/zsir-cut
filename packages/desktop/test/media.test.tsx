@@ -98,6 +98,7 @@ async function mount(nativeMode = false, preview = false, view = project, withCo
     const source = preview && ui.preview === "media" && panel.selected ? sourceProject(project, panel.selected) : null;
     return (
       <>
+        {panel.header}
         {panel.library}
         {panel.parameters}
         <output aria-label="当前状态">{JSON.stringify(ui)}</output>
@@ -324,7 +325,6 @@ it("filters nested folders and tags, searches notes, and exposes list state", as
       });
       expect(h.container.querySelectorAll(".zc-media-card")).toHaveLength(1);
     }
-    await h.click("搜索素材");
     await h.setInput("搜索素材内容", "原注释");
     expect(h.container.querySelectorAll(".zc-media-card")).toHaveLength(1);
     await h.click("列表");
@@ -416,9 +416,9 @@ it("shows one scope count, placeholder fields, and collapsed add/import controls
     expect(h.container.querySelector('input[aria-label="添加标签"]')).toBeNull();
     expect(h.container.querySelector('input[aria-label="添加文件夹"]')).toBeNull();
     expect([...h.container.querySelectorAll(".zc-media-group h4")].map((n) => n.textContent)).toEqual([
+      "基本信息",
       "标签",
       "文件夹",
-      "基本信息",
     ]);
     expect(h.container.querySelectorAll(".zc-stars button")).toHaveLength(5);
     await h.click("添加标签");
@@ -763,7 +763,7 @@ it.each([
     );
     expect(h.container.querySelector(".zc-media-skim-frame")).toBeNull();
     expect(h.container.querySelector(".zc-media-skim-line")).toBeNull();
-    expect(h.container.querySelectorAll(".zc-media-film > img")).toHaveLength(3);
+    expect(h.container.querySelectorAll(".zc-media-film > img")).toHaveLength(1);
     await h.select();
     expect(h.state().selected).toEqual([media.id]);
   } finally {
@@ -846,4 +846,14 @@ it("does not scrub list, image or audio cards and preserves drag payload", async
   } finally {
     await h.close();
   }
+});
+
+it("keeps search and view controls visible above the media grid with scoped information fields", async () => {
+  const h = await mount();
+  expect(h.container.querySelector(".zc-panel-body.zc-media-library .zc-search input")).not.toBeNull();
+  expect(h.container.querySelectorAll(".zc-media-head .zc-seg button")).toHaveLength(2);
+  expect(h.container.querySelector(".zc-media-drop")?.textContent).toContain("拖到这里");
+  await h.select();
+  expect(h.container.querySelector(".zc-media-info.zc-panel-body .zc-field input[aria-label='注释']")).not.toBeNull();
+  await h.close();
 });

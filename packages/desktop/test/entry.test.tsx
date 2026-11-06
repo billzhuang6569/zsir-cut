@@ -224,3 +224,21 @@ it("shows create failures with expandable kernel details and does not import", a
     await view.close();
   }
 });
+
+it("uses the start canvas hierarchy and filters recent projects by name", async () => {
+  const h = await setup();
+  try {
+    expect(h.node.querySelector(".zc-entry-brand h1")?.textContent).toBe("开始剪辑");
+    expect(h.node.querySelector(".zc-entry-brand .is-primary")?.textContent).toBe("新建工程");
+    expect(h.node.querySelector(".zc-entry-drop .zc-hint")?.textContent).toContain("不会移动或改写原文件");
+    const search = h.node.querySelector<HTMLInputElement>('[aria-label="搜索工程"]');
+    if (!search) throw new Error("Missing project search");
+    await h.input(search, "不存在的名称");
+    expect(h.node.querySelectorAll(".zc-entry-recents li")).toHaveLength(0);
+    await h.input(search, "缺失");
+    expect(h.node.querySelectorAll(".zc-entry-recents li")).toHaveLength(1);
+    expect(h.node.querySelector<HTMLButtonElement>(".zc-entry-recents button")?.disabled).toBe(true);
+  } finally {
+    await h.close();
+  }
+});

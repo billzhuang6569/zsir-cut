@@ -48,7 +48,8 @@ function Field({
     }
   };
   return (
-    <label className="zc-media-field">
+    <label className="zc-field zc-media-field">
+      <span className="zc-label">{label}</span>
       <input
         className="zc-input"
         list={options ? listId : undefined}
@@ -228,7 +229,6 @@ export function useMediaPanel({
   const setSearch = (search: string) => update({ ...state, mediaBrowser: { ...browser, search } });
   const setScope = (scope: string) => update({ ...state, mediaBrowser: { ...browser, scope } });
   const [importing, setImporting] = useState(false);
-  const [searching, setSearching] = useState(false);
   const [busy, setBusy] = useState(false);
   const locked = useRef(false);
   const [progress, setProgress] = useState<number | null>(null);
@@ -479,11 +479,53 @@ export function useMediaPanel({
         .filter(Boolean),
     ),
   ];
+  const header = (
+    <IconButton
+      icon="plus"
+      label="导入素材"
+      disabled={busy || !project}
+      onClick={() => {
+        if (!isTauri()) {
+          setImporting(!importing);
+          return;
+        }
+        void open({ multiple: true, directory: false })
+          .then((paths) => {
+            if (paths) importPaths(Array.isArray(paths) ? paths : [paths]);
+          })
+          .catch(() => setError("文件选择失败"));
+      }}
+    />
+  );
   const library = (
-    <div ref={area} className="zc-media-library">
+    <div ref={area} className="zc-panel-body zc-media-library">
       <header className="zc-media-head">
+        <label className="zc-search">
+          <Icon name="search" />
+          <input
+            className="zc-input"
+            aria-label="搜索素材内容"
+            placeholder="搜索素材"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </label>
+        <span className="zc-seg">
+          {["grid", "list"].map((v) => (
+            <IconButton
+              key={v}
+              icon={v}
+              label={v === "grid" ? "网格" : "列表"}
+              pressed={list === (v === "list")}
+              className={list === (v === "list") ? "zc-icon-btn is-active" : "zc-icon-btn"}
+              onClick={() => update({ ...state, sub: v })}
+            />
+          ))}
+        </span>
+      </header>
+      <div className="zc-media-filters">
         <span className="zc-media-scope">
-          <select aria-label="素材范围" value={scope} onChange={(e) => setScope(e.target.value)}>
+          <select className="zc-select" aria-label="素材范围" value={scope} onChange={(e) => setScope(e.target.value)}>
             <option value="all">全部</option>
             {scope.startsWith("folder:") && !folders.includes(scope.slice(7)) && (
               <option value={scope}>{scope.slice(7)}（空）</option>
@@ -503,44 +545,19 @@ export function useMediaPanel({
           <output aria-label="筛选数量">{visible.length}</output>
           <Icon name="down" />
         </span>
-        <IconButton icon="search" label="搜索素材" pressed={searching} onClick={() => setSearching(!searching)} />
-        <span className="zc-seg">
-          {["grid", "list"].map((v) => (
-            <IconButton
-              key={v}
-              icon={v}
-              label={v === "grid" ? "网格" : "列表"}
-              pressed={list === (v === "list")}
-              onClick={() => update({ ...state, sub: v })}
-            />
-          ))}
-        </span>
-        <IconButton
-          icon="plus"
-          label="导入素材"
-          disabled={busy || !project}
-          onClick={() => {
-            if (!isTauri()) {
-              setImporting(!importing);
-              return;
-            }
-            void open({ multiple: true, directory: false })
-              .then((paths) => {
-                if (paths) importPaths(Array.isArray(paths) ? paths : [paths]);
-              })
-              .catch(() => setError("文件选择失败"));
-          }}
-        />
-      </header>
-      {searching && (
-        <input
-          className="zc-input"
-          aria-label="搜索素材内容"
-          placeholder="名称、注释、标签"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-      )}
+        {folders.slice(0, 2).map((folder) => (
+          <button
+            type="button"
+            className="zc-chip is-sm"
+            aria-pressed={scope === `folder:${folder}`}
+            key={folder}
+            onClick={() => setScope(scope === `folder:${folder}` ? "all" : `folder:${folder}`)}
+          >
+            <Icon name="folder" size={12} />
+            {folder.split("/").at(-1)}
+          </button>
+        ))}
+      </div>
       {!isTauri() && importing && (
         <Field
           clear
@@ -556,7 +573,7 @@ export function useMediaPanel({
       {error && <p role="alert">{error}</p>}
       <div
         className={list ? "zc-media-list" : "zc-media-grid"}
-        style={{ gridTemplateColumns: `repeat(auto-fill,minmax(${size}px,1fr))` }}
+        style={{ gridTemplateColumns: `repeat(auto-fill,minmax(${Math.max(100, size - 40)}px,1fr))` }}
       >
         {visible.map((m) => (
           <button
@@ -596,11 +613,11 @@ export function useMediaPanel({
                   {m.kind === "audio" && project ? (
                     <AudioThumbnail project={project} media={m} config={config} width={size} />
                   ) : config ? (
-                    (m.kind === "image" ? [0] : [0, 1, 2]).map((n) => (
+                    [1].map((n) => (
                       <img
                         key={n}
                         alt=""
-                        src={mediaUrl(config, "thumb", m.id, n === 1 ? middle(m) : n === 0 ? "0s" : printTwoThirds(m))}
+                        src={mediaUrl(config, "thumb", m.id, m.kind === "image" ? "0s" : middle(m))}
                       />
                     ))
                   ) : (
@@ -624,10 +641,26 @@ export function useMediaPanel({
           </button>
         ))}
       </div>
+      <section
+        aria-label="拖入素材"
+        className="zc-media-drop zc-hint"
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={(event) => {
+          event.preventDefault();
+          const paths = event.dataTransfer.getData("text/plain");
+          if (paths) importPaths(paths.split("\n").filter(Boolean));
+        }}
+      >
+        <Icon name="export" />
+        把视频、音频、图片拖到这里
+      </section>
+      <p className="zc-hint zc-media-shortcuts">
+        <kbd>I</kbd> <kbd>O</kbd> 设范围　<kbd>Q</kbd> 加到时间线
+      </p>
     </div>
   );
   const parameters = selected ? (
-    <div className="zc-media-info" key={selected.id}>
+    <div className="zc-panel-body zc-media-info" key={selected.id}>
       {config && selected.kind !== "audio" && (
         <img className="zc-media-cover" alt="素材封面" src={mediaUrl(config, "thumb", selected.id, middle(selected))} />
       )}
@@ -652,58 +685,6 @@ export function useMediaPanel({
         ))}
       </fieldset>
       <h3>{selected.name ?? "未命名素材"}</h3>
-      <Field
-        disabled={busy}
-        label="注释"
-        placeholder="添加注释"
-        value={selected.organize?.note ?? ""}
-        commit={(v) => organize("note", v)}
-      />
-      <Field
-        disabled={busy}
-        label="来源链接"
-        placeholder="http://"
-        value={selected.organize?.link ?? ""}
-        commit={(v) => organize("link", v)}
-      />
-      {(["tags", "folders"] as const).map((field) => (
-        <section className="zc-media-group" key={`${selected.id}-${field}`}>
-          <h4>{field === "tags" ? "标签" : "文件夹"}</h4>
-          <div className="zc-media-tags">
-            {(field === "folders" ? joinedFolders : selected.organize?.tags)?.map((v) => (
-              <span key={v} className="zc-tag">
-                {field === "folders" && <Icon name="folder" />}
-                {v}
-                <button
-                  type="button"
-                  aria-label={`删除${field === "tags" ? "标签" : "文件夹"} ${v}`}
-                  disabled={busy}
-                  onClick={() =>
-                    field === "folders"
-                      ? void changeFolders(v, true)
-                      : organize(
-                          "tags",
-                          selected.organize?.tags?.filter((s) => s !== v),
-                        )
-                  }
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-            <AddValue
-              disabled={busy}
-              label={field === "tags" ? "添加标签" : "添加文件夹"}
-              options={field === "folders" ? folders : undefined}
-              commit={(v) =>
-                field === "folders"
-                  ? void changeFolders(v)
-                  : organize("tags", [...new Set([...(selected.organize?.tags ?? []), ...splitValues(v)])])
-              }
-            />
-          </div>
-        </section>
-      ))}
       <section className="zc-media-group">
         <h4>基本信息</h4>
         <dl>
@@ -771,6 +752,58 @@ export function useMediaPanel({
           <dd>{used(selected)} 段</dd>
         </dl>
       </section>
+      {(["tags", "folders"] as const).map((field) => (
+        <section className="zc-media-group" key={`${selected.id}-${field}`}>
+          <h4>{field === "tags" ? "标签" : "文件夹"}</h4>
+          <div className="zc-media-tags">
+            {(field === "folders" ? joinedFolders : selected.organize?.tags)?.map((v) => (
+              <span key={v} className="zc-chip is-sm">
+                {field === "folders" && <Icon name="folder" />}
+                {v}
+                <button
+                  type="button"
+                  aria-label={`删除${field === "tags" ? "标签" : "文件夹"} ${v}`}
+                  disabled={busy}
+                  onClick={() =>
+                    field === "folders"
+                      ? void changeFolders(v, true)
+                      : organize(
+                          "tags",
+                          selected.organize?.tags?.filter((s) => s !== v),
+                        )
+                  }
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+            <AddValue
+              disabled={busy}
+              label={field === "tags" ? "添加标签" : "添加文件夹"}
+              options={field === "folders" ? folders : undefined}
+              commit={(v) =>
+                field === "folders"
+                  ? void changeFolders(v)
+                  : organize("tags", [...new Set([...(selected.organize?.tags ?? []), ...splitValues(v)])])
+              }
+            />
+          </div>
+        </section>
+      ))}
+      <Field
+        disabled={busy}
+        label="注释"
+        placeholder="添加注释"
+        value={selected.organize?.note ?? ""}
+        commit={(v) => organize("note", v)}
+      />
+      <Field
+        disabled={busy}
+        label="来源链接"
+        placeholder="http://"
+        value={selected.organize?.link ?? ""}
+        commit={(v) => organize("link", v)}
+      />
       <button type="button" className="zc-btn" disabled={busy} onClick={() => place()}>
         加到时间线 <kbd>Q</kbd>
       </button>
@@ -790,13 +823,11 @@ export function useMediaPanel({
   ) : (
     <p className="zc-muted">选择一份素材</p>
   );
-  return { library, parameters, selected, place };
+  return { header, library, parameters, selected, place };
 }
 
-import { div, mul, printRational, rational } from "./timeline.js";
+import { div, mul, rational } from "./timeline.js";
 
-const printTwoThirds = (m: MediaView) =>
-  m.kind === "image" ? "0s" : printRational(mul(parseRational(m.duration ?? "0s", true), rational(2n, 3n)), true);
 export function RangeBar({ media, state }: { media: MediaView; state: UiState }) {
   const range = mediaRange(media, state);
   const total = parseRational(mediaDuration(media), true);

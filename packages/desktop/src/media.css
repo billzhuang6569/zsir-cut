@@ -312,3 +312,117 @@
   transform: translateX(-1px);
   pointer-events: none;
 }
+
+.zc-media-library {
+  position: relative;
+  gap: var(--space-3);
+  overflow: auto;
+}
+.zc-media-head {
+  gap: var(--space-2);
+}
+.zc-media-head .zc-seg {
+  flex: none;
+  height: var(--control-h);
+  gap: 0;
+  padding: 0;
+}
+.zc-media-head .zc-seg button {
+  width: 36px;
+}
+.zc-media-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+.zc-media-scope {
+  flex: none;
+  width: 80px;
+}
+.zc-media-scope select {
+  width: 100%;
+  background: var(--raised);
+  border: 0;
+  border-radius: var(--radius-full);
+  height: 20px;
+  color: var(--text);
+  padding: 0 38px 0 var(--space-2);
+  appearance: none;
+}
+.zc-media-filters .zc-chip {
+  border: 0;
+  cursor: pointer;
+}
+.zc-media-filters .zc-chip[aria-pressed="true"] {
+  background: var(--raised-2);
+  color: var(--text);
+}
+.zc-media-grid {
+  gap: var(--space-3) var(--space-2);
+}
+.zc-media-film {
+  border-radius: var(--radius-md);
+}
+.zc-media-film img {
+  width: 100%;
+}
+.zc-media-film .zc-media-duration {
+  top: auto;
+  bottom: var(--space-1);
+  border-radius: var(--radius-sm);
+}
+.zc-media-film .zc-media-used {
+  border-radius: var(--radius-sm);
+}
+.zc-media-drop {
+  margin-top: auto;
+  min-height: 72px;
+  flex-shrink: 0;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+}
+.zc-media-shortcuts {
+  margin: 0;
+}
+.zc-media-info {
+  position: relative;
+  gap: var(--space-3);
+}
+.zc-media-cover {
+  aspect-ratio: 2.45;
+}
+.zc-media-info .zc-palette {
+  position: absolute;
+  top: 96px;
+  right: var(--space-2);
+  padding: var(--space-1);
+  border-radius: var(--radius-sm);
+}
+.zc-media-info .zc-palette button {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-xs);
+}
+.zc-media-info .zc-chip {
+  font-size: var(--label-size);
+}
+.zc-media-info .zc-media-group {
+  padding-top: var(--space-3);
+  border: 0;
+}
+.zc-media-info dl {
+  font-size: var(--label-size);
+}
+.zc-media-list .zc-media-card {
+  min-width: 0;
+  grid-template-columns: 16px minmax(0, 1fr) 5ch;
+}
+.zc-media-list .zc-media-spec,
+.zc-media-list .zc-media-card > span:nth-last-child(-n + 2) {
+  display: none;
+}
