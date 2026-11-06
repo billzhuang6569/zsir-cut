@@ -175,6 +175,7 @@ const writeRequest = (verb: WriteRequest["verb"], id: string, input: Input, ops:
   ...(typeof input.timeline_id === "string" ? { timeline_id: input.timeline_id } : {}),
   ...(typeof input.target === "string" ? { target: input.target } : {}),
   ...(typeof input.label === "string" ? { label: input.label } : {}),
+  ...(typeof input.reason === "string" ? { reason: input.reason } : {}),
   ...(typeof input.project === "string" ? { project: input.project } : {}),
   ...(typeof input.session_id === "string" ? { session_id: input.session_id } : {}),
   ...(input.dry_run === true ? { dry_run: true } : {}),
@@ -491,6 +492,22 @@ async function runExistingSession(
       ...decisionSummary(current, session),
       ...classify(diffProjectEntities(base, current)),
       ops: entries.filter((entry) => entry.kind === "write").flatMap((entry) => entry.ops ?? []),
+      steps: activeWrites(entries).map((entry) => {
+        const summary: Record<string, { added: number; removed: number; changed: number }> = {};
+        for (const change of entry.changes ?? []) {
+          const counts = summary[change.entity] ?? { added: 0, removed: 0, changed: 0 };
+          summary[change.entity] = counts;
+          counts[change.before === null ? "added" : change.after === null ? "removed" : "changed"]++;
+        }
+        return {
+          revision: { seq: entry.seq, id: entry.revision },
+          label: entry.label ?? null,
+          reason: entry.reason ?? null,
+          batch: entry.batch ?? null,
+          summary,
+          keys: (entry.changes ?? []).map((change) => change.key),
+        };
+      }),
       verification: result.verification,
       preview_job: await startPreviewJob("render_preview", projectPath, current, {
         project: projectPath,

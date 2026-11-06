@@ -83,6 +83,14 @@ afterEach(async () => {
 });
 
 describe("project write store", () => {
+  it("rejects oversized reasons at both store entry points without writing", async () => {
+    const input = { ...request(), reason: "字".repeat(201) };
+    for (const result of [await store().commitWrite(input, label), await store().previewWrite(input, label)])
+      expect(result).toMatchObject({ status: "rejected", error: { code: "E_VALIDATION" } });
+    expect(await readFile(path, "utf8")).toBe(original);
+    expect(await store().journal()).toEqual([]);
+  });
+
   it("writes canonical bytes, complete journal and schema-valid envelope", async () => {
     const result = await store().commitWrite(request(), label, { clp_v1: "set_clip" });
     expect(result.status).toBe("applied");

@@ -32,6 +32,7 @@ export interface WriteRequest {
   timeline_id?: string;
   target?: string;
   label?: string;
+  reason?: string;
   batch?: Batch;
   batch_id?: string;
   dry_run?: boolean;
@@ -99,6 +100,8 @@ export interface WriteEnvelope {
 export interface JournalEntry {
   kind: "write" | "undo" | "redo" | "restore" | "recovered";
   label?: string | null;
+  reason?: string | null;
+  session_id?: string | null;
   batch?: Omit<Batch, "timeout_s"> | null;
   batch_id?: string;
   revision: string;
@@ -388,6 +391,8 @@ export function openProject(options: OpenProjectOptions) {
         "E_SESSION_STATE",
         "Restore is only available on the main project",
       );
+    if (request.reason !== undefined && (typeof request.reason !== "string" || [...request.reason].length > 200))
+      return fail("rejected", request.base_revision, "E_VALIDATION", "Reason must contain at most 200 characters");
     if (request.label !== undefined && (!request.label || [...request.label].length > 80))
       return fail("rejected", request.base_revision, "E_VALIDATION", "Label must contain 1 to 80 characters");
     if (request.verb === "edit" && request.author.kind === "agent" && !request.label)
@@ -450,6 +455,8 @@ export function openProject(options: OpenProjectOptions) {
         const recovered: JournalEntry = {
           kind: "recovered",
           label: null,
+          reason: null,
+          session_id: options.sessionId ?? null,
           batch: null,
           revision: before,
           parent: current.revision.parent,
@@ -750,6 +757,8 @@ export function openProject(options: OpenProjectOptions) {
       const entry: JournalEntry = {
         kind,
         label: request.label ?? null,
+        reason: request.reason ?? null,
+        session_id: options.sessionId ?? (request.verb === "session_approve" ? (request.session_id ?? null) : null),
         batch: request.batch ? { id: request.batch.id, seq: request.batch.seq, count: request.batch.count } : null,
         ...(request.batch_id ? { batch_id: request.batch_id } : {}),
         revision: candidate.revision.id,
@@ -989,6 +998,8 @@ export function openProject(options: OpenProjectOptions) {
       output.error = { code, message, retryable: false };
       return output;
     };
+    if (request.reason !== undefined && (typeof request.reason !== "string" || [...request.reason].length > 200))
+      return reject("E_VALIDATION", "Reason must contain at most 200 characters");
     if (request.verb === "edit" && request.author.kind === "agent" && !request.label)
       return reject("E_VALIDATION", "Agent edit requires label");
     if ((!request.batch || request.batch.seq === 1) && request.base_revision !== before.revision.id) {

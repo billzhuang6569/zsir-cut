@@ -214,7 +214,13 @@ export async function inspect(
         .slice(0, before)
         .reverse()
         .slice(0, (input.limit as number | undefined) ?? 20)
-        .map((entry) => ({ ...entry, label: entry.label ?? null, batch: entry.batch ?? null })),
+        .map((entry) => ({
+          ...entry,
+          label: entry.label ?? null,
+          reason: entry.reason ?? null,
+          session_id: entry.session_id ?? null,
+          batch: entry.batch ?? null,
+        })),
     };
   }
   if (input.view === "chapters") {

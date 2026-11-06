@@ -75,6 +75,116 @@ afterEach(async () => {
 });
 
 describe("sessions and diff", () => {
+  it("lists three ordered steps and resolves approved history to its session decisions", async () => {
+    const session_id = await begin();
+    const reasons = ["保留重点", "标出疑问", "疑问已解决"];
+    const ops = [
+      [label("clp_v1", "重点")],
+      [{ op: "add_marker", id: "mrk_review", at: "0s", duration: "0s", kind: "note", text: "疑问" }],
+      [{ op: "remove_marker", marker_id: "mrk_review" }],
+    ];
+    let base = "rev_fixture_1";
+    const expected = [];
+    for (let i = 0; i < ops.length; i++) {
+      const batch = { id: "bat_review", seq: i + 1, count: 3 };
+      const written = await send(
+        "edit",
+        { session_id, label: `步骤 ${i + 1}`, reason: reasons[i], batch, ops: ops[i] },
+        base,
+      );
+      expect(written.status).toBe("drafted");
+      base = written.receipt?.after ?? "";
+      expected.push({
+        revision: { seq: i + 2, id: base },
+        label: `步骤 ${i + 1}`,
+        reason: reasons[i],
+        batch,
+        summary:
+          i === 0
+            ? { clip: { added: 0, removed: 0, changed: 1 } }
+            : { marker: { added: i === 1 ? 1 : 0, removed: i === 2 ? 1 : 0, changed: 0 } },
+        keys: [i === 0 ? "clp_v1" : "mrk_review"],
+      });
+    }
+    await send(
+      "session_ask",
+      { session_id, decisions: [{ id: "dec_review", question: "保留？", options: [{ id: "keep", label: "保留" }] }] },
+      base,
+    );
+    const review = await send("session_review", { session_id }, base);
+    expect(review.result?.steps).toEqual(expected);
+    const draftHistory = await dispatch("inspect", { project, session_id, view: "history" });
+    expect(draftHistory.result?.entries).toEqual(
+      expected
+        .toReversed()
+        .map((step) =>
+          expect.objectContaining({ revision: step.revision.id, label: step.label, reason: step.reason, session_id }),
+        ),
+    );
+    await send("session_approve", { session_id, reason: "采用方案" });
+    const history = await dispatch("inspect", { project, view: "history" });
+    const entries = history.result?.entries as { session_id: string }[];
+    expect(entries).toEqual([expect.objectContaining({ verb: "session_approve", session_id, reason: "采用方案" })]);
+    const session = await dispatch("inspect", { project, view: "session", session_id: entries[0]?.session_id });
+    expect(session.result).toMatchObject({ state: "approved", decisions: [{ id: "dec_review", state: "pending" }] });
+  });
+
+  it.each(["主工程", "草稿"])("validates reason by Unicode characters for %s", async (target) => {
+    const session_id = target === "草稿" ? await begin() : undefined;
+    for (const reason of ["字".repeat(201), 42, null]) {
+      const result = await dispatch("edit", {
+        project,
+        session_id,
+        base_revision: "rev_fixture_1",
+        idempotency_key: `invalid-${reason}`,
+        author,
+        label: "修改",
+        reason,
+        ops: [label("clp_v1", "重点")],
+      });
+      expect(result).toMatchObject({ status: "rejected", error: { code: "E_VALIDATION" } });
+    }
+    const written = await send("edit", {
+      ...(session_id ? { session_id } : {}),
+      reason: "😀".repeat(200),
+      ops: [label("clp_v1", "重点")],
+    });
+    expect(written.ok).toBe(true);
+    const history = await dispatch("inspect", { project, ...(session_id ? { session_id } : {}), view: "history" });
+    expect(history.result?.entries).toEqual([
+      expect.objectContaining({ reason: "😀".repeat(200), session_id: session_id ?? null }),
+    ]);
+  });
+
+  it("reads old journals with missing reason and session_id as null", async () => {
+    await send("edit", { ops: [label("clp_v1", "旧日志")] });
+    const path = join(directory, ".zcut", (await load()).id, "journal.jsonl");
+    const entry = JSON.parse((await readFile(path, "utf8")).trim());
+    delete entry.reason;
+    delete entry.session_id;
+    await writeFile(path, `${JSON.stringify(entry)}\n`);
+    const history = await dispatch("inspect", { project, view: "history" });
+    expect(history.result?.entries).toEqual([expect.objectContaining({ reason: null, session_id: null })]);
+  });
+
+  it("includes a redone step once at its original revision", async () => {
+    const session_id = await begin();
+    const written = await send("edit", { session_id, ops: [label("clp_v1", "重做")] });
+    const undone = await send("undo", { session_id }, written.receipt?.after ?? "");
+    const redone = await send("redo", { session_id }, undone.receipt?.after ?? "");
+    const review = await send("session_review", { session_id }, redone.receipt?.after ?? "");
+    expect(review.result?.steps).toEqual([
+      {
+        revision: { seq: 2, id: written.receipt?.after },
+        label: "Test edit",
+        reason: null,
+        batch: null,
+        summary: { clip: { added: 0, removed: 0, changed: 1 } },
+        keys: ["clp_v1"],
+      },
+    ]);
+  });
+
   it("uses the target track domain for renames inside a draft", async () => {
     const bytes = await readFile(project, "utf8");
     const subtitle = (await load()).timelines[0]?.tracks.find((track) => track.kind === "subtitle");
@@ -220,6 +330,14 @@ describe("sessions and diff", () => {
       expect.arrayContaining([expect.objectContaining({ key: "clp_v1" })]),
     );
     expect(review.result?.subtitle_changes).toEqual([]);
+    expect(review.result?.steps).toEqual([
+      expect.objectContaining({
+        revision: { seq: 2, id: one.receipt?.after },
+        reason: null,
+        batch: null,
+        keys: ["clp_v1"],
+      }),
+    ]);
     expect(review.result?.ops).toEqual([label("clp_v1", "draft label"), token]);
     expect(review.result?.preview_job).toMatch(/^job_/);
     expect(review.verification.level).toBe("L1");
