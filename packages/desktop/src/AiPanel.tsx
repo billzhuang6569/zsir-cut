@@ -1,8 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentKind, ChatEvent } from "../../app-host/src/agent-events.js";
-import { Button, type Decision, DecisionCard, Markdown, StepRow, toolVerb } from "./ai-components.js";
+import {
+  Button,
+  type Decision,
+  DecisionCard,
+  isReadTool,
+  Markdown,
+  PermissionCard,
+  ReviewValue,
+  StepRow,
+  toolVerb,
+} from "./ai-components.js";
 import { Icon, IconButton } from "./components.js";
-import type { ProjectView } from "./connection.js";
+import type { PermissionRequest, ProjectView } from "./connection.js";
 import { DESKTOP_AUTHOR } from "./connection.js";
 import "./ai.css";
 
@@ -37,6 +47,7 @@ interface Session {
   state: string;
   label?: string;
   intent?: string;
+  base_revision: string;
   draft_revision: string;
   decisions: Decision[];
   pending_count: number;
@@ -68,6 +79,8 @@ export function useAiPanel({
   notices,
   revision,
   connectionEpoch = 0,
+  permissions = [],
+  permissionAnswered,
 }: {
   call: Call;
   path: string | null;
@@ -75,6 +88,8 @@ export function useAiPanel({
   notices: AiNotice[];
   revision: number;
   connectionEpoch?: number;
+  permissions?: PermissionRequest[];
+  permissionAnswered?: (id: string) => void;
 }) {
   const [agents, setAgents] = useState<{ agent: AgentKind; available: boolean; version: string | null }[]>([]);
   const [agent, setAgent] = useState<AgentKind>("claude");
@@ -83,6 +98,12 @@ export function useAiPanel({
   const [events, setEvents] = useState<ChatEvent[]>([]);
   const [generating, setGenerating] = useState(false);
   const [input, setInput] = useState("");
+  const [suggestion, setSuggestion] = useState("");
+  const reviewSelection = useRef(0);
+  const [reviewId, setReviewId] = useState("");
+  const [review, setReview] = useState<{ entity: string; before: unknown; after: unknown }[] | null>(null);
+  const permissionCards = useRef<HTMLDivElement>(null);
+  const draftCards = useRef<HTMLDivElement>(null);
   const [error, setError] = useState("");
   const [history, setHistory] = useState<ChatSummary[] | null>(null);
   const messageList = useRef<HTMLDivElement>(null);
@@ -124,6 +145,10 @@ export function useAiPanel({
   useEffect(() => {
     setGenerating(false);
     setInput("");
+    setSuggestion("");
+    reviewSelection.current++;
+    setReviewId("");
+    setReview(null);
     setError("");
     setHistory(null);
     setAi({ sessions: [], batches: [] });
@@ -154,7 +179,10 @@ export function useAiPanel({
       currentChat.current = latest.id;
       setChatId(latest.id);
       setAgent(latest.agent);
-      setEvents([...saved.events, ...incoming.slice(overlap)]);
+      const restored = [...saved.events, ...incoming.slice(overlap)];
+      setEvents(restored);
+      const last = restored.findLast((event) => event.type === "user" || event.type === "suggestion");
+      setSuggestion(last?.type === "suggestion" ? (last.text?.trim() ?? "") : "");
     })()
       .catch((e: Error) => {
         if (!disposed) setError(e.message);
@@ -192,6 +220,8 @@ export function useAiPanel({
         currentChat.current = notice.chat;
         setChatId(notice.chat);
         setEvents((old) => [...old, notice.event]);
+        if (notice.event.type === "suggestion") setSuggestion(notice.event.text?.trim() ?? "");
+        if (notice.event.type === "user") setSuggestion("");
         if (notice.event.type === "end") {
           setGenerating(false);
           void refresh().catch((e: Error) => setError(e.message));
@@ -210,6 +240,7 @@ export function useAiPanel({
     chatSelection.current++;
     setError("");
     setGenerating(true);
+    setSuggestion("");
     setInput("");
     try {
       const result = (await call("chat_send", {
@@ -283,6 +314,24 @@ export function useAiPanel({
       setSaving(false);
     }
   };
+  const showReview = async (item: Session) => {
+    const selection = ++reviewSelection.current;
+    setReviewId(item.session_id);
+    setReview(null);
+    try {
+      const result = (await call("diff", {
+        project: path,
+        session_id: item.session_id,
+        from: item.base_revision,
+        to: item.draft_revision,
+      })) as { changes: NonNullable<typeof review> };
+      if (selection === reviewSelection.current) setReview(result.changes);
+    } catch (e) {
+      if (selection !== reviewSelection.current) return;
+      setReviewId("");
+      setError(String(e));
+    }
+  };
   const messages: {
     id: string;
     role: "user" | "assistant";
@@ -294,6 +343,7 @@ export function useAiPanel({
       result?: unknown;
       live: boolean;
       failed: boolean;
+      stopped?: boolean;
       failureCount?: number;
       attempts?: unknown[];
     }[];
@@ -329,17 +379,27 @@ export function useAiPanel({
         if (tool) {
           tool.live = false;
           tool.result = event.input;
-          tool.failed = event.failed === true || toolResultFailed(event.input);
+          tool.stopped = JSON.stringify(event.input)?.includes("E_PERMISSION_DENIED") ?? false;
+          tool.failed = !tool.stopped && (event.failed === true || toolResultFailed(event.input));
         }
       }
     } else if (event.type === "end")
-      for (const message of messages) for (const tool of message.tools) tool.live = false;
+      for (const message of messages)
+        for (const tool of message.tools) {
+          if (tool.live && event.text === "已停止") tool.stopped = true;
+          tool.live = false;
+        }
   }
   for (const message of messages) {
     for (let i = 0; i < message.tools.length; i++) {
       const tool = message.tools[i];
       const next = message.tools[i + 1];
-      if (tool && next && toolVerb(tool.name) === toolVerb(next.name)) {
+      if (
+        tool &&
+        next &&
+        ((isReadTool(tool.name) && isReadTool(next.name)) ||
+          (tool.failed && toolVerb(tool.name) === toolVerb(next.name)))
+      ) {
         tool.attempts = [
           ...(tool.attempts ?? [{ tool: tool.name, arguments: tool.input, result: tool.result }]),
           { tool: next.name, arguments: next.input, result: next.result },
@@ -347,6 +407,7 @@ export function useAiPanel({
         tool.failureCount = (tool.failureCount ?? Number(tool.failed)) + Number(next.failed);
         tool.failed = tool.failureCount > 0;
         tool.live ||= next.live;
+        tool.stopped ||= next.stopped ?? false;
         message.tools.splice(i + 1, 1);
         i--;
       }
@@ -354,7 +415,7 @@ export function useAiPanel({
   }
   const available = agents.filter((item) => item.available);
   const header = (
-    <div className="zc-panel-head">
+    <div className="zc-panel-head zc-ai-head">
       <h2>AI</h2>
       <div className="zc-agent-selector">
         <Icon name="bot" />
@@ -368,11 +429,13 @@ export function useAiPanel({
             currentChat.current = undefined;
             setChatId(undefined);
             setEvents([]);
+            setSuggestion("");
           }}
         >
           {available.map((item) => (
             <option key={item.agent} value={item.agent}>
-              {item.agent === "claude" ? "Claude Code" : "Codex"} {item.version}
+              {item.agent === "claude" ? "Claude Code" : "Codex"}{" "}
+              {item.version?.match(/\d+\.\d+\.\d+(?:[-+][\w.-]+)?/)?.[0] ?? item.version}
             </option>
           ))}
         </select>
@@ -388,6 +451,17 @@ export function useAiPanel({
           setChatId(undefined);
           setEvents([]);
           setHistory(null);
+          setSuggestion("");
+        }}
+      />
+      <IconButton
+        icon="list"
+        label="历史对话"
+        disabled={generating}
+        onClick={() => {
+          void call("chat_list", {})
+            .then((value) => setHistory(value as typeof history))
+            .catch((e: Error) => setError(e.message));
         }}
       />
     </div>
@@ -403,19 +477,6 @@ export function useAiPanel({
         </p>
       ) : (
         <>
-          <div className="zc-chat-actions">
-            <span className="zc-grow" />
-            <IconButton
-              icon="list"
-              label="历史对话"
-              disabled={generating}
-              onClick={() => {
-                void call("chat_list", {})
-                  .then((value) => setHistory(value as typeof history))
-                  .catch((e: Error) => setError(e.message));
-              }}
-            />
-          </div>
           {history && (
             <section className="zc-chat-history" aria-label="历史对话">
               {history.map((item) => (
@@ -434,6 +495,7 @@ export function useAiPanel({
                         setChatId(item.id);
                         setAgent(item.agent);
                         setEvents(saved.events);
+                        setSuggestion("");
                         setHistory(null);
                       })
                       .catch((e: Error) => setError(e.message));
@@ -473,17 +535,28 @@ export function useAiPanel({
                 ) : (
                   <>
                     <Markdown text={message.text} />
-                    {message.tools.map((tool) => (
-                      <StepRow
-                        key={tool.id}
-                        live={tool.live}
-                        name={tool.name}
-                        failed={tool.failed}
-                        failureCount={tool.failureCount ?? Number(tool.failed)}
-                        count={tool.attempts?.length ?? 1}
-                        detail={tool.attempts ?? { tool: tool.name, arguments: tool.input, result: tool.result }}
-                      />
-                    ))}
+                    {message.tools.map((tool) => {
+                      const id =
+                        tool.input && typeof tool.input === "object"
+                          ? (tool.input as Record<string, unknown>).session_id
+                          : undefined;
+                      const reviewSession = id ? ai.sessions.find((item) => item.session_id === id) : draftSession;
+                      return (
+                        <StepRow
+                          key={tool.id}
+                          live={tool.live}
+                          name={tool.name}
+                          failed={tool.failed}
+                          stopped={tool.stopped ?? false}
+                          {...(reviewSession && ["open", "in_review"].includes(reviewSession.state)
+                            ? { onReview: () => void showReview(reviewSession) }
+                            : {})}
+                          failureCount={tool.failureCount ?? Number(tool.failed)}
+                          count={tool.attempts?.length ?? 1}
+                          detail={tool.attempts ?? { tool: tool.name, arguments: tool.input, result: tool.result }}
+                        />
+                      );
+                    })}
                     <IconButton
                       icon="copy"
                       label="复制回复"
@@ -496,75 +569,71 @@ export function useAiPanel({
                 )}
               </div>
             ))}
-            {ai.sessions
-              .filter((item) => item.state === "in_review")
-              .map((item) => {
-                const changes = item.changes ?? [];
-                return (
-                  <section className="zc-draft" aria-label="AI 草稿" key={item.session_id}>
-                    <strong>草稿</strong>
-                    <div className="zc-draft-counts">
-                      {[
-                        { icon: "list", label: "修订", count: item.revision_count },
-                        {
-                          icon: "clip",
-                          label: "片段",
-                          count: changes.filter((change) => change.entity === "clip").length,
-                        },
-                        {
-                          icon: "subtitle",
-                          label: "字幕改动",
-                          count: changes.filter((change) =>
-                            ["cue", "transcript", "run", "token", "override", "free_cue", "style"].includes(
-                              change.entity,
-                            ),
-                          ).length,
-                        },
-                      ]
-                        .filter((entry) => entry.count > 0)
-                        .map((entry) => (
-                          <span
-                            role="img"
-                            key={entry.label}
-                            aria-label={`${entry.count} ${entry.label}`}
-                            title={entry.label}
-                          >
-                            <Icon name={entry.icon} />
-                            {entry.count}
-                          </span>
-                        ))}
-                    </div>
-                    {confirmApprove === item.session_id && (
-                      <p role="alert">还有 {item.pending_count} 件决定未答，仍要批准吗？</p>
-                    )}
-                    <Button
-                      variant="approve"
-                      icon="check"
-                      disabled={saving || generating}
-                      onClick={() => {
-                        void approve(item);
-                      }}
-                    >
-                      {confirmApprove === item.session_id ? "仍然批准" : "批准"}
-                    </Button>
-                  </section>
-                );
-              })}
+            {ai.sessions.some((item) => item.state === "in_review") && (
+              <Button
+                className="zc-chat-pointer"
+                icon="ask"
+                onClick={() => {
+                  draftCards.current?.scrollIntoView?.({ block: "nearest" });
+                  draftCards.current?.querySelector("button")?.focus();
+                }}
+              >
+                方案等你审 <Icon name="chevron" />
+              </Button>
+            )}
+            {permissions.length > 0 && (
+              <Button
+                className="zc-chat-pointer"
+                icon="ask"
+                onClick={() => {
+                  permissionCards.current?.scrollIntoView?.({ block: "nearest" });
+                  permissionCards.current?.querySelector<HTMLDivElement>('[role="alertdialog"]')?.focus();
+                }}
+              >
+                等你许可 <Icon name="chevron" />
+              </Button>
+            )}
           </div>
+          {generating && permissions.length === 0 && (
+            <output className="zc-agent-status">
+              <Icon name="clock" />
+              <span className="zc-grow">正在处理…</span>
+              <kbd>Esc</kbd> 停止
+            </output>
+          )}
           <div className="zc-chat-input">
             <textarea
               aria-label="发给 AI"
               rows={3}
               value={input}
-              placeholder="描述你想怎么剪，@ 引用素材"
-              onChange={(e) => setInput(e.target.value)}
+              placeholder={suggestion ? "" : "描述你想怎么剪，@ 引用素材"}
+              onChange={(e) => {
+                setInput(e.target.value);
+                setSuggestion("");
+              }}
               onKeyDown={(e) => {
+                if (e.key === "Escape" && generating) {
+                  e.preventDefault();
+                  void call("chat_stop", {}).catch((error: Error) => setError(error.message));
+                }
+                if (e.nativeEvent.isComposing) return;
+                if (e.key === "Tab" && !e.shiftKey && suggestion && !input) {
+                  e.preventDefault();
+                  setInput(suggestion);
+                  setSuggestion("");
+                }
                 if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                   e.preventDefault();
-                  void send(input);
+                  void send(input || suggestion);
                 }
               }}
             />
+            {suggestion && !input && (
+              <div className="zc-ghost" aria-hidden="true">
+                <span>{suggestion}</span>
+                <kbd>Tab</kbd>
+              </div>
+            )}
             {/@[^\s]*$/.test(input) && (
               <fieldset className="zc-chat-refs">
                 <legend>引用素材</legend>
@@ -583,10 +652,10 @@ export function useAiPanel({
               <IconButton
                 icon={generating ? "stop" : "send"}
                 label={generating ? "停止" : "发送"}
-                disabled={!generating && !input.trim()}
+                disabled={!generating && !input.trim() && !suggestion}
                 onClick={() => {
                   if (generating) void call("chat_stop", {}).catch((e: Error) => setError(e.message));
-                  else void send(input);
+                  else void send(input || suggestion);
                 }}
               />
             </div>
@@ -598,6 +667,113 @@ export function useAiPanel({
   );
   const parameters = (
     <>
+      <div ref={permissionCards} className="zc-permission-list">
+        {permissions.map((request) => (
+          <PermissionCard
+            key={request.id}
+            request={request}
+            answer={async (answer, message) => {
+              await call("permission_answer", { id: request.id, answer, ...(message ? { message } : {}) });
+              permissionAnswered?.(request.id);
+            }}
+          />
+        ))}
+      </div>
+      <div ref={draftCards} className="zc-draft-list">
+        {ai.sessions
+          .filter(
+            (item) =>
+              item.state === "in_review" ||
+              (item.state === "open" && (item.revision_count > 0 || reviewId === item.session_id)),
+          )
+          .map((item) => {
+            const changes = item.changes ?? [];
+            return (
+              <section className="zc-draft" aria-label="AI 草稿" key={item.session_id}>
+                <strong>方案 · {item.intent || item.label || "剪辑方案"}</strong>
+                <div className="zc-draft-counts">
+                  {[
+                    { icon: "list", label: "修订", count: item.revision_count },
+                    {
+                      icon: "clip",
+                      label: "片段",
+                      count: changes.filter((change) => change.entity === "clip").length,
+                    },
+                    {
+                      icon: "subtitle",
+                      label: "字幕改动",
+                      count: changes.filter((change) =>
+                        ["cue", "transcript", "run", "token", "override", "free_cue", "style"].includes(change.entity),
+                      ).length,
+                    },
+                  ]
+                    .filter((entry) => entry.count > 0)
+                    .map((entry) => (
+                      <span
+                        role="img"
+                        key={entry.label}
+                        aria-label={`${entry.count} ${entry.label}`}
+                        title={entry.label}
+                      >
+                        <Icon name={entry.icon} />
+                        {entry.count}
+                      </span>
+                    ))}
+                </div>
+                {confirmApprove === item.session_id && (
+                  <p role="alert">还有 {item.pending_count} 件决定未答，仍要批准吗？</p>
+                )}
+                <Button
+                  variant="approve"
+                  icon="check"
+                  disabled={saving || generating}
+                  onClick={() => {
+                    void approve(item);
+                  }}
+                >
+                  {confirmApprove === item.session_id ? "仍然批准" : "全部批准"}
+                </Button>
+                <Button icon="image" onClick={() => void showReview(item)}>
+                  看对比
+                </Button>
+                {reviewId === item.session_id && (
+                  <section aria-label="方案对比" className="zc-review">
+                    <div className="zc-q-head">
+                      <strong>方案对比</strong>
+                      <Button variant="text" onClick={() => setReviewId("")}>
+                        收起
+                      </Button>
+                    </div>
+                    {review === null ? (
+                      <p>正在读取…</p>
+                    ) : review.length ? (
+                      review.map((change, index) => (
+                        <div key={`${change.entity}-${index}`}>
+                          <p>
+                            {change.before === null ? "新增" : change.after === null ? "移除" : "修改"} ·{" "}
+                            {{
+                              clip: "片段",
+                              cue: "字幕",
+                              transcript: "字幕",
+                              track: "轨道",
+                              marker: "标记",
+                              chapter: "章节",
+                              media: "素材",
+                            }[change.entity] ?? "工程内容"}
+                          </p>
+                          <ReviewValue label="原来" value={change.before} />
+                          <ReviewValue label="方案" value={change.after} />
+                        </div>
+                      ))
+                    ) : (
+                      <p>暂无改动</p>
+                    )}
+                  </section>
+                )}
+              </section>
+            );
+          })}
+      </div>
       {runningBatch && (
         <output>
           AI 正在做第 {Math.min(runningBatch.count, runningBatch.applied.length + 1)} / {runningBatch.count} 步
@@ -650,6 +826,11 @@ export function useAiPanel({
   return {
     chat,
     header,
+    decisionStatus: (
+      <span className="zc-chip is-sm is-attention">
+        {permissions.length ? "Agent 在等你" : `${pending.length} 件待定`}
+      </span>
+    ),
     draftStatus: draftSession ? (
       <span className="zc-chip is-sm is-attention">
         <span className="zc-dot is-attention" />

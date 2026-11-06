@@ -46,6 +46,16 @@ export function requestError(envelope: ResultEnvelope) {
   return "没能完成这次修改";
 }
 
+export interface PermissionRequest {
+  type: "permission_request";
+  id: string;
+  verb: string;
+  title: string;
+  detail: string;
+  target: string | null;
+  command: Record<string, unknown>;
+}
+
 export function connectHost(
   config: { port: number; token: string },
   handlers: {
@@ -54,6 +64,7 @@ export function connectHost(
     chat?: (notice: import("./AiPanel.js").AiNotice) => void;
     aiChanged?: () => void;
     projectChanged?: (event: ProjectChanged) => void;
+    permission?: (request: PermissionRequest) => void;
     icon: (value: string | null) => void;
     error: (message: string, detail?: string) => void;
   },
@@ -135,6 +146,8 @@ export function connectHost(
       );
     } else if (message.type === "chat_event") {
       handlers.chat?.(message);
+    } else if (message.type === "permission_request") {
+      handlers.permission?.(message);
     } else if (message.type === "ai_changed") {
       handlers.aiChanged?.();
     }

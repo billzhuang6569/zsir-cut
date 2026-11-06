@@ -385,7 +385,7 @@ it("separates tool-delimited text and merges consecutive failed attempts with fu
       { attempt: 2 },
     ]);
     expect(JSON.stringify(detail)).toContain("E_VALIDATION");
-    expect(JSON.stringify(detail)).toContain("mcp__zsir-cut__zcut_session_begin");
+    expect(JSON.stringify(detail)).not.toContain("mcp__zsir-cut__zcut_session_begin");
   } finally {
     await act(() => root.unmount());
   }
@@ -469,9 +469,7 @@ it("groups consecutive successful and mixed tool calls while preserving order an
     expect(success.map((item: { arguments: unknown; result: unknown }) => [item.arguments, item.result])).toEqual(
       Array.from({ length: 5 }, (_, i) => [{ i }, { ok: true, i }]),
     );
-    expect(success.map((item: { tool: string }) => item.tool)).toEqual(
-      Array.from({ length: 5 }, (_, i) => (i % 2 ? "mcp__zsir-cut__zcut_inspect" : "zcut_inspect")),
-    );
+    expect(success.every((item: { tool?: string }) => item.tool === undefined)).toBe(true);
     await act(() => button(container, "×4").click());
     const mixed = JSON.parse(container.querySelectorAll(".zc-step-detail")[1]?.textContent ?? "null");
     expect(mixed.map((item: { arguments: unknown }) => item.arguments)).toEqual([

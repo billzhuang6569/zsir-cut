@@ -427,11 +427,11 @@
   color: var(--accent);
 }
 
-.zc-step.is-failed {
-  color: var(--attention);
+.zc-agent-status > .zc-icon {
+  color: var(--accent);
 }
 .zc-step.is-live > .zc-icon {
-  color: var(--attention);
+  color: var(--accent);
 }
 
 .zc-q-note {
@@ -527,7 +527,8 @@
   color: var(--text-2);
   font: inherit;
   font-size: var(--label-size);
-  width: 112px;
+  width: auto;
+  min-width: 0;
   padding: var(--space-1);
   cursor: pointer;
 }
@@ -541,8 +542,129 @@
 .zc-chat-input textarea {
   resize: none;
 }
+
+.zc-ai-head {
+  gap: var(--space-1);
+  padding-inline: var(--space-3);
+}
+.zc-ai-head h2 {
+  flex: none;
+  margin-right: auto;
+}
+.zc-ai-head .zc-agent-selector {
+  flex-shrink: 1;
+}
+.zc-ai-head > .zc-ibtn {
+  width: var(--icon-btn-compact);
+}
+.zc-decision-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.zc-decision-heading h2 {
+  font-size: var(--title-size);
+}
+.zc-permission-list,
+.zc-draft-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.zc-permission-list:empty,
+.zc-draft-list:empty {
+  display: none;
+}
+.zc-permission {
+  background: var(--attention-soft);
+  border-color: var(--attention);
+}
+.zc-permission input {
+  min-width: 0;
+  padding: var(--space-2);
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.zc-chat-pointer {
+  width: 100%;
+  justify-content: flex-start;
+  background: var(--panel-2);
+  color: var(--text-2);
+}
+.zc-chat-pointer > .zc-icon:first-child {
+  color: var(--attention);
+}
+.zc-chat-pointer > .zc-icon:last-child {
+  margin-left: auto;
+}
+.zc-chat-input {
+  position: relative;
+}
+.zc-ghost {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  right: var(--space-2);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  color: var(--text-4);
+  pointer-events: none;
+  line-height: var(--body-line);
+}
+.zc-ghost span {
+  flex: 1;
+}
+.zc-ghost kbd,
+.zc-permission kbd {
+  font: inherit;
+  background: var(--raised-2);
+  border-radius: var(--radius-sm);
+  padding-inline: var(--space-1);
+}
 .zc-chat-input .zc-icon-btn {
   background: var(--primary);
   color: var(--on-primary);
   border-radius: var(--radius-full);
+}
+.zc-step-state {
+  color: var(--text-4);
+  font-size: var(--caption-size);
+}
+.zc-step:not(.is-live):not(.is-failed):not(.is-stopped) > .zc-icon:first-child {
+  color: var(--approved);
+}
+.zc-step.is-failed {
+  color: var(--danger);
+}
+.zc-step.is-stopped {
+  color: var(--text-4);
+}
+.zc-review {
+  margin-top: var(--space-3);
+  padding: var(--space-2);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+.zc-review-value {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  color: var(--text-3);
+  padding-block: var(--space-2);
+  font-size: var(--label-size);
+}
+.zc-review-value strong {
+  color: var(--text-2);
+}
+.zc-agent-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--label-size);
+  color: var(--text-3);
 }
