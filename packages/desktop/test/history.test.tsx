@@ -3,6 +3,7 @@ import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import type { UiState } from "../../app-host/src/ui.js";
+import { IconButton } from "../src/components.js";
 import type { ProjectView } from "../src/connection.js";
 import { type HistoryEntry, useHistoryPanel } from "../src/HistoryPanel.js";
 import { applyUi, initialState } from "../src/state.js";
@@ -89,13 +90,13 @@ async function mount(
     return (
       <>
         {state.history?.open && <section aria-label="参数区">{history.panel}</section>}
+        <IconButton icon="history" label="历史 ⌥⌘H" onClick={history.toggle} />
         <TimelinePreview
           project={history.view}
           state={ui}
           update={update}
           call={call}
           readOnly={history.viewing}
-          onHistory={history.toggle}
           historyBanner={history.banner}
           config={undefined}
           error={null}
@@ -201,10 +202,10 @@ it("collapses batches, shows progress, blocks restore until completion and prese
   await act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
   expect(ui.container.querySelector('[aria-label="参数区"]')).toBeNull();
   await act(async () => {
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", metaKey: true }));
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "h", code: "KeyH", metaKey: true, altKey: true }));
   });
   expect(ui.container.querySelector('[aria-label="参数区"]')).not.toBeNull();
-  await ui.click("历史 ⌘ Y");
+  await ui.click("历史 ⌥⌘H");
   expect(ui.state().history?.open).toBe(false);
 });
 it("keeps failed historical previews read-only and offers return to present", async () => {

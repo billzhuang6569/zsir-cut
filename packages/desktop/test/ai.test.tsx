@@ -53,7 +53,11 @@ function Harness({
   const ai = useAiPanel({ call, path, project, notices, revision, connectionEpoch });
   return (
     <>
-      <div>{ai.chat}</div>
+      {ai.draftStatus}
+      <div>
+        {ai.header}
+        {ai.chat}
+      </div>
       <aside>{ai.parameters}</aside>
     </>
   );
@@ -714,6 +718,26 @@ it("does not replace a new conversation with a delayed history response", async 
     await act(async () => resolveHistory?.({ events: [{ type: "text", text: "旧回复" }] }));
     expect(container.textContent).not.toContain("旧回复");
     expect(container.querySelector('[role="log"]')?.getAttribute("data-chat")).toBeNull();
+  } finally {
+    await act(() => root.unmount());
+  }
+});
+
+it("keeps the draft status visible for an open review with no pending decisions", async () => {
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  try {
+    const call = async (verb: string) => {
+      if (verb === "chat_agents" || verb === "chat_list") return [];
+      if (verb === "ai_state")
+        return {
+          sessions: [{ session_id: "review", state: "in_review", pending_count: 0, decisions: [] }],
+          batches: [],
+        };
+      return {};
+    };
+    await act(async () => root.render(<Harness call={call} path="/project" />));
+    expect(container.querySelector(".zc-chip.is-attention")?.textContent).toContain("AI 草稿 · 0 件待定");
   } finally {
     await act(() => root.unmount());
   }

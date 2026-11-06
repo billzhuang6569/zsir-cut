@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { PANELS, type Panel, type UiState } from "../../app-host/src/ui.js";
 import { type AiNotice, useAiPanel } from "./AiPanel.js";
 import { useChapterPanel } from "./ChapterPanel.js";
-import { IconButton } from "./components.js";
+import { Icon, IconButton } from "./components.js";
 import { connectHost, type ProjectView } from "./connection.js";
 import { ExportPanel } from "./ExportPanel.js";
 import { useHistoryPanel } from "./HistoryPanel.js";
@@ -25,6 +25,9 @@ const parameters: Record<Panel, string> = {
 };
 export function App({ config }: { config?: { port: number; token: string } }) {
   const uniqueId = useId();
+  const [revisionControls, setRevisionControls] = useState<HTMLSpanElement | null>(null);
+  const [previewPercent, setPreviewPercent] = useState(57);
+  const [viewerTarget, setViewerTarget] = useState<HTMLDivElement | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [state, setState] = useState<UiState>(initialState);
   const current = useRef(state);
@@ -154,9 +157,14 @@ export function App({ config }: { config?: { port: number; token: string } }) {
     [update],
   );
   return (
-    <main className="zc-shell">
+    <main className="zc zc-shell">
       <section aria-label="菜单栏" className="zc-menubar">
+        <svg className="zc-logo" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
+          <rect width="24" height="24" rx="7" fill="var(--cream)" />
+          <path d="M5 8h9M5 12h14M8 16h7" stroke="var(--on-primary)" strokeWidth="3" strokeLinecap="round" />
+        </svg>
         <strong>庄Sir剪辑助手</strong>
+        <span className="zc-topbar-separator" />
         <ProjectEntry
           aiBusy={ai.generating}
           connectionEpoch={connectionEpoch}
@@ -168,22 +176,45 @@ export function App({ config }: { config?: { port: number; token: string } }) {
             if (media) update({ ...current.current, panel: "media" });
           }}
         />
-        {project && <span className="zc-muted">r{project.revision.seq}</span>}
+        {ai.draftStatus}
         <span className="zc-grow" />
-        <IconButton icon="settings" label="设置" onClick={() => setSettingsOpen(true)} />
+        {project && (
+          <span className="zc-meta zc-save-status">
+            <span className="zc-dot is-approved" />
+            已保存 · r{project.revision.seq}
+          </span>
+        )}
+        <span className="zc-revision-controls" ref={setRevisionControls}>
+          {!project && (
+            <>
+              <IconButton icon="undo" label="撤销" disabled />
+              <IconButton icon="redo" label="重做" disabled />
+            </>
+          )}
+        </span>
+        {!project && <IconButton icon="settings" label="设置" onClick={() => setSettingsOpen(true)} />}
+        <IconButton icon="search" label="命令面板 ⌘K" />
+        <IconButton
+          icon="history"
+          label="历史 ⌥⌘H"
+          disabled={!project}
+          pressed={state.history?.open === true}
+          onClick={history.toggle}
+        />
         <button
           type="button"
-          className="zc-btn"
+          className="zc-btn zc-btn-primary is-primary"
           disabled={!project || history.viewing}
           onClick={() => update(applyUi(current.current, "ui_show_panel", { panel: "export" }))}
         >
+          <Icon name="export" />
           导出
         </button>
       </section>
       {project && (
         <>
-          <section aria-label="功能区" className="zc-functions">
-            <div className="zc-tabs" role="tablist" aria-label="功能">
+          <nav className="zc-rail" aria-label="图标栏">
+            <div role="tablist" aria-label="功能" aria-orientation="vertical">
               {PANELS.map((panel) => (
                 <button
                   key={panel}
@@ -192,13 +223,32 @@ export function App({ config }: { config?: { port: number; token: string } }) {
                   role="tab"
                   aria-selected={state.panel === panel}
                   aria-controls={`${uniqueId}-function-panel`}
-                  className="zc-tab"
+                  className={`zc-rail-item${state.panel === panel ? " is-active" : ""}`}
+                  title={labels[panel]}
                   onClick={() => update(applyUi(current.current, "ui_show_panel", { panel }))}
                 >
-                  {labels[panel]}
+                  <span className="tile">
+                    <Icon name={panel} size={20} />
+                  </span>
+                  <span>{labels[panel]}</span>
                 </button>
               ))}
             </div>
+            <span className="zc-grow" />
+            <button
+              type="button"
+              className="zc-rail-item"
+              onClick={() => setSettingsOpen(true)}
+              title="设置"
+              aria-label="设置"
+            >
+              <span className="tile">
+                <Icon name="settings" size={20} />
+              </span>
+              <span>设置</span>
+            </button>
+          </nav>
+          <section aria-label="功能区" className="zc-functions zc-panel">
             <div
               id={`${uniqueId}-function-panel`}
               role="tabpanel"
@@ -208,7 +258,13 @@ export function App({ config }: { config?: { port: number; token: string } }) {
                 node?.toggleAttribute("inert", history.viewing);
               }}
             >
-              <h2>{labels[state.panel]}</h2>
+              {state.panel === "ai" ? (
+                ai.header
+              ) : (
+                <div className="zc-panel-head">
+                  <h2>{labels[state.panel]}</h2>
+                </div>
+              )}
               <div hidden={state.panel !== "voice"}>{voice}</div>
               {state.panel === "media" && media.library}
               {state.panel === "chapters" && chapters.controls}
@@ -219,58 +275,102 @@ export function App({ config }: { config?: { port: number; token: string } }) {
             </div>
           </section>
           <section
-            aria-label="参数区"
-            className="zc-parameters zc-pad"
-            data-panel={state.history?.open ? "history" : state.panel}
+            className="zc-editor"
+            aria-label="剪辑区"
+            style={{
+              gridTemplateRows: `minmax(160px, ${previewPercent}fr) 8px minmax(120px, ${100 - previewPercent}fr)`,
+            }}
           >
-            {state.history?.open ? (
-              history.panel
-            ) : (
-              <>
-                <h2>{parameters[state.panel]}</h2>
-                {state.panel === "ai" && ai.parameters}
-                {state.panel === "media" && media.parameters}
-                {state.panel === "chapters" && chapters.outline}
-                {state.panel === "subtitles" && subtitles.parameters}
-                {state.panel === "voice" && (
-                  <p className="zc-muted">在左侧克隆音色或生成配音，生成后可在「素材」中查看。</p>
+            <div className="zc-upper-row">
+              <div className="zc-preview-slot" ref={setViewerTarget}>
+                {source && state.media && (
+                  <TimelinePreview
+                    viewerOnly
+                    project={source}
+                    state={{ ...state, playhead: { at: state.media.at }, range: null, loop: false }}
+                    update={updateSource}
+                    config={config}
+                    error={null}
+                    dragging={dragging}
+                    call={call}
+                  />
                 )}
-              </>
-            )}
-          </section>
-          {source && state.media && (
+              </div>
+              <section
+                aria-label="参数区"
+                className="zc-parameters zc-panel zc-pad"
+                data-panel={state.history?.open ? "history" : state.panel}
+              >
+                {state.history?.open ? (
+                  history.panel
+                ) : (
+                  <>
+                    <h2>{parameters[state.panel]}</h2>
+                    {state.panel === "ai" && ai.parameters}
+                    {state.panel === "media" && media.parameters}
+                    {state.panel === "chapters" && chapters.outline}
+                    {state.panel === "subtitles" && subtitles.parameters}
+                    {state.panel === "voice" && (
+                      <p className="zc-muted">在左侧克隆音色或生成配音，生成后可在「素材」中查看。</p>
+                    )}
+                  </>
+                )}
+              </section>
+            </div>
             <TimelinePreview
-              viewerOnly
-              project={source}
-              state={{ ...state, playhead: { at: state.media.at }, range: null, loop: false }}
-              update={updateSource}
+              viewerTarget={viewerTarget}
+              revisionControlsTarget={revisionControls}
+              hideViewer={Boolean(source)}
+              onMediaDrop={(id, at, track) => {
+                const item = project?.media.find((m) => m.id === id);
+                if (item && !history.viewing) media.place(item, at, track);
+              }}
+              project={history.view}
+              historyBanner={history.banner}
+              onEditSubtitle={subtitles.editCue}
+              readOnly={history.viewing}
+              state={state}
+              update={update}
+              subtitlePreview={subtitles.stylePreview}
+              onSubtitleStyle={subtitles.previewStyle}
               config={config}
-              error={null}
+              error={error}
+              errorDetail={errorDetail}
               dragging={dragging}
               call={call}
             />
-          )}
-          <TimelinePreview
-            hideViewer={Boolean(source)}
-            onMediaDrop={(id, at, track) => {
-              const item = project?.media.find((m) => m.id === id);
-              if (item && !history.viewing) media.place(item, at, track);
-            }}
-            project={history.view}
-            historyBanner={history.banner}
-            onHistory={history.toggle}
-            onEditSubtitle={subtitles.editCue}
-            readOnly={history.viewing}
-            state={state}
-            update={update}
-            subtitlePreview={subtitles.stylePreview}
-            onSubtitleStyle={subtitles.previewStyle}
-            config={config}
-            error={error}
-            errorDetail={errorDetail}
-            dragging={dragging}
-            call={call}
-          />
+            <hr
+              className="zc-editor-divider"
+              aria-label="预览与时间线分界"
+              aria-orientation="horizontal"
+              tabIndex={0}
+              aria-valuemin={25}
+              aria-valuemax={75}
+              aria-valuenow={previewPercent}
+              onKeyDown={(event) => {
+                if (!["ArrowUp", "ArrowDown"].includes(event.key)) return;
+                event.preventDefault();
+                setPreviewPercent((value) => Math.max(25, Math.min(75, value + (event.key === "ArrowUp" ? -5 : 5))));
+              }}
+              onPointerDown={(event) => {
+                dragging.current = true;
+                event.currentTarget.setPointerCapture(event.pointerId);
+              }}
+              onPointerMove={(event) => {
+                if (!dragging.current || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
+                const bounds = event.currentTarget.parentElement?.getBoundingClientRect();
+                if (bounds?.height)
+                  setPreviewPercent(Math.max(25, Math.min(75, ((event.clientY - bounds.top) / bounds.height) * 100)));
+              }}
+              onPointerUp={(event) => {
+                dragging.current = false;
+                event.currentTarget.releasePointerCapture(event.pointerId);
+              }}
+              onLostPointerCapture={() => {
+                dragging.current = false;
+              }}
+            />
+          </section>
         </>
       )}
       {settingsOpen && <SettingsPage call={rawCall} close={() => setSettingsOpen(false)} />}

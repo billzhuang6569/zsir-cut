@@ -8,6 +8,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { UiState } from "../../app-host/src/ui.js";
 import { App } from "../src/App.js";
+import { Icon } from "../src/components.js";
 import type { ProjectView } from "../src/connection.js";
 import { connectHost } from "../src/connection.js";
 import { applyUi, initialState } from "../src/state.js";
@@ -43,7 +44,8 @@ describe("desktop shell", () => {
     const tokens = JSON.parse(readFileSync(new NodeURL("../../../design/tokens.json", import.meta.url), "utf8"));
     const css = tokenCss();
     for (const token of tokens.color.tokens) expect(css).toContain(`--${token.name}: ${token.value.dark};`);
-    for (const token of tokens.size.tokens) expect(css).toContain(`--${token.name}: ${token.value};`);
+    for (const group of [tokens.spacing, tokens.radius, tokens.shadow])
+      for (const token of group.tokens) expect(css).toContain(`--${token.name}: ${token.value};`);
   });
 
   it("keeps selected subtitle clips on their track color with the shared selection outline", () => {
@@ -64,6 +66,23 @@ describe("desktop shell", () => {
       expect(rules.some((rule) => rule.selectorText === ".zc-clip-subtitle.is-selected")).toBe(false);
     } finally {
       style.remove();
+    }
+  });
+
+  it("renders v3 icons on a 24 grid without text or HTML injection", async () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    try {
+      await act(() => root.render(<Icon name="media" size={20} />));
+      const svg = container.querySelector("svg");
+      expect(svg?.getAttribute("viewBox")).toBe("0 0 24 24");
+      expect(svg?.getAttribute("stroke-width")).toBe("1.5");
+      expect(svg?.getAttribute("aria-hidden")).toBe("true");
+      expect(svg?.querySelector("rect")).not.toBeNull();
+      expect(svg?.querySelector("path")).not.toBeNull();
+      expect(svg?.textContent).toBe("");
+    } finally {
+      await act(() => root.unmount());
     }
   });
 
@@ -169,14 +188,16 @@ it("opens the project through inspect and receives UI commands", async () => {
               ok: true,
               error: null,
               result:
-                message.request.view === "brief"
-                  ? { project: { name: fixture.name, revision: fixture.revision }, transcripts: fixture.transcripts }
-                  : message.request.view === "entity"
-                    ? {
-                        parent_id: fixture.id,
-                        entity: fixture.transcripts.find((item: { id: string }) => item.id === message.request.id),
-                      }
-                    : data.timeline,
+                message.request.view === "history"
+                  ? { entries: [] }
+                  : message.request.view === "brief"
+                    ? { project: { name: fixture.name, revision: fixture.revision }, transcripts: fixture.transcripts }
+                    : message.request.view === "entity"
+                      ? {
+                          parent_id: fixture.id,
+                          entity: fixture.transcripts.find((item: { id: string }) => item.id === message.request.id),
+                        }
+                      : data.timeline,
             },
           }),
         );
@@ -206,9 +227,56 @@ it("opens the project through inspect and receives UI commands", async () => {
     expect(socket?.url).toBe("ws://127.0.0.1:1234/?token=test%20token");
     expect(container.querySelector('[aria-label="菜单栏"]')?.textContent).toContain(fixture.name);
     expect(container.querySelector('[aria-label="菜单栏"]')?.textContent).toContain(`r${fixture.revision.seq}`);
-    expect([...container.querySelectorAll(".zc-track .zc-track-name")].map((node) => node.textContent)).toEqual(
-      fixture.timelines[0].tracks.map((track: { name: string }) => track.name),
+    expect(
+      [...container.querySelectorAll(".zc-track .zc-track-name")].map((node) => node.getAttribute("aria-label")),
+    ).toEqual(fixture.timelines[0].tracks.map((track: { name: string }) => track.name));
+    const rail = container.querySelector('[aria-label="图标栏"]');
+    expect([...(rail?.querySelectorAll('[role="tab"]') ?? [])].map((node) => node.textContent)).toEqual([
+      "AI",
+      "素材",
+      "章节",
+      "字幕",
+      "语音",
+    ]);
+    expect(rail?.textContent).not.toContain("历史");
+    expect(rail?.querySelector('[aria-label="设置"]')).not.toBeNull();
+    const historyButton = container.querySelector<HTMLButtonElement>('[aria-label="历史 ⌥⌘H"]');
+    expect(historyButton?.nextElementSibling?.textContent).toBe("导出");
+    expect(
+      [...container.querySelectorAll(".zc-menubar .zc-ibtn")].map((node) => node.getAttribute("aria-label")),
+    ).toEqual(["撤销", "重做", "命令面板 ⌘K", "历史 ⌥⌘H"]);
+    expect(container.querySelector('[aria-label="工具栏"] [aria-label^="历史"]')).toBeNull();
+    await act(async () => historyButton?.click());
+    expect(container.querySelector('[aria-label="参数区"]')?.getAttribute("data-panel")).toBe("history");
+    expect(container.querySelector('[aria-label="参数区"]')?.textContent).toContain("历史");
+    await act(async () => historyButton?.click());
+    const divider = container.querySelector<HTMLElement>('[aria-label="预览与时间线分界"]');
+    await act(() => divider?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true })));
+    expect(divider?.getAttribute("aria-valuenow")).toBe("52");
+    expect(container.querySelector(".zc-editor .zc-viewer")).not.toBeNull();
+    expect(container.querySelector(".zc-editor .zc-timeline")).not.toBeNull();
+    const timecodeAtStart = container.querySelector('[aria-label="播放时码"]')?.textContent;
+    const upper = container.querySelector(".zc-upper-row");
+    const timelineCard = container.querySelector(".zc-timeline-card");
+    expect(upper?.parentElement).toBe(timelineCard?.parentElement);
+    expect(upper?.contains(container.querySelector('[aria-label="预览"]'))).toBe(true);
+    expect(upper?.contains(container.querySelector('[aria-label="参数区"]'))).toBe(true);
+    expect(timelineCard?.contains(container.querySelector('[aria-label="工具栏"]'))).toBe(true);
+    expect(timelineCard?.contains(container.querySelector(".zc-timeline"))).toBe(true);
+    expect(timelineCard?.querySelector(".zc-viewer")).toBeNull();
+    expect(container.querySelector(".zc-clip-subtitle")?.textContent).toBe(cues[0].text.replaceAll("\n", " "));
+    expect(container.querySelector(".zc-logo")?.nextElementSibling?.textContent).toBe("庄Sir剪辑助手");
+    const saved = container.querySelector(".zc-save-status");
+    expect(saved?.querySelector(".zc-dot.is-approved")).not.toBeNull();
+    expect(saved?.nextElementSibling?.className).toBe("zc-revision-controls");
+    expect(historyButton?.nextElementSibling?.querySelector("svg")).not.toBeNull();
+    expect([...container.querySelectorAll(".zc-player button")].map((node) => node.getAttribute("aria-label"))).toEqual(
+      ["设入点 I", "上一个剪点", "播放", "下一个剪点", "音量", "全屏"],
     );
+    await act(() => container.querySelector<HTMLButtonElement>('[aria-label="下一个剪点"]')?.click());
+    expect(container.querySelector('[aria-label="播放时码"]')?.textContent).not.toBe(timecodeAtStart);
+    await act(() => container.querySelector<HTMLButtonElement>('[aria-label="上一个剪点"]')?.click());
+    expect(container.querySelector('[aria-label="播放时码"]')?.textContent).toBe(timecodeAtStart);
     const style = document.createElement("style");
     style.textContent = ["shell.css", "ai.css"]
       .map((name) => readFileSync(new NodeURL(`../src/${name}`, import.meta.url), "utf8"))
@@ -226,8 +294,12 @@ it("opens the project through inspect and receives UI commands", async () => {
         expect(getComputedStyle(node).flexDirection).toBe("column");
         expect(getComputedStyle(node).minHeight).toBe("0");
       }
-      expect(functions.firstElementChild?.getAttribute("role")).toBe("tablist");
-      expect(panel.firstElementChild?.tagName).toBe("H2");
+      expect(container.querySelector('.zc-rail [role="tablist"]')).not.toBeNull();
+      expect(panel.firstElementChild?.className).toBe("zc-panel-head");
+      expect(panel.firstElementChild?.querySelector("h2")?.textContent).toBe("AI");
+      expect(panel.firstElementChild?.querySelector('[aria-label="Agent"]')).not.toBeNull();
+      expect(panel.firstElementChild?.querySelector('[aria-label="新对话"]')).not.toBeNull();
+      expect(chat.querySelector('.zc-chat-input [aria-label="Agent"]')).toBeNull();
       expect(getComputedStyle(panel.firstElementChild as HTMLElement).flexShrink).toBe("0");
     } finally {
       style.remove();

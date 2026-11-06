@@ -486,7 +486,7 @@ it("renders cached peaks for audio cards and a single image thumbnail", async ()
     const cards = h.container.querySelectorAll(".zc-media-card");
     expect(cards[0]?.querySelector(".zc-wave canvas")).not.toBeNull();
     expect(canvas.calls.some((call) => call[0] === "fillRect" && call[4] === 26)).toBe(true);
-    expect(cards[0]?.querySelector(".zc-media-used .zc-icon path")?.getAttribute("d")).toContain("M2 6");
+    expect(cards[0]?.querySelector(".zc-media-used .zc-icon path")?.getAttribute("d")).toContain("M4 9.5");
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/peaks?token=test&media_id=audio"), expect.anything());
     expect(cards[1]?.querySelectorAll("img")).toHaveLength(1);
     expect(cards[1]?.querySelector("img")?.getAttribute("src")).toContain("/thumb?token=test&media_id=image&at=0s");

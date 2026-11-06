@@ -77,7 +77,7 @@ export function useHistoryPanel({
       }
       if (
         event.metaKey &&
-        event.key.toLowerCase() === "y" &&
+        (event.key.toLowerCase() === "y" || (event.altKey && event.code === "KeyH")) &&
         !(event.target instanceof Element && event.target.closest("input,textarea,select,[contenteditable=true]"))
       ) {
         event.preventDefault();

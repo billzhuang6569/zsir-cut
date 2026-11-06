@@ -42,11 +42,11 @@
 .zc-history-progress {
   padding-block: var(--space-5);
 }
-.zc-toolbar:has(.zc-history-banner) {
-  flex-wrap: wrap;
-  height: auto;
+.zc-editor .zc-toolbar:has(.zc-history-banner) {
+  flex-wrap: nowrap;
 }
-
-.zc-shell:has(.zc-history-banner) {
-  grid-template-rows: var(--menubar-h) minmax(0, 1fr) auto var(--timeline-h);
+.zc-history-banner {
+  width: auto;
+  flex: none;
+  flex-wrap: nowrap;
 }
