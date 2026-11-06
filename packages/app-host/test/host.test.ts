@@ -584,10 +584,10 @@ it("keeps cache controls on the authenticated UI channel and persists directory 
       error: { code: "E_VALIDATION" },
     });
     expect(await call("preview_cache_clear")).toMatchObject({ status: "applied" });
-    const next = join(appDataDir, "unplugged");
+    const next = join(appDataDir, "new-cache");
     expect(await call("preview_cache_move", { directory: next })).toMatchObject({
       status: "applied",
-      result: { directory: next, directory_ok: false },
+      result: { directory: next, directory_ok: true },
     });
     await prefs.load();
     expect(prefs.get().preview_cache_directory).toBe(next);

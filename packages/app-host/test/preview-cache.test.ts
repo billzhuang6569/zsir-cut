@@ -44,6 +44,7 @@ afterEach(async () => {
   vi.useRealTimers();
   await cache.close();
   process.env.PATH = originalPath;
+  vi.unstubAllEnvs();
   await rm(root, { recursive: true, force: true });
 });
 const calls = async () =>
@@ -53,6 +54,73 @@ const calls = async () =>
     .map((line) => JSON.parse(line) as string[]);
 
 describe("preview cache", () => {
+  it("creates the default cache directory under a fresh HOME and starts encoding", async () => {
+    await cache.close();
+    vi.stubEnv("HOME", join(root, "home"));
+    prefs = new DesktopPreferences(join(root, "fresh-prefs"));
+    cache = new PreviewCache(
+      prefs,
+      () => {},
+      async () => false,
+    );
+    const directory = join(root, "home", "Movies", "庄Sir剪辑助手", "预览缓存");
+    expect(prefs.get().preview_cache_directory).toBe(directory);
+    await expect(stat(directory)).rejects.toMatchObject({ code: "ENOENT" });
+    await cache.open(await fixture(), join(root, "test.zcut.json"));
+    await cache.idle();
+    expect((await stat(directory)).isDirectory()).toBe(true);
+    expect(await cache.status()).toMatchObject({ directory_ok: true });
+    expect((await cache.status()).segments.some((s) => s.state === "ready")).toBe(true);
+    expect((await calls()).length).toBeGreaterThan(0);
+  });
+  it("does not create an unmounted volume and resumes encoding on a later status check", async () => {
+    await cache.close();
+    const volumes = join(root, "Volumes");
+    const volume = join(volumes, "External");
+    const directory = join(volume, "nested", "cache");
+    await prefs.set({ preview_cache: { directory } });
+    cache = new PreviewCache(
+      prefs,
+      () => {},
+      async () => false,
+      volumes,
+    );
+    await cache.open(await fixture(), join(root, "test.zcut.json"));
+    await cache.idle();
+    expect(await cache.status()).toMatchObject({ directory_ok: false, projects: [] });
+    expect((await cache.status()).segments.every((s) => s.state === "missing")).toBe(true);
+    await expect(stat(volumes)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(join(root, "calls"))).rejects.toMatchObject({ code: "ENOENT" });
+    await mkdir(volumes);
+    expect((await cache.status()).directory_ok).toBe(false);
+    await expect(stat(volume)).rejects.toMatchObject({ code: "ENOENT" });
+    await mkdir(volume);
+    expect((await cache.status()).directory_ok).toBe(true);
+    await cache.idle();
+    expect((await cache.status()).segments.some((s) => s.state === "ready")).toBe(true);
+  });
+  it("creates paths outside the volume root and keeps non-directory paths unavailable", async () => {
+    await cache.close();
+    const volumes = join(root, "Volumes");
+    const directory = join(root, "Volumes-other", "cache");
+    await prefs.set({ preview_cache: { directory } });
+    cache = new PreviewCache(
+      prefs,
+      () => {},
+      async () => false,
+      volumes,
+    );
+    expect((await cache.status()).directory_ok).toBe(true);
+    await expect(stat(volumes)).rejects.toMatchObject({ code: "ENOENT" });
+    const file = join(root, "file");
+    await writeFile(file, "original");
+    await cache.updatePreferences({ preview_cache: { directory: join(file, "cache") } });
+    await cache.open(await fixture(), join(root, "test.zcut.json"));
+    await cache.idle();
+    expect(await cache.status()).toMatchObject({ directory_ok: false, projects: [] });
+    expect((await cache.status()).segments.every((s) => s.state === "missing")).toBe(true);
+    expect(await readFile(file, "utf8")).toBe("original");
+  });
   it("uses exact canonical keys, filters disabled/audio/images, and re-encodes only an edited source range", async () => {
     const project = await fixture();
     const track = project.timelines[0]?.tracks.find((t) => t.kind === "video");
@@ -91,7 +159,7 @@ describe("preview cache", () => {
     await cache.clear(project.id);
     await cache.refresh(project);
     await cache.idle();
-    expect(await readFile((await cache.file(project.id, ready.key)) ?? "", "utf8")).toBe("0123456789");
+    expect((await cache.status()).segments[0]).toEqual(ready);
     track.clips.push({ ...clip, id: "disabled", enabled: false });
     const image = structuredClone(media);
     image.id = "image";
@@ -101,11 +169,6 @@ describe("preview cache", () => {
     await cache.refresh(project);
     await cache.idle();
     expect((await cache.status()).segments).toHaveLength(initial.segments.length);
-    await rm(join(root, "cache"), { recursive: true });
-    await expect(cache.refresh(project)).resolves.toBeUndefined();
-    await cache.idle();
-    expect(await cache.status()).toMatchObject({ directory_ok: false, projects: [] });
-    expect((await cache.status()).segments.every((s) => s.state === "missing")).toBe(true);
   });
   it("encodes constant speed and reverse with rational GOP and deterministic metadata flags; skips nonlinear maps", async () => {
     const project = await fixture();
@@ -169,7 +232,7 @@ describe("preview cache", () => {
       cache.updatePreferences({ preview_cache: { directory: join(root, "missing") } }),
     ]);
     expect(await readFile(join(unrelated, "material.bin"), "utf8")).toBe("original");
-    expect((await cache.status()).directory_ok).toBe(false);
+    expect((await cache.status()).directory_ok).toBe(true);
     await expect(cache.clear()).resolves.toBeUndefined();
     await expect(cache.updatePreferences({ preview_cache: { directory: "relative" } })).rejects.toThrow();
     expect(prefs.get().preview_cache_directory).toBe(join(root, "missing"));

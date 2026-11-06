@@ -15,7 +15,7 @@ import {
   utimes,
   writeFile,
 } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import type { Clip, Media, Project, Rational } from "../../core/dist/index.js";
 import { runFfmpeg } from "./media.js";
@@ -183,6 +183,7 @@ export class PreviewCache {
         return false;
       }
     },
+    private volumesRoot = "/Volumes",
   ) {
     this.poll = setInterval(() => {
       this.kick();
@@ -197,6 +198,13 @@ export class PreviewCache {
   private async directoryOK() {
     try {
       const directory = this.settings().directory;
+      const withinVolumes = relative(this.volumesRoot, directory);
+      const volume = withinVolumes.split(sep)[0];
+      if (volume && volume !== ".." && !isAbsolute(withinVolumes)) {
+        // Never create an absent volume's mount point on the startup disk.
+        if (!(await stat(join(this.volumesRoot, volume))).isDirectory()) return false;
+      }
+      await mkdir(directory, { recursive: true });
       await access(directory, constants.W_OK);
       return (await stat(directory)).isDirectory();
     } catch {
@@ -437,6 +445,7 @@ export class PreviewCache {
   }
   async status() {
     const directory_ok = await this.directoryOK();
+    if (directory_ok) this.kick();
     const projects = directory_ok ? await this.projects() : [];
     const fs = directory_ok ? await statfs(this.settings().directory).catch(() => null) : null;
     const segments = await Promise.all(
