@@ -155,6 +155,8 @@ export function connectHost(
       void refresh().catch((error: Error) =>
         handlers.error(`工程文件打不开：${error.message}`, String(error.cause ?? error.message)),
       );
+    } else if (message.type === "preview_cache") {
+      window.dispatchEvent(new CustomEvent("desktop-preview-cache", { detail: message }));
     } else if (message.type === "chat_event") {
       handlers.chat?.(message);
     } else if (message.type === "permission_request") {

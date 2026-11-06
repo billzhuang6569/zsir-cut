@@ -32,6 +32,8 @@ it("exposes revision events to subscribers while refreshing the project and subt
     close() {}
   }
   vi.stubGlobal("WebSocket", FakeSocket);
+  const previewCache = vi.fn();
+  window.addEventListener("desktop-preview-cache", previewCache);
   const project = vi.fn();
   const projectChanged = vi.fn();
   const aiChanged = vi.fn();
@@ -48,6 +50,14 @@ it("exposes revision events to subscribers while refreshing the project and subt
     },
   );
   try {
+    const status = {
+      type: "preview_cache",
+      segments: [{ clip_id: "c", key: "key", state: "ready" }],
+      directory_ok: true,
+      projects: [],
+    };
+    socket?.receive(status);
+    expect(previewCache.mock.calls[0]?.[0].detail).toEqual(status);
     socket?.receive({ type: "bootstrap", project: "/project.zcut.json" });
     await vi.waitFor(() => expect(project).toHaveBeenCalledTimes(2));
     project.mockClear();
@@ -76,6 +86,7 @@ it("exposes revision events to subscribers while refreshing the project and subt
     expect(projectChanged).toHaveBeenCalledTimes(1);
     expect(error).not.toHaveBeenCalled();
   } finally {
+    window.removeEventListener("desktop-preview-cache", previewCache);
     disconnect();
   }
 });

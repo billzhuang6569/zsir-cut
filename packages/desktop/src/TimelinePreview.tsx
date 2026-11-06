@@ -7,6 +7,7 @@ import { memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState
 import { createPortal } from "react-dom";
 import { Clip, Icon, IconButton } from "./components.js";
 import { DESKTOP_AUTHOR, type ProjectView, type useTimelinePreferences } from "./connection.js";
+import { usePreviewStream } from "./preview-stream.js";
 import { useReverseAudio } from "./reverse-audio.js";
 import { SubtitleCanvas } from "./SubtitleCanvas.js";
 import type { UiState } from "./state.js";
@@ -395,6 +396,21 @@ export function TimelinePreview({
   const speed = clip ? sourceSpeed(clip, at) : 0;
   const source = clip ? sourceAt(clip, at) : rational(0n);
   const src = config && clip ? mediaUrl(config, "media", clip.media_id) : undefined;
+  const {
+    video: streamVideo,
+    visible: streamVisible,
+    active: streamActive,
+    sample: sampleStream,
+  } = usePreviewStream({
+    project,
+    top,
+    path: viewerOnly || readOnly ? null : state.project,
+    config,
+    call,
+    enabled: state.playing && direction > 0n && !hideViewer && !viewerOnly && !readOnly && !dragging.current,
+    at,
+    playbackAt,
+  });
   useReverseAudio(
     media?.kind === "image" ? undefined : src,
     clip?.id,
@@ -476,6 +492,8 @@ export function TimelinePreview({
         const first = frameAt(active.timeline_in.t, project.edit_rate);
         if (frame < first) frame = first;
       } else if (native) frame = frameAt(target, project.edit_rate);
+      const streamed = !dragging.current ? sampleStream(target) : null;
+      if (streamed) frame = frameAt(streamed, project.edit_rate);
       let next = frameTime(frame, project.edit_rate);
       let looped = false;
       const range = current.state.range;
@@ -501,10 +519,26 @@ export function TimelinePreview({
         started = now;
         start = frameAt(next, project.edit_rate);
       }
+      if (streamActive.current) {
+        discardPreroll();
+        for (const video of videos.current) {
+          video?.pause();
+          if (video) video.muted = true;
+        }
+      }
       if (looped) discardPreroll();
       let swapped = false;
       let fallback = false;
-      if (native && element && config && !viewerOnly && !dragging.current && !looped) {
+      if (
+        !streamActive.current &&
+        !streamed &&
+        native &&
+        element &&
+        config &&
+        !viewerOnly &&
+        !dragging.current &&
+        !looped
+      ) {
         const upcoming = top?.clips.find(
           (item) => item.enabled && contains(item.timeline_in.t, item.timeline_out.t, active.timeline_out.t),
         );
@@ -717,8 +751,18 @@ export function TimelinePreview({
     viewerOnly,
     dragging,
     discardPreroll,
+    sampleStream,
+    streamActive,
   ]);
   useEffect(() => {
+    if (streamVisible) {
+      discardPreroll();
+      for (const video of videos.current) {
+        video?.pause();
+        if (video) video.muted = true;
+      }
+      return;
+    }
     if (at !== playbackAt.current) discardPreroll();
     // Publishing the held boundary must not load or restart the next clip on the paused top.
     if (state.playing && preroll.current?.heldAt != null) return;
@@ -760,7 +804,7 @@ export function TimelinePreview({
     if (element.readyState >= 1) sync();
     element.addEventListener("loadedmetadata", sync);
     return () => element.removeEventListener("loadedmetadata", sync);
-  }, [clip, source, speed, state.playing, direction, hideViewer, at, src, visibleVideo, discardPreroll]);
+  }, [clip, source, speed, state.playing, direction, hideViewer, at, src, visibleVideo, discardPreroll, streamVisible]);
   const write = async (verb: string, label: string, ops?: unknown[]) => {
     if (!project || busy || readOnly) return;
     setBusy(true);
@@ -1080,21 +1124,45 @@ export function TimelinePreview({
               ref={(element) => {
                 videos.current[index] = element;
               }}
+              data-preview-mode="preroll"
               playsInline
               preload="auto"
-              muted={index !== visibleVideo}
-              data-preroll={index !== visibleVideo ? "" : undefined}
+              muted={index !== visibleVideo || streamVisible}
+              data-preroll={streamVisible || index !== visibleVideo ? "" : undefined}
               data-preroll-lead={index === visibleVideo ? prerollLead : undefined}
               data-preroll-state="idle"
               onWaiting={(event) => resetTopPlayback(event.currentTarget)}
               onSeeked={(event) => resetTopPlayback(event.currentTarget)}
-              style={{ position: "absolute", inset: 0, zIndex: index === visibleVideo ? 1 : 0 }}
-              aria-hidden={index !== visibleVideo}
-              aria-label={index === visibleVideo ? (viewerOnly ? "素材预览" : "时间线预览") : undefined}
+              style={{
+                position: "absolute",
+                inset: 0,
+                zIndex: index === visibleVideo ? 1 : 0,
+                visibility: streamVisible ? "hidden" : undefined,
+              }}
+              aria-hidden={streamVisible || index !== visibleVideo}
+              aria-label={
+                !streamVisible && index === visibleVideo ? (viewerOnly ? "素材预览" : "时间线预览") : undefined
+              }
               onError={() => setWriteError("预览无法读取，请检查素材或代理")}
             />
           ))
         )}
+        {/* biome-ignore lint/a11y/useMediaCaption: SubtitleCanvas renders the editable timeline captions. */}
+        <video
+          ref={streamVideo}
+          data-preview-mode="mse"
+          data-preroll={!streamVisible ? "" : undefined}
+          playsInline
+          preload="auto"
+          aria-label={streamVisible ? "时间线预览" : undefined}
+          aria-hidden={!streamVisible}
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: streamVisible ? 1 : -1,
+            visibility: streamVisible ? "visible" : "hidden",
+          }}
+        />
         {clip?.speed === "map" && (
           <span
             className="zc-approx"
