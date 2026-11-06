@@ -308,7 +308,14 @@ export const otioExporter: Exporter & { validationNotes?: string } = {
     }
     const markers = timeline.markers.map((marker) => ({
       OTIO_SCHEMA: "Marker.2",
-      metadata: { zsir: { kind: marker.kind, marker_id: marker.id, ...(marker.ext ? { ext: marker.ext } : {}) } },
+      metadata: {
+        zsir: {
+          kind: marker.kind,
+          marker_id: marker.id,
+          ...(marker.description !== undefined ? { description: marker.description } : {}),
+          ...(marker.ext ? { ext: marker.ext } : {}),
+        },
+      },
       name: marker.text,
       color: "RED",
       marked_range: range(
@@ -445,6 +452,19 @@ export const otioExporter: Exporter & { validationNotes?: string } = {
   },
   losses(project, timeline) {
     const items: LossItem[] = [];
+    for (const marker of timeline.markers)
+      if (marker.description !== undefined)
+        items.push(
+          item(
+            marker.id,
+            "marker",
+            "marker_description",
+            "approximated",
+            "info",
+            "R_HOST_IGNORES",
+            "章节描述已写入 metadata；Resolve 不显示，需从源工程查看",
+          ),
+        );
     for (const marker of timeline.markers)
       if (marker.kind === "chapter" && marker.level !== undefined)
         items.push(

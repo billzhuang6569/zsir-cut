@@ -487,7 +487,10 @@ export async function lossReport(
     }
     for (const transition of track.transitions) preserve(transition.id, "cross_dissolve");
   }
-  for (const marker of timeline.markers) preserve(marker.id, "marker");
+  for (const marker of timeline.markers) {
+    preserve(marker.id, "marker");
+    if (marker.description !== undefined) preserve(marker.id, "marker_description");
+  }
   for (const cue of projectSubtitles(project, timeline.id).cues) preserve(cue.cue_id, "subtitle_text_timing");
   for (const style of project.subtitle_styles) preserve(style.id, "subtitle_style");
   const report = {

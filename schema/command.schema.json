@@ -411,7 +411,7 @@
         "properties": {
           "project": { "type": "string", "minLength": 1 },
           "author": { "$ref": "#/$defs/author" },
-          "view": { "enum": ["brief", "timeline", "entity", "history", "session"] },
+          "view": { "enum": ["brief", "timeline", "entity", "history", "session", "chapters"] },
           "timeline_id": { "$ref": "#/$defs/id" },
           "range": { "$ref": "#/$defs/range" },
           "id": { "$ref": "#/$defs/id" },
@@ -439,7 +439,8 @@
                 "view": {
                   "enum": [
                     "timeline",
-                    "entity"
+                    "entity",
+                    "chapters"
                   ]
                 }
               }
@@ -1678,6 +1679,7 @@
             "text": {
               "type": "string"
             },
+            "description": { "type": "string", "maxLength": 500 },
             "level": {
               "type": "integer",
               "enum": [
@@ -1718,6 +1720,7 @@
             "text": {
               "type": "string"
             },
+            "description": { "type": "string", "maxLength": 500 },
             "level": {
               "type": "integer",
               "enum": [
@@ -1728,6 +1731,7 @@
           },
           "additionalProperties": false,
           "anyOf": [
+            { "required": ["description"], "properties": { "description": true } },
             {
               "required": [
                 "at"

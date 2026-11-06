@@ -945,6 +945,7 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
           undefined,
           result,
           (request.author as Author).name,
+          (request.author as Author).kind,
         );
       const write = writeRequest("edit", requestId, request);
       return request.dry_run === true

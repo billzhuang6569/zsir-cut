@@ -879,6 +879,7 @@
         "ext": {
           "$ref": "#/$defs/ext"
         },
+        "description": { "type": "string", "maxLength": 500 },
         "level": {
           "type": "integer",
           "enum": [

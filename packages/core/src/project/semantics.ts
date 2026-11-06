@@ -206,6 +206,8 @@ export function validateProjectSemantics(project: Project, parseIssues: ProjectI
     }
     for (const marker of timeline.markers) {
       addId(marker.id);
+      if (marker.description !== undefined && marker.kind !== "chapter")
+        report("E_VALIDATION", "error", "Only chapter markers may have a description", marker.id);
       if (marker.level !== undefined && marker.kind !== "chapter")
         report("E_VALIDATION", "error", "Only chapter markers may have a level", marker.id);
     }

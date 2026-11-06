@@ -562,6 +562,7 @@ export function openProject(options: OpenProjectOptions) {
                   undefined,
                   stepResult,
                   step.request.author.name,
+                  step.request.author.kind,
                 ),
               "write",
               undefined,

@@ -8,7 +8,18 @@ import { projectSubtitles } from "./projection.ts";
 import { applySubtitleEdit } from "./subtitle-edit.ts";
 import { clipTimeMap, mapClipTimeToSource, mapSourceTimeToClip } from "./time-map.ts";
 import { automaticTrackName } from "./track-name.ts";
-import type { Clip, Marker, Media, MediaTrack, Project, Timeline, TimeMapPoint, Token, Track } from "./types.ts";
+import type {
+  Author,
+  Clip,
+  Marker,
+  Media,
+  MediaTrack,
+  Project,
+  Timeline,
+  TimeMapPoint,
+  Token,
+  Track,
+} from "./types.ts";
 
 export class EditError extends Error {
   readonly code: "E_MIXED_DOMAIN" | "E_VALIDATION" | "E_NOT_FOUND" | "E_UNSUPPORTED" | "E_LOCKED" | "E_SESSION_STATE";
@@ -368,7 +379,13 @@ function setFields<T extends object>(entity: T, op: Op, fields: string[]): void 
       else (entity as Record<string, unknown>)[field] = op[field];
     }
 }
-function applyOne(project: Project, timeline: Timeline, op: Op, generate: (prefix: string) => string): void {
+function applyOne(
+  project: Project,
+  timeline: Timeline,
+  op: Op,
+  generate: (prefix: string) => string,
+  authorKind: Author["kind"],
+): void {
   const t = (field: string) => time(op[field]);
   switch (op.op) {
     case "place": {
@@ -646,17 +663,26 @@ function applyOne(project: Project, timeline: Timeline, op: Op, generate: (prefi
         kind: op.kind as Marker["kind"],
         text: op.text as string,
         ...(op.level !== undefined ? { level: op.level as 1 | 2 } : {}),
+        ...(op.description !== undefined ? { description: op.description as string } : {}),
+        ...(authorKind === "human" && op.kind === "chapter" ? { ext: { "zsir.user_edited": true } } : {}),
       });
       break;
     case "update_marker": {
       const marker =
         timeline.markers.find((item) => item.id === op.marker_id) ?? fail("E_NOT_FOUND", "Marker not found");
-      if (!["at", "duration", "kind", "text", "level"].some((field) => Object.hasOwn(op, field)))
+      if (!["at", "duration", "kind", "text", "level", "description"].some((field) => Object.hasOwn(op, field)))
         fail("E_VALIDATION", "No marker field supplied");
+      const userEdited =
+        authorKind === "human" &&
+        (op.kind ?? marker.kind) === "chapter" &&
+        ["text", "description"].some(
+          (field) => Object.hasOwn(op, field) && op[field] !== marker[field as "text" | "description"],
+        );
       const converted = { ...op };
       if (op.at !== undefined) converted.at = t("at");
       if (op.duration !== undefined) converted.duration = t("duration");
-      setFields(marker, converted, ["at", "duration", "kind", "text", "level"]);
+      setFields(marker, converted, ["at", "duration", "kind", "text", "level", "description"]);
+      if (userEdited) marker.ext = { ...marker.ext, "zsir.user_edited": true };
       break;
     }
     case "remove_marker": {
@@ -712,6 +738,7 @@ export function applyEdit(
   idTime?: string,
   result: Record<string, unknown> = {},
   authorName = project.revision.author.name,
+  authorKind: Author["kind"] = "system",
 ): void {
   const warnings: Record<string, unknown>[] = [];
   let serial = 0;
@@ -741,7 +768,7 @@ export function applyEdit(
   for (const op of ops) {
     const before = structuredClone(project);
     if (SUBTITLE_OPS.has(op.op)) applySubtitleEdit(project, timeline, op, generate, allowForce, warnings, authorName);
-    else applyOne(project, timeline, op, generate);
+    else applyOne(project, timeline, op, generate, authorKind);
     const oldClips = before.timelines.flatMap((item) => mediaTracks(item).flatMap((track) => track.clips));
     const oldById = new Map(oldClips.map((clip) => [clip.id, clip]));
     const liveClips = project.timelines.flatMap((item) => mediaTracks(item).flatMap((track) => track.clips));

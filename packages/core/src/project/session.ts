@@ -450,6 +450,7 @@ async function runExistingSession(
           undefined,
           result,
           request.author.name,
+          request.author.kind,
         );
       applied =
         input.dry_run === true
@@ -600,6 +601,7 @@ async function approve(
               times.get(entry.parent ?? "") ?? session.base_created_at,
               {},
               entry.author?.name,
+              entry.author?.kind,
             );
           } catch (error) {
             failed = { revision: entry.revision, ops: entry.ops, reason: String(error) };
