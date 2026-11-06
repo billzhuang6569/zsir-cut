@@ -1,3 +1,4 @@
+import type { ProjectChanged } from "../../app-host/src/revision-events.js";
 import type { UiState, UiVerb } from "../../app-host/src/ui.js";
 
 import type { PreviewData, TimelineView, TranscriptView } from "./timeline.js";
@@ -50,6 +51,7 @@ export function connectHost(
     project: (path: string | null, view: ProjectView | null) => void;
     chat?: (notice: import("./AiPanel.js").AiNotice) => void;
     aiChanged?: () => void;
+    projectChanged?: (event: ProjectChanged) => void;
     icon: (value: string | null) => void;
     error: (message: string, detail?: string) => void;
   },
@@ -130,7 +132,9 @@ export function connectHost(
       handlers.chat?.(message);
     } else if (message.type === "ai_changed") {
       handlers.aiChanged?.();
-    } else if (message.type === "project_changed") {
+    }
+    if (message.type === "project_changed" || (message.type === "ai_changed" && message.refresh)) {
+      if (message.type === "project_changed") handlers.projectChanged?.(message);
       void refresh().catch((error: Error) =>
         handlers.error(`工程文件打不开：${error.message}`, String(error.cause ?? error.message)),
       );

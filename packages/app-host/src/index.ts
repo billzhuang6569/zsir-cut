@@ -22,6 +22,7 @@ import { mediaChannel, runFfmpeg } from "./media.js";
 import { type HostEnvelope, Permissions, permissionDenied } from "./permissions.js";
 import { DesktopPreferences } from "./preferences.js";
 import { RecentProjects } from "./recent.js";
+import { projectChanged } from "./revision-events.js";
 import { SubtitlePass, type SubtitlePassParams } from "./subtitle-pass.js";
 import { DESKTOP_VERBS, type DesktopVerb, PANELS, SUBTITLE_VERBS, type SubtitleVerb, type UiEnvelope } from "./ui.js";
 
@@ -375,20 +376,50 @@ export async function startHost(
   const batches = new Set<string>();
   let agents: Agents | undefined;
   let subtitlePass: SubtitlePass | undefined;
-  const notify = (type: string) => {
-    if (ui?.readyState === WebSocket.OPEN) ui.send(JSON.stringify({ type }));
+  const notify = (type: string, refresh = false) => {
+    if (ui?.readyState === WebSocket.OPEN) ui.send(JSON.stringify({ type, ...(refresh ? { refresh } : {}) }));
+  };
+  const published = new Set<string>();
+  let revisionQueue = Promise.resolve();
+  const publishRevisions = async (project: string, envelope: Envelope) => {
+    const epoch = projectEpoch;
+    if (envelope.receipt?.replayed) return;
+    const batch = envelope.result?.batch as { executed?: number[]; revisions: Record<string, string> } | undefined;
+    const revisions = new Set(batch?.executed?.map((seq) => batch.revisions[String(seq)]));
+    if (envelope.receipt?.after) revisions.add(envelope.receipt.after);
+    if (!revisions.size) return;
+    const sessionId = (envelope.receipt as { session_id?: string } | null)?.session_id ?? null;
+    const main = await loadPath(project);
+    const path = sessionId
+      ? join(dirname(project), ".zcut", main.id, "sessions", sessionId, "draft.zcut.json")
+      : project;
+    const journal = await openProject({ projectPath: path }).journal();
+    if (epoch !== projectEpoch) return;
+    for (const entry of journal.filter((entry) => revisions.has(entry.revision)).sort((a, b) => a.seq - b.seq)) {
+      const key = `${path}\0${entry.revision}`;
+      if (published.has(key)) continue;
+      if (ui?.readyState === WebSocket.OPEN) ui.send(JSON.stringify(projectChanged(entry, sessionId)));
+      published.add(key);
+    }
   };
   const kernel = async (verb: Verb, input: unknown) => {
     const epoch = projectEpoch;
     const envelope = await dispatch(verb, input, options.dispatchOptions);
     if (epoch !== projectEpoch || verb === "create_project") return envelope;
     subtitlePass?.observe(verb, input, envelope);
-    const job = verb === "job_status" ? (envelope.result as { envelope?: { receipt?: unknown } } | null) : null;
-    if (envelope.receipt || job?.envelope?.receipt) notify("project_changed");
-    const request = input as { batch?: { id?: string } };
+    const job = verb === "job_status" ? (envelope.result as { envelope?: Envelope } | null) : null;
+    const request = input as { project?: string; batch?: { id?: string } };
+    if (request?.project && options.project && resolve(request.project) === resolve(options.project)) {
+      const project = options.project;
+      const operation = revisionQueue.then(() =>
+        epoch === projectEpoch ? publishRevisions(project, job?.envelope ?? envelope) : undefined,
+      );
+      revisionQueue = operation.catch(() => {});
+      await operation;
+    }
     if (envelope.ok && request?.batch?.id) {
       batches.add(request.batch.id);
-      if (!envelope.receipt) notify("project_changed");
+      if (!envelope.receipt) notify("ai_changed", true);
     }
     if (["session_begin", "session_ask", "session_answer", "session_review", "session_approve", "edit"].includes(verb))
       notify("ai_changed");
@@ -812,6 +843,7 @@ export async function startHost(
     agents = undefined;
     projectEpoch++;
     batches.clear();
+    published.clear();
     disconnected();
     if (path) options.project = resolve(path);
     else delete options.project;
@@ -852,7 +884,7 @@ export async function startHost(
         detect: () => currentAgents.detect(),
         selected: () => currentAgents.selected,
         run: (agent, prompt, signal) => currentAgents.subtitlePass(agent, prompt, signal),
-        changed: () => notify("project_changed"),
+        changed: () => notify("ai_changed", true),
       });
       void subtitlePass.open().catch(() => {});
     }
