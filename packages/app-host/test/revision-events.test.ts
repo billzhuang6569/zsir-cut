@@ -6,7 +6,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
-import { type Envelope, type JournalEntry, openProject } from "../../core/src/index.ts";
+import { type Envelope, type JournalEntry, newId, openProject } from "../../core/src/index.ts";
 import { jobPath, writeJob } from "../../core/src/jobs.ts";
 import { Agents } from "../src/agents.js";
 import { startHost } from "../src/index.js";
@@ -147,7 +147,9 @@ describe("host revision pushes", () => {
       );
       expect(events.at(-1)).toMatchObject({ target: "session", session_id, verb });
     }
-    expect((await call("session_review", await request({ session_id }))).ok).toBe(true);
+    expect(
+      (await call("session_review", await request({ session_id, base_revision: events.at(-1)?.revision.id }))).ok,
+    ).toBe(true);
     expect((await call("session_approve", await request({ session_id }))).ok).toBe(true);
     expect(events.at(-1)).toMatchObject({ target: "main", session_id, verb: "session_approve" });
     const mainRevision = events.at(-1)?.revision.id;
@@ -165,7 +167,8 @@ describe("host revision pushes", () => {
         candidate.name = "worker result";
       },
     );
-    const job_id = "job_event";
+    expect(envelope.ok).toBe(true);
+    const job_id = newId("job_");
     const now = new Date().toISOString();
     await writeJob(jobPath(project, (await current()).id, job_id), {
       job_id,
