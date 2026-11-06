@@ -2,13 +2,21 @@
   position: fixed;
   inset: 0;
   z-index: 100;
-  background: var(--bg);
+  background: var(--scrim);
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
   padding: var(--space-8);
   overflow: auto;
 }
 .zc-export-panel {
   position: relative;
-  max-width: 1400px;
+  max-width: 1080px;
+  flex: 1;
+  height: 760px;
+  max-height: calc(100dvh - var(--space-8) * 2);
+  box-sizing: border-box;
+  overflow: auto;
   margin: auto;
   padding: var(--space-8);
   border: 1px solid var(--line);
@@ -415,4 +423,70 @@
 }
 .zc-overlay-content {
   padding: 0 var(--space-6) var(--space-5);
+}
+
+.zc-export-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  margin-bottom: var(--space-6);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+}
+.zc-export-summary-main,
+.zc-export-summary-chips,
+.zc-export-saved {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.zc-export-summary-chips {
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+.zc-export-summary-title {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.zc-export-summary-title strong {
+  overflow-wrap: anywhere;
+  font-size: var(--heading-size);
+  font-weight: var(--heading-weight);
+}
+.zc-export-saved {
+  gap: var(--space-1);
+  color: var(--text-3);
+  font-size: var(--caption-size);
+}
+.zc-export-thumbnail {
+  position: relative;
+  flex: none;
+  width: 112px;
+  height: 63px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--bg-viewer);
+  color: var(--text-3);
+}
+.zc-export-thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.zc-export-thumbnail > span {
+  position: absolute;
+  right: var(--space-1);
+  bottom: var(--space-1);
+  padding-inline: var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--scrim);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--mono-sm-size);
 }

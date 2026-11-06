@@ -4,16 +4,20 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import type { UiState } from "../../app-host/src/ui.js";
 import { Button } from "./ai-components.js";
+import { chapterTime } from "./chapters.js";
 import { Icon, IconButton } from "./components.js";
 import type { ProjectView } from "./connection.js";
 import { DESKTOP_AUTHOR } from "./connection.js";
 import { SubtitleCanvas } from "./SubtitleCanvas.js";
 import { mediaUrl } from "./TimelinePreview.js";
 import {
+  compare,
   contains,
+  floor,
   frameAt,
   frameTime,
   type OverlayView,
+  parseRational,
   printRational,
   seekTarget,
   sourceAt,
@@ -393,6 +397,25 @@ export function ExportPanel({
     .find((c) => c.enabled && contains(c.timeline_in.t, c.timeline_out.t, at));
   const src =
     clip && config ? mediaUrl(config, "thumb", clip.media_id, printRational(sourceAt(clip, at), true)) : undefined;
+  const firstClip = project.tracks
+    .filter((track) => track.kind === "video" && track.enabled)
+    .flatMap((track) => track.clips)
+    .filter((clip) => clip.enabled)
+    .sort((a, b) => compare(parseRational(a.timeline_in.t, true), parseRational(b.timeline_in.t, true)))[0];
+  const poster =
+    firstClip && config
+      ? mediaUrl(config, "thumb", firstClip.media_id, printRational(sourceAt(firstClip, firstClip.timeline_in.t), true))
+      : undefined;
+  const seconds = floor(parseRational(project.duration.t, true));
+  const rate = parseRational(project.edit_rate);
+  const hundredths = (rate.numerator * 100n + rate.denominator / 2n) / rate.denominator;
+  const fps = `${hundredths / 100n}${
+    hundredths % 100n
+      ? `.${String(hundredths % 100n)
+          .padStart(2, "0")
+          .replace(/0$/, "")}`
+      : ""
+  }`;
   if (!settings.open) return null;
   return (
     <div className="zc-export-backdrop">
@@ -409,6 +432,39 @@ export function ExportPanel({
           <h2>导出</h2>
           <IconButton icon="close" label="关闭导出" onClick={() => change({ open: false })} />
         </header>
+        <section className="zc-export-summary" aria-label="成片信息">
+          <div className="zc-export-summary-main">
+            <div className="zc-export-thumbnail">
+              {poster ? <img src={poster} alt="成片缩略图" /> : <Icon name="media" />}
+              <span>{chapterTime(project.duration.t).padStart(5, "0")}</span>
+            </div>
+            <div className="zc-export-summary-title">
+              <strong>{project.name}</strong>
+              <span className="zc-export-saved">
+                <span className="zc-dot is-approved" />第 {project.revision.seq} 版 · 已保存
+              </span>
+            </div>
+          </div>
+          <div className="zc-export-summary-chips">
+            <span className="zc-chip">
+              <Icon name="clock" size={12} />
+              {seconds / 60n > 0n ? `${seconds / 60n} 分 ` : ""}
+              {String(seconds % 60n)} 秒
+            </span>
+            <span className="zc-chip">
+              <Icon name="media" size={12} />
+              {project.format?.height ?? 1080}p
+            </span>
+            <span className="zc-chip">
+              <Icon name="play" size={12} />
+              {fps} 帧/秒
+            </span>
+            <span className="zc-chip">
+              <Icon name="subtitle" size={12} />
+              {project.cues.length} 条字幕
+            </span>
+          </div>
+        </section>
         {error && <p role="alert">{error}</p>}
         <fieldset className="zc-export-graph" disabled={Boolean(editing || confirm)} aria-label="导出去处与预览">
           <div className="zc-export-preview">

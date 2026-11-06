@@ -1,3 +1,5 @@
+import { isTauri } from "@tauri-apps/api/core";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { UiState } from "../../app-host/src/ui.js";
 import { Icon, IconButton } from "./components.js";
@@ -1536,6 +1538,30 @@ export function useSubtitlePanel({
               setSelectedOnly(v === "selected");
             }}
           />
+          <section aria-label="叠层导出" className="zc-sub-overlays">
+            <span className="zc-muted">叠层导出</span>
+            {(project?.subtitleOverlays ?? [])
+              .filter((overlay) => overlay.timeline_id === project?.id && overlay.subtitle_track_id === styleTrack?.id)
+              .map((overlay) => (
+                <div className="zc-sub-overlay-row" key={overlay.id}>
+                  <span title={overlay.output_path}>{overlay.output_path.split(/[\\/]/).at(-1)}</span>
+                  <span className="zc-meta">
+                    {overlay.last_export
+                      ? `${new Date(overlay.last_export.created_at).toLocaleDateString("zh-CN")} 导出`
+                      : "尚未导出"}
+                  </span>
+                  {isTauri() && (
+                    <IconButton
+                      icon="folderOpen"
+                      label="在访达中显示"
+                      onClick={() =>
+                        void revealItemInDir(overlay.output_path).catch(() => setError("无法在访达中显示"))
+                      }
+                    />
+                  )}
+                </div>
+              ))}
+          </section>
           <div className="zc-tabs" role="tablist" aria-label="字幕样式设置">
             {[
               ["style", "样式"],

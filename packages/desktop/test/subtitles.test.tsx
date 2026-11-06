@@ -5,6 +5,8 @@ import { readFileSync } from "node:fs";
 import { copyFile, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { isTauri } from "@tauri-apps/api/core";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -30,6 +32,9 @@ import {
 import { TimelinePreview } from "../src/TimelinePreview.js";
 import type { TranscriptView } from "../src/timeline.js";
 import { recordingCanvas } from "./canvas.js";
+
+vi.mock("@tauri-apps/api/core", () => ({ isTauri: vi.fn(() => false) }));
+vi.mock("@tauri-apps/plugin-opener", () => ({ revealItemInDir: vi.fn(async () => {}) }));
 
 const cue = {
   cue_id: "cue_1",
@@ -85,6 +90,7 @@ beforeEach(() => {
 afterEach(async () => {
   for (const close of cleanups.splice(0)) await close();
   vi.restoreAllMocks();
+  vi.mocked(isTauri).mockReturnValue(false);
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
@@ -1951,4 +1957,28 @@ it("renders presets identically to the contact sheet helper and loops animated h
   await act(async () => cell.dispatchEvent(new MouseEvent("mouseout", { bubbles: true })));
   expect(callbacks.size).toBe(0);
   expect(h.call).not.toHaveBeenCalled();
+});
+
+it("reveals the selected subtitle track overlay in Finder only in the desktop app", async () => {
+  const view: ProjectView = {
+    ...project,
+    subtitleOverlays: [
+      {
+        id: "ovl_sub",
+        name: "字幕层",
+        timeline_id: project.id,
+        subtitle_track_id: "trk_s",
+        output_path: "/tmp/叠层/字幕A.mov",
+        tail: "10s",
+        last_export: null,
+      },
+    ],
+  };
+  const browser = await mount(view, "style");
+  expect(browser.container.querySelector('[aria-label="在访达中显示"]')).toBeNull();
+  vi.mocked(isTauri).mockReturnValue(true);
+  const desktop = await mount(view, "style");
+  expect(desktop.container.textContent).toContain("字幕A.mov");
+  await desktop.click("在访达中显示");
+  expect(revealItemInDir).toHaveBeenCalledWith("/tmp/叠层/字幕A.mov");
 });
