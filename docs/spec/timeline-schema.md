@@ -220,9 +220,15 @@ FCP 12.4 实测与此一致：25 帧倒放段从源 44 秒倒放到 40 秒，片
 
 ### 4.6 标记 `markers[]`
 
-`id`、`at`、`duration`（可为 `"0s"`）、`kind`、`text`，以及可选的 `level`。`kind` 取 `note`、`todo`、`chapter`、`review`。`review` 用来标出待人工检查的片段，是校对台和交接复核的入口。
+`id`、`at`、`duration`（可为 `"0s"`）、`kind`、`text`，以及可选的 `level`、`description`。`kind` 取 `note`、`todo`、`chapter`、`review`。`review` 用来标出待人工检查的片段，是校对台和交接复核的入口。
 
 `level` 只用于 `chapter` 标记：`1` 是一级标题，`2` 是二级标题，没写按 `1`。章节大纲按 `at` 排序，二级标题归到它前面最近的一级标题下面；第一个一级标题之前的二级标题单独成组。其他类标记带 `level` 时 L1 报 `E_VALIDATION`。导出时 FCPXML 的 `<chapter-marker>` 和其他格式的章节标记都不区分层级，`level` 写进损失报告的 `marker_level`，状态为近似。
+
+`description` 只用于 `chapter` 标记：这一章或这一节讲什么，一两句话，不超过 500 字（2026-11-06 加）。其他类标记带它时 L1 报 `E_VALIDATION`。导出规则见 `handoff-profile.md` 第 4 节。
+
+章节标记的 `ext["zsir.user_edited"]` 为 `true` 表示人改过它的标题或描述：作者 `kind` 为 `human` 的 `add_marker` 建的章节标记，或 `update_marker` 改了 `text`、`description` 时，内核写上；作者不是人的不写，也不清掉已有的。AI 重新分章时不改带这个标记的章节（Skill 里的规则，内核不拦）。
+
+`level`、`description`、`ext["zsir.user_edited"]` 都是可选的新增字段，旧文件照常能读，`schema_version` 仍为 `0.2`。
 
 ## 5. 字幕：五层数据
 

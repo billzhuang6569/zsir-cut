@@ -1,6 +1,6 @@
 # 桌面版第 3 版：界面反馈落地（U3）
 
-状态：已定 · 2026-11-06（Bill 当天定了第 6 节的六件事） · 上位文档：`docs/plan.md` 第 3 步、`docs/product.md`、`docs/design.md`
+状态：已定 · 2026-11-06（Bill 当天定了第 6 节的六件事）· 规格：`docs/spec/desktop-host.md`、ADR-0023 及第 3 节所列修改。规格和本文冲突时以规格为准 · 上位文档：`docs/plan.md` 第 3 步、`docs/product.md`、`docs/design.md`
 
 来源：Bill 2026-11-04 到 11-06 在设计画布上的 10 轮反馈（F1 到 F10）。本轮的做法是先改设计稿，后端需求随手记下，最后统一出这份方案。反馈原文、画布上改了什么、后端需要什么，都记在 [UI 反馈与后端改动记录](https://claude.ai/artifact/YM2ULRLHoJQCFgsPqibset)。设计稿在 [设计画布](https://claude.ai/artifact/2cz57o7WFBCD2kcNpEA3n8)，变量和组件在 [设计系统](https://claude.ai/artifact/TSP7nbUeS5MgrfEEwNjse7)。
 
@@ -82,7 +82,7 @@ U3.1、U3.2、U3.3 改的文件不重叠（标记和读视图、剪辑操作、�
 
 | 编号 | 内容 | 依赖 | 验收 |
 |---|---|---|---|
-| U3.4 | 应用级设置：`settings.json`（和 `recent.json` 同目录），zod 校验，写临时文件再改名；界面通道加 `settings_get`、`settings_set`（不进 MCP）。内容：`keymap`（`preset: "premiere" \| "fcp"`，`overrides`：动作到键）、`default_agent`、`preview_cache`（`directory`、`limit_gb`、`quality`、`auto`、`pause_on_battery`）、`ui`（`snap`、`timeline_zoom`、`track_height`、`chapters.view`、`chapters.zoom`、`chapters.folded[]`）。快捷键数据表放 `packages/app-host/src/keymap.ts`，动作名和界面的动作一致，两套默认按 U3-S2 附录 A | U3-S2 | 改一项设置后重启宿主仍在；文件损坏时回到默认并给界面一条警告，不崩；`keymap.ts` 里每个动作都有两套键，没有重复的键；界面通道外调不到这两个动词 |
+| U3.4 | 应用级偏好：按 `desktop-host.md` 第 2、3 节。文件是 `desktop.json`（内核的 `settings.json` 和 `settings_get`/`settings_set` 是语音设置，名字已被占用，不碰）；界面通道动词 `prefs_get`、`prefs_set`；快捷键表 `packages/app-host/src/keymap.ts` | U3-S2 | 改一项偏好后重启宿主仍在；文件损坏时回到默认并给界面一条警告，不崩；`keymap.ts` 里每个动作都有两套键，没有重复的键；界面通道外调不到这两个动词 |
 | U3.5 | Agent 管理：找程序（PATH 加 `/opt/homebrew/bin`、`/usr/local/bin`、`~/.local/bin`、`~/.npm-global/bin`）、版本、新版检查（查 npm registry，走 `HTTPS_PROXY`，结果缓存 24 小时，失败静默）、安装和更新（`npm install -g @anthropic-ai/claude-code`、`npm install -g @openai/codex`，输出逐行推给界面，没有 npm 时给出手动安装说明）、设默认（写 U3.4 的 `default_agent`，`agents.selected` 启动时读它）。界面通道动词 `agents_list`、`agents_install`、`agents_update`、`agents_set_default`；推送 `agents_changed` | U3.4 | 两家都没装时列表给出「没有找到」和安装按钮的数据；装了 Claude Code 的机器上版本号和程序位置正确；不查也不显示登录状态；新版检查断网时 3 秒内返回、不报错；安装过程的每行输出都到了界面；设默认后重启仍是它；测试不联网，npm 和 CLI 都用假命令 |
 | U3.6 | 许可闸：Agent 通过宿主 MCP 调用会碰到工程外面的动词时，宿主先停下问界面。要问的动词：`export`、直接导出、`record_handoff_check`、`voice_generate`（花钱）、云端 `transcribe`，以及以后任何写工程目录以外文件的动词，清单在 U3-S2。流程：推 `permission_request`（`id`、`verb`、标题、说明、会写到哪、命令原文）给界面，等答复；`once` 放行一次；`project` 写进 `.zcut/<project_id>/permissions.json`，以后同动词不问；`deny` 给 Agent 返回 `rejected`、`E_PERMISSION_DENIED`，`details` 带用户的话（可选）。界面没连上时按 `deny` 处理。等待时 Agent 的调用挂着，不超时 | U3.4、U3-S2、U3-S5 | Agent 调 `export` 时界面收到请求，答 `once` 后导出照常；答 `project` 后再调不问；答 `deny` 后 Agent 收到 `E_PERMISSION_DENIED`，对话里能看到它换了办法；`edit`、`inspect` 这类不问；对等测试：同一动词从 CLI 调用不经过闸 |
 | U3.7 | 下一步建议：系统提示里约定 Agent 每轮最后一行写 `【下一步】一句话`（没把握就不写）；`agent-events.ts` 解析成 `suggestion` 事件，不进正文；界面收到后放进输入框当灰字。两家 CLI 都要 | — | 带这一行的回复，正文里看不到它，`suggestion` 事件里有；不带时没有事件；一行里有多个「【下一步】」只取最后一个 |
@@ -97,7 +97,7 @@ U3.4 先做；U3.5、U3.6、U3.7、U3.8 之间不重叠，可以并行；U3.9 �
 
 | 编号 | 内容 | 依赖 | 验收 |
 |---|---|---|---|
-| U3.10 | 换皮到 v3「黑底浮卡」：`design/tokens.json` 和 `components.css` 换成 v3；壳子改成顶栏 + 左侧图标栏 + 三块浮卡（左栏、预览加右栏、时间线），尺寸按画布的 `TopBar`、`Rail`、`Preview`、`Timeline` 部件；顶栏加历史图标（在导出左边）、撤销重做、命令面板占位；图标栏去掉历史；每个面板的类名换成设计系统的 `zc-*`，布局按画布。可以按面板拆成几个 PR，第一个 PR 先做壳子和 AI 面板 | U3-S8 | Claude 用画布的截图逐屏比对；每个颜色、字号、间距都引用变量，`grep` 不到写死的十六进制色；Bill 实机看 |
+| U3.10 | 换皮到 v3「黑底浮卡」：把 `design/v3/` 换到 `design/tokens.json` 和 `design/reference/components.css`（见 `design/README.md`），`tokens.ts` 跟上（v3 没有 `size` 组、多了 `shadow` 组）；壳子改成顶栏 + 左侧图标栏 + 三块浮卡（左栏、预览加右栏、时间线），尺寸按画布的 `TopBar`、`Rail`、`Preview`、`Timeline` 部件；顶栏加历史图标（在导出左边）、撤销重做、命令面板占位；图标栏去掉历史；每个面板的类名换成设计系统的 `zc-*`，布局按画布。可以按面板拆成几个 PR，第一个 PR 先做壳子和 AI 面板 | U3-S8 | Claude 用画布的截图逐屏比对；每个颜色、字号、间距都引用变量，`grep` 不到写死的十六进制色；Bill 实机看 |
 | U3.11 | 时间线：剪点显示（相接片段间 2px 缝、标尺下的剪点刻度、选中剪点的白条加三角，样式 `zc-seam`、`zc-cut-tick`）；剪点选中（点缝隙选中，`ui_state.edit_point`，`ui_select` 清空时一起清）；快捷键改为读 U3.4 的 `keymap`（两套习惯都能用、单键覆盖生效）；新动作：滚动编辑（拖剪点或 `,` `.` 一帧 → `roll`）、剪到播放头去掉前段/后段（`trim` 到播放头，`ripple` 跟磁性开关）、把剪点延到播放头（`roll`）、所有轨道一起切（一个 `edit` 里对横跨播放头的每个片段各一个 `split`）、删除并合拢（`remove` 带 `ripple: true`）、删除留空隙（`remove`）；磁性开关 = 一个界面偏好（U3.4 的 `ui.snap` 之外再加 `ui.magnetic`），决定拖动用 `move` 的哪个 `mode`、删除和修剪带不带 `ripple`；标尺上方的缓存细线（读 U3.9 的状态） | U3.10、U3.2、U3.4 | 切到 Premiere 习惯后 `V` 选择、`C` 切割、`⌘K` 切一刀、`⌥⌫` 删除并合拢；切回 FCP 后 `A` `B` `⌘B` `⌫`；改单个键后只有那一项变；选中剪点后按 `,` 发出 `roll` 且总时长不变；磁性开时拖动发 `mode: insert`、删除带 `ripple`，关时相反；三轨一起切后三轨各多一个片段且剪点在同一时刻；组件测试覆盖每个动作发出的操作 |
 | U3.12 | 设置对话框：左边导航（通用、Agent、字幕识别、语音、预览与缓存、快捷键、关于），按画布的 `Settings`、`SettingsKeys`、`SettingsPreview`。Agent 页读写 U3.5；快捷键页读写 U3.4（两张习惯卡片、三组对照表、搜索、改单键、恢复默认）；预览与缓存页读写 U3.4 和 U3.9（位置、换位置、在访达中显示、剩余空间、用量和上限、全部清空、画质、自动准备、用电池时暂停、按工程的占用和状态） | U3.10、U3.4、U3.5、U3.9 | 每个控件改了都落到设置文件；Agent 页在没装 Codex 的机器上显示「没有找到」和一键安装，点安装能看到逐行输出；缓存页换位置后状态列表刷新；快捷键搜索「切」能找到切割和切一刀 |
 | U3.13 | AI 面板：按画布 `Main`、`MainRunning` 和「Agent 工具调用」画板的 14 种情形画工具调用（读、看画面、改时间线、听、等待、失败、停止、计划、许可）；方案卡和「全部批准」「看对比」放右侧「决定」顶上，对话里只留「方案等你审 ›」；许可卡放「决定」顶上标「Agent 在等你」，对话里一行「等你许可 ›」，三个按钮和数字键 1 2 3 走 U3.6；输入框灰字建议（U3.7）：Tab 填入、回车发送、打字即消失；草稿改动下的链接「看方案」打开审方案 | U3.10、U3.6、U3.7 | 对照画板 14 种情形各有组件测试；许可卡答复后 Agent 继续；灰字在没有建议时不出现；Bill 实机看一次完整的「让 AI 剪开头」 |
@@ -149,7 +149,7 @@ U3.11、U3.12、U3.13、U3.15、U3.16、U3.18 改的文件不重叠，可以并�
 - 把界面状态（折叠、缩放、选中的剪点）写进工程文件。
 - Windows 的程序路径和安装命令，到 Windows 兼容那一步再补。
 
-## 附录 A：快捷键两套默认
+## 附录 A：快捷键两套默认（已移到 `desktop-host.md` 3.1，以那里为准）
 
 动作名就是 `keymap.ts` 里的键名。「◇」是本应用自己补的，两家都没有对应默认键。实现前用两家的官方快捷键表逐条核对，下面标「?」的还没在官方表里确认（F1-g）。
 
