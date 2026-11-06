@@ -21,6 +21,7 @@ import { exportPreferences } from "./export-preferences.js";
 import { mediaChannel, runFfmpeg } from "./media.js";
 import { type HostEnvelope, Permissions, permissionDenied } from "./permissions.js";
 import { DesktopPreferences } from "./preferences.js";
+import { PreviewCache } from "./preview-cache.js";
 import { RecentProjects } from "./recent.js";
 import { projectChanged } from "./revision-events.js";
 import { SubtitlePass, type SubtitlePassParams } from "./subtitle-pass.js";
@@ -38,6 +39,7 @@ const {
   displayRanges,
   openProject,
   printRational,
+  parseRational,
 }: typeof import("../../core/dist/index.js") = await import(
   new URL(import.meta.url.endsWith(".ts") ? "../../core/src/index.ts" : "../../core/dist/index.js", import.meta.url)
     .href
@@ -284,7 +286,11 @@ export async function startHost(
     return loadPath(options.project);
   };
   const initialProject = options.project ? await load() : undefined;
-  let serve = mediaChannel(options.project, token, load);
+  const cache = new PreviewCache(prefs, (status) => {
+    if (ui?.readyState === WebSocket.OPEN) ui.send(JSON.stringify({ type: "preview_cache", ...status }));
+  });
+  const cacheFile = (project: string, key: string) => cache.file(project, key);
+  let serve = mediaChannel(options.project, token, load, runFfmpeg, cacheFile);
   let entryQueue = Promise.resolve();
   let projectEpoch = 0;
   const httpServers = new Set<Server>();
@@ -376,7 +382,15 @@ export async function startHost(
   const batches = new Set<string>();
   let agents: Agents | undefined;
   let subtitlePass: SubtitlePass | undefined;
+  const refreshCache = () => {
+    const epoch = projectEpoch;
+    if (options.project)
+      void loadPath(options.project)
+        .then((project) => (epoch === projectEpoch ? cache.refresh(project) : undefined))
+        .catch(() => {});
+  };
   const notify = (type: string, refresh = false) => {
+    if (type === "project_changed") refreshCache();
     if (ui?.readyState === WebSocket.OPEN) ui.send(JSON.stringify({ type, ...(refresh ? { refresh } : {}) }));
   };
   const published = new Set<string>();
@@ -401,6 +415,7 @@ export async function startHost(
       if (ui?.readyState === WebSocket.OPEN) ui.send(JSON.stringify(projectChanged(entry, sessionId)));
       published.add(key);
     }
+    refreshCache();
   };
   const kernel = async (verb: Verb, input: unknown) => {
     const epoch = projectEpoch;
@@ -534,7 +549,18 @@ export async function startHost(
             client.send(JSON.stringify({ type: "result", id: message.id, envelope }));
           return;
         }
-        if (typeof message.id === "string" && ["prefs_get", "prefs_set", "permission_answer"].includes(message.verb)) {
+        if (
+          typeof message.id === "string" &&
+          [
+            "prefs_get",
+            "prefs_set",
+            "permission_answer",
+            "preview_cache_status",
+            "preview_cache_clear",
+            "preview_cache_move",
+            "preview_cache_playhead",
+          ].includes(message.verb)
+        ) {
           if (client !== ui) throw new Error("界面未连接");
           let envelope: Record<string, unknown>;
           const base = {
@@ -543,20 +569,44 @@ export async function startHost(
             changes: [],
           };
           try {
-            const request =
-              message.verb === "prefs_get"
-                ? z.strictObject({}).parse(message.request ?? {})
-                : message.verb === "permission_answer"
-                  ? message.request
+            let reply: { status: string; result: unknown };
+            if (message.verb.startsWith("preview_cache_")) {
+              const request = message.request ?? {};
+              if (message.verb === "preview_cache_clear") {
+                const parsed = z
+                  .strictObject({
+                    project_id: z
+                      .string()
+                      .regex(/^prj_[a-zA-Z0-9_-]+$/)
+                      .optional(),
+                  })
+                  .parse(request);
+                await cache.clear(parsed.project_id);
+              } else if (message.verb === "preview_cache_move") {
+                const parsed = z.strictObject({ directory: z.string() }).parse(request);
+                await cache.updatePreferences({ preview_cache: { directory: parsed.directory } });
+              } else if (message.verb === "preview_cache_playhead") {
+                const parsed = z.strictObject({ at: time }).parse(request);
+                cache.hint(parseRational(parsed.at, true));
+              } else z.strictObject({}).parse(request);
+              reply = {
+                status: ["preview_cache_clear", "preview_cache_move"].includes(message.verb) ? "applied" : "no_op",
+                result: await cache.status(),
+              };
+            } else if (message.verb === "permission_answer") {
+              reply = await permissions.answer(message.request);
+            } else {
+              const request =
+                message.verb === "prefs_get"
+                  ? z.strictObject({}).parse(message.request ?? {})
                   : z
                       .strictObject({ patch: z.unknown().refine((value) => value !== undefined) })
                       .parse(message.request);
-            const reply =
-              message.verb === "prefs_get"
-                ? { status: "no_op", result: prefs.get() }
-                : message.verb === "permission_answer"
-                  ? await permissions.answer(request)
-                  : await prefs.set("patch" in request ? request.patch : undefined);
+              reply =
+                message.verb === "prefs_get"
+                  ? { status: "no_op", result: prefs.get() }
+                  : await cache.updatePreferences("patch" in request ? request.patch : undefined);
+            }
             envelope = {
               ...base,
               ok: true,
@@ -847,7 +897,8 @@ export async function startHost(
     disconnected();
     if (path) options.project = resolve(path);
     else delete options.project;
-    serve = mediaChannel(path ?? undefined, token, path ? () => loadPath(path) : load);
+    await cache.open(next, path ?? "");
+    serve = mediaChannel(path ?? undefined, token, path ? () => loadPath(path) : load, runFfmpeg, cacheFile);
     if (options.project && next)
       agents = new Agents({
         project: options.project,
@@ -899,6 +950,7 @@ export async function startHost(
     mcp,
     close: async () => {
       permissions.clear();
+      await cache.close();
       await subtitlePass?.stop();
       await agents?.stop();
       await Promise.all([...httpServers].map((server) => server.close()));

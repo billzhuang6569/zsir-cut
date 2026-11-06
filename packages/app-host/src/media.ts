@@ -72,6 +72,7 @@ export function mediaChannel(
   token: string,
   load: () => Promise<Project>,
   run = runFfmpeg,
+  cacheFile?: (project: string, key: string) => Promise<string | undefined>,
 ) {
   const pending = new Map<string, { work: Promise<Buffer>; controller: AbortController; users: number }>();
   async function cached(file: string, generate: (signal: AbortSignal) => Promise<Buffer>, signal: AbortSignal) {
@@ -137,7 +138,15 @@ export function mediaChannel(
       let fingerprint = "";
       let projectId = "";
       let media: Project["media"][number] | undefined;
-      if (sample) {
+      const cache = /^\/cache\/(prj_[a-zA-Z0-9_-]+)\/([a-f0-9]{32})\.mp4$/.exec(url.pathname);
+      if (cache) {
+        const file = await cacheFile?.(cache[1] ?? "", cache[2] ?? "");
+        if (!file || [...url.searchParams.keys()].some((key) => key !== "token")) {
+          response.writeHead(404).end();
+          return;
+        }
+        source = file;
+      } else if (sample) {
         if ([...url.searchParams.keys()].some((key) => !["token", "voice_id"].includes(key))) {
           response.writeHead(404).end();
           return;

@@ -545,3 +545,53 @@ it("serializes stored animation durations in preview data without bigint or chan
   const { animation: _animation, ...plain } = styles[0] ?? {};
   expect(subtitleStylesForPreview([plain as (typeof styles)[number]])[0]).toEqual(plain);
 });
+
+it("keeps cache controls on the authenticated UI channel and persists directory changes", async () => {
+  const { DesktopPreferences } = await import("../src/preferences.js");
+  const directory = join(appDataDir, "cache");
+  await mkdir(directory);
+  const prefs = new DesktopPreferences(appDataDir);
+  await prefs.set({ preview_cache: { directory, auto: false } });
+  const socket = await connect();
+  try {
+    const bootstrap = once(socket, "message");
+    socket.send(JSON.stringify({ type: "ui_ready" }));
+    expect(JSON.parse((await bootstrap)[0].toString()).type).toBe("bootstrap");
+    let sequence = 0;
+    const call = (verb: string, request = {}) =>
+      new Promise<{ result: { segments: { state: string }[] } }>((resolve, reject) => {
+        const id = `cache-${sequence++}`;
+        const timer = setTimeout(() => {
+          socket.off("message", receive);
+          reject(new Error("Missing response"));
+        }, 3000);
+        const receive = (data: Buffer) => {
+          const message = JSON.parse(data.toString());
+          if (message.id !== id) return;
+          clearTimeout(timer);
+          socket.off("message", receive);
+          resolve(message.envelope);
+        };
+        socket.on("message", receive);
+        socket.send(JSON.stringify({ id, verb, request }));
+      });
+    const status = await call("preview_cache_status");
+    expect(status).toMatchObject({ ok: true, result: { directory, directory_ok: true, used_bytes: 0 } });
+    expect(status.result.segments.every((s: { state: string }) => s.state === "missing")).toBe(true);
+    expect(await call("preview_cache_playhead", { at: "6s" })).toMatchObject({ ok: true });
+    expect(await call("preview_cache_playhead", { at: "1.5s" })).toMatchObject({
+      status: "rejected",
+      error: { code: "E_VALIDATION" },
+    });
+    expect(await call("preview_cache_clear")).toMatchObject({ status: "applied" });
+    const next = join(appDataDir, "unplugged");
+    expect(await call("preview_cache_move", { directory: next })).toMatchObject({
+      status: "applied",
+      result: { directory: next, directory_ok: false },
+    });
+    await prefs.load();
+    expect(prefs.get().preview_cache_directory).toBe(next);
+  } finally {
+    socket.terminate();
+  }
+});
