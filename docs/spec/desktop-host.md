@@ -29,6 +29,10 @@
 
 这些动词只在本机通道上有，宿主的 MCP 不暴露它们：Agent 不能改用户的偏好、不能自己答许可。
 
+### 1.1 界面状态
+
+`ui_state`（`command-protocol.md` 9.6）的 `edit_point`、`chapters`、`history` 由界面上报，宿主原样转给 Agent。宿主校验界面上报的状态时要认这三个字段（2026-11-06 补）。
+
 ## 2. 应用级偏好 `desktop.json`
 
 放在 `~/Library/Application Support/zsir-cut/desktop.json`，和 `recent.json` 同目录，跟随 `HOME`。内核的 `settings.json`（`voice.md` 1.1）是另一个文件，宿主不写它，两个文件各有一个写入者。
@@ -76,7 +80,7 @@
 | `ui.chapters.zoom` | 章节时间轴的上下缩放，0.5 到 4 |
 | `ui.chapters.folded` | 大纲里折叠起来的一级章节的标记 ID |
 
-`prefs_get`：无参数，`result.prefs` 是整个对象（`directory` 展开后的路径另给 `result.preview_cache_directory`）。`prefs_set`：`patch`，按字段深合并，数组整体替换；写入后返回 `applied` 和新的整个对象，内容不变返回 `no_op`；校验不过返回 `rejected`、`E_VALIDATION`，文件不变。
+`prefs_get`：无参数，`result.prefs` 是整个对象（`directory` 展开后的路径另给 `result.preview_cache_directory`）。`prefs_set`：`patch`，按字段深合并，数组整体替换，`keymap.overrides` 给了就整体替换（`{}` 即恢复默认，2026-11-06 补）；写入后返回 `applied` 和新的整个对象，内容不变返回 `no_op`；校验不过返回 `rejected`、`E_VALIDATION`，文件不变。
 
 ## 3. 快捷键
 
@@ -171,7 +175,7 @@ Agent 通过宿主的 MCP 调用会碰到工程外面的动词时，宿主先停
 | `export`（不带 `dry_run`） | 往工程目录以外写文件 |
 | `record_handoff_check` | 写交接包 |
 | `voice_generate`、`voice_clone` | 花钱 |
-| `transcribe`（工程的识别设置用云端引擎时） | 把声音传到外面 |
+| `transcribe`（会用到云端识别时：请求指定云端引擎，或用 `auto` 且本机设置开了云端兜底） | 把声音传到外面 |
 | `terms_edit`、`voice_edit` | 改全局库，影响别的工程 |
 
 以后新增的会写工程目录以外文件、联网或花钱的动词，先加进这张表。读动词、`edit`、会话动词、界面动词都不问。
