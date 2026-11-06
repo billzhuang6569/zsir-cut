@@ -31,10 +31,11 @@ export class Agents {
       token: string;
       emit: (chat: string, event: ChatEvent) => void;
       commands?: Record<AgentKind, string>;
+      directories?: string[];
     },
   ) {}
   private async command(agent: AgentKind) {
-    const path = this.options.commands?.[agent] ?? (await findProgram(agent));
+    const path = this.options.commands?.[agent] ?? (await findProgram(agent, this.options.directories));
     if (!path) throw new Error(`没有找到 ${agent}`);
     return path;
   }
