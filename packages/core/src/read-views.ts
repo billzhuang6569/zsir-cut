@@ -8,7 +8,7 @@ import type { Session } from "./project/session.ts";
 import { openProject } from "./project/store.ts";
 import { displayRanges } from "./project/subtitle-rules.ts";
 import { clipTimeMap } from "./project/time-map.ts";
-import type { Clip, Media, Project, Timeline, Token, Transcript } from "./project/types.ts";
+import type { Clip, Marker, Media, Project, Timeline, Token, Transcript } from "./project/types.ts";
 import {
   add,
   compare,
@@ -58,6 +58,46 @@ function timelineEnd(timeline: Timeline): Rational {
     } else for (const clip of track.clips) end = max(end, add(clip.timeline_start, clip.duration));
   }
   return end;
+}
+
+function chaptersView(timeline: Timeline) {
+  const total = timeline.tracks
+    .flatMap((track) => (track.kind === "subtitle" ? [] : track.clips))
+    .reduce((end, clip) => max(end, add(clip.timeline_start, clip.duration)), zero);
+  const markers = timeline.markers
+    .filter((marker) => marker.kind === "chapter")
+    .sort((a, b) => compare(a.at, b.at) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const groups: { marker: Marker | null; start: Rational; sections: Marker[] }[] = [];
+  for (const marker of markers) {
+    if (marker.level !== 2) groups.push({ marker, start: marker.at, sections: [] });
+    else {
+      if (!groups.length) groups.push({ marker: null, start: marker.at, sections: [] });
+      groups.at(-1)!.sections.push(marker);
+    }
+  }
+  const row = (marker: Marker | null, level: 1 | 2, start: Rational, end: Rational, hue: number) => ({
+    id: marker?.id ?? null,
+    level,
+    start: sequenceTime(start, timeline),
+    end: sequenceTime(end, timeline),
+    duration: durationTime(sub(end, start), timeline.edit_rate, timeline.start_timecode),
+    title: marker?.text ?? null,
+    description: marker?.description ?? null,
+    user_edited: marker?.ext?.["zsir.user_edited"] === true,
+    hue,
+  });
+  return {
+    chapters: groups.map((group, hue) => {
+      const end = groups[hue + 1]?.start ?? total;
+      return {
+        ...row(group.marker, 1, group.start, end, hue),
+        sections: group.sections.map((marker, index) =>
+          row(marker, 2, marker.at, group.sections[index + 1]?.at ?? end, hue),
+        ),
+      };
+    }),
+    total: durationTime(total, timeline.edit_rate, timeline.start_timecode),
+  };
 }
 
 function entity(project: Project, id: string): Record<string, unknown> | undefined {
@@ -176,6 +216,11 @@ export async function inspect(
         .slice(0, (input.limit as number | undefined) ?? 20)
         .map((entry) => ({ ...entry, label: entry.label ?? null, batch: entry.batch ?? null })),
     };
+  }
+  if (input.view === "chapters") {
+    const timeline = project.timelines.find((item) => item.id === (input.timeline_id ?? project.timelines[0]?.id));
+    if (!timeline) throw new Error(`E_NOT_FOUND: ${input.timeline_id}`);
+    return chaptersView(timeline);
   }
   if (input.view === "timeline") {
     const timeline = project.timelines.find((item) => item.id === (input.timeline_id ?? project.timelines[0]?.id));

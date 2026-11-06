@@ -85,6 +85,87 @@ describe("CLI and MCP", () => {
       await server.close();
     }
   });
+  it("shares chapter descriptions, human edit flags, historical reads and validation", async () => {
+    const server = createServer();
+    const client = new Client({ name: "chapter-parity", version: "1" });
+    const [left, right] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(left), client.connect(right)]);
+    const human = { kind: "human", name: "editor" };
+    try {
+      const cases: [string, Record<string, unknown>][] = [
+        [
+          "edit",
+          {
+            author: human,
+            idempotency_key: "add-chapter",
+            label: "Chapter",
+            ops: [
+              {
+                op: "add_marker",
+                id: "mrk_parity",
+                kind: "chapter",
+                text: "Title",
+                description: "Description",
+                at: "0s",
+                duration: "0s",
+              },
+            ],
+          },
+        ],
+        [
+          "edit",
+          {
+            author,
+            idempotency_key: "update-chapter",
+            label: "Chapter",
+            ops: [{ op: "update_marker", marker_id: "mrk_parity", description: "Agent description" }],
+          },
+        ],
+        ["inspect", { view: "chapters" }],
+        ["inspect", { view: "chapters", at_revision: "rev_fixture_1" }],
+        [
+          "edit",
+          {
+            author,
+            idempotency_key: "invalid-chapter",
+            label: "Invalid",
+            ops: [{ op: "add_marker", kind: "note", text: "Bad", description: "Bad", at: "0s", duration: "0s" }],
+          },
+        ],
+      ];
+      for (const [verb, fields] of cases) {
+        const parsed = parseProject(await readFile(project, "utf8"));
+        if (!parsed.ok) throw new Error("Invalid fixture");
+        const input = { project, ...(verb === "edit" ? { base_revision: parsed.project.revision.id } : {}), ...fields };
+        const cliResult = invokeCli(verb, input).envelope;
+        const mcp = (await client.callTool({ name: `zcut_${verb}`, arguments: input })).structuredContent as Record<
+          string,
+          unknown
+        >;
+        expect(validateEnvelope(mcp).valid).toBe(true);
+        if (verb === "edit" && cliResult.ok) {
+          expect(mcp.receipt).toMatchObject({ replayed: true });
+          mcp.receipt = { ...(mcp.receipt as Record<string, unknown>), replayed: false };
+        }
+        expect(withoutRequestId(cliResult)).toEqual(withoutRequestId(mcp));
+        if (verb === "inspect") {
+          const rows = (mcp.result as { chapters: Record<string, unknown>[] }).chapters;
+          expect(rows.find((row) => row.id === "mrk_parity")).toEqual(
+            fields.at_revision
+              ? undefined
+              : expect.objectContaining({ description: "Agent description", user_edited: true }),
+          );
+        } else if (fields.idempotency_key === "invalid-chapter") {
+          expect(mcp.error).toMatchObject({ code: "E_VALIDATION" });
+          expect(mcp.verification).toMatchObject({ level: "L1", passed: false });
+        } else expect(cliResult.status).toBe("applied");
+      }
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  }, 30000);
+
   it("begins a session through the SDK with an object author", async () => {
     const server = createServer();
     const client = new Client({ name: "object-author", version: "1" });
@@ -169,6 +250,8 @@ describe("CLI and MCP", () => {
       const cases = [
         ["inspect", { view: "brief" }],
         ["inspect", { view: "timeline" }],
+        ["inspect", { view: "chapters" }],
+        ["inspect", { view: "chapters", at_revision: "rev_fixture_1" }],
         ["inspect", { view: "history" }],
         ["read_transcript", { transcript_id: "trs_A_zh" }],
         ["read_transcript", { timeline_id: "tl_std" }],

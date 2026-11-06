@@ -672,6 +672,7 @@ export const fcpxmlExporter: Exporter & { validationNotes?: string } = {
           start: sec(offset),
           ...(compare(marker.duration, zero) > 0 ? { duration: sec(marker.duration) } : {}),
           value: marker.text,
+          ...(marker.kind === "chapter" && marker.description !== undefined ? { note: marker.description } : {}),
           ...(marker.kind === "todo" ? { completed: "0" } : {}),
         }),
       );

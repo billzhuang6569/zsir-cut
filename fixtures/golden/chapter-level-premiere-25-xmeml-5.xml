@@ -138,23 +138,75 @@
         </track>
       </audio>
     </media>
-    <marker id="mrk_parent">
+    <marker id="mrk_orphan">
       <name>chapter</name>
-      <comment>一级</comment>
+      <comment>序
+章前说明</comment>
       <in>0</in>
       <out>0</out>
     </marker>
-    <marker id="mrk_child">
+    <marker id="mrk_parent">
       <name>chapter</name>
-      <comment>二级</comment>
+      <comment>第一章
+起因 &amp; 背景</comment>
       <in>25</in>
       <out>25</out>
     </marker>
+    <marker id="mrk_child">
+      <name>chapter</name>
+      <comment>第一节
+问题 &lt;起点&gt;</comment>
+      <in>38</in>
+      <out>38</out>
+    </marker>
+    <marker id="mrk_s2">
+      <name>chapter</name>
+      <comment>第二节
+调查 &quot;过程&quot;</comment>
+      <in>63</in>
+      <out>63</out>
+    </marker>
     <marker id="mrk_default">
       <name>chapter</name>
-      <comment>默认</comment>
-      <in>50</in>
-      <out>50</out>
+      <comment>第二章
+尝试方案</comment>
+      <in>100</in>
+      <out>100</out>
+    </marker>
+    <marker id="mrk_s3">
+      <name>chapter</name>
+      <comment>第三节
+初步尝试</comment>
+      <in>113</in>
+      <out>113</out>
+    </marker>
+    <marker id="mrk_s4">
+      <name>chapter</name>
+      <comment>第四节
+调整方法</comment>
+      <in>125</in>
+      <out>125</out>
+    </marker>
+    <marker id="mrk_third">
+      <name>chapter</name>
+      <comment>第三章
+结果与后续</comment>
+      <in>175</in>
+      <out>175</out>
+    </marker>
+    <marker id="mrk_s5">
+      <name>chapter</name>
+      <comment>第五节
+验证结果</comment>
+      <in>188</in>
+      <out>188</out>
+    </marker>
+    <marker id="mrk_s6">
+      <name>chapter</name>
+      <comment>第六节
+下一步</comment>
+      <in>213</in>
+      <out>213</out>
     </marker>
     <marker id="mrk_note">
       <name>note</name>

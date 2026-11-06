@@ -95,27 +95,96 @@
       ],
       "markers": [
         {
-          "id": "mrk_parent",
+          "id": "mrk_orphan",
           "at": "0s",
           "duration": "0s",
           "kind": "chapter",
-          "text": "一级",
-          "level": 1
+          "text": "序",
+          "description": "章前说明",
+          "level": 2
         },
         {
-          "id": "mrk_child",
+          "id": "mrk_parent",
           "at": "1s",
           "duration": "0s",
           "kind": "chapter",
-          "text": "二级",
+          "text": "第一章",
+          "description": "起因 & 背景",
+          "level": 1,
+          "ext": {
+            "zsir.user_edited": true
+          }
+        },
+        {
+          "id": "mrk_child",
+          "at": "3/2s",
+          "duration": "0s",
+          "kind": "chapter",
+          "text": "第一节",
+          "description": "问题 <起点>",
+          "level": 2
+        },
+        {
+          "id": "mrk_s2",
+          "at": "5/2s",
+          "duration": "0s",
+          "kind": "chapter",
+          "text": "第二节",
+          "description": "调查 \"过程\"",
           "level": 2
         },
         {
           "id": "mrk_default",
-          "at": "2s",
+          "at": "4s",
           "duration": "0s",
           "kind": "chapter",
-          "text": "默认"
+          "text": "第二章",
+          "description": "尝试方案"
+        },
+        {
+          "id": "mrk_s3",
+          "at": "9/2s",
+          "duration": "0s",
+          "kind": "chapter",
+          "text": "第三节",
+          "description": "初步尝试",
+          "level": 2
+        },
+        {
+          "id": "mrk_s4",
+          "at": "5s",
+          "duration": "0s",
+          "kind": "chapter",
+          "text": "第四节",
+          "description": "调整方法",
+          "level": 2
+        },
+        {
+          "id": "mrk_third",
+          "at": "7s",
+          "duration": "0s",
+          "kind": "chapter",
+          "text": "第三章",
+          "description": "结果与后续",
+          "level": 1
+        },
+        {
+          "id": "mrk_s5",
+          "at": "15/2s",
+          "duration": "0s",
+          "kind": "chapter",
+          "text": "第五节",
+          "description": "验证结果",
+          "level": 2
+        },
+        {
+          "id": "mrk_s6",
+          "at": "17/2s",
+          "duration": "0s",
+          "kind": "chapter",
+          "text": "第六节",
+          "description": "下一步",
+          "level": 2
         },
         {
           "id": "mrk_note",

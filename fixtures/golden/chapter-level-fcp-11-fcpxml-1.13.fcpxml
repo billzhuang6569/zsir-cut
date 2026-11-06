@@ -17,9 +17,16 @@
         <sequence format="r1" duration="10s" tcStart="0s" tcFormat="NDF" audioLayout="stereo" audioRate="48k">
           <spine>
             <asset-clip ref="r3" offset="0s" start="36004s" duration="10s" srcEnable="all" format="r2">
-              <chapter-marker start="36004s" value="一级"/>
-              <chapter-marker start="36005s" value="二级"/>
-              <chapter-marker start="36006s" value="默认"/>
+              <chapter-marker start="36004s" value="序" note="章前说明"/>
+              <chapter-marker start="36005s" value="第一章" note="起因 &amp; 背景"/>
+              <chapter-marker start="72011/2s" value="第一节" note="问题 &lt;起点&gt;"/>
+              <chapter-marker start="72013/2s" value="第二节" note="调查 &quot;过程&quot;"/>
+              <chapter-marker start="36008s" value="第二章" note="尝试方案"/>
+              <chapter-marker start="72017/2s" value="第三节" note="初步尝试"/>
+              <chapter-marker start="36009s" value="第四节" note="调整方法"/>
+              <chapter-marker start="36011s" value="第三章" note="结果与后续"/>
+              <chapter-marker start="72023/2s" value="第五节" note="验证结果"/>
+              <chapter-marker start="72025/2s" value="第六节" note="下一步"/>
               <marker start="36007s" value="备注"/>
               <audio-channel-source srcCh="1, 2"/>
               <metadata>

@@ -29,10 +29,11 @@
         "metadata": {
           "zsir": {
             "kind": "chapter",
-            "marker_id": "mrk_parent"
+            "marker_id": "mrk_orphan",
+            "description": "章前说明"
           }
         },
-        "name": "一级",
+        "name": "序",
         "color": "RED",
         "marked_range": {
           "OTIO_SCHEMA": "TimeRange.1",
@@ -54,10 +55,14 @@
         "metadata": {
           "zsir": {
             "kind": "chapter",
-            "marker_id": "mrk_child"
+            "marker_id": "mrk_parent",
+            "description": "起因 & 背景",
+            "ext": {
+              "zsir.user_edited": true
+            }
           }
         },
-        "name": "二级",
+        "name": "第一章",
         "color": "RED",
         "marked_range": {
           "OTIO_SCHEMA": "TimeRange.1",
@@ -79,10 +84,11 @@
         "metadata": {
           "zsir": {
             "kind": "chapter",
-            "marker_id": "mrk_default"
+            "marker_id": "mrk_child",
+            "description": "问题 <起点>"
           }
         },
-        "name": "默认",
+        "name": "第一节",
         "color": "RED",
         "marked_range": {
           "OTIO_SCHEMA": "TimeRange.1",
@@ -94,7 +100,189 @@
           "start_time": {
             "OTIO_SCHEMA": "RationalTime.1",
             "rate": 25,
-            "value": 50
+            "value": 38
+          }
+        },
+        "comment": ""
+      },
+      {
+        "OTIO_SCHEMA": "Marker.2",
+        "metadata": {
+          "zsir": {
+            "kind": "chapter",
+            "marker_id": "mrk_s2",
+            "description": "调查 \"过程\""
+          }
+        },
+        "name": "第二节",
+        "color": "RED",
+        "marked_range": {
+          "OTIO_SCHEMA": "TimeRange.1",
+          "duration": {
+            "OTIO_SCHEMA": "RationalTime.1",
+            "rate": 25,
+            "value": 0
+          },
+          "start_time": {
+            "OTIO_SCHEMA": "RationalTime.1",
+            "rate": 25,
+            "value": 63
+          }
+        },
+        "comment": ""
+      },
+      {
+        "OTIO_SCHEMA": "Marker.2",
+        "metadata": {
+          "zsir": {
+            "kind": "chapter",
+            "marker_id": "mrk_default",
+            "description": "尝试方案"
+          }
+        },
+        "name": "第二章",
+        "color": "RED",
+        "marked_range": {
+          "OTIO_SCHEMA": "TimeRange.1",
+          "duration": {
+            "OTIO_SCHEMA": "RationalTime.1",
+            "rate": 25,
+            "value": 0
+          },
+          "start_time": {
+            "OTIO_SCHEMA": "RationalTime.1",
+            "rate": 25,
+            "value": 100
+          }
+        },
+        "comment": ""
+      },
+      {
+        "OTIO_SCHEMA": "Marker.2",
+        "metadata": {
+          "zsir": {
+            "kind": "chapter",
+            "marker_id": "mrk_s3",
+            "description": "初步尝试"
+          }
+        },
+        "name": "第三节",
+        "color": "RED",
+        "marked_range": {
+          "OTIO_SCHEMA": "TimeRange.1",
+          "duration": {
+            "OTIO_SCHEMA": "RationalTime.1",
+            "rate": 25,
+            "value": 0
+          },
+          "start_time": {
+            "OTIO_SCHEMA": "RationalTime.1",
+            "rate": 25,
+            "value": 113
+          }
+        },
+        "comment": ""
+      },
+      {
+        "OTIO_SCHEMA": "Marker.2",
+        "metadata": {
+          "zsir": {
+            "kind": "chapter",
+            "marker_id": "mrk_s4",
+            "description": "调整方法"
+          }
+        },
+        "name": "第四节",
+        "color": "RED",
+        "marked_range": {
+          "OTIO_SCHEMA": "TimeRange.1",
+          "duration": {
+            "OTIO_SCHEMA": "RationalTime.1",
+            "rate": 25,
+            "value": 0
+          },
+          "start_time": {
+            "OTIO_SCHEMA": "RationalTime.1",
+            "rate": 25,
+            "value": 125
+          }
+        },
+        "comment": ""
+      },
+      {
+        "OTIO_SCHEMA": "Marker.2",
+        "metadata": {
+          "zsir": {
+            "kind": "chapter",
+            "marker_id": "mrk_third",
+            "description": "结果与后续"
+          }
+        },
+        "name": "第三章",
+        "color": "RED",
+        "marked_range": {
+          "OTIO_SCHEMA": "TimeRange.1",
+          "duration": {
+            "OTIO_SCHEMA": "RationalTime.1",
+            "rate": 25,
+            "value": 0
+          },
+          "start_time": {
+            "OTIO_SCHEMA": "RationalTime.1",
+            "rate": 25,
+            "value": 175
+          }
+        },
+        "comment": ""
+      },
+      {
+        "OTIO_SCHEMA": "Marker.2",
+        "metadata": {
+          "zsir": {
+            "kind": "chapter",
+            "marker_id": "mrk_s5",
+            "description": "验证结果"
+          }
+        },
+        "name": "第五节",
+        "color": "RED",
+        "marked_range": {
+          "OTIO_SCHEMA": "TimeRange.1",
+          "duration": {
+            "OTIO_SCHEMA": "RationalTime.1",
+            "rate": 25,
+            "value": 0
+          },
+          "start_time": {
+            "OTIO_SCHEMA": "RationalTime.1",
+            "rate": 25,
+            "value": 188
+          }
+        },
+        "comment": ""
+      },
+      {
+        "OTIO_SCHEMA": "Marker.2",
+        "metadata": {
+          "zsir": {
+            "kind": "chapter",
+            "marker_id": "mrk_s6",
+            "description": "下一步"
+          }
+        },
+        "name": "第六节",
+        "color": "RED",
+        "marked_range": {
+          "OTIO_SCHEMA": "TimeRange.1",
+          "duration": {
+            "OTIO_SCHEMA": "RationalTime.1",
+            "rate": 25,
+            "value": 0
+          },
+          "start_time": {
+            "OTIO_SCHEMA": "RationalTime.1",
+            "rate": 25,
+            "value": 213
           }
         },
         "comment": ""

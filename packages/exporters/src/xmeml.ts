@@ -439,7 +439,10 @@ export const xmemlExporter: Exporter & { validationNotes?: string } = {
                 "marker",
                 [
                   t("name", marker.kind),
-                  t("comment", marker.text),
+                  t(
+                    "comment",
+                    marker.description === undefined ? marker.text : `${marker.text}\n${marker.description}`,
+                  ),
                   t("in", count(marker.at, timeline.edit_rate)),
                   t("out", count(add(marker.at, marker.duration), timeline.edit_rate)),
                 ],
@@ -507,6 +510,19 @@ export const xmemlExporter: Exporter & { validationNotes?: string } = {
   },
   losses(project, timeline) {
     const items: LossItem[] = [];
+    for (const marker of timeline.markers)
+      if (marker.description !== undefined)
+        items.push(
+          loss(
+            marker.id,
+            "marker",
+            "marker_description",
+            "approximated",
+            "info",
+            "R_FORMAT_NO_FIELD",
+            "章节描述已合并到标记注释，需手动区分标题和描述",
+          ),
+        );
     for (const marker of timeline.markers)
       if (marker.kind === "chapter" && marker.level !== undefined)
         items.push(
@@ -586,7 +602,8 @@ export const xmemlExporter: Exporter & { validationNotes?: string } = {
     ext(project, "timeline");
     ext(timeline, "timeline");
     for (const media of project.media) ext(media, "media");
-    for (const marker of timeline.markers) ext(marker, "marker", marker.at, marker.duration);
+    for (const marker of timeline.markers)
+      ext(marker, "marker", marker.at, compare(marker.duration, rational(0n)) > 0 ? marker.duration : undefined);
     for (const style of project.subtitle_styles) ext(style, "style");
     for (const transcript of project.transcripts) {
       ext(transcript, "cue");

@@ -168,6 +168,7 @@ export interface Marker {
   duration: Rational;
   kind: "note" | "todo" | "chapter" | "review";
   level?: 1 | 2;
+  description?: string;
   text: string;
   ext?: Extension;
 }
