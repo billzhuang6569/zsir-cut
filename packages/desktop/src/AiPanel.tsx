@@ -7,13 +7,13 @@ import {
   isReadTool,
   Markdown,
   PermissionCard,
-  ReviewValue,
   StepRow,
   toolVerb,
 } from "./ai-components.js";
 import { Icon, IconButton } from "./components.js";
 import type { PermissionRequest, ProjectView } from "./connection.js";
 import { DESKTOP_AUTHOR } from "./connection.js";
+import { openReview } from "./ReviewView.js";
 import "./ai.css";
 
 function toolResultFailed(value: unknown): boolean {
@@ -99,9 +99,6 @@ export function useAiPanel({
   const [generating, setGenerating] = useState(false);
   const [input, setInput] = useState("");
   const [suggestion, setSuggestion] = useState("");
-  const reviewSelection = useRef(0);
-  const [reviewId, setReviewId] = useState("");
-  const [review, setReview] = useState<{ entity: string; before: unknown; after: unknown }[] | null>(null);
   const permissionCards = useRef<HTMLDivElement>(null);
   const draftCards = useRef<HTMLDivElement>(null);
   const [error, setError] = useState("");
@@ -146,9 +143,6 @@ export function useAiPanel({
     setGenerating(false);
     setInput("");
     setSuggestion("");
-    reviewSelection.current++;
-    setReviewId("");
-    setReview(null);
     setError("");
     setHistory(null);
     setAi({ sessions: [], batches: [] });
@@ -260,7 +254,9 @@ export function useAiPanel({
     call(verb, {
       project: path,
       session_id: session.session_id,
-      base_revision: verb === "session_approve" ? project?.revision.id : session.draft_revision,
+      base_revision: ["session_approve", "session_reject"].includes(verb)
+        ? project?.revision.id
+        : session.draft_revision,
       idempotency_key: crypto.randomUUID(),
       author: DESKTOP_AUTHOR,
       ...extra,
@@ -296,40 +292,42 @@ export function useAiPanel({
       setSaving(false);
     }
   };
-  const approve = async (item: Session) => {
-    if (saving) return;
-    if (item.pending_count && confirmApprove !== item.session_id) {
+  const approve = async (item: Session, pendingCount = item.pending_count) => {
+    if (saving || generating || item.state !== "in_review") return false;
+    if (pendingCount && confirmApprove !== item.session_id) {
       setConfirmApprove(item.session_id);
-      return;
+      return false;
     }
     setSaving(true);
     setError("");
     try {
       await write("session_approve", item, { label: "批准 AI 草稿" });
       setConfirmApprove(undefined);
-      await refresh();
+      await refresh().catch((e: Error) => setError(e.message));
+      return true;
     } catch (e) {
       setError(String(e));
+      return false;
     } finally {
       setSaving(false);
     }
   };
-  const showReview = async (item: Session) => {
-    const selection = ++reviewSelection.current;
-    setReviewId(item.session_id);
-    setReview(null);
+  const showReview = (item: Session) => openReview(item.session_id);
+  const reject = async (id: string) => {
+    const item = ai.sessions.find((item) => item.session_id === id);
+    if (!item || saving) return false;
+    setSaving(true);
+    setError("");
     try {
-      const result = (await call("diff", {
-        project: path,
-        session_id: item.session_id,
-        from: item.base_revision,
-        to: item.draft_revision,
-      })) as { changes: NonNullable<typeof review> };
-      if (selection === reviewSelection.current) setReview(result.changes);
+      await write("session_reject", item, { label: "拒绝 AI 草稿" });
+      setConfirmApprove(undefined);
+      await refresh().catch((e: Error) => setError(e.message));
+      return true;
     } catch (e) {
-      if (selection !== reviewSelection.current) return;
-      setReviewId("");
       setError(String(e));
+      return false;
+    } finally {
+      setSaving(false);
     }
   };
   const messages: {
@@ -574,8 +572,8 @@ export function useAiPanel({
                 className="zc-chat-pointer"
                 icon="ask"
                 onClick={() => {
-                  draftCards.current?.scrollIntoView?.({ block: "nearest" });
-                  draftCards.current?.querySelector("button")?.focus();
+                  const item = ai.sessions.find((item) => item.state === "in_review");
+                  if (item) showReview(item);
                 }}
               >
                 方案等你审 <Icon name="chevron" />
@@ -681,11 +679,7 @@ export function useAiPanel({
       </div>
       <div ref={draftCards} className="zc-draft-list">
         {ai.sessions
-          .filter(
-            (item) =>
-              item.state === "in_review" ||
-              (item.state === "open" && (item.revision_count > 0 || reviewId === item.session_id)),
-          )
+          .filter((item) => item.state === "in_review" || (item.state === "open" && item.revision_count > 0))
           .map((item) => {
             const changes = item.changes ?? [];
             return (
@@ -726,7 +720,7 @@ export function useAiPanel({
                 <Button
                   variant="approve"
                   icon="check"
-                  disabled={saving || generating}
+                  disabled={saving || generating || item.state !== "in_review"}
                   onClick={() => {
                     void approve(item);
                   }}
@@ -736,40 +730,6 @@ export function useAiPanel({
                 <Button icon="image" onClick={() => void showReview(item)}>
                   看对比
                 </Button>
-                {reviewId === item.session_id && (
-                  <section aria-label="方案对比" className="zc-review">
-                    <div className="zc-q-head">
-                      <strong>方案对比</strong>
-                      <Button variant="text" onClick={() => setReviewId("")}>
-                        收起
-                      </Button>
-                    </div>
-                    {review === null ? (
-                      <p>正在读取…</p>
-                    ) : review.length ? (
-                      review.map((change, index) => (
-                        <div key={`${change.entity}-${index}`}>
-                          <p>
-                            {change.before === null ? "新增" : change.after === null ? "移除" : "修改"} ·{" "}
-                            {{
-                              clip: "片段",
-                              cue: "字幕",
-                              transcript: "字幕",
-                              track: "轨道",
-                              marker: "标记",
-                              chapter: "章节",
-                              media: "素材",
-                            }[change.entity] ?? "工程内容"}
-                          </p>
-                          <ReviewValue label="原来" value={change.before} />
-                          <ReviewValue label="方案" value={change.after} />
-                        </div>
-                      ))
-                    ) : (
-                      <p>暂无改动</p>
-                    )}
-                  </section>
-                )}
               </section>
             );
           })}
@@ -838,6 +798,16 @@ export function useAiPanel({
       </span>
     ) : null,
     generating,
+    reviewActions: {
+      approve: async (id: string, pendingCount: number) => {
+        const item = ai.sessions.find((item) => item.session_id === id);
+        return item ? approve(item, pendingCount) : false;
+      },
+      reject,
+      confirming: confirmApprove,
+      busy: saving || generating,
+      error,
+    },
     parameters,
     send,
     setInput,

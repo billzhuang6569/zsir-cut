@@ -94,7 +94,7 @@ export function connectHost(
       pending.set(id, { resolve, reject, verb });
       const message = JSON.stringify(
         verb === "preview_data"
-          ? { id, type: "preview_data", at_revision: request.at_revision }
+          ? { id, type: "preview_data", at_revision: request.at_revision, session_id: request.session_id }
           : { id, verb, request },
       );
       if (ready) socket.send(message);

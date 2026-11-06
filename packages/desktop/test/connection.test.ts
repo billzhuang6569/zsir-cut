@@ -8,6 +8,7 @@ afterEach(() => vi.unstubAllGlobals());
 it("exposes revision events to subscribers while refreshing the project and subtitle progress", async () => {
   let socket: FakeSocket | undefined;
   const requests: string[] = [];
+  const messages: Record<string, unknown>[] = [];
   class FakeSocket {
     readyState = 1;
     onmessage: ((event: MessageEvent) => void) | null = null;
@@ -20,6 +21,7 @@ it("exposes revision events to subscribers while refreshing the project and subt
     }
     send(raw: string) {
       const message = JSON.parse(raw);
+      messages.push(message);
       requests.push(message.verb ?? message.type);
       const result =
         message.request?.view === "brief"
@@ -85,6 +87,9 @@ it("exposes revision events to subscribers while refreshing the project and subt
     expect(aiChanged).toHaveBeenCalledTimes(1);
     expect(projectChanged).toHaveBeenCalledTimes(1);
     expect(error).not.toHaveBeenCalled();
+    await disconnect.call("preview_data", { session_id: "ses_test", at_revision: "rev_draft" });
+    expect(messages.at(-1)).toMatchObject({ type: "preview_data", session_id: "ses_test", at_revision: "rev_draft" });
+    expect(messages.at(-1)).not.toHaveProperty("verb");
   } finally {
     window.removeEventListener("desktop-preview-cache", previewCache);
     disconnect();

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import type { ProjectChanged } from "../../app-host/src/revision-events.js";
 import { PANELS, type Panel } from "../../app-host/src/ui.js";
 import { type AiNotice, useAiPanel } from "./AiPanel.js";
 import { useChapterPanel } from "./ChapterPanel.js";
@@ -15,6 +16,7 @@ import { useHistoryPanel } from "./HistoryPanel.js";
 import { useMediaPanel } from "./MediaPanel.js";
 import { sourceProject } from "./media.js";
 import { ProjectEntry } from "./ProjectEntry.js";
+import { ReviewView } from "./ReviewView.js";
 import { SettingsPage } from "./SettingsPage.js";
 import { useSubtitlePanel } from "./SubtitlePanel.js";
 import { recordedKey } from "./settings-keymap.js";
@@ -38,6 +40,11 @@ export function App({ config }: { config?: { port: number; token: string } }) {
   const [previewPercent, setPreviewPercent] = useState(57);
   const [viewerTarget, setViewerTarget] = useState<HTMLDivElement | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [reviewSession, setReviewSession] = useState<string | null>(null);
+  const reviewSessionRef = useRef(reviewSession);
+  reviewSessionRef.current = reviewSession;
+  const [reviewTarget, setReviewTarget] = useState<HTMLElement | null>(null);
+  const [projectChange, setProjectChange] = useState<ProjectChanged | null>(null);
   const [state, setState] = useState<UiState>(initialState);
   const current = useRef(state);
   const [project, setProject] = useState<ProjectView | null>(null);
@@ -120,6 +127,8 @@ export function App({ config }: { config?: { port: number; token: string } }) {
         if (firstProject || path !== current.current.project) {
           setNotices([]);
           setPermissions([]);
+          setReviewSession(null);
+          setProjectChange(null);
           firstProject = false;
           setConnectionEpoch((value) => value + 1);
         }
@@ -134,6 +143,9 @@ export function App({ config }: { config?: { port: number; token: string } }) {
       permission: (request) =>
         setPermissions((old) => (old.some((item) => item.id === request.id) ? old : [...old, request])),
       aiChanged: () => setAiRevision((value) => value + 1),
+      projectChanged: (event) => {
+        if (event.target === "session" && event.session_id === reviewSessionRef.current) setProjectChange(event);
+      },
       icon: setFcpIcon,
       error: (message, detail) => {
         setError(message);
@@ -168,6 +180,23 @@ export function App({ config }: { config?: { port: number; token: string } }) {
     window.addEventListener("keydown", keydown, true);
     return () => window.removeEventListener("keydown", keydown, true);
   }, [settingsKey]);
+  useEffect(() => {
+    const open = (event: Event) => {
+      const id = (event as CustomEvent<string>).detail;
+      if (typeof id !== "string" || !id || !current.current.project) return;
+      update({
+        ...current.current,
+        history: { open: false, revision: null, label: null },
+        playing: false,
+        preview: "timeline",
+        selected: [],
+        edit_point: null,
+      });
+      setReviewSession(id);
+    };
+    window.addEventListener("desktop-open-review", open);
+    return () => window.removeEventListener("desktop-open-review", open);
+  }, [update]);
   const history = useHistoryPanel({ project, state, update, call: rawCall });
   const media = useMediaPanel({ project, state, update, call, config });
   const chapters = useChapterPanel({
@@ -187,10 +216,10 @@ export function App({ config }: { config?: { port: number; token: string } }) {
   const voice = useVoicePanel({ call, state, update, project, config });
   const source = useMemo(
     () =>
-      project && media.selected && state.preview === "media" && !state.history?.revision
+      project && !reviewSession && media.selected && state.preview === "media" && !state.history?.revision
         ? sourceProject(project, media.selected)
         : null,
-    [project, media.selected, state.preview, state.history?.revision],
+    [project, reviewSession, media.selected, state.preview, state.history?.revision],
   );
   const updateSource = useCallback(
     (next: UiState) => {
@@ -252,7 +281,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
         <button
           type="button"
           className="zc-btn zc-btn-primary is-primary"
-          disabled={!project || history.viewing}
+          disabled={!project || history.viewing || Boolean(reviewSession)}
           onClick={() => update(applyUi(current.current, "ui_show_panel", { panel: "export" }))}
         >
           <Icon name="export" />
@@ -350,11 +379,12 @@ export function App({ config }: { config?: { port: number; token: string } }) {
                 )}
               </div>
               <section
+                ref={setReviewTarget}
                 aria-label="参数区"
                 className="zc-parameters zc-panel zc-pad"
                 data-panel={state.history?.open ? "history" : state.panel}
               >
-                {state.history?.open ? (
+                {reviewSession ? null : state.history?.open ? (
                   history.panel
                 ) : (
                   <>
@@ -375,30 +405,51 @@ export function App({ config }: { config?: { port: number; token: string } }) {
                 )}
               </section>
             </div>
-            <TimelinePreview
-              preferences={preferences}
-              onOpenSettings={() => setSettingsOpen(true)}
-              viewerTarget={viewerTarget}
-              revisionControlsTarget={revisionControls}
-              hideViewer={Boolean(source)}
-              onMediaDrop={(id, at, track) => {
-                const item = project?.media.find((m) => m.id === id);
-                if (item && !history.viewing) media.place(item, at, track);
-              }}
-              project={history.view}
-              historyBanner={history.banner}
-              onEditSubtitle={subtitles.editCue}
-              readOnly={history.viewing}
-              state={state}
-              update={update}
-              subtitlePreview={subtitles.stylePreview}
-              onSubtitleStyle={subtitles.previewStyle}
-              config={config}
-              error={error}
-              errorDetail={errorDetail}
-              dragging={dragging}
-              call={call}
-            />
+            {reviewSession ? (
+              <ReviewView
+                key={`${state.project}-${reviewSession}`}
+                preferences={preferences}
+                sessionId={reviewSession}
+                revision={aiRevision}
+                project={project}
+                state={state}
+                update={update}
+                call={call}
+                change={projectChange}
+                actions={ai.reviewActions}
+                parametersTarget={reviewTarget}
+                viewerTarget={viewerTarget}
+                config={config}
+                dragging={dragging}
+                close={() => setReviewSession(null)}
+                committed={setProject}
+              />
+            ) : (
+              <TimelinePreview
+                preferences={preferences}
+                onOpenSettings={() => setSettingsOpen(true)}
+                viewerTarget={viewerTarget}
+                revisionControlsTarget={revisionControls}
+                hideViewer={Boolean(source)}
+                onMediaDrop={(id, at, track) => {
+                  const item = project?.media.find((m) => m.id === id);
+                  if (item && !history.viewing) media.place(item, at, track);
+                }}
+                project={history.view}
+                historyBanner={history.banner}
+                onEditSubtitle={subtitles.editCue}
+                readOnly={history.viewing}
+                state={state}
+                update={update}
+                subtitlePreview={subtitles.stylePreview}
+                onSubtitleStyle={subtitles.previewStyle}
+                config={config}
+                error={error}
+                errorDetail={errorDetail}
+                dragging={dragging}
+                call={call}
+              />
+            )}
             <hr
               className="zc-editor-divider"
               aria-label="预览与时间线分界"

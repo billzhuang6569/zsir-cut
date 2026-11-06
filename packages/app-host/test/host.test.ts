@@ -151,6 +151,65 @@ describe("desktop host", () => {
       expect((await send({ id: "present-preview", type: "preview_data" })).envelope.result.recognition.language).toBe(
         "en",
       );
+      const mainRevision = (await dispatch("inspect", { project, view: "brief" })).result?.project as {
+        revision: { id: string };
+      };
+      const begun = await dispatch("session_begin", {
+        project,
+        base_revision: mainRevision.revision.id,
+        idempotency_key: "draft-preview-begin",
+        author: { kind: "human", name: "test" },
+        approval: "manual",
+        intent: "校对字幕",
+      });
+      const session_id = begun.result?.session_id as string;
+      const edited = await dispatch("edit", {
+        project,
+        session_id,
+        base_revision: mainRevision.revision.id,
+        idempotency_key: "draft-preview-edit",
+        author: { kind: "human", name: "test" },
+        ops: [
+          {
+            op: "set_override",
+            track_id: "trk_sub_zh",
+            occurrence_id: "occ_1",
+            cue_id: "cue_1",
+            text: "草稿字幕",
+            force: true,
+          },
+        ],
+      });
+      expect(edited.status, JSON.stringify(edited)).toBe("drafted");
+      const draftPreview = await send({
+        id: "draft-preview",
+        type: "preview_data",
+        session_id,
+        at_revision: edited.receipt?.after,
+      });
+      const originalCue = preview.envelope.result.cues.find((cue: { cue_id: string }) => cue.cue_id === "cue_1");
+      expect(draftPreview.envelope.result.cues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            cue_id: "cue_1",
+            text: "草稿字幕",
+            track_id: "trk_sub_zh",
+            start: originalCue.start,
+            end: originalCue.end,
+          }),
+        ]),
+      );
+      const basePreview = await send({
+        id: "draft-base-preview",
+        type: "preview_data",
+        session_id,
+        at_revision: mainRevision.revision.id,
+      });
+      expect(basePreview.envelope.result.cues).toEqual(preview.envelope.result.cues);
+      expect((await send({ id: "main-stays", type: "preview_data" })).envelope.result.cues).toEqual(
+        preview.envelope.result.cues,
+      );
+      expect((await dispatch("inspect", { project, view: "session", session_id })).result?.state).toBe("open");
       await writeFile(project, "{}");
       expect(await send({ id: "failed-preview", type: "preview_data" })).toMatchObject({
         envelope: { ok: false, error: { message: expect.stringContaining("工程文件无效，可能已损坏或版本不兼容") } },
