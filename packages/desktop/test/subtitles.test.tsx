@@ -30,9 +30,9 @@ import {
   textEdit,
   textEdits,
 } from "../src/subtitles.js";
-import { TimelinePreview } from "../src/TimelinePreview.js";
 import type { TranscriptView } from "../src/timeline.js";
 import { recordingCanvas } from "./canvas.js";
+import { TimelinePreview } from "./timeline-preview.js";
 
 vi.mock("@tauri-apps/api/core", () => ({ isTauri: vi.fn(() => false) }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ revealItemInDir: vi.fn(async () => {}) }));

@@ -1,0 +1,38 @@
+{
+  "type": "result",
+  "id": "1",
+  "envelope": {
+    "verb": "agents_list",
+    "request_id": "req_01a1b0d3-18b0-7ef0-be8e-6d520b4138d1",
+    "changes": [],
+    "ok": true,
+    "status": "no_op",
+    "result": {
+      "agents": [
+        {
+          "id": "claude",
+          "name": "Claude Code",
+          "found": true,
+          "path": "/Users/billzhuang/.nvm/versions/node/v24.14.1/bin/claude",
+          "version": "2.1.318 (Claude Code)",
+          "latest": "2.1.318",
+          "update_available": false,
+          "default": true
+        },
+        {
+          "id": "codex",
+          "name": "Codex",
+          "found": true,
+          "path": "/Users/billzhuang/.nvm/versions/node/v24.14.1/bin/codex",
+          "version": "codex-cli 0.167.0",
+          "latest": "0.167.0",
+          "update_available": false,
+          "default": false
+        }
+      ],
+      "npm": "/Users/billzhuang/.nvm/versions/node/v24.14.1/bin/npm"
+    },
+    "verification": { "level": "none", "passed": true, "issues": [] },
+    "error": null
+  }
+}

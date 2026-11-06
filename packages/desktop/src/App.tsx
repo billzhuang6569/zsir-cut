@@ -3,17 +3,25 @@ import { PANELS, type Panel } from "../../app-host/src/ui.js";
 import { type AiNotice, useAiPanel } from "./AiPanel.js";
 import { useChapterPanel } from "./ChapterPanel.js";
 import { Icon, IconButton } from "./components.js";
-import { connectHost, type PermissionRequest, type ProjectView } from "./connection.js";
+import {
+  connectHost,
+  type PermissionRequest,
+  type ProjectView,
+  type Subscribe,
+  useTimelinePreferences,
+} from "./connection.js";
 import { ExportPanel } from "./ExportPanel.js";
 import { useHistoryPanel } from "./HistoryPanel.js";
 import { useMediaPanel } from "./MediaPanel.js";
 import { sourceProject } from "./media.js";
 import { ProjectEntry } from "./ProjectEntry.js";
+import { SettingsPage } from "./SettingsPage.js";
 import { useSubtitlePanel } from "./SubtitlePanel.js";
+import { recordedKey } from "./settings-keymap.js";
 import { applyUi, initialState, type UiState } from "./state.js";
 import { TimelinePreview } from "./TimelinePreview.js";
 import { seekTarget } from "./timeline.js";
-import { SettingsPage, useVoicePanel } from "./VoicePanel.js";
+import { useVoicePanel } from "./VoicePanel.js";
 import "./panels.css";
 
 const labels: Record<Panel, string> = { ai: "AI", media: "素材", chapters: "章节", subtitles: "字幕", voice: "语音" };
@@ -34,6 +42,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
   const current = useRef(state);
   const [project, setProject] = useState<ProjectView | null>(null);
   const connection = useRef<ReturnType<typeof connectHost> | null>(null);
+  const subscribe: Subscribe = useCallback((listener) => connection.current?.subscribe(listener) ?? (() => {}), []);
   const projectRef = useRef(project);
   projectRef.current = project;
   const [notices, setNotices] = useState<AiNotice[]>([]);
@@ -137,6 +146,28 @@ export function App({ config }: { config?: { port: number; token: string } }) {
       connection.current = null;
     };
   }, [config, update]);
+  const preferences = useTimelinePreferences(rawCall, setError, state, update);
+  const settingsKey = preferences.keymap.open_settings;
+  useEffect(() => {
+    const keydown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || event.repeat || document.querySelector("dialog[open]")) return;
+      if (
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        event.target instanceof Element &&
+        event.target.closest("input, textarea, [contenteditable=true]")
+      )
+        return;
+      if (settingsKey && recordedKey(event) === settingsKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        setSettingsOpen(true);
+      }
+    };
+    window.addEventListener("keydown", keydown, true);
+    return () => window.removeEventListener("keydown", keydown, true);
+  }, [settingsKey]);
   const history = useHistoryPanel({ project, state, update, call: rawCall });
   const media = useMediaPanel({ project, state, update, call, config });
   const chapters = useChapterPanel({
@@ -305,6 +336,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
               <div className="zc-preview-slot" ref={setViewerTarget}>
                 {source && state.media && (
                   <TimelinePreview
+                    preferences={preferences}
                     onOpenSettings={() => setSettingsOpen(true)}
                     viewerOnly
                     project={source}
@@ -344,6 +376,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
               </section>
             </div>
             <TimelinePreview
+              preferences={preferences}
               onOpenSettings={() => setSettingsOpen(true)}
               viewerTarget={viewerTarget}
               revisionControlsTarget={revisionControls}
@@ -400,7 +433,16 @@ export function App({ config }: { config?: { port: number; token: string } }) {
           </section>
         </>
       )}
-      {settingsOpen && <SettingsPage call={rawCall} close={() => setSettingsOpen(false)} />}
+      {settingsOpen && (
+        <SettingsPage
+          call={rawCall}
+          subscribe={subscribe}
+          onPrefs={preferences.acceptPrefs}
+          projectPath={state.project}
+          close={() => setSettingsOpen(false)}
+          openRecognition={() => update(applyUi(current.current, "ui_show_panel", { panel: "subtitles" }))}
+        />
+      )}
       {project && (
         <ExportPanel project={project} state={state} update={update} call={call} config={config} fcpIcon={fcpIcon} />
       )}

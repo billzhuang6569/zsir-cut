@@ -7,8 +7,8 @@ import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 import type { ProjectView } from "../src/connection.js";
 import { initialState } from "../src/state.js";
-import { TimelinePreview } from "../src/TimelinePreview.js";
 import { recordingCanvas } from "./canvas.js";
+import { TimelinePreview } from "./timeline-preview.js";
 
 it("follows decoded frames without repeated seeks and keeps React updates below frame rate", async () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });

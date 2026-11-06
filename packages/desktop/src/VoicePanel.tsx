@@ -43,7 +43,7 @@ function Modal({ title, close, children }: { title: string; close: () => void; c
   );
 }
 
-export function SettingsPage({ call, close }: { call: Call; close: () => void }) {
+export function SettingsPage({ call, close, embedded = false }: { call: Call; close: () => void; embedded?: boolean }) {
   const [settings, setSettings] = useState<VoiceSettings | null>(null);
   const [keySet, setKeySet] = useState(false);
   const [replace, setReplace] = useState(false);
@@ -90,8 +90,8 @@ export function SettingsPage({ call, close }: { call: Call; close: () => void })
       setBusy(false);
     }
   };
-  return (
-    <Modal title="设置" close={close}>
+  const content = (
+    <>
       {error && <p role="alert">{error}</p>}
       {settings && (
         <form
@@ -166,6 +166,13 @@ export function SettingsPage({ call, close }: { call: Call; close: () => void })
           </fieldset>
         </form>
       )}
+    </>
+  );
+  return embedded ? (
+    content
+  ) : (
+    <Modal title="设置" close={close}>
+      {content}
     </Modal>
   );
 }

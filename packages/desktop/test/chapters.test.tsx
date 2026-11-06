@@ -12,7 +12,7 @@ import type { ProjectView } from "../src/connection.js";
 import * as connection from "../src/connection.js";
 import type { UiState } from "../src/state.js";
 import { applyUi, initialState } from "../src/state.js";
-import { TimelinePreview } from "../src/TimelinePreview.js";
+import { TimelinePreview } from "./timeline-preview.js";
 
 const markers: ProjectView["markers"] = [
   { id: "second", kind: "chapter", at: { t: "20s" }, text: "第二章", level: 1 },
@@ -281,7 +281,7 @@ it.each([true, false])(
     });
     vi.spyOn(connection, "connectHost").mockImplementation((_config, value) => {
       handlers = value;
-      return Object.assign(() => {}, { call });
+      return Object.assign(() => {}, { call, subscribe: () => () => {} });
     });
     const container = document.createElement("div");
     document.body.append(container);

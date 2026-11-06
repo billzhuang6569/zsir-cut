@@ -6,7 +6,7 @@
 import { memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Clip, Icon, IconButton } from "./components.js";
-import { DESKTOP_AUTHOR, type ProjectView, useTimelinePreferences } from "./connection.js";
+import { DESKTOP_AUTHOR, type ProjectView, type useTimelinePreferences } from "./connection.js";
 import { useReverseAudio } from "./reverse-audio.js";
 import { SubtitleCanvas } from "./SubtitleCanvas.js";
 import type { UiState } from "./state.js";
@@ -92,6 +92,7 @@ const Film = memo(function Film({
   );
 });
 export function TimelinePreview({
+  preferences,
   project,
   state,
   update,
@@ -112,6 +113,7 @@ export function TimelinePreview({
   subtitlePreview,
   onSubtitleStyle,
 }: {
+  preferences: ReturnType<typeof useTimelinePreferences>;
   onEditSubtitle?: (cue: CueView) => void;
   subtitlePreview?: { fields: Partial<import("./timeline.js").StyleView>; cue_ids?: string[] | undefined } | undefined;
   onSubtitleStyle?: (
@@ -327,7 +329,7 @@ export function TimelinePreview({
   const [writeError, setWriteError] = useState<string | null>(null);
   const [writeErrorDetail, setWriteErrorDetail] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
-  const { keymap, snap, magnetic, trackHeight, setUi } = useTimelinePreferences(call, setWriteError, state, update);
+  const { keymap, snap, magnetic, trackHeight, setUi } = preferences;
   const snapRef = useRef(snap);
   snapRef.current = snap;
   const [direction, setDirection] = useState(1n);

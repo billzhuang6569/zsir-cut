@@ -14,9 +14,9 @@ import type { ProjectView } from "../src/connection.js";
 import { connectHost } from "../src/connection.js";
 import { applyUi, initialState } from "../src/state.js";
 import { caretOffset } from "../src/subtitles.js";
-import { TimelinePreview } from "../src/TimelinePreview.js";
 import { tokenCss } from "../src/tokens.js";
 import { recordingCanvas } from "./canvas.js";
+import { TimelinePreview } from "./timeline-preview.js";
 
 beforeEach(() => {
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => recordingCanvas().context);
@@ -576,6 +576,11 @@ it("preserves create and open rejection reasons instead of blaming the project f
   class FakeSocket {
     onmessage: ((event: MessageEvent) => void) | null = null;
     onclose = null;
+    constructor() {
+      queueMicrotask(() =>
+        this.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ type: "bootstrap", project: null }) })),
+      );
+    }
     send(raw: string) {
       const request = JSON.parse(raw);
       queueMicrotask(() =>
@@ -641,6 +646,11 @@ it.each([
   class FakeSocket {
     onmessage: ((event: MessageEvent) => void) | null = null;
     onclose = null;
+    constructor() {
+      queueMicrotask(() =>
+        this.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ type: "bootstrap", project: null }) })),
+      );
+    }
     send(raw: string) {
       const request = JSON.parse(raw);
       queueMicrotask(() =>

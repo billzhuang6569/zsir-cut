@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ProjectChanged } from "../../app-host/src/revision-events.js";
 import { UI_VERBS, type UiState, type UiVerb } from "../../app-host/src/ui.js";
 
@@ -14,7 +14,7 @@ export const DESKTOP_AUTHOR = { kind: "human", name: "桌面用户" } as const;
 interface ResultEnvelope {
   ok: boolean;
   result: unknown;
-  error: { message: string; code?: string } | null;
+  error: { message: string; code?: string; details?: { manual?: string } } | null;
   verification?: { issues: { code: string; severity: string }[] };
 }
 export function requestError(envelope: ResultEnvelope) {
@@ -55,6 +55,8 @@ export interface PermissionRequest {
   target: string | null;
   command: Record<string, unknown>;
 }
+export type HostPush = { type: string; [key: string]: unknown };
+export type Subscribe = (listener: (message: HostPush) => void) => () => void;
 
 export function connectHost(
   config: { port: number; token: string },
@@ -68,8 +70,12 @@ export function connectHost(
     icon: (value: string | null) => void;
     error: (message: string, detail?: string) => void;
   },
-): (() => void) & { call: (verb: string, request: Record<string, unknown>) => Promise<unknown> } {
+): (() => void) & { call: (verb: string, request: Record<string, unknown>) => Promise<unknown>; subscribe: Subscribe } {
   const socket = new WebSocket(`ws://127.0.0.1:${config.port}/?token=${encodeURIComponent(config.token)}`);
+  const listeners = new Set<(message: HostPush) => void>();
+  // The host accepts UI-only verbs after bootstrap, not merely after socket open.
+  let ready = false;
+  const queued: string[] = [];
   let sequence = 0;
   let project: string | null = null;
   let generation = 0;
@@ -80,19 +86,19 @@ export function connectHost(
   const call = (verb: string, request: Record<string, unknown>): Promise<unknown> => {
     if (UI_VERBS.includes(verb as UiVerb)) return Promise.resolve().then(() => handlers.ui(verb as UiVerb, request));
     return new Promise<unknown>((resolve, reject) => {
-      if (socket.readyState === 0) {
-        reject(new Error("宿主正在连接"));
+      if (socket.readyState > 1) {
+        reject(new Error("宿主连接已断开"));
         return;
       }
       const id = String(++sequence);
       pending.set(id, { resolve, reject, verb });
-      socket.send(
-        JSON.stringify(
-          verb === "preview_data"
-            ? { id, type: "preview_data", at_revision: request.at_revision }
-            : { id, verb, request },
-        ),
+      const message = JSON.stringify(
+        verb === "preview_data"
+          ? { id, type: "preview_data", at_revision: request.at_revision }
+          : { id, verb, request },
       );
+      if (ready) socket.send(message);
+      else queued.push(message);
     });
   };
   async function refresh() {
@@ -135,7 +141,12 @@ export function connectHost(
   let uiQueue = Promise.resolve();
   socket.onmessage = (event) => {
     const message = JSON.parse(event.data);
+    if (["agents_changed", "agents_output", "preview_cache"].includes(message.type)) {
+      for (const listener of listeners) listener(message);
+    }
     if (message.type === "bootstrap") {
+      ready = true;
+      for (const request of queued.splice(0)) socket.send(request);
       generation++;
       project = message.project;
       window.dispatchEvent(new Event("desktop-host-ready"));
@@ -187,6 +198,7 @@ export function connectHost(
             ? requestError(envelope)
             : `${envelope.error?.code ?? ""} ${envelope.error?.message ?? ""}`.trim(),
         });
+        Object.assign(error, { manual: envelope.error?.details?.manual });
         if (envelope.error?.code === "E_CONFLICT") {
           void refresh().then(
             () => item?.reject(error),
@@ -203,14 +215,26 @@ export function connectHost(
   socket.onclose = () => {
     for (const item of pending.values()) item.reject(new Error("宿主连接已断开"));
     pending.clear();
+    queued.length = 0;
     handlers.error("宿主连接已断开");
   };
   return Object.assign(
     () => {
       socket.onclose = null;
+      for (const item of pending.values()) item.reject(new Error("宿主连接已断开"));
+      pending.clear();
+      queued.length = 0;
       socket.close();
     },
-    { call },
+    {
+      call,
+      subscribe: (listener: (message: HostPush) => void) => {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+    },
   );
 }
 
@@ -227,19 +251,22 @@ export function useTimelinePreferences(
   const latest = useRef({ state, update });
   latest.current = { state, update };
   const [preferences, setPreferences] = useState<TimelinePreferences | null>(null);
+  const generation = useRef(0);
+  const acceptPrefs = useCallback((value: TimelinePreferences) => {
+    if (!value?.keymap || !value.prefs?.ui) return;
+    generation.current++;
+    setPreferences(value);
+    if (latest.current.state.snap !== value.prefs.ui.snap)
+      latest.current.update({ ...latest.current.state, snap: value.prefs.ui.snap });
+  }, []);
   useEffect(() => {
     let active = true;
-    let generation = 0;
     const refresh = () => {
-      const current = ++generation;
+      const current = ++generation.current;
       void call("prefs_get", {})
         .then((result) => {
           const value = result as TimelinePreferences;
-          if (active && current === generation && value?.keymap && value.prefs?.ui) {
-            setPreferences(value);
-            if (latest.current.state.snap !== value.prefs.ui.snap)
-              latest.current.update({ ...latest.current.state, snap: value.prefs.ui.snap });
-          }
+          if (active && current === generation.current) acceptPrefs(value);
         })
         .catch(() => {
           /* Bootstrap retries after the socket is ready. */
@@ -255,18 +282,19 @@ export function useTimelinePreferences(
       window.removeEventListener("desktop-prefs-changed", refresh);
       window.removeEventListener("focus", refresh);
     };
-  }, [call]);
+  }, [call, acceptPrefs]);
   const setUi = async (patch: Partial<TimelinePreferences["prefs"]["ui"]>) => {
     if (patch.snap !== undefined) update({ ...state, snap: patch.snap });
     try {
       const value = (await call("prefs_set", { patch: { ui: patch } })) as TimelinePreferences;
-      if (value?.keymap && value.prefs?.ui) setPreferences(value);
+      acceptPrefs(value);
     } catch (cause) {
       error(cause instanceof Error ? cause.message : "偏好保存失败，请重试");
     }
   };
   return {
-    keymap: preferences?.keymap ?? {},
+    keymap: preferences?.keymap ?? { open_settings: "⌘," },
+    acceptPrefs,
     snap: state.snap ?? true,
     magnetic: preferences?.prefs.ui.magnetic ?? true,
     trackHeight: preferences?.prefs.ui.track_height ?? "m",
