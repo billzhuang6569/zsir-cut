@@ -367,7 +367,7 @@ it("opens the review view and closes the history popover when clicking 待审 �
   await act(async () => root.render(<App config={{ port: 1234, token: "test" }} />));
   await act(async () => bootstrap?.());
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="历史 ⌥⌘H"]')?.click());
-  const popover = container.querySelector('[role="dialog"][aria-label="历史"]');
+  const popover = document.body.querySelector('[role="dialog"][aria-label="历史"]');
   expect(popover).not.toBeNull();
   const pending = popover?.querySelector<HTMLButtonElement>(".zc-history-draft");
   expect(pending?.textContent).toContain("待审 ›");
@@ -378,7 +378,7 @@ it("opens the review view and closes the history popover when clicking 待审 �
   expect(container.querySelector('[aria-label="参数区"] [aria-label="审阅方案"]')?.textContent).toContain(
     "方案 · 删掉沟通",
   );
-  expect(container.querySelector('[role="dialog"][aria-label="历史"]')).toBeNull();
+  expect(document.body.querySelector('[role="dialog"][aria-label="历史"]')).toBeNull();
   expect(container.querySelector('[aria-label="历史 ⌥⌘H"]')?.getAttribute("aria-expanded")).toBe("false");
 });
 it("reads decisions from the selected step session and refreshes immediately on a draft project_changed", async () => {
