@@ -18,6 +18,8 @@ vi.mock("../src/jobs.ts", async (importOriginal) => ({
   startPreviewJob: vi.fn(async () => "job_review"),
 }));
 
+import { startPreviewJob } from "../src/jobs.ts";
+
 const fixture = new URL("../../../fixtures/projects/std-25.zcut.json", import.meta.url);
 const author = { kind: "agent", name: "test" };
 let directory: string;
@@ -75,6 +77,59 @@ afterEach(async () => {
 });
 
 describe("sessions and diff", () => {
+  it.each(["approved", "rejected"] as const)(
+    "reads review without side effects through %s state",
+    async (closedState) => {
+      const session_id = await begin();
+      const timeline = await send("edit", { session_id, ops: [label("clp_v1", "重点")] });
+      const edited = await send("edit", { session_id, ops: [token] }, timeline.receipt?.after ?? "");
+      expect(edited.status, JSON.stringify(edited.error)).toBe("drafted");
+      const revision = edited.receipt?.after ?? "";
+      await send(
+        "session_ask",
+        {
+          session_id,
+          decisions: [{ id: "dec_read", question: "保留？", options: [{ id: "keep", label: "保留" }] }],
+        },
+        revision,
+      );
+      const sessionPath = join(directory, ".zcut", (await load()).id, "sessions", session_id, "session.json");
+      const readReview = async (state: string) => {
+        const before = await readFile(sessionPath, "utf8");
+        expect(JSON.parse(before).state).toBe(state);
+        const mainBefore = await readFile(project, "utf8");
+        const previewCalls = vi.mocked(startPreviewJob).mock.calls.length;
+        const result = await dispatch("inspect", { project, view: "review", session_id });
+        expect(result.ok).toBe(true);
+        expect(validateEnvelope(result).valid).toBe(true);
+        expect(await readFile(sessionPath, "utf8")).toBe(before);
+        expect(await readFile(project, "utf8")).toBe(mainBefore);
+        expect(vi.mocked(startPreviewJob).mock.calls.length).toBe(previewCalls);
+        expect(result.result?.preview_job).toBeNull();
+        return result.result;
+      };
+      const open = await readReview("open");
+      expect(open?.timeline_changes).not.toEqual([]);
+      expect(open?.subtitle_changes).not.toEqual([]);
+      expect(open?.decisions).toMatchObject([{ id: "dec_read" }]);
+      const review = await send("session_review", { session_id }, revision);
+      expect(open).toEqual({ ...review.result, preview_job: null });
+      expect(await readReview("in_review")).toEqual(open);
+      await send(closedState === "approved" ? "session_approve" : "session_reject", { session_id });
+      expect(await readReview(closedState)).toEqual(open);
+    },
+  );
+
+  it("requires session_id for review and rejects write-only request fields", async () => {
+    expect((await dispatch("inspect", { project, view: "review" })).error?.code).toBe("E_VALIDATION");
+    const session_id = await begin();
+    for (const extra of [{ base_revision: "rev_fixture_1" }, { idempotency_key: "read" }]) {
+      expect((await dispatch("inspect", { project, view: "review", session_id, ...extra })).error?.code).toBe(
+        "E_VALIDATION",
+      );
+    }
+  });
+
   it("lists three ordered steps and resolves approved history to its session decisions", async () => {
     const session_id = await begin();
     const reasons = ["保留重点", "标出疑问", "疑问已解决"];

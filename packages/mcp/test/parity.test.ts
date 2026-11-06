@@ -80,6 +80,7 @@ describe("CLI and MCP", () => {
       expect(invalid.error).toMatchObject({ code: "E_VALIDATION" });
       const written = await compare("edit", edit, true);
       const revision = (written.receipt as { after: string }).after;
+      const openReview = await compare("inspect", { session_id, view: "review" });
       const review = await compare("session_review", {
         ...base,
         base_revision: revision,
@@ -98,12 +99,17 @@ describe("CLI and MCP", () => {
           },
         ],
       });
+      expect(openReview.result).toEqual({ ...(review.result as Record<string, unknown>), preview_job: null });
+      const readReview = await compare("inspect", { session_id, view: "review" });
+      expect(readReview.result).toEqual(openReview.result);
+      await compare("inspect", { view: "review" });
       await compare("inspect", { session_id, view: "history" });
       const approved = await compare("session_approve", { ...base, session_id, idempotency_key: "approve" }, true);
       expect(approved.status).toBe("applied");
       const history = await compare("inspect", { view: "history" });
       expect(history.result).toMatchObject({ entries: [{ session_id, reason: null }] });
       await compare("inspect", { view: "session", session_id });
+      await compare("inspect", { view: "review", session_id });
     } finally {
       await client.close();
       await server.close();

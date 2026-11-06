@@ -223,6 +223,36 @@ const draftEnvelope = (envelope: WriteEnvelope, sessionId: string): Envelope =>
     receipt: envelope.receipt ? { ...envelope.receipt, session_id: sessionId } : null,
   }) as Envelope;
 
+export function sessionReviewSummary(session: Session, base: Project, current: Project, entries: JournalEntry[]) {
+  const issues = validateProjectSemantics(current);
+  const verification = { level: "L1" as const, passed: !issues.some((issue) => issue.severity === "error"), issues };
+  return {
+    base_revision: session.base_revision,
+    draft_revision: current.revision.id,
+    ...decisionSummary(current, session),
+    ...classify(diffProjectEntities(base, current)),
+    ops: entries.filter((entry) => entry.kind === "write").flatMap((entry) => entry.ops ?? []),
+    steps: activeWrites(entries).map((entry) => {
+      const summary: Record<string, { added: number; removed: number; changed: number }> = {};
+      for (const change of entry.changes ?? []) {
+        const counts = summary[change.entity] ?? { added: 0, removed: 0, changed: 0 };
+        summary[change.entity] = counts;
+        counts[change.before === null ? "added" : change.after === null ? "removed" : "changed"]++;
+      }
+      return {
+        revision: { seq: entry.seq, id: entry.revision },
+        label: entry.label ?? null,
+        reason: entry.reason ?? null,
+        batch: entry.batch ?? null,
+        summary,
+        keys: (entry.changes ?? []).map((change) => change.key),
+      };
+    }),
+    verification,
+    preview_job: null,
+  };
+}
+
 export async function runSession(verb: Verb, input: Input, id: string): Promise<Envelope> {
   const projectPath = resolve(input.project as string);
   const main = await readProject(projectPath);
@@ -481,34 +511,16 @@ async function runExistingSession(
     const current = await readProject(draftPath);
     if (input.base_revision !== current.revision.id)
       return reject(verb, id, "E_CONFLICT", "Draft revision differs from current revision");
-    const base = await draft.snapshotAt(session.base_revision);
-    const entries = await draft.journal();
-    const issues = validateProjectSemantics(current);
+    const summary = sessionReviewSummary(
+      session,
+      await draft.snapshotAt(session.base_revision),
+      current,
+      await draft.journal(),
+    );
     const result = output(verb, id);
-    result.verification = { level: "L1", passed: !issues.some((issue) => issue.severity === "error"), issues };
+    result.verification = summary.verification;
     result.result = {
-      base_revision: session.base_revision,
-      draft_revision: current.revision.id,
-      ...decisionSummary(current, session),
-      ...classify(diffProjectEntities(base, current)),
-      ops: entries.filter((entry) => entry.kind === "write").flatMap((entry) => entry.ops ?? []),
-      steps: activeWrites(entries).map((entry) => {
-        const summary: Record<string, { added: number; removed: number; changed: number }> = {};
-        for (const change of entry.changes ?? []) {
-          const counts = summary[change.entity] ?? { added: 0, removed: 0, changed: 0 };
-          summary[change.entity] = counts;
-          counts[change.before === null ? "added" : change.after === null ? "removed" : "changed"]++;
-        }
-        return {
-          revision: { seq: entry.seq, id: entry.revision },
-          label: entry.label ?? null,
-          reason: entry.reason ?? null,
-          batch: entry.batch ?? null,
-          summary,
-          keys: (entry.changes ?? []).map((change) => change.key),
-        };
-      }),
-      verification: result.verification,
+      ...summary,
       preview_job: await startPreviewJob("render_preview", projectPath, current, {
         project: projectPath,
         session_id: sessionId,
