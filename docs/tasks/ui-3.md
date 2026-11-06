@@ -1,10 +1,10 @@
 # 桌面版第 3 版：界面反馈落地（U3）
 
-状态：草案 · 2026-11-06 · 上位文档：`docs/plan.md` 第 3 步、`docs/product.md`、`docs/design.md`
+状态：已定 · 2026-11-06（Bill 当天定了第 6 节的六件事） · 上位文档：`docs/plan.md` 第 3 步、`docs/product.md`、`docs/design.md`
 
 来源：Bill 2026-11-04 到 11-06 在设计画布上的 10 轮反馈（F1 到 F10）。本轮的做法是先改设计稿，后端需求随手记下，最后统一出这份方案。反馈原文、画布上改了什么、后端需要什么，都记在 [UI 反馈与后端改动记录](https://claude.ai/artifact/YM2ULRLHoJQCFgsPqibset)。设计稿在 [设计画布](https://claude.ai/artifact/2cz57o7WFBCD2kcNpEA3n8)，变量和组件在 [设计系统](https://claude.ai/artifact/TSP7nbUeS5MgrfEEwNjse7)。
 
-本轮所有任务归入一个新里程碑「桌面版 v3」。仓库现在没有里程碑，这是第一个。EPIC 和 ISSUE 等 Bill 看过这份方案再建。
+本轮所有任务归入一个新里程碑「桌面版 v3」。仓库现在没有里程碑，这是第一个。EPIC 和 ISSUE 在规格合并后建。
 
 ## 1. 一条架构原则
 
@@ -83,7 +83,7 @@ U3.1、U3.2、U3.3 改的文件不重叠（标记和读视图、剪辑操作、�
 | 编号 | 内容 | 依赖 | 验收 |
 |---|---|---|---|
 | U3.4 | 应用级设置：`settings.json`（和 `recent.json` 同目录），zod 校验，写临时文件再改名；界面通道加 `settings_get`、`settings_set`（不进 MCP）。内容：`keymap`（`preset: "premiere" \| "fcp"`，`overrides`：动作到键）、`default_agent`、`preview_cache`（`directory`、`limit_gb`、`quality`、`auto`、`pause_on_battery`）、`ui`（`snap`、`timeline_zoom`、`track_height`、`chapters.view`、`chapters.zoom`、`chapters.folded[]`）。快捷键数据表放 `packages/app-host/src/keymap.ts`，动作名和界面的动作一致，两套默认按 U3-S2 附录 A | U3-S2 | 改一项设置后重启宿主仍在；文件损坏时回到默认并给界面一条警告，不崩；`keymap.ts` 里每个动作都有两套键，没有重复的键；界面通道外调不到这两个动词 |
-| U3.5 | Agent 管理：找程序（PATH 加 `/opt/homebrew/bin`、`/usr/local/bin`、`~/.local/bin`、`~/.npm-global/bin`）、版本、登录状态（Claude Code 用 `claude auth status` 一类的命令，Codex 用 `codex login status`；具体命令在任务里核实，没有可靠办法就显示「未知」，不猜）、新版检查（查 npm registry，走 `HTTPS_PROXY`，结果缓存 24 小时，失败静默）、安装和更新（`npm install -g @anthropic-ai/claude-code`、`npm install -g @openai/codex`，输出逐行推给界面，没有 npm 时给出手动安装说明）、设默认（写 U3.4 的 `default_agent`，`agents.selected` 启动时读它）。界面通道动词 `agents_list`、`agents_install`、`agents_update`、`agents_set_default`；推送 `agents_changed` | U3.4 | 两家都没装时列表给出「没有找到」和安装按钮的数据；装了 Claude Code 的机器上版本号和程序位置正确；新版检查断网时 3 秒内返回、不报错；安装过程的每行输出都到了界面；设默认后重启仍是它；测试不联网，npm 和 CLI 都用假命令 |
+| U3.5 | Agent 管理：找程序（PATH 加 `/opt/homebrew/bin`、`/usr/local/bin`、`~/.local/bin`、`~/.npm-global/bin`）、版本、新版检查（查 npm registry，走 `HTTPS_PROXY`，结果缓存 24 小时，失败静默）、安装和更新（`npm install -g @anthropic-ai/claude-code`、`npm install -g @openai/codex`，输出逐行推给界面，没有 npm 时给出手动安装说明）、设默认（写 U3.4 的 `default_agent`，`agents.selected` 启动时读它）。界面通道动词 `agents_list`、`agents_install`、`agents_update`、`agents_set_default`；推送 `agents_changed` | U3.4 | 两家都没装时列表给出「没有找到」和安装按钮的数据；装了 Claude Code 的机器上版本号和程序位置正确；不查也不显示登录状态；新版检查断网时 3 秒内返回、不报错；安装过程的每行输出都到了界面；设默认后重启仍是它；测试不联网，npm 和 CLI 都用假命令 |
 | U3.6 | 许可闸：Agent 通过宿主 MCP 调用会碰到工程外面的动词时，宿主先停下问界面。要问的动词：`export`、直接导出、`record_handoff_check`、`voice_generate`（花钱）、云端 `transcribe`，以及以后任何写工程目录以外文件的动词，清单在 U3-S2。流程：推 `permission_request`（`id`、`verb`、标题、说明、会写到哪、命令原文）给界面，等答复；`once` 放行一次；`project` 写进 `.zcut/<project_id>/permissions.json`，以后同动词不问；`deny` 给 Agent 返回 `rejected`、`E_PERMISSION_DENIED`，`details` 带用户的话（可选）。界面没连上时按 `deny` 处理。等待时 Agent 的调用挂着，不超时 | U3.4、U3-S2、U3-S5 | Agent 调 `export` 时界面收到请求，答 `once` 后导出照常；答 `project` 后再调不问；答 `deny` 后 Agent 收到 `E_PERMISSION_DENIED`，对话里能看到它换了办法；`edit`、`inspect` 这类不问；对等测试：同一动词从 CLI 调用不经过闸 |
 | U3.7 | 下一步建议：系统提示里约定 Agent 每轮最后一行写 `【下一步】一句话`（没把握就不写）；`agent-events.ts` 解析成 `suggestion` 事件，不进正文；界面收到后放进输入框当灰字。两家 CLI 都要 | — | 带这一行的回复，正文里看不到它，`suggestion` 事件里有；不带时没有事件；一行里有多个「【下一步】」只取最后一个 |
 | U3.8 | 修订事件：任何写入成功后（界面的、Agent 的、会话草稿的），`project_changed` 改为带内容：`revision`、`label`、`author`、`session_id`、`changes` 摘要（每类实体的增删改个数）和第一批 `changes` 的 `before`/`after` 位置（片段的轨道和起止，上限 50 条）。界面用它做过场和刷新历史 | U3.3 | Agent 一个 5 步的批次，界面按顺序收到 5 条；每条的 `changes` 和 `inspect history` 对得上；超过 50 条改动时摘要仍完整、明细截断并标 `truncated` |
@@ -131,15 +131,15 @@ U3.11、U3.12、U3.13、U3.15、U3.16、U3.18 改的文件不重叠，可以并�
 
 每段结束 Claude 验收一次；第 2 段和第 4 段结束请 Bill 实机看。
 
-## 6. 请 Bill 定的事
+## 6. 已定的事（Bill 2026-11-06）
 
-| 事 | 我的建议 |
+| 事 | 结论 |
 |---|---|
-| F2-f 方案能不能只批其中几条 | 本轮不做。协议只有整批批准或拒绝；用户不满意某条，在「决定」里告诉 AI 改。等用「决定面板的具体计划显示」细化时再看 |
-| 磁性开关管不管移动 | 管。开着时拖动用 `move` 的 `insert`，删除和修剪带 `ripple`；关着时都不带 |
-| 预览画质默认 | 720p，上限 20 GB，缓存放 `~/Movies/庄Sir剪辑助手/预览缓存`；外接盘可选 |
-| 章节颜色能不能自己改 | 本轮不做，`hue` 按顺序给 |
-| 登录状态查不到怎么办 | 显示「未知」，不猜；安装和更新照样能用 |
+| F2-f 方案能不能只批其中几条 | 本轮不做。协议只有整批批准或拒绝；用户不满意某条，在「决定」里告诉 AI 改 |
+| 磁性开关管不管移动 | 管，模仿 FCP 的操作感觉。开着时拖动用 `move` 的 `insert`，删除和修剪带 `ripple`；关着时都不带 |
+| 预览画质默认 | 720p，上限 20 GB，缓存放 `~/Movies/庄Sir剪辑助手/预览缓存`；设置里能改位置和上限 |
+| 章节颜色能不能自己改 | 不做，`hue` 按顺序给 |
+| 登录状态查不到怎么办 | 不做登录状态。Agent 页只显示找到没有、版本、位置、新版；安装和更新照样能用 |
 | 历史里人改的步骤要不要也有「理由」 | 不要。`reason` 只有 Agent 写；人的操作只有界面生成的 `label` |
 
 ## 7. 不做
