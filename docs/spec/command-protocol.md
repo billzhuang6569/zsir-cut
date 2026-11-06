@@ -323,7 +323,7 @@
 
 | 动词 | 类型 | 作用 |
 |---|---|---|
-| `inspect` | 读 | 按视图读工程：`brief`、`timeline`、`entity`、`history`、`session`、`chapters` |
+| `inspect` | 读 | 按视图读工程：`brief`、`timeline`、`entity`、`history`、`session`、`chapters`、`review` |
 | `read_transcript` | 读 | 读打包后的转写文本，可按时间线投影 |
 | `validate` | 读 | 跑 L1 校验，`media: true` 时加跑 L2 |
 | `diff` | 读 | 比较两个修订，输出实体级差异 |
@@ -362,6 +362,7 @@
 | `history` | 日志条目，按修订序号倒序，可选 `limit`（默认 20，最大 200）和 `before`（从这个修订之前开始） |
 | `session` | 必须带 `session_id`：会话的状态、`approval`、`intent`、`base_revision`、草稿当前修订，和全部决定 |
 | `chapters` | 章节树，见下文。可选 `timeline_id`，可带 `session_id`、`at_revision` |
+| `review` | 必须带 `session_id`：会话当前草稿的审阅汇总，内容同 7.3 的 `session_review` 结果（`base_revision`、`draft_revision`、`timeline_changes`、`subtitle_changes`、`ops`、`steps`、`verification`、`decisions`），只是不改会话状态、不启动预览任务，`preview_job` 为 null。任何状态的会话都能读；草稿在写时读到的是读那一刻的结果（2026-11-06 加，给桌面版的审方案用） |
 
 **`chapters` 视图**（2026-11-06 加）：大纲视图和时间轴视图读同一份数据，界面不自己算结束时间和颜色。
 
