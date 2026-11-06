@@ -412,7 +412,7 @@
         "properties": {
           "project": { "type": "string", "minLength": 1 },
           "author": { "$ref": "#/$defs/author" },
-          "view": { "enum": ["brief", "timeline", "entity", "history", "session", "chapters"] },
+          "view": { "enum": ["brief", "timeline", "entity", "history", "session", "chapters", "review"] },
           "timeline_id": { "$ref": "#/$defs/id" },
           "range": { "$ref": "#/$defs/range" },
           "id": { "$ref": "#/$defs/id" },
@@ -425,7 +425,7 @@
         },
         "if": { "properties": { "view": { "const": "entity" } } },
         "then": { "required": ["id"], "properties": { "id": true } },
-        "allOf": [{ "if": { "properties": { "view": { "const": "session" } } }, "then": { "required": ["session_id"], "properties": { "session_id": true } } },
+        "allOf": [{ "if": { "properties": { "view": { "enum": ["session", "review"] } } }, "then": { "required": ["session_id"], "properties": { "session_id": true } } },
           {
             "if": {
               "required": [

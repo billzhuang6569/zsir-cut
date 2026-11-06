@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { serializeProject } from "./project/io.ts";
 import { projectSubtitles } from "./project/projection.ts";
 import { validateProjectSemantics } from "./project/semantics.ts";
-import type { Session } from "./project/session.ts";
+import { type Session, sessionReviewSummary } from "./project/session.ts";
 import { openProject } from "./project/store.ts";
 import { displayRanges } from "./project/subtitle-rules.ts";
 import { clipTimeMap } from "./project/time-map.ts";
@@ -178,6 +178,11 @@ export async function inspect(
   input: Input,
   mainProjectPath = projectPath,
 ): Promise<Record<string, unknown>> {
+  if (input.view === "review") {
+    const session = JSON.parse(await readFile(join(dirname(projectPath), "session.json"), "utf8")) as Session;
+    const draft = openProject({ projectPath });
+    return sessionReviewSummary(session, await draft.snapshotAt(session.base_revision), project, await draft.journal());
+  }
   if (input.view === "session") {
     const session = JSON.parse(await readFile(join(dirname(projectPath), "session.json"), "utf8")) as Session;
     return {
