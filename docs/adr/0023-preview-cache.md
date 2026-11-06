@@ -13,7 +13,7 @@ Claude 2026-11-06 用 Playwright WebKit（和 Tauri 的 WKWebView 同一个引�
 ## 决策
 
 1. **每个视频片段一段缓存，不整条渲染。** 键是 `hash(素材指纹 + 源入点 + 源出点 + 速度 + 画质)`，所以挪片段、改字幕、改别的片段都不重做；`trim` 只重做被改的那一段。整条时间线渲染成一个文件的做法不采用：剪一刀全部重做。
-2. **格式是 fMP4。** 视频 H.264，默认 720p（短边 720，保持比例），关键帧间隔 0.5 秒；声音 AAC 48 kHz 单声道。macOS 上用 `h264_videotoolbox`，没有 VideoToolbox 时退回 `libx264 -preset veryfast`。文件不写时间戳，同样的输入两次生成逐字节相同。
+2. **格式是 fMP4。** 视频 H.264，默认 720p（短边 720，保持比例），关键帧间隔 0.5 秒；声音 AAC 48 kHz 单声道。macOS 上用 `h264_videotoolbox`，没有 VideoToolbox 时退回 `libx264 -preset veryfast`。文件不写时间戳。硬件编码器两次编出的字节不一定相同（2026-11-06 实测 VideoToolbox 就不同），缓存只给预览，不要求逐字节相同；要求的是同样的片段算出同样的键，不重复编码。
 3. **播放时用 MSE 接成一条流。** 上层只有一个 `<video>`，`SourceBuffer` 用 `sequence` 模式按时间线顺序追加各段，剪点处不 seek。播放头、字幕叠层、时码仍按现有办法从时间线推算，不靠 `<video>` 的 `currentTime` 反推片段。
 4. **没备好的段退回 P2.1。** 某段状态是 `building` 或 `missing` 时，那个剪点用两个播放器轮流播原素材；段备好后下一次经过剪点时再接上。缓存目录不存在（外接盘拔了）时全部按 `missing`，播放不中断，只是回到 P2.1 的水平。
 5. **缓存是宿主的事，不是内核的。** 生成队列、状态推送、清理、设置都在 `packages/app-host`，规格见 `desktop-host.md` 第 5 节。内核的 `render_preview` 不变，仍给 Agent 用。
