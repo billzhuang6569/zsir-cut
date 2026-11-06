@@ -113,7 +113,7 @@
 ### 转场、标记、轨道
 
 - `add_transition`：`id`、`from_clip`、`to_clip`、`duration`、`alignment`。`remove_transition`：`transition_id`。
-- `add_marker`：`id`、`at`、`duration`、`kind`、`text`、`level`（可选，只用于 `chapter`，取 1 或 2）。`update_marker`：`marker_id` 加要改的字段。`remove_marker`：`marker_id`。
+- `add_marker`：`id`、`at`、`duration`、`kind`、`text`、`level`（可选，只用于 `chapter`，取 1 或 2）、`description`（可选，只用于 `chapter`，见 `timeline-schema.md` 4.6）。`update_marker`：`marker_id` 加要改的字段。`remove_marker`：`marker_id`。
 - `add_track`：`id`、`kind`（`video` 或 `audio`）、`name`（可选，没给时按 `timeline-schema.md` 4.4 自动命名）、`index`（插入位置，默认末尾）。`rename_track`：`track_id`、`name`。它属于被改名轨道所在的域：视频、音频轨是剪辑域，字幕轨是字幕域。`remove_track`：`track_id`，轨道必须是空的，并且不是任何字幕轨的承载轨。
 
 ## 3. 字幕域

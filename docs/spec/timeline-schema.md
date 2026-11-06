@@ -228,7 +228,7 @@ FCP 12.4 实测与此一致：25 帧倒放段从源 44 秒倒放到 40 秒，片
 
 章节标记的 `ext["zsir.user_edited"]` 为 `true` 表示人改过它的标题或描述：作者 `kind` 为 `human` 的 `add_marker` 建的章节标记，或 `update_marker` 改了 `text`、`description` 时，内核写上；作者不是人的不写，也不清掉已有的。AI 重新分章时不改带这个标记的章节（Skill 里的规则，内核不拦）。
 
-`level`、`description`、`ext["zsir.user_edited"]` 都是可选的新增字段，旧文件照常能读，`schema_version` 仍为 `0.2`。
+`level`、`description`、`ext["zsir.user_edited"]` 都是可选的新增字段，旧文件照常能读，`schema_version` 不变（现为 `0.3`）。
 
 ## 5. 字幕：五层数据
 

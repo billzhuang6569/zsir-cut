@@ -17,3 +17,5 @@
 | `cutlist.py` | 按 handoff-profile 6.0 独立计算工程剪辑表；按 export-fcpxml 独立解析 FCPXML；逐行零帧比较 | `python3 -I tools/acceptance/cutlist.py compare <fcpxml> <工程>` |
 | `fcpxml_dtd.sh` | 用本机 FCP 应用包里的 DTD 校验 FCPXML（DTD 不进仓库；先复制到无空格路径再校验） | `sh tools/acceptance/fcpxml_dtd.sh <fcpxml>` |
 | `preview_seam.mjs` | 在 WebKit 里打开桌面版，从每个剪点前 2 秒播放，量最大帧间隔，看可见的 `<video>` 有没有 `seeking`。要求 playwright 和 WebKit，不进仓库 | `cd .tmp/pw && node ../../tools/acceptance/preview_seam.mjs <界面URL> <宿主端口> <令牌> <工程>` |
+| `chapters_check.py` | 按 command-protocol 9.1 独立算章节树（结束时间、时长、颜色编号、孤立二级），和 `inspect chapters` 的结果比 | `python3 -I tools/acceptance/chapters_check.py <工程> <结果信封.json>` |
+| `keymap_check.mjs` | 对照 desktop-host.md 3.1 逐项核对 `keymap.ts` 的两套默认，报出不一致和重复的键 | `node tools/acceptance/keymap_check.mjs` |
