@@ -362,7 +362,7 @@ export function SettingsPage({
                       className={`zc-settings-card${prefs.prefs.keymap.preset === preset ? " is-active" : ""}`}
                       aria-pressed={prefs.prefs.keymap.preset === preset}
                       disabled={busy}
-                      onClick={() => void run(() => save({ keymap: { preset, overrides: { ...presets[preset] } } }))}
+                      onClick={() => void run(() => save({ keymap: { preset, overrides: {} } }))}
                     >
                       <Icon name="keyboard" />
                       <strong>{preset === "premiere" ? "Premiere" : "Final Cut Pro"}</strong>
@@ -384,9 +384,7 @@ export function SettingsPage({
                     type="button"
                     className="zc-btn"
                     disabled={busy}
-                    onClick={() =>
-                      void run(() => save({ keymap: { overrides: { ...presets[prefs.prefs.keymap.preset] } } }))
-                    }
+                    onClick={() => void run(() => save({ keymap: { overrides: {} } }))}
                   >
                     恢复默认
                   </button>
@@ -444,7 +442,13 @@ export function SettingsPage({
                                           const key = recordedKey(event.nativeEvent);
                                           if (key) {
                                             setRecording(null);
-                                            void run(() => save({ keymap: { overrides: { [action]: key } } }));
+                                            void run(() =>
+                                              save({
+                                                keymap: {
+                                                  overrides: { ...prefs.prefs.keymap.overrides, [action]: key },
+                                                },
+                                              }),
+                                            );
                                           }
                                         }}
                                       >

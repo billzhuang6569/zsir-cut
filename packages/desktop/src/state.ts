@@ -1,18 +1,6 @@
 import type { UiState as HostUiState, UiVerb } from "../../app-host/src/ui.js";
 
-export type UiState = Omit<HostUiState, "chapters"> & {
-  snap?: boolean;
-  chapters?:
-    | { levels: 1 | 2; timecodes: boolean; view?: "outline" | "timeline"; zoom?: number; folded?: string[] }
-    | undefined;
-};
-
-// Desktop-only presentation state, also returned through ui_state.
-declare module "../../app-host/src/ui.js" {
-  interface UiState {
-    edit_point?: { track_id: string; at: string } | null;
-  }
-}
+export type UiState = HostUiState;
 
 export function initialState(): UiState {
   return {

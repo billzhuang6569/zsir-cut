@@ -15,13 +15,30 @@ export interface UiState {
   sub: string | null;
   playhead: { at: string } | { id: string };
   selected: string[];
+  edit_point?: { track_id: string; at: string } | null | undefined;
+  snap?: boolean | undefined;
   playing: boolean;
   range: { start: string; duration: string } | null;
   loop: boolean;
-  history?: { open: boolean; revision: string | null; label: string | null } | undefined;
+  history?:
+    | {
+        open: boolean;
+        viewing?: string | null | undefined;
+        revision?: string | null | undefined;
+        label?: string | null | undefined;
+      }
+    | undefined;
   export?: { open: boolean; sub: string | null; srt: boolean; wav: boolean; active: string | null } | undefined;
   subtitleBrowser?: { search: string; find: string; replace: string; matchCase: boolean } | undefined;
-  chapters?: { levels: 1 | 2; timecodes: boolean } | undefined;
+  chapters?:
+    | {
+        view?: "outline" | "timeline" | undefined;
+        levels?: 1 | 2 | undefined;
+        timecodes?: boolean | undefined;
+        zoom?: number | undefined;
+        folded?: string[] | undefined;
+      }
+    | undefined;
   mediaBrowser?: { scope: string; search: string; size: number } | undefined;
   preview?: "media" | "timeline" | undefined;
   media?: { id: string; at: string; in: string | null; out: string | null } | undefined;

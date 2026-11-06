@@ -207,6 +207,21 @@ describe.each(["fcp", "premiere"] as const)("%s merged actions", (value) => {
     }
     expect(writes()).toHaveLength(1);
   });
+  it("shows distinct snap and magnetic icons and tooltips from the merged keymap", async () => {
+    const snap = get(`[title="吸附 ${reply().keymap.toggle_snap}"]`);
+    const magnetic = get(`[title="磁性 ${reply().keymap.toggle_magnetic}"]`);
+    expect(snap).not.toBeNull();
+    expect(magnetic).not.toBeNull();
+    expect(snap.querySelector("svg")?.innerHTML).not.toBe(magnetic.querySelector("svg")?.innerHTML);
+    for (const button of [snap, magnetic]) {
+      expect(button.querySelector("svg")?.getAttribute("viewBox")).toBe("0 0 24 24");
+      expect(button.querySelector("svg")?.getAttribute("stroke-width")).toBe("1.5");
+    }
+    overrides = { toggle_snap: "D", toggle_magnetic: null };
+    await refresh();
+    expect(get('[title="吸附 D"]')).not.toBeNull();
+    expect(get('[title="磁性"]')).not.toBeNull();
+  });
   it("dispatches transport, navigation, range, tools, zoom, height and window actions", async () => {
     await action("play_pause");
     expect(state.playing).toBe(true);
@@ -471,8 +486,9 @@ it("refreshes the merged keymap after a successful prefs_set reply through the c
   }
 });
 
-it("keeps local edit points while preserving compatibility with the host's strict UI reply schema", async () => {
+it("reports selected edit points and the viewed history revision to the host", async () => {
   state.edit_point = { track_id: "t0", at: "4s" };
+  state.history = { open: true, revision: "rev_previous", label: "上一步" };
   let receive: ((event: { data: string }) => void) | null = null;
   const sent: { type: string; result: unknown }[] = [];
   class Socket {
@@ -504,11 +520,16 @@ it("keeps local edit points while preserving compatibility with the host's stric
     );
     expect(state.edit_point).toEqual({ track_id: "t0", at: "4s" });
     expect(sent[0]?.result).toMatchObject({ selected: [] });
-    expect(sent[0]?.result).not.toHaveProperty("edit_point");
+    expect(sent[0]?.result).toMatchObject({
+      edit_point: state.edit_point,
+      chapters: { view: "outline" },
+      history: { open: true, viewing: "rev_previous" },
+    });
     await act(async () =>
       receive?.({ data: JSON.stringify({ type: "ui_request", id: "clear", verb: "ui_select", request: { ids: [] } }) }),
     );
     expect(state.edit_point).toBeNull();
+    expect(sent[1]?.result).toHaveProperty("edit_point", null);
   } finally {
     connection();
     vi.unstubAllGlobals();

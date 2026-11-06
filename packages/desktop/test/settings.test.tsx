@@ -278,16 +278,26 @@ it("searches Chinese action labels, records one chord, reports unbinding, and re
   expect(h.onPrefs).toHaveBeenLastCalledWith(
     expect.objectContaining({ keymap: expect.objectContaining({ tool_blade: "A", tool_select: null }) }),
   );
+  await h.input("搜索快捷键", "");
+  await h.click("修改吸附开关");
+  await act(async () =>
+    h.find("修改吸附开关").dispatchEvent(new KeyboardEvent("keydown", { key: "d", code: "KeyD", bubbles: true })),
+  );
+  await h.settle();
+  expect(h.prefs.get().prefs.keymap.overrides).toEqual({ tool_blade: "A", toggle_snap: "D" });
   await h.click("恢复默认");
+  expect(h.call).toHaveBeenCalledWith("prefs_set", { patch: { keymap: { overrides: {} } } });
+  expect(h.prefs.get().prefs.keymap.overrides).toEqual({});
   expect(h.prefs.get().keymap).toEqual(presets.fcp);
   await h.input("搜索快捷键", "");
   await h.click("Premiere使用这套习惯");
   expect(h.call).toHaveBeenCalledWith("prefs_set", {
-    patch: { keymap: { preset: "premiere", overrides: presets.premiere } },
+    patch: { keymap: { preset: "premiere", overrides: {} } },
   });
   expect(h.prefs.get().keymap).toEqual(presets.premiere);
+  expect(h.prefs.get().prefs.keymap.overrides).toEqual({});
   await h.click("Final Cut Pro使用这套习惯");
-  expect(h.call).toHaveBeenCalledWith("prefs_set", { patch: { keymap: { preset: "fcp", overrides: presets.fcp } } });
+  expect(h.call).toHaveBeenCalledWith("prefs_set", { patch: { keymap: { preset: "fcp", overrides: {} } } });
   expect(Object.keys(h.prefs.get().keymap)).toEqual(actions);
 });
 it("cancels recording without writes and keeps saved preferences after failed writes", async () => {

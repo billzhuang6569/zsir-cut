@@ -212,6 +212,64 @@ describe("desktop host", () => {
     }
   });
 
+  it("round trips edit points, chapter views and history through the host to MCP", async () => {
+    const socket = await connect();
+    const client = await mcpClient();
+    let extra: Record<string, unknown> = {};
+    const state = {
+      project,
+      panel: "chapters",
+      sub: "timeline",
+      playhead: { at: "0s" },
+      selected: [],
+      playing: false,
+      range: null,
+      loop: false,
+    };
+    try {
+      socket.on("message", (raw) => {
+        const message = JSON.parse(raw.toString());
+        if (message.type === "ui_request")
+          socket.send(JSON.stringify({ type: "ui_result", id: message.id, result: { ...state, ...extra } }));
+      });
+      const bootstrap = once(socket, "message");
+      socket.send(JSON.stringify({ type: "ui_ready" }));
+      await bootstrap;
+      for (const fields of [
+        { edit_point: null, chapters: { view: "outline" }, history: { open: false, viewing: null } },
+        {
+          edit_point: { track_id: "trk_v1", at: "1001/300s" },
+          chapters: { view: "timeline" },
+          history: { open: true, viewing: "rev_previous" },
+        },
+        {
+          edit_point: { track_id: "trk_v1", at: "4s" },
+          snap: false,
+          chapters: { view: "timeline", levels: 2, timecodes: true, zoom: 1, folded: ["mrk_one"] },
+          history: { open: true, viewing: "rev_previous", revision: "rev_previous", label: "上一步" },
+        },
+      ]) {
+        extra = fields;
+        const reply = await client.callTool({ name: "zcut_ui_state", arguments: {} });
+        expect(reply.structuredContent).toMatchObject({ ok: true, status: "no_op", result: { ...state, ...fields } });
+      }
+      for (const fields of [
+        { edit_point: { track_id: "trk_v1", at: "invalid" } },
+        { edit_point: { track_id: "trk_v1", at: "4s", extra: true } },
+        { chapters: { view: "invalid" } },
+        { history: { open: true, viewing: 1 } },
+        { unknown: true },
+      ]) {
+        extra = fields;
+        const reply = await client.callTool({ name: "zcut_ui_state", arguments: {} });
+        expect(reply.structuredContent).toMatchObject({ ok: false, error: { code: "E_INTERNAL" } });
+      }
+    } finally {
+      socket.terminate();
+      await client.close();
+    }
+  });
+
   it("lists all kernel and UI MCP tools, reports no UI, and forwards UI requests", async () => {
     const socket = await connect();
     const client = await mcpClient();
