@@ -65,7 +65,6 @@ function host() {
     if (verb === "chat_list") return [];
     if (verb === "ai_state") return { sessions: [draft], batches: [] };
     if (verb === "chat_send") return { id: "chat_test" };
-    if (verb === "diff") return { changes: [{ entity: "clip", before: {}, after: null }] };
     return {};
   });
 }
@@ -237,9 +236,11 @@ it("renders suggestions only inside the composer; Tab fills, Enter sends, typing
   expect(call.mock.calls.filter(([verb]) => verb === "chat_send")).toHaveLength(2);
 });
 
-it("places the plan in 决定, leaves one chat pointer, and opens the diff from both links", async () => {
+it("places the plan in 决定 and opens review from all three links", async () => {
   const { node, root } = mount();
   const call = host();
+  const opened = vi.fn();
+  window.addEventListener("desktop-open-review", opened);
   await act(async () =>
     root.render(
       <Panel
@@ -261,16 +262,12 @@ it("places the plan in 决定, leaves one chat pointer, and opens the diff from 
   expect(node.querySelector(".zc-ai-head")?.textContent).not.toContain("(Claude Code)");
   expect(node.querySelectorAll(".zc-ai-head > button")).toHaveLength(2);
   await act(async () => button(node, "看对比").click());
-  expect(call).toHaveBeenCalledWith("diff", {
-    project: "/project",
-    session_id: "ses_draft",
-    from: "rev_base",
-    to: "rev_draft",
-  });
-  expect(node.querySelector('[aria-label="方案对比"]')?.textContent).toContain("移除 · 片段");
-  await act(() => button(node, "收起").click());
-  await act(async () => button(node, "看方案").click());
-  expect(node.querySelector('[aria-label="方案对比"]')).not.toBeNull();
+  expect((opened.mock.calls[0]?.[0] as CustomEvent).detail).toBe("ses_draft");
+  await act(() => button(node, "方案等你审").click());
+  await act(() => button(node, "看方案").click());
+  expect(opened).toHaveBeenCalledTimes(3);
+  expect(call.mock.calls.some(([verb]) => verb === "diff" || verb === "session_review")).toBe(false);
+  window.removeEventListener("desktop-open-review", opened);
   expect(button(node, "全部批准")).toBeDefined();
 });
 

@@ -107,6 +107,7 @@ export function TimelinePreview({
   revisionControlsTarget,
   viewerTarget,
   viewerOnly = false,
+  hideTimeline = false,
   hideViewer = false,
   onOpenSettings,
   onMediaDrop,
@@ -127,6 +128,7 @@ export function TimelinePreview({
   revisionControlsTarget?: HTMLElement | null;
   viewerTarget?: HTMLElement | null;
   viewerOnly?: boolean;
+  hideTimeline?: boolean;
   hideViewer?: boolean;
   onOpenSettings?: () => void;
   onMediaDrop?: (id: string, at: string, track: string) => void;
@@ -1307,7 +1309,7 @@ export function TimelinePreview({
         </div>
       )}
       {!hideViewer && (viewerTarget ? createPortal(viewer, viewerTarget) : viewer)}
-      {!viewerOnly && (
+      {!viewerOnly && !hideTimeline && (
         <section className="zc-timeline-card zc-panel" aria-label="时间线卡片">
           <section aria-label="工具栏" className="zc-toolbar">
             <IconButton

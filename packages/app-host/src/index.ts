@@ -44,6 +44,45 @@ const {
   new URL(import.meta.url.endsWith(".ts") ? "../../core/src/index.ts" : "../../core/dist/index.js", import.meta.url)
     .href
 );
+async function loadPath(path: string) {
+  let text: string;
+  try {
+    text = await readFile(path, "utf8");
+  } catch {
+    throw new Error("找不到或无法读取工程文件");
+  }
+  const parsed = parseProject(text);
+  if (!parsed.ok) throw new Error("工程文件无效，可能已损坏或版本不兼容");
+  return parsed.project;
+}
+
+export async function readPreviewProject(
+  projectPath: string,
+  request: { session_id?: unknown; at_revision?: unknown },
+) {
+  let previewPath = projectPath;
+  if (request.session_id !== undefined) {
+    const main = await loadPath(projectPath);
+    const session = await dispatch("inspect", {
+      project: projectPath,
+      view: "session",
+      session_id: request.session_id,
+    });
+    if (!session.ok) throw new Error(session.error?.message ?? "Session not found");
+    previewPath = join(
+      dirname(resolve(projectPath)),
+      ".zcut",
+      main.id,
+      "sessions",
+      request.session_id as string,
+      "draft.zcut.json",
+    );
+  }
+  return typeof request.at_revision === "string"
+    ? openProject({ projectPath: previewPath }).snapshotAt(request.at_revision)
+    : loadPath(previewPath);
+}
+
 export function subtitleStylesForPreview(styles: SubtitleStyle[]) {
   return styles.map((style) => ({
     ...style,
@@ -287,17 +326,6 @@ export async function startHost(
   const recent = new RecentProjects(options.appDataDir);
   const prefs = new DesktopPreferences(options.appDataDir);
   await prefs.load();
-  const loadPath = async (path: string) => {
-    let text: string;
-    try {
-      text = await readFile(path, "utf8");
-    } catch {
-      throw new Error("找不到或无法读取工程文件");
-    }
-    const parsed = parseProject(text);
-    if (!parsed.ok) throw new Error("工程文件无效，可能已损坏或版本不兼容");
-    return parsed.project;
-  };
   const load = async () => {
     if (!options.project) throw new Error("No project");
     return loadPath(options.project);
@@ -690,10 +718,7 @@ export async function startHost(
         if (message.type === "preview_data" && typeof message.id === "string") {
           const projectPath = options.project;
           if (!projectPath) throw new Error("No project");
-          const project =
-            typeof message.at_revision === "string"
-              ? await openProject({ projectPath }).snapshotAt(message.at_revision)
-              : await loadPath(projectPath);
+          const project = await readPreviewProject(projectPath, message);
           const timeline = project.timelines[0];
           const journal = await openProject({ projectPath }).journal();
           const lastRecognition = journal.findLast((entry) => entry.verb === "transcribe");
