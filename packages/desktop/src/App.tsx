@@ -3,7 +3,7 @@ import { PANELS, type Panel } from "../../app-host/src/ui.js";
 import { type AiNotice, useAiPanel } from "./AiPanel.js";
 import { useChapterPanel } from "./ChapterPanel.js";
 import { Icon, IconButton } from "./components.js";
-import { connectHost, type ProjectView } from "./connection.js";
+import { connectHost, type PermissionRequest, type ProjectView } from "./connection.js";
 import { ExportPanel } from "./ExportPanel.js";
 import { useHistoryPanel } from "./HistoryPanel.js";
 import { useMediaPanel } from "./MediaPanel.js";
@@ -37,6 +37,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
   const projectRef = useRef(project);
   projectRef.current = project;
   const [notices, setNotices] = useState<AiNotice[]>([]);
+  const [permissions, setPermissions] = useState<PermissionRequest[]>([]);
   const [aiRevision, setAiRevision] = useState(0);
   const [connectionEpoch, setConnectionEpoch] = useState(0);
   const rawCall = useCallback(
@@ -55,7 +56,16 @@ export function App({ config }: { config?: { port: number; token: string } }) {
     },
     [rawCall],
   );
-  const ai = useAiPanel({ call, path: state.project, project, notices, revision: aiRevision, connectionEpoch });
+  const ai = useAiPanel({
+    call,
+    path: state.project,
+    project,
+    notices,
+    revision: aiRevision,
+    connectionEpoch,
+    permissions,
+    permissionAnswered: (id) => setPermissions((old) => old.filter((item) => item.id !== id)),
+  });
   const [fcpIcon, setFcpIcon] = useState<string | null>(null);
   const dragging = useRef(false);
   const [errorDetail, setErrorDetail] = useState<string | undefined>();
@@ -100,6 +110,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
       project: (path, view) => {
         if (firstProject || path !== current.current.project) {
           setNotices([]);
+          setPermissions([]);
           firstProject = false;
           setConnectionEpoch((value) => value + 1);
         }
@@ -107,7 +118,12 @@ export function App({ config }: { config?: { port: number; token: string } }) {
         setProject(view);
         setError(null);
       },
-      chat: (notice) => setNotices((old) => [...old, notice]),
+      chat: (notice) => {
+        setNotices((old) => [...old, notice]);
+        if (notice.event.type === "end" && notice.event.text === "已停止") setPermissions([]);
+      },
+      permission: (request) =>
+        setPermissions((old) => (old.some((item) => item.id === request.id) ? old : [...old, request])),
       aiChanged: () => setAiRevision((value) => value + 1),
       icon: setFcpIcon,
       error: (message, detail) => {
@@ -309,7 +325,14 @@ export function App({ config }: { config?: { port: number; token: string } }) {
                   history.panel
                 ) : (
                   <>
-                    {state.panel !== "chapters" && state.panel !== "subtitles" && <h2>{parameters[state.panel]}</h2>}
+                    {state.panel === "ai" ? (
+                      <div className="zc-decision-heading">
+                        <h2>决定</h2>
+                        {ai.decisionStatus}
+                      </div>
+                    ) : (
+                      state.panel !== "chapters" && state.panel !== "subtitles" && <h2>{parameters[state.panel]}</h2>
+                    )}
                     {state.panel === "ai" && ai.parameters}
                     {state.panel === "media" && media.parameters}
                     {state.panel === "chapters" && chapters.outline}

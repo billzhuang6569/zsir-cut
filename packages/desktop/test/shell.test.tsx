@@ -295,7 +295,7 @@ it("opens the project through inspect and receives UI commands", async () => {
         expect(getComputedStyle(node).minHeight).toBe("0");
       }
       expect(container.querySelector('.zc-rail [role="tablist"]')).not.toBeNull();
-      expect(panel.firstElementChild?.className).toBe("zc-panel-head");
+      expect(panel.firstElementChild?.classList.contains("zc-panel-head")).toBe(true);
       expect(panel.firstElementChild?.querySelector("h2")?.textContent).toBe("AI");
       expect(panel.firstElementChild?.querySelector('[aria-label="Agent"]')).not.toBeNull();
       expect(panel.firstElementChild?.querySelector('[aria-label="新对话"]')).not.toBeNull();
