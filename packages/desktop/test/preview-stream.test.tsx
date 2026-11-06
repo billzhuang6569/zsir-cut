@@ -6,9 +6,9 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ProjectView } from "../src/connection.js";
 import { PreviewStream, usePreviewStream } from "../src/preview-stream.js";
 import { initialState, type UiState } from "../src/state.js";
-import { TimelinePreview } from "../src/TimelinePreview.js";
 import type { ClipView } from "../src/timeline.js";
 import { recordingCanvas } from "./canvas.js";
+import { TimelinePreview } from "./timeline-preview.js";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 const clips: ClipView[] = Array.from({ length: 7 }, (_, i) => ({
