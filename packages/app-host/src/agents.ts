@@ -15,7 +15,10 @@ export interface Chat {
 }
 const skill = fileURLToPath(new URL("../../../skills/zsir-cut/SKILL.md", import.meta.url));
 export class Agents {
-  private active: { child: ChildProcess; done: Promise<void> } | undefined;
+  private active: { chat: string; child: ChildProcess; done: Promise<void> } | undefined;
+  get activeChat() {
+    return this.active?.chat;
+  }
   private busy = false;
   selected: AgentKind | undefined;
   private cancelRequested = false;
@@ -202,7 +205,7 @@ export class Agents {
           })();
         });
       });
-      this.active = { child, done };
+      this.active = { chat: id, child, done };
       child.stdin.on("error", () => {});
       child.stdin.end(
         agent === "claude"
