@@ -281,7 +281,7 @@ it.each([true, false])(
     });
     vi.spyOn(connection, "connectHost").mockImplementation((_config, value) => {
       handlers = value;
-      return Object.assign(() => {}, { call });
+      return Object.assign(() => {}, { call, subscribe: () => () => {} });
     });
     const container = document.createElement("div");
     document.body.append(container);

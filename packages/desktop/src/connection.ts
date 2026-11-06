@@ -14,7 +14,7 @@ export const DESKTOP_AUTHOR = { kind: "human", name: "桌面用户" } as const;
 interface ResultEnvelope {
   ok: boolean;
   result: unknown;
-  error: { message: string; code?: string } | null;
+  error: { message: string; code?: string; details?: { manual?: string } } | null;
   verification?: { issues: { code: string; severity: string }[] };
 }
 export function requestError(envelope: ResultEnvelope) {
@@ -55,6 +55,8 @@ export interface PermissionRequest {
   target: string | null;
   command: Record<string, unknown>;
 }
+export type HostPush = { type: string; [key: string]: unknown };
+export type Subscribe = (listener: (message: HostPush) => void) => () => void;
 
 export function connectHost(
   config: { port: number; token: string },
@@ -68,8 +70,9 @@ export function connectHost(
     icon: (value: string | null) => void;
     error: (message: string, detail?: string) => void;
   },
-): (() => void) & { call: (verb: string, request: Record<string, unknown>) => Promise<unknown> } {
+): (() => void) & { call: (verb: string, request: Record<string, unknown>) => Promise<unknown>; subscribe: Subscribe } {
   const socket = new WebSocket(`ws://127.0.0.1:${config.port}/?token=${encodeURIComponent(config.token)}`);
+  const listeners = new Set<(message: HostPush) => void>();
   let sequence = 0;
   let project: string | null = null;
   let generation = 0;
@@ -135,6 +138,9 @@ export function connectHost(
   let uiQueue = Promise.resolve();
   socket.onmessage = (event) => {
     const message = JSON.parse(event.data);
+    if (["agents_changed", "agents_output", "preview_cache"].includes(message.type)) {
+      for (const listener of listeners) listener(message);
+    }
     if (message.type === "bootstrap") {
       generation++;
       project = message.project;
@@ -187,6 +193,7 @@ export function connectHost(
             ? requestError(envelope)
             : `${envelope.error?.code ?? ""} ${envelope.error?.message ?? ""}`.trim(),
         });
+        Object.assign(error, { manual: envelope.error?.details?.manual });
         if (envelope.error?.code === "E_CONFLICT") {
           void refresh().then(
             () => item?.reject(error),
@@ -210,7 +217,15 @@ export function connectHost(
       socket.onclose = null;
       socket.close();
     },
-    { call },
+    {
+      call,
+      subscribe: (listener: (message: HostPush) => void) => {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+    },
   );
 }
 

@@ -1,0 +1,289 @@
+.zc-settings {
+  width: 960px;
+  height: 700px;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+  padding: 0;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-dialog);
+  overflow: hidden;
+}
+.zc-settings[open] {
+  display: flex;
+}
+.zc-settings::backdrop {
+  background: var(--scrim);
+}
+.zc-settings-nav {
+  width: 200px;
+  flex: none;
+  padding: var(--space-5) var(--space-2);
+  background: var(--panel-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.zc-settings-nav h2 {
+  margin: 0 var(--space-2) var(--space-3);
+}
+.zc-settings-nav .zc-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 36px;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-2);
+  text-align: left;
+  cursor: pointer;
+}
+.zc-settings-nav .zc-row.is-active {
+  background: var(--raised);
+  color: var(--text);
+}
+.zc-settings-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-5) var(--space-6);
+  gap: var(--space-2);
+}
+.zc-settings-header,
+.zc-settings-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.zc-settings h3,
+.zc-settings p {
+  margin: 0;
+}
+.zc-settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  overflow: auto;
+  min-height: 0;
+}
+.zc-settings .zc-input {
+  min-width: 0;
+}
+.zc-settings .zc-btn {
+  flex: none;
+  white-space: nowrap;
+}
+.zc-settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.zc-settings-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+}
+.zc-settings-agent {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-3);
+}
+.zc-settings-agent + .zc-settings-agent {
+  border-top: 1px solid var(--line);
+}
+.zc-settings-agent .zc-grow {
+  min-width: 0;
+}
+.zc-settings-agent-icon {
+  display: grid;
+  place-items: center;
+  color: var(--text-2);
+}
+.zc-settings-path {
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+}
+.zc-settings-presets {
+  display: flex;
+  gap: var(--space-2);
+}
+.zc-settings-presets button {
+  flex: 1;
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  color: var(--text);
+  cursor: pointer;
+}
+.zc-settings-presets .is-active {
+  background: var(--cream);
+  color: var(--on-primary);
+  border-color: var(--cream);
+}
+.zc-settings-keytable,
+.zc-settings-projects {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: var(--label-size);
+}
+.zc-settings-keytable caption {
+  text-align: left;
+  font-weight: var(--title-weight);
+  padding-bottom: var(--space-4);
+}
+.zc-settings th {
+  color: var(--text-3);
+  font-weight: var(--body-weight);
+}
+.zc-settings td,
+.zc-settings th {
+  padding: var(--space-1);
+  height: 26px;
+}
+.zc-settings-keytable th:not(:first-child),
+.zc-settings-keytable td:not(:first-child) {
+  width: 60px;
+}
+.zc-settings-keytable tbody tr:hover {
+  background: var(--panel-2);
+}
+.zc-settings .zc-kbd {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+  color: var(--text);
+  padding: 0 var(--space-1);
+  font-family: var(--font-mono);
+  cursor: pointer;
+}
+.zc-settings-options {
+  padding: 0;
+  margin: 0;
+  border: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.zc-settings .zc-seg {
+  margin: 0;
+  border: 0;
+  display: flex;
+  background: var(--panel-2);
+  border-radius: var(--radius-md);
+  padding: var(--space-1);
+}
+.zc-settings .zc-seg button {
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+  background: transparent;
+  padding: var(--space-1) var(--space-3);
+  cursor: pointer;
+}
+.zc-settings .zc-seg .is-active {
+  background: var(--raised-2);
+  color: var(--text);
+}
+.zc-settings .zc-switch {
+  width: 32px;
+  height: 18px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--raised-2);
+  padding: 2px;
+  cursor: pointer;
+}
+.zc-settings .zc-switch::before {
+  content: "";
+  display: block;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+  background: var(--text);
+}
+.zc-settings .zc-switch.is-on {
+  background: var(--accent);
+}
+.zc-settings .zc-switch.is-on::before {
+  margin-left: auto;
+  background: var(--on-primary);
+}
+.zc-settings-usage {
+  width: 100%;
+  height: 6px;
+  accent-color: var(--text-3);
+}
+.zc-settings-projects {
+  background: var(--panel-2);
+}
+.zc-settings-projects tr {
+  border-bottom: 1px solid var(--line);
+}
+.zc-settings-log pre {
+  background: var(--panel-2);
+  padding: var(--space-3);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 200px;
+  overflow: auto;
+  font-family: var(--font-mono);
+}
+.zc-settings .zc-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.zc-settings button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+@media (max-width: 760px) {
+  .zc-settings-nav {
+    width: 140px;
+  }
+  .zc-settings-content {
+    padding: var(--space-3);
+  }
+  .zc-settings-field .zc-settings-row,
+  .zc-settings-agent {
+    flex-wrap: wrap;
+  }
+}
+
+.zc-settings[data-page="快捷键"] {
+  height: 820px;
+}
+.zc-settings[data-page="预览与缓存"] {
+  height: 780px;
+}
+.zc-settings-nav h2 {
+  font-size: var(--headline-size);
+  line-height: var(--headline-line);
+}
+.zc-settings h3 {
+  font-size: var(--title-size);
+  line-height: var(--title-line);
+}
+.zc-settings-tables {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  align-items: start;
+}
+.zc-settings-tables > table:first-child {
+  grid-row: span 2;
+}
+.zc-settings-presets .is-active .zc-meta {
+  color: inherit;
+}
