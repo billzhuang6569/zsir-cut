@@ -750,3 +750,19 @@ fieldset.zc-sub-list {
 .zc-sub-animation-cell.zc-sub-preset-cell {
   padding: 0;
 }
+
+.zc-sub-overlays {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.zc-sub-overlay-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.zc-sub-overlay-row > span:first-child {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

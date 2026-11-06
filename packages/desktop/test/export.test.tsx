@@ -52,7 +52,15 @@ const done = {
   progress: 1,
   envelope: { ok: true, result: { files: [{ name: "主时间线_r1.srt" }] } },
 };
-async function mount(options: { losses?: string; polling?: boolean; fail?: boolean } = {}) {
+async function mount(
+  options: {
+    losses?: string;
+    polling?: boolean;
+    fail?: boolean;
+    project?: ProjectView;
+    config?: { port: number; token: string };
+  } = {},
+) {
   let poll = 0;
   const call = vi.fn(async (verb: string, request: Record<string, unknown>): Promise<unknown> => {
     if (verb === "export_preferences")
@@ -80,11 +88,11 @@ async function mount(options: { losses?: string; polling?: boolean; fail?: boole
     state = ui;
     return (
       <ExportPanel
-        project={project}
+        project={options.project ?? project}
         state={ui}
         update={update}
         call={call}
-        config={undefined}
+        config={options.config}
         fcpIcon="data:image/png;base64,a"
       />
     );
@@ -329,4 +337,62 @@ it("retains the export lock when job status is temporarily unavailable", async (
   });
   expect(ui.state().export?.active).toBeNull();
   expect(ui.container.textContent).toContain("导出完成");
+});
+
+it("shows project summary values and the first timeline clip thumbnail", async () => {
+  const view: ProjectView = {
+    ...project,
+    name: "成片测试",
+    duration: { t: "216001/2000s" },
+    revision: { id: "rev_13", seq: 13 },
+    edit_rate: "25",
+    cues: Array.from({ length: 67 }, (_, i) => ({
+      cue_id: `cue_${i}`,
+      track_id: "trk_sub",
+      start: "0s",
+      end: "1s",
+      text: "字幕",
+      style_id: "sty_default",
+      piece: 0,
+    })),
+    tracks: [
+      {
+        id: "trk_video",
+        name: "视频 A",
+        kind: "video",
+        enabled: true,
+        clips: [
+          {
+            id: "clp_first",
+            media_id: "med_first",
+            label: null,
+            enabled: true,
+            timeline_in: { t: "2s" },
+            timeline_out: { t: "10s" },
+            source_in: { t: "5s" },
+            source_out: { t: "13s" },
+            speed: "1",
+          },
+        ],
+      },
+    ],
+  };
+  const ui = await mount({ project: view, config: { port: 1234, token: "test" } });
+  const summary = ui.container.querySelector('[aria-label="成片信息"]');
+  for (const value of ["成片测试", "01:48", "1 分 48 秒", "1080p", "25 帧/秒", "67 条字幕", "第 13 版 · 已保存"])
+    expect(summary?.textContent).toContain(value);
+  expect(summary?.querySelector(".zc-dot.is-approved")).not.toBeNull();
+  const url = new URL(summary?.querySelector("img")?.src ?? "");
+  expect(url.pathname).toContain("thumb");
+  expect(url.searchParams.get("media_id")).toBe("med_first");
+  expect(url.searchParams.get("at")).toBe("5s");
+});
+it("formats fractional fps and duration without the project's starting timecode", async () => {
+  const ui = await mount();
+  const summary = ui.container.querySelector('[aria-label="成片信息"]');
+  expect(summary?.textContent).toContain("29.97 帧/秒");
+  expect(summary?.textContent).toContain("10 秒");
+  expect(summary?.textContent).toContain("00:10");
+  expect(summary?.textContent).toContain("0 条字幕");
+  expect(summary?.querySelector("img")).toBeNull();
 });
