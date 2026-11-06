@@ -260,30 +260,30 @@ it("opens the project through inspect and receives UI commands", async () => {
     expect(container.querySelector('[aria-label="工具栏"] [aria-label^="历史"]')).toBeNull();
     const parametersBefore = container.querySelector('[aria-label="参数区"]')?.innerHTML;
     await act(async () => historyButton?.click());
-    expect(container.querySelector('[role="dialog"][aria-label="历史"]')).not.toBeNull();
+    expect(document.body.querySelector('[role="dialog"][aria-label="历史"]')).not.toBeNull();
     expect(container.querySelector('[aria-label="参数区"]')?.innerHTML).toBe(parametersBefore);
     await act(async () => historyButton?.click());
     await act(async () =>
       socket?.receive({ type: "ui_request", id: "history", verb: "ui_show_panel", request: { panel: "history" } }),
     );
-    expect(container.querySelector('[role="dialog"][aria-label="历史"]')).not.toBeNull();
+    expect(document.body.querySelector('[role="dialog"][aria-label="历史"]')).not.toBeNull();
     expect(container.querySelector('[aria-label="参数区"]')?.innerHTML).toBe(parametersBefore);
     expect(replies.at(-1)).toMatchObject({ id: "history", result: { history: { open: true } } });
     await act(() =>
-      container
+      document.body
         .querySelector('[role="dialog"][aria-label="历史"] button')
         ?.dispatchEvent(
           new KeyboardEvent("keydown", { key: "˙", code: "KeyH", metaKey: true, altKey: true, bubbles: true }),
         ),
     );
-    expect(container.querySelector('[role="dialog"][aria-label="历史"]')).toBeNull();
+    expect(document.body.querySelector('[role="dialog"][aria-label="历史"]')).toBeNull();
     await act(() =>
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "˙", code: "KeyH", metaKey: true, altKey: true })),
     );
-    expect(container.querySelector('[role="dialog"][aria-label="历史"]')).not.toBeNull();
+    expect(document.body.querySelector('[role="dialog"][aria-label="历史"]')).not.toBeNull();
     expect(container.querySelector('[aria-label="参数区"]')?.innerHTML).toBe(parametersBefore);
     await act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
-    expect(container.querySelector('[role="dialog"][aria-label="历史"]')).toBeNull();
+    expect(document.body.querySelector('[role="dialog"][aria-label="历史"]')).toBeNull();
     const divider = container.querySelector<HTMLElement>('[aria-label="预览与时间线分界"]');
     await act(() => divider?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true })));
     expect(divider?.getAttribute("aria-valuenow")).toBe("52");

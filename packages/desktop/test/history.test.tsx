@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
 import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
@@ -155,7 +156,7 @@ async function mount(
     container.remove();
   });
   const click = async (label: string) => {
-    const node = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+    const node = [...document.body.querySelectorAll<HTMLButtonElement>("button")].find(
       (n) => n.textContent?.trim() === label || n.getAttribute("aria-label") === label,
     );
     if (!node) throw new Error(`找不到按钮：${label}`);
@@ -192,8 +193,8 @@ it("keeps the paired panel and sub when history opens through a UI verb", () => 
 });
 it("paginates on scroll, previews at_revision read-only and restores with a human label", async () => {
   const ui = await mount();
-  expect(ui.container.querySelectorAll(".zc-history-step")).toHaveLength(20);
-  expect(ui.container.querySelector(".zc-history-step")?.textContent).toContain("现在");
+  expect(document.body.querySelectorAll(".zc-history-step")).toHaveLength(20);
+  expect(document.body.querySelector(".zc-history-step")?.textContent).toContain("现在");
   await ui.click("修改 29刚刚");
   expect(ui.call).toHaveBeenCalledWith("inspect", { project: "/工程.json", view: "timeline", at_revision: "rev_29" });
   expect(ui.call).toHaveBeenCalledWith("preview_data", { project: "/工程.json", at_revision: "rev_29" });
@@ -205,7 +206,7 @@ it("paginates on scroll, previews at_revision read-only and restores with a huma
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "z", metaKey: true }));
   });
   expect(ui.call.mock.calls.filter(([verb]) => ["edit", "undo", "redo"].includes(verb))).toHaveLength(writesBefore);
-  const list = ui.container.querySelector(".zc-history-list");
+  const list = document.body.querySelector(".zc-history-list");
   await act(async () => list?.dispatchEvent(new Event("scroll")));
   expect(ui.call).toHaveBeenCalledWith("inspect", {
     project: "/工程.json",
@@ -213,7 +214,7 @@ it("paginates on scroll, previews at_revision read-only and restores with a huma
     limit: 20,
     before: "rev_11",
   });
-  expect(ui.container.querySelectorAll(".zc-history-step")).toHaveLength(30);
+  expect(document.body.querySelectorAll(".zc-history-step")).toHaveLength(30);
   await ui.click("回到这一步");
   expect(ui.call).toHaveBeenCalledWith(
     "restore",
@@ -228,38 +229,38 @@ it("paginates on scroll, previews at_revision read-only and restores with a huma
   );
   expect(ui.state().history?.revision).toBeNull();
   await ui.rerender();
-  expect(ui.container.querySelector(".zc-history-step")?.textContent).toContain("回到了 修改 29");
-  expect(ui.container.querySelector(".zc-history-banner")).toBeNull();
+  expect(document.body.querySelector(".zc-history-step")?.textContent).toContain("回到了 修改 29");
+  expect(document.body.querySelector(".zc-history-banner")).toBeNull();
 });
 it("collapses batches, shows progress, blocks restore until completion and preserves the original panel", async () => {
   vi.useFakeTimers();
   const ui = await mount({ batch: true, open: true });
-  expect(ui.container.textContent).toContain("AI 正在做第 3 / 3 步");
-  expect(ui.container.querySelectorAll(".zc-history-step")).toHaveLength(1);
+  expect(document.body.textContent).toContain("AI 正在做第 3 / 3 步");
+  expect(document.body.querySelectorAll(".zc-history-step")).toHaveLength(1);
   await ui.click("修改 293 步");
-  expect(ui.container.querySelectorAll(".zc-history-step")).toHaveLength(3);
+  expect(document.body.querySelectorAll(".zc-history-step")).toHaveLength(3);
   await ui.click("修改 29刚刚");
-  expect(ui.container.querySelector<HTMLButtonElement>(".zc-history-footer button")?.disabled).toBe(true);
-  expect(ui.container.querySelector(".zc-history-footer button")?.getAttribute("title")).toContain("AI 批次尚未完成");
+  expect(document.body.querySelector<HTMLButtonElement>(".zc-history-footer button")?.disabled).toBe(true);
+  expect(document.body.querySelector(".zc-history-footer button")?.getAttribute("title")).toContain("AI 批次尚未完成");
   await ui.complete();
-  expect(ui.container.textContent).not.toContain("AI 正在做第");
-  expect(ui.container.querySelector<HTMLButtonElement>(".zc-history-footer button")?.disabled).toBe(false);
+  expect(document.body.textContent).not.toContain("AI 正在做第");
+  expect(document.body.querySelector<HTMLButtonElement>(".zc-history-footer button")?.disabled).toBe(false);
   await ui.click("回到最新");
   expect(ui.state()).toMatchObject({ panel: "subtitles", sub: "style", history: { open: true, revision: null } });
   await act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
-  expect(ui.container.querySelector('[role="dialog"][aria-label="历史"]')).toBeNull();
+  expect(document.body.querySelector('[role="dialog"][aria-label="历史"]')).toBeNull();
   await act(async () => {
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "h", code: "KeyH", metaKey: true, altKey: true }));
   });
-  expect(ui.container.querySelector('[role="dialog"][aria-label="历史"]')).not.toBeNull();
+  expect(document.body.querySelector('[role="dialog"][aria-label="历史"]')).not.toBeNull();
   await ui.click("历史 ⌥⌘H");
   expect(ui.state().history?.open).toBe(false);
 });
 it("keeps failed historical previews read-only and offers return to present", async () => {
   const ui = await mount({ failPreview: true });
   await ui.click("修改 29刚刚");
-  expect(ui.container.querySelector('[role="alert"]')?.textContent).toContain("历史预览读取失败");
-  expect(ui.container.querySelector<HTMLButtonElement>(".zc-history-footer button")?.disabled).toBe(true);
+  expect(document.body.querySelector('[role="alert"]')?.textContent).toContain("历史预览读取失败");
+  expect(document.body.querySelector<HTMLButtonElement>(".zc-history-footer button")?.disabled).toBe(true);
   await ui.click("回到最新");
   expect(ui.state().history?.revision).toBeNull();
 });
@@ -272,9 +273,9 @@ it("loads the beginning of a batch across pages before naming its collapsed grou
     limit: 20,
     before: "rev_11",
   });
-  expect(ui.container.querySelector(".zc-history-list [aria-expanded]")?.textContent).toBe("修改 130 步");
+  expect(document.body.querySelector(".zc-history-list [aria-expanded]")?.textContent).toBe("修改 130 步");
   await ui.click("修改 130 步");
-  expect(ui.container.querySelectorAll(".zc-history-step")).toHaveLength(30);
+  expect(document.body.querySelectorAll(".zc-history-step")).toHaveLength(30);
 });
 
 it("catches up without gaps when more than a page is written between refreshes", async () => {
@@ -286,16 +287,16 @@ it("catches up without gaps when more than a page is written between refreshes",
     limit: 20,
     before: "rev_41",
   });
-  expect(ui.container.querySelectorAll(".zc-history-step")).toHaveLength(50);
-  expect(ui.container.querySelector(".zc-history-step")?.textContent).toContain("修改 60");
+  expect(document.body.querySelectorAll(".zc-history-step")).toHaveLength(50);
+  expect(document.body.querySelector(".zc-history-step")?.textContent).toContain("修改 60");
 });
 
 it("shows a queued batch even before it has written a history entry", async () => {
   const ui = await mount({ queued: true, open: true });
   expect(ui.call).toHaveBeenCalledWith("batch_status", { project: "/工程.json", batch_id: "bat_queued" });
-  expect(ui.container.textContent).toContain("AI 正在做第 1 / 3 步");
+  expect(document.body.textContent).toContain("AI 正在做第 1 / 3 步");
   await ui.click("修改 29刚刚");
-  expect(ui.container.querySelector<HTMLButtonElement>(".zc-history-footer button")?.disabled).toBe(true);
+  expect(document.body.querySelector<HTMLButtonElement>(".zc-history-footer button")?.disabled).toBe(true);
 });
 
 it("closes on outside click and preserves the current step and paired panels across popover toggles", async () => {
@@ -315,7 +316,7 @@ it("opens draft review with the session id and never previews or restores a draf
   const review = vi.fn();
   window.addEventListener("desktop-open-review", review);
   try {
-    const row = ui.container.querySelector<HTMLButtonElement>(".zc-history-draft");
+    const row = document.body.querySelector<HTMLButtonElement>(".zc-history-draft");
     expect(row?.textContent).toContain("待审 ›");
     await act(async () => row?.click());
     expect(review).toHaveBeenCalledOnce();
@@ -391,4 +392,41 @@ it("reads decisions from the selected step session and refreshes immediately on 
   expect(ui.call.mock.calls.filter(([, request]) => request.view === "history")).toHaveLength(count + 1);
   await ui.click("修改 28刚刚");
   expect(ui.container.querySelector('[aria-label="参数区"]')?.textContent).not.toContain("跳剪怎么处理？");
+});
+
+it("portals the styled floating layer to body without replacing paired panels and tracks its anchor", async () => {
+  let right = 900;
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+    () => ({ left: right - 32, right, top: 8, bottom: 40, width: 32, height: 32 }) as DOMRect,
+  );
+  const style = document.createElement("style");
+  style.textContent = readFileSync("packages/desktop/src/history.css", "utf8");
+  document.head.append(style);
+  cleanups.push(async () => style.remove());
+  const ui = await mount({ draft: true });
+  const panel = document.body.querySelector<HTMLElement>('[role="dialog"][aria-label="历史"]');
+  expect(panel).not.toBeNull();
+  expect(panel?.parentElement).toBe(document.body);
+  expect(panel?.classList.contains("zc-popover")).toBe(true);
+  expect(ui.container.contains(panel)).toBe(false);
+  expect(panel?.closest('[aria-label="参数区"], [aria-label="功能区"], .zc-menubar')).toBeNull();
+  expect(ui.container.querySelector('[aria-label="参数区"]')?.textContent).toBe("字幕样式");
+  expect(ui.container.querySelector('[aria-label="功能区"]')?.textContent).toBe("字幕设置");
+  const computed = getComputedStyle(panel as HTMLElement);
+  expect(computed.position).toBe("fixed");
+  expect(computed.zIndex).toBe("30");
+  expect(computed.display).toBe("flex");
+  expect(computed.width).toBe("360px");
+  expect(computed.getPropertyValue("background")).toBe("var(--panel)");
+  expect(panel?.style.top).toBe("46px");
+  expect(panel?.style.right).toBe(`${window.innerWidth - 912}px`);
+  expect(panel?.style.getPropertyValue("--history-caret-right")).toBe("23px");
+  expect(panel?.querySelector(".zc-popover-caret")).not.toBeNull();
+  await act(() => panel?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true })));
+  expect(ui.state().history?.open).toBe(true);
+  right = 850;
+  await act(() => window.dispatchEvent(new Event("resize")));
+  expect(panel?.style.right).toBe(`${window.innerWidth - 862}px`);
+  await ui.click("关闭");
+  expect(document.body.querySelector(".zc-history-popover")).toBeNull();
 });

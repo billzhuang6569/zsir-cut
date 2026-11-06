@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { EntityChange } from "../../core/dist/project/entities.js";
 import { Button, DecisionProgress } from "./ai-components.js";
 import { Icon } from "./components.js";
@@ -50,6 +51,7 @@ export function useHistoryPanel({
   const latest = useRef({ project, state, update });
   latest.current = { project, state, update };
   const anchor = useRef<HTMLDivElement>(null);
+  const popover = useRef<HTMLElement>(null);
   const [drafts, setDrafts] = useState<{ session_id: string; intent?: string; revision_count: number }[]>([]);
   const [decisions, setDecisions] = useState<{ revision: string; items: HistoryDecision[] } | null>(null);
   const [refreshVersion, setRefreshVersion] = useState(0);
@@ -68,6 +70,29 @@ export function useHistoryPanel({
   const loaded = useRef(false);
   const generation = useRef(0);
   const open = state.history?.open === true;
+  useLayoutEffect(() => {
+    if (!open) return;
+    const position = () => {
+      const button = anchor.current?.getBoundingClientRect();
+      const panel = popover.current;
+      if (!button || !panel) return;
+      const right = Math.max(8, window.innerWidth - button.right - 12);
+      panel.style.top = `${button.bottom + 6}px`;
+      panel.style.right = `${right}px`;
+      panel.style.maxHeight = `min(600px, calc(100dvh - ${button.bottom + 18}px))`;
+      panel.style.setProperty(
+        "--history-caret-right",
+        `${window.innerWidth - right - button.left - button.width / 2 - 5}px`,
+      );
+    };
+    position();
+    window.addEventListener("resize", position);
+    window.addEventListener("scroll", position, true);
+    return () => {
+      window.removeEventListener("resize", position);
+      window.removeEventListener("scroll", position, true);
+    };
+  }, [open]);
   const revision = state.history?.revision;
   const change = useCallback((history: NonNullable<UiState["history"]>) => {
     const { state, update } = latest.current;
@@ -108,7 +133,12 @@ export function useHistoryPanel({
 
   useEffect(() => {
     const outside = (event: PointerEvent) => {
-      if (latest.current.state.history?.open && event.target instanceof Node && !anchor.current?.contains(event.target))
+      if (
+        latest.current.state.history?.open &&
+        event.target instanceof Node &&
+        !anchor.current?.contains(event.target) &&
+        !popover.current?.contains(event.target)
+      )
         close();
     };
     document.addEventListener("pointerdown", outside);
@@ -367,71 +397,74 @@ export function useHistoryPanel({
         正在看：{state.history?.label}
       </span>
     ),
-    panel: open && (
-      <section className="zc-popover zc-history-popover" role="dialog" aria-label="历史">
-        <span className="zc-popover-caret" />
-        <div className="zc-history-heading">
-          <h2>历史</h2>
-          <Button icon="close" onClick={close}>
-            关闭
-          </Button>
-        </div>
-        {Object.entries(batches)
-          .filter(([, batch]) => batch.state === "open")
-          .map(([id, batch]) => (
-            <output className="zc-history-progress" key={id}>
-              <DecisionProgress done={batch.applied.length} total={batch.count} />
-              AI 正在做第 {Math.min(batch.applied.length + 1, batch.count)} / {batch.count} 步
-            </output>
-          ))}
-        {(error || readError) && <p role="alert">{error || readError}</p>}
-        <div
-          className="zc-history-list"
-          onScroll={(event) => {
-            const node = event.currentTarget;
-            if (node.scrollHeight - node.scrollTop - node.clientHeight < 32) void loadMore();
-          }}
-        >
-          {drafts.map((draft) => (
-            <button
-              type="button"
-              className="zc-step zc-history-draft"
-              key={draft.session_id}
-              onClick={() => {
-                change({ open: false, revision: null, label: null });
-                window.dispatchEvent(new CustomEvent("desktop-open-review", { detail: draft.session_id }));
-              }}
-            >
-              <Icon name="spark" />
-              <span className="zc-grow">
-                {draft.intent || "AI 草稿"}
-                <small>{draft.revision_count} 步</small>
-              </span>
-              <span className="zc-chip is-sm is-attention">待审 ›</span>
-            </button>
-          ))}
-          {list}
-          {!entries.length && !drafts.length && <p className="zc-muted">还没有历史步骤</p>}
-          {more && (
-            <Button disabled={loading} onClick={() => void loadMore()}>
-              {loading ? "正在加载…" : "加载更早的步骤"}
+    panel:
+      open &&
+      createPortal(
+        <section ref={popover} className="zc-popover zc-history-popover" role="dialog" aria-label="历史">
+          <span className="zc-popover-caret" />
+          <div className="zc-history-heading">
+            <h2>历史</h2>
+            <Button icon="close" onClick={close}>
+              关闭
             </Button>
-          )}
-        </div>
-        <footer className="zc-history-footer">
-          <Button
-            icon="undo"
-            disabled={!revision || busy || batchOpen || snapshot?.revision !== revision}
-            title={batchOpen ? "AI 批次尚未完成，暂时不能恢复" : undefined}
-            onClick={() => void restore()}
+          </div>
+          {Object.entries(batches)
+            .filter(([, batch]) => batch.state === "open")
+            .map(([id, batch]) => (
+              <output className="zc-history-progress" key={id}>
+                <DecisionProgress done={batch.applied.length} total={batch.count} />
+                AI 正在做第 {Math.min(batch.applied.length + 1, batch.count)} / {batch.count} 步
+              </output>
+            ))}
+          {(error || readError) && <p role="alert">{error || readError}</p>}
+          <div
+            className="zc-history-list"
+            onScroll={(event) => {
+              const node = event.currentTarget;
+              if (node.scrollHeight - node.scrollTop - node.clientHeight < 32) void loadMore();
+            }}
           >
-            回到这一步
-          </Button>
-          <Button disabled={busy} onClick={present}>
-            回到最新
-          </Button>
-        </footer>
-      </section>
-    ),
+            {drafts.map((draft) => (
+              <button
+                type="button"
+                className="zc-step zc-history-draft"
+                key={draft.session_id}
+                onClick={() => {
+                  change({ open: false, revision: null, label: null });
+                  window.dispatchEvent(new CustomEvent("desktop-open-review", { detail: draft.session_id }));
+                }}
+              >
+                <Icon name="spark" />
+                <span className="zc-grow">
+                  {draft.intent || "AI 草稿"}
+                  <small>{draft.revision_count} 步</small>
+                </span>
+                <span className="zc-chip is-sm is-attention">待审 ›</span>
+              </button>
+            ))}
+            {list}
+            {!entries.length && !drafts.length && <p className="zc-muted">还没有历史步骤</p>}
+            {more && (
+              <Button disabled={loading} onClick={() => void loadMore()}>
+                {loading ? "正在加载…" : "加载更早的步骤"}
+              </Button>
+            )}
+          </div>
+          <footer className="zc-history-footer">
+            <Button
+              icon="undo"
+              disabled={!revision || busy || batchOpen || snapshot?.revision !== revision}
+              title={batchOpen ? "AI 批次尚未完成，暂时不能恢复" : undefined}
+              onClick={() => void restore()}
+            >
+              回到这一步
+            </Button>
+            <Button disabled={busy} onClick={present}>
+              回到最新
+            </Button>
+          </footer>
+        </section>,
+        document.body,
+      ),
   };
 }
