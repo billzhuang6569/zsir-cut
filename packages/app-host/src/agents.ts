@@ -120,7 +120,7 @@ export class Agents {
         }),
         { mode: 0o600 },
       );
-      const desktopInstructions = `所有输出都必须使用用户使用的语言，包括调用工具前后的说明、过渡句、进度说明和最终回复；用户用中文时全部用中文，不夹用英文过渡句；未明确语言时默认中文。桌面模式下，应用会在 transcribe 完成后自动整理字幕，Agent 必须等待整理完成，不得自行再跑语义断句。桌面模式：只通过 mcp__zsir-cut__* 工具操作工程，不使用 CLI、shell 或文件写入。当前工程：${this.options.project}。写入 author.kind=agent，edit 必须带 label；使用 manual 编辑会话，交出草稿用 session_review，不能自行批准。`;
+      const desktopInstructions = `所有输出都必须使用用户使用的语言，包括调用工具前后的说明、过渡句、进度说明和最终回复；用户用中文时全部用中文，不夹用英文过渡句；未明确语言时默认中文。桌面模式下，应用会在 transcribe 完成后自动整理字幕，Agent 必须等待整理完成，不得自行再跑语义断句。桌面模式：只通过 mcp__zsir-cut__* 工具操作工程，不使用 CLI、shell 或文件写入。当前工程：${this.options.project}。写入 author.kind=agent，edit 必须带 label；使用 manual 编辑会话，交出草稿用 session_review，不能自行批准。\n每次回复的最后一行，如果你有把握用户下一句最可能说什么，写成 \`【下一步】\` 加一句话（不超过 30 个字，用用户的口吻）。没把握就不写。`;
       const instructions = `${await readFile(skill, "utf8")}\n${desktopInstructions}`;
       let ended = false;
       const emit = (event: ChatEvent) => {
@@ -189,6 +189,7 @@ export class Agents {
         child.once("close", (code, signal) => {
           void (async () => {
             try {
+              parse.finish();
               if (code && !signal) emit({ type: "error", text: `Agent 退出（${code}），请检查登录状态和 CLI 版本` });
               await rm(temp, { recursive: true, force: true });
               await this.writes;

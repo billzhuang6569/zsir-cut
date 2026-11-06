@@ -73,6 +73,10 @@ const events=${JSON.stringify(
           ],
     )};
 if (${JSON.stringify(mode)} === 'error') { process.stderr.write('not logged in\\n'); process.exitCode=1; return; }
+if (${JSON.stringify(mode)} === 'suggestion') {
+const text='\\n【下一步】 继续剪辑';
+events.splice(-1,0,${agent === "claude" ? "{type:'stream_event',event:{type:'content_block_delta',delta:{text}}}" : "{type:'item.completed',item:{id:'suggestion',type:'agent_message',text}}"});
+}
 for(const event of events) process.stdout.write(JSON.stringify(event)+'\\n');
 if (${JSON.stringify(mode)} === 'stop') setInterval(()=>{},1000);
 });
@@ -132,6 +136,9 @@ describe("local agent conversations with fake executables", () => {
       expect(details.input).toContain("所有输出都必须使用用户使用的语言");
       expect(details.input).toContain("包括调用工具前后的说明、过渡句、进度说明和最终回复");
       expect(details.input).toContain("用户用中文时全部用中文");
+      expect(details.input).toContain(
+        "每次回复的最后一行，如果你有把握用户下一句最可能说什么，写成 `【下一步】` 加一句话（不超过 30 个字，用用户的口吻）。没把握就不写。",
+      );
       expect(details.cwd).toBe(await realpath(directory));
       if (agent === "claude") {
         expect(details.mode).toBe(0o600);
@@ -365,4 +372,111 @@ it("retains Claude authentication details from nonzero JSON output", async () =>
   await expect(manager.subtitlePass("claude", "test", new AbortController().signal)).rejects.toThrow(
     "Failed to authenticate",
   );
+});
+
+describe.each(["claude", "codex"] as const)("%s next-step suggestions", (agent) => {
+  function stream() {
+    const events: ChatEvent[] = [];
+    const parse = agentParser(agent, (event) => events.push(event));
+    let full = "";
+    return {
+      events,
+      push(chunk: string) {
+        full += chunk;
+        parse(
+          JSON.stringify(
+            agent === "claude"
+              ? { type: "stream_event", event: { type: "content_block_delta", delta: { text: chunk } } }
+              : { type: "item.updated", item: { id: "reply", type: "agent_message", text: full } },
+          ),
+        );
+      },
+      end() {
+        if (agent === "claude")
+          parse(JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: full }] } }));
+        else
+          parse(JSON.stringify({ type: "item.completed", item: { id: "reply", type: "agent_message", text: full } }));
+        parse(JSON.stringify({ type: agent === "claude" ? "result" : "turn.completed" }));
+      },
+      visible() {
+        return events
+          .filter((e) => e.type === "text")
+          .map((e) => e.text)
+          .join("");
+      },
+    };
+  }
+
+  it.each([
+    ["正文\n【下一步】 继续 \n\n", "正文\n", "继续"],
+    ["正文", "正文", undefined],
+    ["【下一步】旧【下一步】 新建议", "", "新建议"],
+    ["正文\n【下一步】建议\n继续正文", "正文\n【下一步】建议\n继续正文", undefined],
+    ["正文里【下一步】建议", "正文里【下一步】建议", undefined],
+    ["正文\n 【下一步】建议", "正文\n 【下一步】建议", undefined],
+    ["正文\n【下一步】 \r\n \r\n", "正文\n", undefined],
+    ["正文\n【下一", "正文\n【下一", undefined],
+    ["正文\r\n【下一步】 建议\r\n", "正文\r\n", "建议"],
+  ])("extracts only the final non-empty marker line: %j", (reply, visible, suggestion) => {
+    for (const chunks of [[reply], [...reply]]) {
+      const run = stream();
+      for (const chunk of chunks) run.push(chunk);
+      run.end();
+      expect(run.visible()).toBe(visible);
+      expect(run.events.filter((e) => e.type === "suggestion")).toEqual(
+        suggestion ? [{ type: "suggestion", text: suggestion }] : [],
+      );
+      expect(run.events.at(-1)).toEqual({ type: "end" });
+    }
+  });
+
+  it("never flashes a split marker, and releases it when the reply continues", () => {
+    const run = stream();
+    run.push("正文\n");
+    for (const chunk of [..."【下一步】继续\n\n"]) {
+      run.push(chunk);
+      expect(run.visible()).toBe("正文\n");
+      expect(run.events.some((e) => e.type === "suggestion")).toBe(false);
+    }
+    run.push("后续正文");
+    expect(run.visible()).toBe("正文\n【下一步】继续\n\n后续正文");
+    run.end();
+    expect(run.events.some((e) => e.type === "suggestion")).toBe(false);
+  });
+
+  it("handles Claude non-streamed text and Codex completed-only items", () => {
+    const events: ChatEvent[] = [];
+    const parse = agentParser(agent, (event) => events.push(event));
+    parse(
+      JSON.stringify(
+        agent === "claude"
+          ? { type: "assistant", message: { content: [{ type: "text", text: "正文\n【下一步】继续" }] } }
+          : { type: "item.completed", item: { id: "reply", type: "agent_message", text: "正文\n【下一步】继续" } },
+      ),
+    );
+    parse(JSON.stringify({ type: agent === "claude" ? "result" : "turn.completed" }));
+    expect(events).toEqual([{ type: "text", text: "正文\n" }, { type: "suggestion", text: "继续" }, { type: "end" }]);
+  });
+
+  it("persists suggestions and filtered text across host restarts", async () => {
+    const { directory, manager, events } = await fixture(agent, "suggestion");
+    const chat = await manager.send(agent, "剪辑");
+    await vi.waitFor(() => expect(events.at(-1)?.type).toBe("end"), { timeout: 10000, interval: 10 });
+    const reopened = new Agents({
+      project: join(directory, "project.zcut.json"),
+      projectId: "prj_test",
+      url: "unused",
+      token: "unused",
+      emit: () => {},
+    });
+    const history = await reopened.history(chat.id);
+    expect(history.events).toEqual(events);
+    expect(history.events).toContainEqual({ type: "suggestion", text: "继续剪辑" });
+    expect(
+      history.events
+        .filter((e) => e.type === "text")
+        .map((e) => e.text)
+        .join(""),
+    ).toBe("你好\n");
+  });
 });
