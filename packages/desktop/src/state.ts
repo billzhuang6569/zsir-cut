@@ -1,4 +1,11 @@
-import type { UiState, UiVerb } from "../../app-host/src/ui.js";
+import type { UiState as HostUiState, UiVerb } from "../../app-host/src/ui.js";
+
+export type UiState = Omit<HostUiState, "chapters"> & {
+  snap?: boolean;
+  chapters?:
+    | { levels: 1 | 2; timecodes: boolean; view?: "outline" | "timeline"; zoom?: number; folded?: string[] }
+    | undefined;
+};
 
 export function initialState(): UiState {
   return {
@@ -10,7 +17,7 @@ export function initialState(): UiState {
     playing: false,
     range: null,
     loop: false,
-    chapters: { levels: 2, timecodes: true },
+    chapters: { levels: 2, timecodes: true, view: "outline", zoom: 1, folded: [] },
   };
 }
 
@@ -34,9 +41,28 @@ export function applyUi(state: UiState, verb: UiVerb, request: Record<string, un
       return {
         ...state,
         panel: request.panel as UiState["panel"],
+        ...(request.panel === "chapters"
+          ? {
+              chapters: {
+                levels: 2 as const,
+                timecodes: true,
+                ...state.chapters,
+                view:
+                  request.sub === undefined
+                    ? (state.chapters?.view ?? "outline")
+                    : request.sub === "timeline"
+                      ? "timeline"
+                      : "outline",
+              },
+            }
+          : {}),
         sub:
           (request.sub as string | undefined) ??
-          (request.panel === "chapters" ? "outline" : request.panel === "voice" ? "clone" : null),
+          (request.panel === "chapters"
+            ? (state.chapters?.view ?? "outline")
+            : request.panel === "voice"
+              ? "clone"
+              : null),
       };
     case "ui_seek":
       return { ...state, playhead: typeof request.at === "string" ? { at: request.at } : { id: request.id as string } };

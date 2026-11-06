@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
+
+import { readFileSync } from "node:fs";
 import { act, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
-import type { UiState } from "../../app-host/src/ui.js";
 import { App } from "../src/App.js";
 import { useChapterPanel } from "../src/ChapterPanel.js";
-import { chapterGroups, chapterMarkdown, chapterTime } from "../src/chapters.js";
+import { type ChaptersView, chapterMarkdown, chapterTime } from "../src/chapters.js";
 import type { ProjectView } from "../src/connection.js";
 import * as connection from "../src/connection.js";
+import type { UiState } from "../src/state.js";
 import { applyUi, initialState } from "../src/state.js";
 import { TimelinePreview } from "../src/TimelinePreview.js";
 
@@ -18,6 +20,43 @@ const markers: ProjectView["markers"] = [
   { id: "note", kind: "review", at: { t: "5s" }, text: "检查" },
   { id: "first", kind: "chapter", at: { t: "5s" }, text: "第一章" },
 ];
+const row = (
+  id: string | null,
+  title: string | null,
+  start: string,
+  end: string,
+  duration: string,
+  level: number,
+  hue: number,
+) => ({
+  id,
+  title,
+  start: { t: start },
+  end: { t: end },
+  duration: { t: duration },
+  level,
+  hue,
+  description: `描述：${title}`,
+  user_edited: false,
+});
+const chapters: ChaptersView = {
+  total: { t: "60s" },
+  chapters: [
+    { ...row(null, null, "0s", "5s", "5s", 1, 0), sections: [row("orphan", "开场小节", "0s", "5s", "5s", 2, 0)] },
+    {
+      ...row("first", "第一章", "5s", "20s", "15s", 1, 1),
+      sections: [row("section", "细节", "1001/100s", "20s", "999/100s", 2, 1)],
+    },
+    {
+      ...row("second", "第二章", "20s", "60s", "40s", 1, 2),
+      sections: [
+        row("s21", "第二章第一节", "20s", "30s", "10s", 2, 2),
+        row("s22", "第二章第二节", "30s", "60s", "30s", 2, 2),
+      ],
+    },
+  ],
+};
+const flat = chapters.chapters.flatMap((g) => [...(g.id ? [g] : []), ...g.sections]);
 const project: ProjectView = {
   id: "tl_main",
   name: "工程",
@@ -40,25 +79,35 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-it("groups by rational time, retains leading orphan sections and defaults to level one", () => {
-  expect(chapterGroups(markers, 2).map((g) => g.map((m) => m.id))).toEqual([
-    ["orphan"],
-    ["first", "section"],
-    ["second"],
-  ]);
-  expect(chapterGroups(markers, 1).map((g) => g.map((m) => m.id))).toEqual([["first"], ["second"]]);
-  expect(markers[0]?.id).toBe("second");
-  expect(chapterGroups([], 2)).toEqual([]);
-});
 it("copies exact Markdown with relative timestamps, hour rollover and level filtering", () => {
-  expect(chapterMarkdown(markers, 2)).toBe("  - 0:00 开场小节\n0:05 第一章\n  - 0:10 细节\n0:20 第二章");
-  expect(chapterMarkdown(markers, 1)).toBe("0:05 第一章\n0:20 第二章");
+  expect(chapterMarkdown(flat)).toBe(
+    "  - 0:00 开场小节\n0:05 第一章\n  - 0:10 细节\n0:20 第二章\n  - 0:20 第二章第一节\n  - 0:30 第二章第二节",
+  );
+  expect(chapterMarkdown(flat.filter((m) => m.level === 1))).toBe("0:05 第一章\n0:20 第二章");
   expect(chapterTime("3599999/1000s")).toBe("59:59");
   expect(chapterTime("3600s")).toBe("1:00:00");
   expect(chapterTime("3661001/1000s")).toBe("1:01:01");
 });
-async function mount(view = project, timeline = false) {
-  const call = vi.fn(async (_verb: string, _request: Record<string, unknown>): Promise<unknown> => ({}));
+async function mount(
+  view = project,
+  timeline = false,
+  saved = { view: "outline" as "outline" | "timeline", zoom: 1, folded: [] as string[] },
+  snap = true,
+) {
+  let data = structuredClone(chapters);
+  const call = vi.fn(async (verb: string, request: Record<string, unknown>): Promise<unknown> => {
+    if (verb === "inspect") return data;
+    if (verb === "prefs_get") return { prefs: { ui: { chapters: saved, snap } } };
+    if (verb === "prefs_set") {
+      Object.assign(saved, (request.patch as { ui: { chapters?: unknown } }).ui.chapters);
+      return {};
+    }
+    if (verb === "ui_seek") {
+      updateState({ ...state, playhead: { at: request.at as string }, preview: "timeline", playing: false });
+    }
+    return {};
+  });
+  let updateState: (state: UiState) => void = () => {};
   let state: UiState = {
     ...initialState(),
     project: "/工程.zcut.json",
@@ -74,6 +123,7 @@ async function mount(view = project, timeline = false) {
     const dragging = useRef(false);
     const [ui, update] = useState(state);
     state = ui;
+    updateState = update;
     const panel = useChapterPanel({ project: view, state: ui, update, call, canGenerate: false, generate: vi.fn() });
     return (
       <>
@@ -108,12 +158,28 @@ async function mount(view = project, timeline = false) {
   const render = async () => {
     await act(async () => root.render(<Harness />));
   };
-  return { container, call, click, render, state: () => state };
+  return {
+    container,
+    call,
+    click,
+    render,
+    unmount: async () => {
+      await act(async () => root.unmount());
+      container.remove();
+    },
+    state: () => state,
+    saved,
+    refresh: async (next: ChaptersView) => {
+      data = next;
+      view = { ...view };
+      await render();
+    },
+  };
 }
 it("renders sequence timecodes, highlights the current section, seeks and exposes settings through ui_state", async () => {
   const ui = await mount();
-  expect(ui.container.querySelector('[aria-current="location"]')?.textContent).toBe("细节");
-  expect(ui.container.querySelector("time")?.textContent).toBe("01:00:00:00");
+  expect(ui.container.querySelector('[aria-current="location"]')?.textContent).toBe("第一章");
+  expect(ui.container.querySelector("time")?.textContent).toBe("0:00 – 0:05 · 0:05");
   expect(ui.container.querySelector('[aria-label="未归组的小节"]')?.textContent).toContain("开场小节");
   await ui.click("第二章");
   expect(ui.state()).toMatchObject({ playhead: { at: "20s" }, preview: "timeline", playing: false });
@@ -127,7 +193,7 @@ it("renders sequence timecodes, highlights the current section, seeks and expose
   expect(ui.container.querySelectorAll(".zc-chapter-title")).toHaveLength(2);
   await act(async () => ui.container.querySelector<HTMLInputElement>('[role="switch"]')?.click());
   expect(ui.container.querySelector("time")).toBeNull();
-  expect(applyUi(ui.state(), "ui_state", {}).chapters).toEqual({ levels: 1, timecodes: false });
+  expect(applyUi(ui.state(), "ui_state", {}).chapters).toMatchObject({ levels: 1, timecodes: false, view: "outline" });
   expect(applyUi(ui.state(), "ui_show_panel", { panel: "chapters", sub: "outline" })).toMatchObject({
     panel: "chapters",
     sub: "outline",
@@ -187,7 +253,7 @@ it("copies the filtered outline and briefly reports success; clipboard failures 
   vi.stubGlobal("navigator", { clipboard: { writeText } });
   const ui = await mount();
   await ui.click("复制 Markdown");
-  expect(writeText).toHaveBeenCalledWith(chapterMarkdown(markers, 2));
+  expect(writeText).toHaveBeenCalledWith(chapterMarkdown(flat));
   expect(ui.container.textContent).toContain("已复制");
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 1600));
@@ -196,30 +262,6 @@ it("copies the filtered outline and briefly reports success; clipboard failures 
   writeText.mockRejectedValueOnce(new Error("denied"));
   await ui.click("复制 Markdown");
   expect(ui.container.querySelector('[role="alert"]')?.textContent).toContain("复制失败");
-});
-it("reorders after project refresh and sends chapter marker drag through edit", async () => {
-  const view = { ...project, markers: structuredClone(markers) };
-  const ui = await mount(view, true);
-  const marker = ui.container.querySelector<HTMLButtonElement>('.zc-marker[aria-label="第二章"]');
-  // jsdom has no PointerEvent implementation.
-  await act(async () => marker?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 960 })));
-  await act(async () => marker?.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, clientX: 48 })));
-  expect(ui.call).toHaveBeenLastCalledWith(
-    "edit",
-    expect.objectContaining({
-      label: "移动章节「第二章」",
-      ops: [{ op: "update_marker", marker_id: "second", at: "1s" }],
-    }),
-  );
-  const moved = view.markers.find((m) => m.id === "second");
-  if (moved) moved.at.t = "1s";
-  await ui.render();
-  expect([...ui.container.querySelectorAll(".zc-chapter-title")].map((n) => n.textContent)).toEqual([
-    "开场小节",
-    "第二章",
-    "第一章",
-    "细节",
-  ]);
 });
 it.each([true, false])(
   "handles chapter generation through the existing chat (Agent available: %s)",
@@ -271,4 +313,125 @@ it("aligns new sections to NTSC frames without floating point time", async () =>
     "edit",
     expect.objectContaining({ ops: [expect.objectContaining({ at: "359359/30000s" })] }),
   );
+});
+
+it("renders the host ranges and titles in both views and refreshes both after a rename", async () => {
+  const ui = await mount();
+  expect(ui.call).toHaveBeenCalledWith("inspect", {
+    project: "/工程.zcut.json",
+    timeline_id: "tl_main",
+    view: "chapters",
+  });
+  expect(ui.container.querySelectorAll(".zc-chapter-title")).toHaveLength(flat.length);
+  expect(ui.container.querySelectorAll(".zc-chapter-group")).toHaveLength(chapters.chapters.length);
+  const renamed = structuredClone(chapters);
+  if (renamed.chapters[1]) renamed.chapters[1].title = "改过的标题";
+  await ui.refresh(renamed);
+  expect(ui.container.textContent).toContain("改过的标题");
+  await ui.click("时间轴");
+  expect(ui.state().chapters?.view).toBe("timeline");
+  const labels = [...ui.container.querySelectorAll(".zc-chap-label")];
+  expect(labels).toHaveLength(flat.length);
+  expect(labels.map((node) => node.querySelector("strong")?.textContent)).toEqual(
+    flat.map((m) => (m.id === "first" ? "改过的标题" : m.title)),
+  );
+  for (const [index, node] of labels.entries()) {
+    const m = flat[index];
+    if (!m) throw new Error("missing chapter");
+    expect(node.textContent).toContain(
+      `${chapterTime(m.start.t)} – ${chapterTime(m.end.t)} · ${chapterTime(m.duration.t)}`,
+    );
+  }
+  const block = ui.container.querySelector<HTMLButtonElement>('.zc-chap-block[aria-label="第二章第二节"]');
+  await act(async () => block?.click());
+  expect(ui.call).toHaveBeenLastCalledWith("ui_seek", { at: "30s" });
+  await ui.click("第二章第二节");
+  expect(ui.call).toHaveBeenLastCalledWith("ui_seek", { at: "30s" });
+  expect(applyUi(ui.state(), "ui_show_panel", { panel: "chapters", sub: "outline" }).chapters?.view).toBe("outline");
+});
+
+it("persists folds and restores them together with view and zoom after remount", async () => {
+  const saved = { view: "outline" as "outline" | "timeline", zoom: 2, folded: [] as string[] };
+  const ui = await mount(project, false, saved);
+  await ui.click("折叠：第一章");
+  await ui.click("折叠：第二章");
+  expect(saved.folded).toEqual(["first", "second"]);
+  await ui.unmount();
+  const restored = await mount(project, false, saved);
+  expect(restored.container.querySelectorAll('.zc-chapter-fold[aria-expanded="false"]')).toHaveLength(2);
+  expect(restored.container.querySelectorAll(".is-section")).toHaveLength(1);
+  await restored.click("全部展开");
+  expect(saved.folded).toEqual([]);
+  await restored.click("时间轴");
+  await restored.unmount();
+  const reopened = await mount(project, false, saved);
+  expect(reopened.container.querySelector<HTMLInputElement>('[aria-label="章节时间轴缩放"]')?.value).toBe("2");
+  expect(reopened.state().chapters?.view).toBe("timeline");
+});
+
+it.each([
+  [true, false, "30s"],
+  [false, false, "301/10s"],
+  [true, true, "301/10s"],
+])("scrubs with shared snapping=%s and Cmd=%s", async (snap, metaKey, target) => {
+  const ui = await mount(project, false, { view: "timeline", zoom: 1, folded: [] }, snap);
+  // Click 0.1 seconds beyond section 2 using its rendered pixel position.
+  await act(async () =>
+    ui.container.querySelector('[aria-label="章节播放头"]')?.dispatchEvent(
+      new MouseEvent("click", {
+        bubbles: true,
+        clientY:
+          Number.parseFloat(
+            ui.container.querySelector<HTMLElement>('.zc-chap-block[aria-label="第二章第二节"]')?.style.top ?? "0",
+          ) *
+          (30.1 / 30),
+        metaKey,
+      }),
+    ),
+  );
+  expect(ui.call).toHaveBeenLastCalledWith("ui_seek", { at: target });
+});
+
+it("keeps chapter grouping and end-time derivation out of the UI", () => {
+  const helper = readFileSync("packages/desktop/src/chapters.ts", "utf8");
+  const panel = readFileSync("packages/desktop/src/ChapterPanel.tsx", "utf8");
+  expect(helper + panel).not.toMatch(/chapterGroups|project\??\.markers|\.sort\(|\bsub\(/);
+  expect(panel).toContain('view: "chapters"');
+  expect(panel).toContain("m.end.t");
+  expect(panel).toContain("m.duration.t");
+});
+
+it("routes chapter seeks through the same UI verb handler as host requests", async () => {
+  const send = vi.fn();
+  class Socket {
+    send = send;
+    close() {}
+  }
+  vi.stubGlobal("WebSocket", Socket);
+  const ui = vi.fn((verb, request) => applyUi(initialState(), verb, request));
+  const host = connection.connectHost(
+    { port: 1, token: "test" },
+    { ui, project: vi.fn(), icon: vi.fn(), error: vi.fn() },
+  );
+  expect(await host.call("ui_seek", { at: "30s" })).toMatchObject({ playhead: { at: "30s" } });
+  expect(ui).toHaveBeenCalledExactlyOnceWith("ui_seek", { at: "30s" });
+  expect(send).not.toHaveBeenCalled();
+  host();
+});
+
+it("shares the timeline snap toggle with chapter scrubbing", async () => {
+  const ui = await mount(project, true);
+  await ui.click("吸附");
+  expect(ui.state().snap).toBe(false);
+  expect(ui.call).toHaveBeenCalledWith("prefs_set", { patch: { ui: { snap: false } } });
+  await ui.click("时间轴");
+  const start = Number.parseFloat(
+    ui.container.querySelector<HTMLElement>('.zc-chap-block[aria-label="第二章第二节"]')?.style.top ?? "0",
+  );
+  await act(async () =>
+    ui.container
+      .querySelector('[aria-label="章节播放头"]')
+      ?.dispatchEvent(new MouseEvent("click", { bubbles: true, clientY: start * (30.1 / 30) })),
+  );
+  expect(ui.call).toHaveBeenLastCalledWith("ui_seek", { at: "301/10s" });
 });

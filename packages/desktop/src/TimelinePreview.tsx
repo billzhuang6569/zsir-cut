@@ -5,11 +5,11 @@
 
 import { memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { UiState } from "../../app-host/src/ui.js";
 import { Clip, Icon, IconButton } from "./components.js";
 import { DESKTOP_AUTHOR, type ProjectView } from "./connection.js";
 import { useReverseAudio } from "./reverse-audio.js";
 import { SubtitleCanvas } from "./SubtitleCanvas.js";
+import type { UiState } from "./state.js";
 import { subtitleStyleOps } from "./subtitles.js";
 import {
   add,
@@ -319,7 +319,11 @@ export function TimelinePreview({
       };
     },
   });
-  const [snap, setSnap] = useState(true);
+  const snap = state.snap ?? true;
+  const setSnap = (value: boolean) => {
+    update({ ...state, snap: value });
+    void call("prefs_set", { patch: { ui: { snap: value } } }).catch(() => setWriteError("吸附偏好保存失败，请重试"));
+  };
   const snapRef = useRef(snap);
   snapRef.current = snap;
   const [tool, setTool] = useState("select");

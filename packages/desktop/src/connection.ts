@@ -1,5 +1,5 @@
 import type { ProjectChanged } from "../../app-host/src/revision-events.js";
-import type { UiState, UiVerb } from "../../app-host/src/ui.js";
+import { UI_VERBS, type UiState, type UiVerb } from "../../app-host/src/ui.js";
 
 import type { PreviewData, TimelineView, TranscriptView } from "./timeline.js";
 export interface ProjectView extends TimelineView, PreviewData {
@@ -64,8 +64,9 @@ export function connectHost(
     string,
     { resolve: (value: unknown) => void; reject: (error: Error) => void; verb: string }
   >();
-  const call = (verb: string, request: Record<string, unknown>) =>
-    new Promise<unknown>((resolve, reject) => {
+  const call = (verb: string, request: Record<string, unknown>): Promise<unknown> => {
+    if (UI_VERBS.includes(verb as UiVerb)) return Promise.resolve().then(() => handlers.ui(verb as UiVerb, request));
+    return new Promise<unknown>((resolve, reject) => {
       if (socket.readyState === 0) {
         reject(new Error("宿主正在连接"));
         return;
@@ -80,6 +81,7 @@ export function connectHost(
         ),
       );
     });
+  };
   async function refresh() {
     if (!project) return;
     const path = project;

@@ -1,11 +1,13 @@
-import { useEffect, useRef, useState } from "react";
-import type { UiState } from "../../app-host/src/ui.js";
-import { chapterGroups, chapterMarkdown, chapterTime } from "./chapters.js";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
+import { type Chapter, type ChaptersView, chapterMarkdown, chapterTime } from "./chapters.js";
 import { Icon, IconButton } from "./components.js";
 import type { ProjectView } from "./connection.js";
 import { DESKTOP_AUTHOR } from "./connection.js";
-import { compare, frameAt, frameTime, parseRational, seekTarget, timecode } from "./timeline.js";
+import type { UiState } from "./state.js";
+import { compare, frameAt, frameTime, numberOf, parseRational, pointerTime, seekTarget } from "./timeline.js";
 import "./chapters.css";
+
+const EMPTY_FOLDED: string[] = [];
 
 export function useChapterPanel({
   project,
@@ -29,15 +31,92 @@ export function useChapterPanel({
   const locked = useRef(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+  const [hiddenDescriptions, setHiddenDescriptions] = useState<string[]>([]);
   useEffect(() => {
     if (!copied) return;
     const timer = setTimeout(() => setCopied(false), 1500);
     return () => clearTimeout(timer);
   }, [copied]);
-  const groups = chapterGroups(project?.markers ?? [], settings.levels);
-  const markers = groups.flat();
+  const [data, setData] = useState<ChaptersView>({ chapters: [], total: { t: "0s" } });
+  const latest = useRef(state);
+  latest.current = state;
+  const view = settings.view ?? "outline";
+  const folded = settings.folded ?? EMPTY_FOLDED;
+  const zoom = settings.zoom ?? 1;
+  const [ready, setReady] = useState(false);
+  const readyProject = useRef<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    readyProject.current = null;
+    setReady(false);
+    if (!state.project) return;
+    void call("prefs_get", {})
+      .then((result) => {
+        const prefs = (
+          result as {
+            prefs?: {
+              ui: { snap: boolean; chapters: { view: "outline" | "timeline"; zoom: number; folded: string[] } };
+            };
+          }
+        ).prefs;
+        if (!cancelled && prefs)
+          update({
+            ...latest.current,
+            snap: prefs.ui.snap,
+            sub: latest.current.panel === "chapters" ? prefs.ui.chapters.view : latest.current.sub,
+            chapters: { levels: 2, timecodes: true, ...latest.current.chapters, ...prefs.ui.chapters },
+          });
+        if (!cancelled) {
+          readyProject.current = state.project;
+          setReady(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setError("章节偏好读取失败，请重新打开工程");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [call, update, state.project]);
+  useEffect(() => {
+    if (!ready || readyProject.current !== state.project) return;
+    void call("prefs_set", { patch: { ui: { chapters: { view, zoom, folded } } } }).catch(() =>
+      setError("章节偏好保存失败，请重试"),
+    );
+  }, [call, ready, view, zoom, folded, state.project]);
+  useEffect(() => {
+    let cancelled = false;
+    setData({ chapters: [], total: { t: "0s" } });
+    if (project)
+      void call("inspect", {
+        project: state.project,
+        timeline_id: project.id,
+        view: "chapters",
+        ...(state.history?.revision ? { at_revision: state.history.revision } : {}),
+      })
+        .then((result) => {
+          if (!cancelled && (result as ChaptersView).chapters) setData(result as ChaptersView);
+        })
+        .catch(() => {
+          if (!cancelled) setError("章节读取失败，请重试");
+        });
+    return () => {
+      cancelled = true;
+    };
+  }, [call, project, state.project, state.history?.revision]);
+  const groups = data.chapters;
+  const markers = groups.flatMap((g) => [...(g.id ? [g] : []), ...(settings.levels === 2 ? g.sections : [])]);
   const at = project ? seekTarget(project, project.cues, state.playhead) : "0s";
-  const active = markers.findLast((m) => compare(parseRational(m.at.t, true), parseRational(at, true)) <= 0);
+  const contains = (m: Chapter) =>
+    compare(parseRational(m.start.t, true), parseRational(at, true)) <= 0 &&
+    compare(parseRational(at, true), parseRational(m.end.t, true)) < 0;
+  const seek = (start: string) => {
+    void call("ui_seek", { at: start }).catch(() => setError("跳转失败，请重试"));
+  };
+  const change = (patch: Partial<typeof settings>) =>
+    update({ ...state, sub: patch.view ?? state.sub, chapters: { ...settings, ...patch } });
+  const fold = (id: string) =>
+    change({ folded: folded.includes(id) ? folded.filter((item) => item !== id) : [...folded, id] });
   const write = async (op: Record<string, unknown>, label: string) => {
     if (!project || locked.current) return;
     locked.current = true;
@@ -64,23 +143,17 @@ export function useChapterPanel({
   const controls = (
     <div className="zc-chapter-controls">
       <fieldset className="zc-chapter-views" aria-label="章节视图">
-        <button
-          type="button"
-          className="zc-chapter-view"
-          aria-pressed
-          onClick={() => update({ ...state, sub: "outline" })}
-        >
-          <Icon name="list" />
-          大纲
-        </button>
-        <button type="button" className="zc-chapter-view" disabled>
-          <Icon name="grid" />
-          思维导图<small>下个版本</small>
-        </button>
-        <button type="button" className="zc-chapter-view" disabled>
-          <Icon name="clip" />
-          时间地图<small>下个版本</small>
-        </button>
+        {(["outline", "timeline"] as const).map((value) => (
+          <button
+            key={value}
+            type="button"
+            className="zc-chapter-view"
+            aria-pressed={view === value}
+            onClick={() => change({ view: value })}
+          >
+            {value === "outline" ? "大纲" : "时间轴"}
+          </button>
+        ))}
       </fieldset>
       <section>
         <h3>显示</h3>
@@ -128,7 +201,7 @@ export function useChapterPanel({
             onClick={() => {
               setError("");
               void Promise.resolve()
-                .then(() => navigator.clipboard.writeText(chapterMarkdown(project?.markers ?? [], settings.levels)))
+                .then(() => navigator.clipboard.writeText(chapterMarkdown(markers)))
                 .then(() => setCopied(true))
                 .catch(() => setError("复制失败，请检查剪贴板权限后重试"));
             }}
@@ -140,21 +213,21 @@ export function useChapterPanel({
       </section>
     </div>
   );
-  const all = chapterGroups(project?.markers ?? [], 2).flat();
+  const all = groups.flatMap((g) => [...(g.id ? [g] : []), ...g.sections]);
   const outline = (
     <div className="zc-chapter-outline">
       <header className="zc-chapter-stats">
-        <span role="img" aria-label={`${all.filter((m) => m.level !== 2).length} 章`}>
+        <span role="img" aria-label={`${all.filter((m) => m.level === 1).length} 章`}>
           <span aria-hidden="true">#</span>
-          {all.filter((m) => m.level !== 2).length}
+          {all.filter((m) => m.level === 1).length}
         </span>
         <span role="img" aria-label={`${all.filter((m) => m.level === 2).length} 节`}>
           <span aria-hidden="true">##</span>
           {all.filter((m) => m.level === 2).length}
         </span>
-        <span role="img" aria-label={`总长 ${chapterTime(project?.duration.t ?? "0s")}`}>
+        <span role="img" aria-label={`总长 ${chapterTime(data.total.t)}`}>
           <Icon name="play" />
-          {chapterTime(project?.duration.t ?? "0s")}
+          {chapterTime(data.total.t)}
         </span>
         <span className="zc-grow" />
         <IconButton
@@ -178,85 +251,325 @@ export function useChapterPanel({
       </header>
       {error && <p role="alert">{error}</p>}
       {!markers.length && <p className="zc-muted">暂无章节</p>}
-      {groups.map((group) => (
-        <section
-          className="zc-chapter-group"
-          aria-label={group[0]?.level === 2 ? "未归组的小节" : group[0]?.text}
-          key={group[0]?.id}
-        >
-          {group.map((m) => (
-            <div className={`zc-chapter-row${m.level === 2 ? " is-section" : ""}`} key={m.id}>
-              <span className="zc-chapter-hash" aria-hidden="true">
-                {m.level === 2 ? "##" : "#"}
-              </span>
-              {editing === m.id ? (
-                <input
-                  className="zc-input"
-                  aria-label="章节名称"
-                  value={draft}
-                  disabled={busy}
-                  ref={(input) => input?.focus()}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onBlur={() => {
-                    if (draft !== m.text)
-                      void write({ op: "update_marker", marker_id: m.id, text: draft }, `重命名章节「${m.text}」`);
-                    else setEditing(null);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") e.currentTarget.blur();
-                    if (e.key === "Escape") setEditing(null);
-                  }}
-                />
-              ) : (
+      {view === "outline" ? (
+        <>
+          <div className="zc-chapter-folds">
+            <button
+              type="button"
+              onClick={() => {
+                change({ folded: [] });
+                setHiddenDescriptions([]);
+              }}
+            >
+              全部展开
+            </button>
+            ｜
+            <button
+              type="button"
+              onClick={() => {
+                change({ folded: groups.flatMap((g) => (g.id ? [g.id] : [])) });
+                setHiddenDescriptions(all.flatMap((m) => (m.id ? [m.id] : [])));
+              }}
+            >
+              全部折叠
+            </button>
+          </div>
+          {groups.map((group) => (
+            <section
+              className={`zc-chapter-group${contains(group) ? " is-current" : ""}`}
+              aria-label={group.title ?? "未归组的小节"}
+              key={group.id ?? "orphans"}
+            >
+              {group.id && (
                 <button
                   type="button"
-                  className="zc-chapter-title"
-                  aria-current={active?.id === m.id ? "location" : undefined}
-                  onClick={() => update({ ...state, playhead: { at: m.at.t }, preview: "timeline", playing: false })}
-                  onDoubleClick={() => {
-                    setEditing(m.id);
-                    setDraft(m.text);
-                  }}
+                  className="zc-chapter-fold"
+                  aria-label={`折叠：${group.title}`}
+                  aria-expanded={!folded.includes(group.id)}
+                  onClick={() => fold(group.id ?? "")}
                 >
-                  {m.text}
+                  {folded.includes(group.id) ? "▸" : "▾"}
                 </button>
               )}
-              {settings.timecodes && project && <time>{timecode(m.at.t, project)}</time>}
-              <details className="zc-chapter-menu">
-                <summary aria-label={`章节菜单：${m.text}`}>
-                  <Icon name="down" />
-                </summary>
-                <div>
-                  {([1, 2] as const).map((level) => (
+              {[
+                ...(group.id ? [group] : []),
+                ...(settings.levels === 2 && !folded.includes(group.id ?? "") ? group.sections : []),
+              ].map((m) => (
+                <div className={`zc-chapter-row${m.level === 2 ? " is-section" : ""}`} key={m.id}>
+                  {m.level === 2 ? (
                     <button
                       type="button"
-                      key={level}
-                      disabled={busy || (m.level ?? 1) === level}
+                      className="zc-chapter-fold"
+                      aria-label={`描述：${m.title}`}
+                      aria-expanded={!hiddenDescriptions.includes(m.id ?? "")}
                       onClick={() =>
-                        void write(
-                          { op: "update_marker", marker_id: m.id, level },
-                          `把章节「${m.text}」改为${level === 1 ? "一级" : "二级"}标题`,
+                        setHiddenDescriptions((ids) =>
+                          ids.includes(m.id ?? "") ? ids.filter((id) => id !== m.id) : [...ids, m.id ?? ""],
                         )
                       }
                     >
-                      {level === 1 ? "一级标题" : "二级标题"}
+                      ▾
                     </button>
-                  ))}
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void write({ op: "remove_marker", marker_id: m.id }, `删除章节「${m.text}」`)}
-                  >
-                    <Icon name="trash" />
-                    删除
-                  </button>
+                  ) : (
+                    <span className="zc-chapter-hash" aria-hidden="true">
+                      #
+                    </span>
+                  )}
+                  {editing === m.id ? (
+                    <input
+                      className="zc-input"
+                      aria-label="章节名称"
+                      value={draft}
+                      disabled={busy}
+                      ref={(input) => input?.focus()}
+                      onChange={(e) => setDraft(e.target.value)}
+                      onBlur={() => {
+                        if (draft !== m.title)
+                          void write({ op: "update_marker", marker_id: m.id, text: draft }, `重命名章节「${m.title}」`);
+                        else setEditing(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") e.currentTarget.blur();
+                        if (e.key === "Escape") setEditing(null);
+                      }}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      className="zc-chapter-title"
+                      aria-current={contains(m) ? "location" : undefined}
+                      onClick={() => seek(m.start.t)}
+                      onDoubleClick={() => {
+                        setEditing(m.id);
+                        setDraft(m.title ?? "");
+                      }}
+                    >
+                      {m.title}
+                    </button>
+                  )}
+                  {settings.timecodes && project && (
+                    <time>
+                      {m.start.tc ?? chapterTime(m.start.t)} – {m.end.tc ?? chapterTime(m.end.t)} ·{" "}
+                      {chapterTime(m.duration.t)}
+                    </time>
+                  )}
+                  <details className="zc-chapter-menu">
+                    <summary aria-label={`章节菜单：${m.title}`}>
+                      <Icon name="down" />
+                    </summary>
+                    <div>
+                      {([1, 2] as const).map((level) => (
+                        <button
+                          type="button"
+                          key={level}
+                          disabled={busy || (m.level ?? 1) === level}
+                          onClick={() =>
+                            void write(
+                              { op: "update_marker", marker_id: m.id, level },
+                              `把章节「${m.title}」改为${level === 1 ? "一级" : "二级"}标题`,
+                            )
+                          }
+                        >
+                          {level === 1 ? "一级标题" : "二级标题"}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void write({ op: "remove_marker", marker_id: m.id }, `删除章节「${m.title}」`)}
+                      >
+                        <Icon name="trash" />
+                        删除
+                      </button>
+                    </div>
+                  </details>
+                  {m.description && !hiddenDescriptions.includes(m.id ?? "") && (
+                    <p className="zc-chapter-description">{m.description}</p>
+                  )}
                 </div>
-              </details>
-            </div>
+              ))}
+            </section>
           ))}
-        </section>
-      ))}
+        </>
+      ) : (
+        <ChapterRail
+          groups={groups}
+          total={data.total.t}
+          at={at}
+          levels={settings.levels}
+          zoom={zoom}
+          timecodes={settings.timecodes}
+          snap={state.snap ?? true}
+          seek={seek}
+          change={change}
+        />
+      )}
     </div>
   );
   return { controls, outline };
+}
+
+function ChapterRail({
+  groups,
+  total,
+  at,
+  levels,
+  zoom,
+  snap,
+  timecodes,
+  seek,
+  change,
+}: {
+  groups: ChaptersView["chapters"];
+  total: string;
+  at: string;
+  levels: 1 | 2;
+  zoom: number;
+  snap: boolean;
+  timecodes: boolean;
+  seek: (at: string) => void;
+  change: (patch: { levels?: 1 | 2; zoom?: number }) => void;
+}) {
+  const viewport = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState(400);
+  useEffect(() => {
+    if (!viewport.current || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) setHeight(entry.contentRect.height);
+    });
+    observer.observe(viewport.current);
+    return () => observer.disconnect();
+  }, []);
+  const seconds = (t: string) => numberOf(parseRational(t, true));
+  const scale = Math.max(1, Math.round(((height - 24) * zoom * 1000) / Math.max(seconds(total), 1)));
+  const y = (t: string) => (seconds(t) * scale) / 1000;
+  let lastLabel = -44;
+  const labels = groups
+    .flatMap((g) => [...(g.id ? [g] : []), ...(levels === 2 ? g.sections : [])])
+    .map((m) => {
+      const top = Math.max(y(m.start.t), lastLabel + 44);
+      lastLabel = top;
+      return { m, top };
+    });
+  return (
+    <div className="zc-chapter-timeline">
+      <header className="zc-chapter-rail-header">
+        <fieldset aria-label="时间轴层级">
+          {([1, 2] as const).map((level) => (
+            <button type="button" key={level} aria-pressed={levels === level} onClick={() => change({ levels: level })}>
+              {level === 1 ? "一级" : "二级"}
+            </button>
+          ))}
+        </fieldset>
+        <input
+          aria-label="章节时间轴缩放"
+          type="range"
+          min="0.5"
+          max="4"
+          step="0.1"
+          value={zoom}
+          onChange={(e) => change({ zoom: Number(e.target.value) })}
+        />
+      </header>
+      <div className="zc-chapter-rail-scroll" ref={viewport}>
+        <div className="zc-chapter-rail" style={{ height: Math.max(y(total), lastLabel + 44) + 12 }}>
+          <div
+            className="zc-chapter-scrub"
+            role="slider"
+            tabIndex={0}
+            aria-label="章节播放头"
+            aria-valuemin={0}
+            aria-valuemax={seconds(total)}
+            aria-valuenow={seconds(at)}
+            onKeyDown={(e) => {
+              if (["Home", "End", "ArrowUp", "ArrowDown"].includes(e.key)) e.preventDefault();
+              if (e.key === "ArrowUp" || e.key === "ArrowDown")
+                seek(
+                  pointerTime(
+                    Math.max(0, Math.min(y(total), y(at) + (e.key === "ArrowUp" ? -scale / 1000 : scale / 1000))) *
+                      1000,
+                    scale,
+                    "1000",
+                  ),
+                );
+              if (e.key === "Home") seek("0s");
+              if (e.key === "End") seek(total);
+            }}
+            onClick={(e) => {
+              const pixels = Math.max(0, Math.min(y(total), e.clientY - e.currentTarget.getBoundingClientRect().top));
+              const nearest = groups
+                .flatMap((group) => [group, ...group.sections])
+                .reduce<Chapter | null>(
+                  (best, m) =>
+                    !best || Math.abs(y(m.start.t) - pixels) < Math.abs(y(best.start.t) - pixels) ? m : best,
+                  null,
+                );
+              seek(
+                snap && !e.metaKey && nearest && Math.abs(y(nearest.start.t) - pixels) <= 8
+                  ? nearest.start.t
+                  : pointerTime(pixels * 1000, scale, "1000"),
+              );
+            }}
+          />
+          {groups.map((group) => (
+            <div key={group.id ?? "orphans"} className={`zc-chapter-colour hue-${group.hue % 5}`}>
+              <button
+                type="button"
+                className={`zc-chap-block${levels === 2 && group.sections.length ? " is-parent" : ""}`}
+                style={{ top: y(group.start.t), height: Math.max(4, y(group.duration.t)) }}
+                aria-label={group.title ?? "未归组的小节"}
+                onClick={() => seek(group.start.t)}
+              >
+                <span>{chapterTime(group.duration.t)}</span>
+              </button>
+              {group.sections.map((m, index) => (
+                <button
+                  type="button"
+                  key={m.id}
+                  className={`zc-chap-block is-section shade-${index % 3}`}
+                  style={
+                    {
+                      top: y(m.start.t),
+                      height: Math.max(4, y(m.duration.t)),
+                      opacity: levels === 2 ? 1 : 0,
+                      pointerEvents: levels === 2 ? "auto" : "none",
+                    } as CSSProperties
+                  }
+                  tabIndex={levels === 2 ? 0 : -1}
+                  aria-hidden={levels !== 2}
+                  aria-label={m.title ?? "小节"}
+                  onClick={() => seek(m.start.t)}
+                >
+                  {y(m.duration.t) >= 20 && <span>{chapterTime(m.duration.t)}</span>}
+                </button>
+              ))}
+            </div>
+          ))}
+          <svg className="zc-chapter-leaders" width="94" height="100%" aria-hidden="true">
+            {labels.map(({ m, top }) => (
+              <path key={m.id} d={`M60 ${y(m.start.t) + 2} H70 L84 ${top + 10} H94`} />
+            ))}
+          </svg>
+          {labels.map(({ m, top }) => (
+            <button
+              key={m.id}
+              type="button"
+              className={`zc-chap-label hue-${m.hue % 5}${m.level === 1 ? " is-chapter" : ""}`}
+              style={{ top }}
+              onClick={() => seek(m.start.t)}
+            >
+              <strong>{m.title}</strong>
+              {timecodes && (
+                <small>
+                  {m.start.tc ?? chapterTime(m.start.t)} – {m.end.tc ?? chapterTime(m.end.t)} ·{" "}
+                  {chapterTime(m.duration.t)}
+                </small>
+              )}
+            </button>
+          ))}
+          <div className="zc-chap-playhead" style={{ top: y(at) }} />
+        </div>
+      </div>
+    </div>
+  );
 }

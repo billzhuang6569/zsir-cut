@@ -185,3 +185,197 @@
   left: var(--space-8);
   background: var(--bg);
 }
+
+.zc-chapter-group {
+  position: relative;
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+}
+.zc-chapter-group.is-current {
+  background: var(--raised);
+}
+.zc-chapter-fold {
+  float: right;
+}
+.zc-chapter-folds,
+.zc-chapter-rail-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.zc-chapter-folds button,
+.zc-chapter-fold,
+.zc-chapter-rail-header button {
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.zc-chapter-rail-header button[aria-pressed="true"],
+.zc-chapter-view[aria-pressed="true"] {
+  background: var(--raised);
+  color: var(--text);
+}
+.zc-chapter-description {
+  color: var(--text-3);
+  font-size: var(--body-size);
+  width: 100%;
+  margin: 0;
+}
+.zc-chapter-row {
+  flex-wrap: wrap;
+}
+.zc-chapter-row time {
+  width: 100%;
+}
+.zc-chapter-timeline {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  gap: var(--space-6);
+}
+.zc-chapter-outline:has(.zc-chapter-timeline) {
+  height: 100%;
+  min-height: 0;
+}
+.zc-chapter-rail-header input {
+  margin-left: auto;
+  width: 40%;
+  accent-color: var(--text);
+}
+.zc-chapter-rail-scroll {
+  overflow: auto;
+  min-height: 0;
+  flex: 1;
+}
+.zc-chapter-rail {
+  position: relative;
+  margin-top: var(--space-4);
+}
+.hue-0 {
+  --chapter-hue: 55;
+}
+.hue-1 {
+  --chapter-hue: 128;
+}
+.hue-2 {
+  --chapter-hue: 245;
+}
+.hue-3 {
+  --chapter-hue: 300;
+}
+.hue-4 {
+  --chapter-hue: 190;
+}
+.zc-chapter-colour {
+  --chapter-colour: oklch(0.74 0.14 var(--chapter-hue));
+}
+.zc-chap-block {
+  position: absolute;
+  left: 0;
+  width: 60px;
+  border: 1px solid var(--panel);
+  border-radius: var(--radius-sm);
+  background: var(--chapter-colour);
+  color: var(--on-primary);
+  overflow: hidden;
+  text-align: left;
+  padding: 0 var(--space-2);
+  transition:
+    top 250ms,
+    height 250ms,
+    opacity 250ms;
+  cursor: pointer;
+}
+.zc-chap-block span {
+  font-size: var(--caption-size);
+}
+.zc-chap-block.is-parent {
+  opacity: 0.3;
+}
+.zc-chap-block.shade-0 {
+  background: oklch(0.8 0.14 var(--chapter-hue));
+}
+.zc-chap-block.shade-1 {
+  background: oklch(0.7 0.14 var(--chapter-hue));
+}
+.zc-chap-block.shade-2 {
+  background: oklch(0.62 0.14 var(--chapter-hue));
+}
+.zc-chap-label {
+  position: absolute;
+  left: 96px;
+  right: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+  transition: top 250ms;
+}
+.zc-chap-label strong {
+  display: block;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  font-size: var(--body-size);
+  font-weight: var(--body-weight);
+}
+.zc-chap-label.is-chapter strong {
+  color: var(--text);
+  font-weight: var(--title-weight);
+}
+.zc-chap-label.is-chapter strong::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: var(--space-3);
+  background: oklch(0.74 0.14 var(--chapter-hue));
+  border-radius: 2px;
+}
+.zc-chap-label small {
+  color: var(--text-3);
+  font-size: var(--caption-size);
+}
+.zc-chapter-leaders {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  fill: none;
+  stroke: var(--text-3);
+}
+.zc-chap-playhead {
+  position: absolute;
+  width: 68px;
+  height: 2px;
+  background: var(--text);
+  pointer-events: none;
+}
+.zc-chapter-scrub {
+  position: absolute;
+  left: 60px;
+  width: 34px;
+  top: 0;
+  bottom: 0;
+  cursor: crosshair;
+}
+@media (prefers-reduced-motion: reduce) {
+  .zc-chap-block,
+  .zc-chap-label {
+    transition: none;
+  }
+}
+.zc-chapter-rail-header fieldset {
+  border: 0;
+  margin: 0;
+  padding: var(--space-2);
+  display: flex;
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+}
+.zc-chap-block.is-parent span {
+  visibility: hidden;
+}
