@@ -1,4 +1,4 @@
-import { once } from "node:events";
+import { on, once } from "node:events";
 import { copyFile, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -60,9 +60,11 @@ describe("host revision pushes", () => {
     host = await startHost({ project, appDataDir: directory });
     socket = new WebSocket(`ws://127.0.0.1:${host.port}/?token=${host.token}`);
     await once(socket, "open");
-    const bootstrap = once(socket, "message");
+    const messages = on(socket, "message", { signal: AbortSignal.timeout(3000) });
     socket.send(JSON.stringify({ type: "ui_ready" }));
-    expect(JSON.parse((await bootstrap)[0].toString()).type).toBe("bootstrap");
+    for await (const [raw] of messages) {
+      if (JSON.parse(raw.toString()).type === "bootstrap") break;
+    }
     events.length = 0;
     socket.on("message", (raw) => {
       const message = JSON.parse(raw.toString());

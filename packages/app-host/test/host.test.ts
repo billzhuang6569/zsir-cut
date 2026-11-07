@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { once } from "node:events";
+import { on, once } from "node:events";
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -36,6 +36,17 @@ async function connect() {
   await once(socket, "open");
   return socket;
 }
+async function sendMessage(socket: WebSocket, message: Record<string, unknown>) {
+  const replies = on(socket, "message", { signal: AbortSignal.timeout(3000) });
+  socket.send(JSON.stringify(message));
+  for await (const [raw] of replies) {
+    const result = JSON.parse(raw.toString());
+    if (message.id !== undefined ? result.id !== message.id : result.type !== "bootstrap") continue;
+    expect(socket.readyState).toBe(WebSocket.OPEN);
+    return result;
+  }
+  throw new Error("Missing response");
+}
 async function mcpClient() {
   if (!host) throw new Error("Missing host");
   const client = new Client({ name: "host-test", version: "1" });
@@ -45,6 +56,22 @@ async function mcpClient() {
 }
 
 describe("desktop host", () => {
+  it.each([
+    { request: { type: "ui_ready" }, reply: { type: "bootstrap", project } },
+    { request: { id: "matching", verb: "inspect" }, reply: { id: "matching", type: "result" } },
+  ])("ignores unrelated messages while waiting for $request", async ({ request, reply }) => {
+    const socket = await connect();
+    try {
+      vi.spyOn(socket, "send").mockImplementationOnce(() => {
+        for (const message of [{ type: "preview_cache" }, { id: "other", type: "result" }, reply])
+          socket.emit("message", Buffer.from(JSON.stringify(message)));
+      });
+      expect(await sendMessage(socket, request)).toEqual(reply);
+    } finally {
+      socket.terminate();
+    }
+  });
+
   it("serializes preview rationals and keeps the connection usable after a request fails", async () => {
     const directory = await mkdtemp(join(tmpdir(), "zcut-preview-rational-"));
     const project = join(directory, "project.zcut.json");
@@ -54,14 +81,7 @@ describe("desktop host", () => {
     const socket = new WebSocket(`ws://127.0.0.1:${host.port}/?token=${host.token}`);
     try {
       await once(socket, "open");
-      const send = async (message: Record<string, unknown>) => {
-        const reply = once(socket, "message", { signal: AbortSignal.timeout(3000) });
-        socket.send(JSON.stringify(message));
-        const result = JSON.parse((await reply)[0].toString());
-        expect(socket.readyState).toBe(WebSocket.OPEN);
-        if (message.id) expect(result.id).toBe(message.id);
-        return result;
-      };
+      const send = (message: Record<string, unknown>) => sendMessage(socket, message);
       expect(await send({ type: "ui_ready" })).toMatchObject({ type: "bootstrap", project });
       for (const view of ["brief", "timeline"])
         expect(await send({ id: view, verb: "inspect", request: { project, view } })).toMatchObject({
@@ -250,11 +270,9 @@ describe("desktop host", () => {
         ["inspect", { project, view: "invalid" }],
         ["inspect", { project: `${project}.missing`, view: "brief" }],
       ] as const) {
-        const reply = once(socket, "message");
-        socket.send(JSON.stringify({ id: "1", verb, request }));
-        const [raw] = await reply;
+        const reply = await sendMessage(socket, { id: "1", verb, request });
         const run = spawnSync(process.execPath, [cli, verb], { encoding: "utf8", input: JSON.stringify(request) });
-        expect(comparable(JSON.parse(raw.toString()).envelope)).toEqual(comparable(JSON.parse(run.stdout)));
+        expect(comparable(reply.envelope)).toEqual(comparable(JSON.parse(run.stdout)));
       }
     } finally {
       socket.terminate();
@@ -291,9 +309,7 @@ describe("desktop host", () => {
         if (message.type === "ui_request")
           socket.send(JSON.stringify({ type: "ui_result", id: message.id, result: { ...state, ...extra } }));
       });
-      const bootstrap = once(socket, "message");
-      socket.send(JSON.stringify({ type: "ui_ready" }));
-      await bootstrap;
+      await sendMessage(socket, { type: "ui_ready" });
       for (const fields of [
         { edit_point: null, chapters: { view: "outline" }, history: { open: false, viewing: null } },
         {
@@ -361,9 +377,7 @@ describe("desktop host", () => {
         if (message.verb === "ui_show_panel") state = { ...state, ...message.request };
         socket.send(JSON.stringify({ type: "ui_result", id: message.id, result: state }));
       });
-      const bootstrap = once(socket, "message");
-      socket.send(JSON.stringify({ type: "ui_ready" }));
-      expect(JSON.parse((await bootstrap)[0].toString())).toMatchObject({ type: "bootstrap", project });
+      expect(await sendMessage(socket, { type: "ui_ready" })).toMatchObject({ type: "bootstrap", project });
       await client.callTool({ name: "zcut_ui_show_panel", arguments: { panel: "subtitles", sub: "style" } });
       const shown = await client.callTool({ name: "zcut_ui_state", arguments: {} });
       expect(shown.structuredContent).toMatchObject({
@@ -671,9 +685,7 @@ it("keeps cache controls on the authenticated UI channel and persists directory 
   await prefs.set({ preview_cache: { directory, auto: false } });
   const socket = await connect();
   try {
-    const bootstrap = once(socket, "message");
-    socket.send(JSON.stringify({ type: "ui_ready" }));
-    expect(JSON.parse((await bootstrap)[0].toString()).type).toBe("bootstrap");
+    expect((await sendMessage(socket, { type: "ui_ready" })).type).toBe("bootstrap");
     let sequence = 0;
     const call = (verb: string, request = {}) =>
       new Promise<{ result: { segments: { state: string }[] } }>((resolve, reject) => {
