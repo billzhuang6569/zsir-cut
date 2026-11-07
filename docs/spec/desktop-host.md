@@ -203,9 +203,11 @@ Agent 通过宿主的 MCP 调用会碰到工程外面的动词时，宿主先停
 ### 6.1 一段缓存
 
 - 每个**启用的视频片段**一段（纯音频片段和静帧图片不做缓存，播放时照旧）。
-- 键：`sha256(素材指纹 + "|" + 源入点 + "|" + 源出点 + "|" + 速度 + "|" + 画质 + "|" + "v1")` 的前 32 个十六进制字符。源入点、源出点用规范时间字符串；速度无时间映射为 `"1"`，有时间映射为映射的规范 JSON。
+- 键：`sha256(素材指纹 + "|" + 源入点 + "|" + 源出点 + "|" + 速度 + "|" + 画质 + "|" + "v2")` 的前 32 个十六进制字符。源入点、源出点用规范时间字符串；速度无时间映射为 `"1"`，有时间映射为映射的规范 JSON。
 - 文件：`<缓存目录>/<project_id>/<键>.mp4`，写临时文件再改名。
-- 编码：`ffmpeg -ss <源入点> -t <时长> -i <素材>`，视频 `h264_videotoolbox`（没有时 `libx264 -preset veryfast`），短边按画质（540、720、1080），关键帧间隔 0.5 秒（`-g` 按素材帧率算），声音 AAC 48 kHz 单声道，`-movflags +frag_keyframe+empty_moov+default_base_moof`，`-map_metadata -1 -fflags +bitexact`，不写时间戳。不要求两次编出的字节相同（硬件编码器做不到），只要求键相同。变速和倒放按片段的映射生成，画面和预览看到的一致。
+- 编码：`ffmpeg -ss <源入点> -t <时长> -i <素材>`，视频 `h264_videotoolbox`（没有时 `libx264 -preset veryfast`），短边按画质（540、720、1080），关键帧间隔 0.5 秒（`-g` 按素材帧率算），声音 AAC 48 kHz 单声道，**声音补静音到和画面一样长**（`-af apad`，再用 `-t` 截到画面时长），`-movflags +frag_keyframe+empty_moov+default_base_moof`，`-map_metadata -1 -fflags +bitexact`，不写时间戳。不要求两次编出的字节相同（硬件编码器做不到），只要求键相同。变速和倒放按片段的映射生成，画面和预览看到的一致。
+- 键的版本从 `v1` 升到 `v2`（2026-11-07）：`v1` 的段声音比画面短一到两个 AAC 帧（约 20 到 30 毫秒），接起来每个剪点都留一个声音空隙，WebKit 在空隙处停下等声音。`v1` 的段不再使用，按第 6.3 节的清理规则被删掉。
+- 界面接段（ADR-0023 第 3 条修订）：`SourceBuffer` 用 `segments` 模式，每段追加前设 `timestampOffset` = 这段在流里的起点（前面各段画面时长之和），`appendWindowStart` / `appendWindowEnd` = 这段的起点和起点加画面时长，让多出来的声音被截掉，段与段在流里严丝合缝。段的画面时长由宿主在 `preview_cache_status` 的每段里给出（`duration`，规范时间字符串），界面不自己解析文件。
 - 索引：`<缓存目录>/<project_id>/index.json`：`{project_path, last_opened, segments: {键: {bytes}}}`。
 
 ### 6.2 队列
@@ -227,7 +229,7 @@ Agent 通过宿主的 MCP 调用会碰到工程外面的动词时，宿主先停
 
 | 动词 | 参数 | 结果 |
 |---|---|---|
-| `preview_cache_status` | 无 | 当前工程每个视频片段的 `{clip_id, key, state}`（`ready`、`building`、`missing`），`directory`、`directory_ok`、`free_bytes`、`used_bytes`、`limit_bytes`，以及 `projects`：每个工程的 `project_id`、`name`、`path`、`bytes`、`last_opened` |
+| `preview_cache_status` | 无 | 当前工程每个视频片段的 `{clip_id, key, state, duration}`（`duration` 是段的画面时长，`ready` 时才有）（`ready`、`building`、`missing`），`directory`、`directory_ok`、`free_bytes`、`used_bytes`、`limit_bytes`，以及 `projects`：每个工程的 `project_id`、`name`、`path`、`bytes`、`last_opened` |
 | `preview_cache_clear` | `project_id`（可选，没给时全部清空） | 删文件，返回 `applied` |
 | `preview_cache_move` | `directory` | 改 `desktop.json` 的目录；旧目录的文件不搬，返回 `applied` |
 
