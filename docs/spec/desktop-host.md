@@ -1,6 +1,6 @@
 # 桌面版宿主 v0.1
 
-状态：草案 · 2026-11-06 · 依赖 ADR-0016（桌面版架构）、ADR-0023（预览缓存）、`command-protocol.md`、`docs/tasks/ui-3.md`
+状态：草案 · 2026-11-07 · 依赖 ADR-0016（桌面版架构）、ADR-0023（预览缓存）、ADR-0024（素材缓存）、`command-protocol.md`、`docs/tasks/ui-3.md`
 
 本文规定宿主进程（`packages/app-host`）自己的事：给界面的本机通道上的动词和推送、应用级偏好、快捷键表、Agent 管理、许可闸、预览缓存、下一步建议。这些都不是内核动词，不进 `command-protocol.md` 第 9 节的动词表，没有 CLI 命令。给 Agent 的界面动词仍在 `command-protocol.md` 9.6。
 
@@ -22,7 +22,7 @@
 | `agents_changed`、`agents_output` | 推送 | 4 |
 | `permission_request` | 推送 | 5 |
 | `permission_answer` | 动词 | 5 |
-| `preview_cache_status` / `preview_cache_clear` / `preview_cache_move` | 动词 | 6 |
+| `preview_cache_status` / `preview_cache_clear` / `preview_cache_move` | 动词 | 6（含 6.5 素材缓存） |
 | `preview_cache` | 推送 | 6 |
 | `project_changed` | 推送（改为带内容） | 7 |
 | `chat_event` 的 `suggestion` 类型 | 推送 | 8 |
@@ -57,7 +57,8 @@
     "magnetic": true,
     "timeline_zoom": null,
     "track_height": "m",
-    "chapters": { "view": "outline", "zoom": 1, "folded": [] }
+    "chapters": { "view": "outline", "zoom": 1, "folded": [] },
+    "layout": { "left_width": null, "right_width": null, "timeline_height": null }
   }
 }
 ```
@@ -79,6 +80,11 @@
 | `ui.chapters.view` | `outline` 或 `timeline` |
 | `ui.chapters.zoom` | 章节时间轴的上下缩放，0.5 到 4 |
 | `ui.chapters.folded` | 大纲里折叠起来的一级章节的标记 ID |
+| `ui.layout.left_width` | 功能区宽度，CSS 像素整数，200 到 560；null 用默认宽度（2026-11-07 补） |
+| `ui.layout.right_width` | 参数区宽度，CSS 像素整数，240 到 600；null 用默认宽度 |
+| `ui.layout.timeline_height` | 时间线区域高度占窗口内容区高度的比例，0.2 到 0.75，最多 3 位小数；null 用默认比例 |
+
+`ui.layout` 由界面在拖完边界（松开鼠标）时用 `prefs_set` 写一次，拖动中不写；双击边界恢复默认时写 null。窗口变小时界面按最小尺寸临时压缩显示，不改写偏好里的值。
 
 `prefs_get`：无参数，`result.prefs` 是整个对象（`directory` 展开后的路径另给 `result.preview_cache_directory`）。`prefs_set`：`patch`，按字段深合并，数组整体替换，`keymap.overrides` 给了就整体替换（`{}` 即恢复默认，2026-11-06 补）；写入后返回 `applied` 和新的整个对象，内容不变返回 `no_op`；校验不过返回 `rejected`、`E_VALIDATION`，文件不变。
 
@@ -225,6 +231,36 @@ Agent 通过宿主的 MCP 调用会碰到工程外面的动词时，宿主先停
 状态变化时推 `{type: "preview_cache", ...}`，内容同 `preview_cache_status` 的结果，最多每 500 毫秒一次。
 
 媒体通道按键提供分段：`/cache/<project_id>/<键>.mp4`，带 ADR-0016 的令牌，支持 Range。
+
+### 6.5 素材缓存：波形和缩略图
+
+规则见 ADR-0024（2026-11-07 补）。和预览段不同，素材缓存**按素材文件**做，不按片段：同一个素材在几条片段、几个工程里用，只做一份。
+
+**键和位置。** 素材键 = `sha256(素材指纹 + "|media-v1")` 的前 32 个十六进制字符（指纹见 `timeline-schema.md` 的 `fingerprint`）。文件放在 `<缓存目录>/media/<素材键>/`，和各工程的预览段同一个缓存目录：
+
+| 文件 | 内容 |
+|---|---|
+| `peaks.bin` | 波形。单声道（各声道取绝对值最大），每秒 100 个值，每个值 1 字节：`round(峰值 × 255)`，峰值在 0 到 1。没有文件头；值的个数 = `ceil(时长秒数 × 100)` |
+| `thumbs.json` | 缩略图索引：`{version: 1, interval, tile_width, tile_height, columns, rows, count, sheets}`。`interval` 是规范时间字符串，第 i 张缩略图取素材时间 `i × interval`；`sheets` 是拼图文件名数组 |
+| `thumbs-<n>.jpg` | 拼图，n 从 0 起，三位数补零。每张 `columns × rows` 格，按行从左到右排；第 i 张在第 `floor(i / (columns × rows))` 张拼图的第 `i mod (columns × rows)` 格 |
+| `frames/<时间键>.jpg` | 放大到一格比 `interval` 还细时按需取的单帧，`时间键 = sha256(规范时间字符串)` 前 32 位，规格同拼图里的一格 |
+| `meta.json` | `{media_key, fingerprint, duration, bytes, last_used, peaks: "ready"|"missing", thumbs: "ready"|"missing"}` |
+
+**规格。** 缩略图高 96 像素，宽按素材画面比例取偶数；`columns` 10、`rows` 10；`interval`：素材时长不到 10 分钟取 1 秒，不到 60 分钟取 2 秒，再长取 5 秒。纯音频素材只做 `peaks.bin`，静帧图片只做一张缩略图（`interval` 为 0，`count` 为 1）。
+
+**生成。** 波形用一次 ffmpeg 解出整条单声道 PCM 算峰值；缩略图用一次 ffmpeg 按 `fps=1/interval` 抽帧、缩放、`tile` 拼图。不对每个可见位置单独起 ffmpeg。写临时文件再改名，`meta.json` 最后写，写完才算 `ready`。素材文件只读，不改、不移、不删（AGENTS.md 硬规则 5）。
+
+**队列。** 和第 6.2 节的预览段共用一个后台队列，但素材缓存排在所有预览段前面（它便宜，而且界面马上要用）：先当前工程时间线上用到的素材（播放头附近的先），再素材面板里其余素材。导入素材后、打开工程时、`project_changed` 带来新素材时入队，已 `ready` 的不重做。同时最多 2 个素材缓存任务。`preview_cache.auto` 为 false 时也做素材缓存（它不是预览段）；`pause_on_battery` 不暂停素材缓存。
+
+**界面怎么用。** 波形整条取一次 `peaks.bin`，按缩放在界面里取每像素最大值，不随缩放重新请求。缩略图按片段宽度算要画的格子，每格取最接近时间的那张拼图格（CSS 背景定位）；只有当相邻两格会落在同一张缩略图上（放大到比 `interval` 还细）时才按需请求 `frames/`。缓存还没好时，波形处画一条细中线，缩略图处用素材主色（`/palette`）铺底，好了以后直接换上，不闪白。
+
+**媒体通道。** `/media-cache/<素材键>/peaks.bin`、`/media-cache/<素材键>/thumbs.json`、`/media-cache/<素材键>/thumbs-<n>.jpg`、`/media-cache/<素材键>/frame?at=<规范时间>`，带令牌。文件还没生成时，`peaks.bin`、`thumbs.json` 返回 404，界面等推送再取；`frame` 按需生成并存进 `frames/`。原来的 `/peaks`、`/thumb` 保留一个版本，内部改为读素材缓存，下一版删除。
+
+**缓存目录不可用时**（第 6.2 节），素材缓存退回旧位置 `<工程目录>/.zcut/<project_id>/cache/`，按旧办法按需生成，界面照常显示。旧位置的文件宿主不迁移、不删除。
+
+**状态和推送。** `preview_cache_status` 的结果加 `media`：当前工程用到和导入的每个素材 `{media_id, key, peaks, thumbs}`，取值 `ready`、`building`、`missing`；`used_bytes` 含素材缓存。某个素材的波形或缩略图变成 `ready` 时，`preview_cache` 推送里带 `media_ready: [{media_id, key}]`，界面据此去取。
+
+**清理。** `preview_cache_clear` 带 `project_id` 时只删这个工程的预览段，不删素材缓存（别的工程可能在用）；不带参数时连素材缓存一起清空。超过 `limit_gb` 时（第 6.3 节），先按原规则删预览段；预览段删完仍超上限，才按 `meta.json` 的 `last_used` 从旧到新删素材缓存，当前工程用到的素材最后删。设置里「预览与缓存」一页多显示一行「波形和缩略图」：素材数、已就绪数、占用大小。
 
 ## 7. 修订事件 `project_changed`
 
