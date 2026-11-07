@@ -416,6 +416,13 @@ export function TimelinePreview({
     if (element !== videos.current[activeVideo.current]) return;
     topPlayback.current = { time: element.currentTime, steady: false };
   };
+  const pauseOriginal = useCallback(() => {
+    discardPreroll();
+    for (const video of videos.current) {
+      video?.pause();
+      if (video) video.muted = true;
+    }
+  }, [discardPreroll]);
   const playhead = useRef<HTMLDivElement>(null);
   const clock = useRef<HTMLOutputElement>(null);
   const playbackAt = useRef<string | null>(null);
@@ -448,6 +455,7 @@ export function TimelinePreview({
   const {
     video: streamVideo,
     visible: streamVisible,
+    preparing: streamPreparing,
     active: streamActive,
     sample: sampleStream,
     cacheStatus,
@@ -460,6 +468,7 @@ export function TimelinePreview({
     enabled: state.playing && direction > 0n && !hideViewer && !viewerOnly && !readOnly && !dragging.current,
     at,
     playbackAt,
+    prepare: pauseOriginal,
   });
   useReverseAudio(
     media?.kind === "image" ? undefined : src,
@@ -570,11 +579,7 @@ export function TimelinePreview({
         start = frameAt(next, project.edit_rate);
       }
       if (streamActive.current) {
-        discardPreroll();
-        for (const video of videos.current) {
-          video?.pause();
-          if (video) video.muted = true;
-        }
+        pauseOriginal();
       }
       if (looped) discardPreroll();
       let swapped = false;
@@ -803,14 +808,11 @@ export function TimelinePreview({
     discardPreroll,
     sampleStream,
     streamActive,
+    pauseOriginal,
   ]);
   useEffect(() => {
-    if (streamVisible) {
-      discardPreroll();
-      for (const video of videos.current) {
-        video?.pause();
-        if (video) video.muted = true;
-      }
+    if (streamVisible || streamPreparing) {
+      pauseOriginal();
       return;
     }
     if (at !== playbackAt.current) discardPreroll();
@@ -827,6 +829,7 @@ export function TimelinePreview({
       return;
     }
     const sync = () => {
+      if (streamActive.current) return;
       const seconds = numberOf(source);
       if (
         lastClip.current !== clip.id ||
@@ -854,7 +857,22 @@ export function TimelinePreview({
     if (element.readyState >= 1) sync();
     element.addEventListener("loadedmetadata", sync);
     return () => element.removeEventListener("loadedmetadata", sync);
-  }, [clip, source, speed, state.playing, direction, hideViewer, at, src, visibleVideo, discardPreroll, streamVisible]);
+  }, [
+    clip,
+    source,
+    speed,
+    state.playing,
+    direction,
+    hideViewer,
+    at,
+    src,
+    visibleVideo,
+    discardPreroll,
+    streamVisible,
+    streamPreparing,
+    streamActive,
+    pauseOriginal,
+  ]);
   const write = async (verb: string, label: string, ops?: unknown[]) => {
     if (!project || busy || readOnly) return;
     setBusy(true);
@@ -1179,7 +1197,7 @@ export function TimelinePreview({
               data-preview-mode="preroll"
               playsInline
               preload="auto"
-              muted={index !== visibleVideo || streamVisible}
+              muted={index !== visibleVideo || streamVisible || streamPreparing}
               data-preroll={streamVisible || index !== visibleVideo ? "" : undefined}
               data-preroll-lead={index === visibleVideo ? prerollLead : undefined}
               data-preroll-state="idle"
@@ -1211,8 +1229,8 @@ export function TimelinePreview({
           style={{
             position: "absolute",
             inset: 0,
-            zIndex: streamVisible ? 1 : -1,
-            visibility: streamVisible ? "visible" : "hidden",
+            zIndex: streamVisible ? 1 : 0,
+            opacity: streamVisible ? 1 : 0,
           }}
         />
         {clip?.speed === "map" && (

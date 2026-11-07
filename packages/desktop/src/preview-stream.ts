@@ -16,7 +16,7 @@ import {
 } from "./timeline.js";
 
 export interface CacheStatus {
-  segments: { clip_id: string; key: string; state: "ready" | "building" | "missing" }[];
+  segments: { clip_id: string; key: string; state: "ready" | "building" | "missing"; duration?: string }[];
   projects: { project_id: string; path: string }[];
   directory_ok: boolean;
   paused?: "battery";
@@ -24,6 +24,7 @@ export interface CacheStatus {
 export interface StreamSegment {
   clip: ClipView;
   url: string;
+  duration: string;
 }
 const seconds = (value: number) => rational(BigInt(Math.round(value * 1_000_000)), 1_000_000n);
 const mime = 'video/mp4; codecs="avc1.64001f, mp4a.40.2"';
@@ -62,7 +63,7 @@ export class PreviewStream {
   private open = () => {
     try {
       this.buffer = this.media.addSourceBuffer(mime);
-      this.buffer.mode = "sequence";
+      this.buffer.mode = "segments";
       void this.pump();
     } catch {
       this.error();
@@ -118,12 +119,19 @@ export class PreviewStream {
         }
         if (this.disposed) return;
         const start = previous?.end ?? "0s";
-        await this.operation(() => this.buffer?.appendBuffer(bytes));
-        if (this.disposed) return;
-        const end = printRational(seconds(this.buffer.buffered.end(this.buffer.buffered.length - 1)), true);
+        const end = printRational(add(parseRational(start, true), parseRational(segment.duration, true)), true);
         if (compare(parseRational(end, true), parseRational(start, true)) <= 0) throw new Error("Empty segment");
+        const buffer = this.buffer;
+        await this.operation(() => {
+          buffer.appendWindowEnd = Infinity;
+          buffer.timestampOffset = numberOf(parseRational(start, true));
+          buffer.appendWindowStart = numberOf(parseRational(start, true));
+          buffer.appendWindowEnd = numberOf(parseRational(end, true));
+          buffer.appendBuffer(bytes);
+        });
+        if (this.disposed) return;
         this.table.push({ segment, start, end });
-        if (!this.started && this.table.length === 2) {
+        if (!this.started) {
           const at = this.getAt();
           const row = this.table.find((row) =>
             contains(row.segment.clip.timeline_in.t, row.segment.clip.timeline_out.t, at),
@@ -146,13 +154,12 @@ export class PreviewStream {
           );
           this.video.volume = Math.min(1, 10 ** ((row.segment.clip.gain_db ?? 0) / 20));
           this.video.playbackRate = 1;
-          await this.video.play();
-          if (this.disposed) return;
           this.started = true;
-          this.activate();
+          void this.video.play().then(() => {
+            if (!this.disposed && !this.failed) this.activate();
+          }, this.error);
         }
       }
-      if (!this.started && !this.disposed) throw new Error("Startup needs two segments");
       if (this.table.at(-1)?.segment.clip.timeline_out.t === this.timelineEnd && this.media.readyState === "open")
         this.media.endOfStream();
       const old = this.table[Math.max(0, current - 2)];
@@ -216,6 +223,7 @@ export function usePreviewStream({
   enabled,
   at,
   playbackAt,
+  prepare,
 }: {
   project: ProjectView | null;
   top: TrackView | undefined;
@@ -225,6 +233,7 @@ export function usePreviewStream({
   enabled: boolean;
   at: string;
   playbackAt: React.MutableRefObject<string | null>;
+  prepare?: () => void;
 }) {
   const video = useRef<HTMLVideoElement>(null);
   const engine = useRef<PreviewStream>();
@@ -233,6 +242,7 @@ export function usePreviewStream({
   const attempted = useRef<string>();
   const active = useRef(false);
   const [visible, setVisible] = useState(false);
+  const [preparing, setPreparing] = useState(false);
   const latestAt = useRef(at);
   latestAt.current = at;
   const stop = useCallback(() => {
@@ -240,6 +250,7 @@ export function usePreviewStream({
     engine.current = undefined;
     active.current = false;
     setVisible(false);
+    setPreparing(false);
   }, []);
   useEffect(() => {
     if (!config || !path) return;
@@ -304,13 +315,18 @@ export function usePreviewStream({
           const projectId = status?.projects?.find((item) => item.path === path)?.project_id;
           if (
             !status?.directory_ok ||
-            !item ||
+            !item?.duration ||
             !projectId ||
             clip.speed === "map" ||
             compare(parseRational(clip.speed), rational(0n)) <= 0 ||
             project?.media.find((item) => item.id === clip.media_id)?.kind !== "video"
           )
             return;
+          try {
+            if (compare(parseRational(item.duration, true), rational(0n)) <= 0) return;
+          } catch {
+            return;
+          }
           const rate = parseRational(clip.speed);
           if (
             clip.time_map?.some(
@@ -328,6 +344,7 @@ export function usePreviewStream({
             return;
           return {
             clip,
+            duration: item.duration,
             url: `http://127.0.0.1:${config.port}/cache/${encodeURIComponent(projectId)}/${encodeURIComponent(item.key)}.mp4?token=${encodeURIComponent(config.token)}`,
           };
         };
@@ -338,7 +355,10 @@ export function usePreviewStream({
           return incoming ? segment(incoming) : undefined;
         };
         const first = segment(clip);
-        if (first && next(clip))
+        if (first) {
+          prepare?.();
+          active.current = true;
+          setPreparing(true);
           engine.current = new PreviewStream(
             video.current,
             first,
@@ -347,14 +367,16 @@ export function usePreviewStream({
             () => {
               active.current = true;
               setVisible(true);
+              setPreparing(false);
             },
             stop,
             project?.duration.t,
           );
+        }
       }
       return mapped?.ended ? mapped.at : null;
     },
-    [enabled, top, config, path, project, stop],
+    [enabled, top, config, path, project, stop, prepare],
   );
-  return { video, visible, active, sample, cacheStatus };
+  return { video, visible, preparing, active, sample, cacheStatus };
 }

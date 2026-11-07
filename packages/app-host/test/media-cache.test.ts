@@ -230,6 +230,10 @@ it("runs at most two media tasks, timeline media first, before preview segments 
     async () => false,
     "/Volumes",
     encode,
+    async () => ({
+      streams: [{ index: 0, codec_type: "video", r_frame_rate: "25", width: 1280, height: 720, time_base: "1/25" }],
+      summaries: new Map([[0, { count: 2, first300: [{ pts: 0n, duration: 1n }], last: { pts: 1n, duration: 1n } }]]),
+    }),
   );
   const base = first();
   project.media.unshift({ ...base, id: "med_unused", fingerprint: { ...base.fingerprint, value: "unused" } });
@@ -238,6 +242,7 @@ it("runs at most two media tasks, timeline media first, before preview segments 
   await cache.open(project, path());
   await cache.idle();
   expect(maximum).toBe(2);
+  expect((await cache.status()).segments[0]).toMatchObject({ state: "ready", duration: "2/25s" });
   expect(run.mock.calls[0]?.[0]).toContain(join(root, base.path));
   const before = run.mock.calls.length;
   project.media.push({ ...base, id: "med_new", fingerprint: { ...base.fingerprint, value: "new" } });

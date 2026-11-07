@@ -27,7 +27,34 @@ const sources: FakeSource[] = [];
 let finishAppend: (() => void) | undefined;
 let holdAppend = false;
 class FakeBuffer extends EventTarget {
-  mode = "segments";
+  mode = "sequence";
+  settings: [string, number][] = [];
+  private offset = 0;
+  private windowStart = 0;
+  private windowEnd = Infinity;
+  get timestampOffset() {
+    return this.offset;
+  }
+  set timestampOffset(value: number) {
+    this.settings.push(["timestampOffset", value]);
+    this.offset = value;
+  }
+  get appendWindowStart() {
+    return this.windowStart;
+  }
+  set appendWindowStart(value: number) {
+    expect(value).toBeLessThan(this.windowEnd);
+    this.settings.push(["appendWindowStart", value]);
+    this.windowStart = value;
+  }
+  get appendWindowEnd() {
+    return this.windowEnd;
+  }
+  set appendWindowEnd(value: number) {
+    expect(value).toBeGreaterThan(this.windowStart);
+    this.settings.push(["appendWindowEnd", value]);
+    this.windowEnd = value;
+  }
   end = 0;
   start = 0;
   updating = false;
@@ -37,6 +64,8 @@ class FakeBuffer extends EventTarget {
     this.updating = true;
     const id = new Uint8Array(bytes)[0];
     events.push(`append:${id}:${this.mode}`);
+    expect(this.timestampOffset).toBe(this.appendWindowStart);
+    expect(this.appendWindowEnd).toBeGreaterThan(this.appendWindowStart);
     const finish = () => {
       this.end += 4;
       this.updating = false;
@@ -111,8 +140,8 @@ afterEach(async () => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
-const segment = (clip: ClipView) => ({ clip, url: `http://cache/${clip.id}` });
-it("appends two segments in sequence mode before play, maps three segments, and evicts old ranges", async () => {
+const segment = (clip: ClipView) => ({ clip, url: `http://cache/${clip.id}`, duration: "4s" });
+it("plays after the first segment in segments mode, maps three segments, and evicts old ranges", async () => {
   const video = document.createElement("video");
   const stream = new PreviewStream(
     video,
@@ -127,7 +156,7 @@ it("appends two segments in sequence mode before play, maps three segments, and 
     "38s",
   );
   await settle();
-  expect(events.slice(0, 4)).toEqual(["append:0:sequence", "append:1:sequence", "play", "active"]);
+  expect(events.slice(0, 4)).toEqual(["append:0:segments", "play", "active", "append:1:segments"]);
   expect(video.currentTime).toBe(1);
   for (const [decoded, at] of [
     [2, "12s"],
@@ -143,10 +172,10 @@ it("appends two segments in sequence mode before play, maps three segments, and 
   await settle();
   expect(events).toContain("remove:0:8");
   expect(events).toContain("end");
-  expect(events.filter((event) => event.startsWith("append"))).toEqual(clips.map((_, i) => `append:${i}:sequence`));
+  expect(events.filter((event) => event.startsWith("append"))).toEqual(clips.map((_, i) => `append:${i}:segments`));
   stream.dispose();
 });
-it("waits for updateend of both startup segments, and cancels an in-flight append on seek", async () => {
+it("waits for the first updateend to play and cancels the second append on seek", async () => {
   holdAppend = true;
   const video = document.createElement("video");
   const fail = vi.fn();
@@ -159,14 +188,14 @@ it("waits for updateend of both startup segments, and cancels an in-flight appen
     fail,
   );
   await settle();
-  expect(events).toEqual(["append:0:sequence"]);
+  expect(events).toEqual(["append:0:segments"]);
   finishAppend?.();
   await settle();
-  expect(events).toEqual(["append:0:sequence", "append:1:sequence"]);
+  expect(events).toEqual(["append:0:segments", "play", "append:1:segments"]);
   stream.dispose();
   finishAppend?.();
   await settle();
-  expect(events).not.toContain("play");
+  expect(events.filter((event) => event === "play")).toHaveLength(1);
   expect(fail).not.toHaveBeenCalled();
   expect(URL.revokeObjectURL).toHaveBeenCalled();
 });
@@ -180,7 +209,12 @@ const path = "/test.zcut.json";
 const cache = () => ({
   directory_ok: true,
   projects: [{ project_id: "prj_test", path }],
-  segments: clips.map((clip) => ({ clip_id: clip.id, key: clip.id, state: "ready" })),
+  segments: clips.map((clip) => ({
+    clip_id: clip.id,
+    key: clip.id,
+    state: "ready",
+    duration: "4s" as string | undefined,
+  })),
 });
 const project = {
   id: "timeline",
@@ -273,72 +307,103 @@ it("returns to the original player on a cache fetch failure", async () => {
   expect(events).not.toContain("play");
 });
 
-it("drives the real preview playhead and timecode through three cached clips, then falls back at the missing cut", async () => {
-  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => recordingCanvas() as never);
-  vi.spyOn(HTMLMediaElement.prototype, "readyState", "get").mockReturnValue(2);
-  let frame: FrameRequestCallback | undefined;
-  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
-    frame = callback;
-    return 1;
-  });
-  vi.stubGlobal("cancelAnimationFrame", () => {});
-  let state: UiState = { ...initialState(), project: path, playing: true, playhead: { at: "10s" } };
-  const dragging = { current: false };
-  const update = (next: typeof state) => {
-    state = next;
-    render();
-  };
-  const render = () =>
-    root?.render(
-      <TimelinePreview
-        project={project}
-        state={state}
-        update={update}
-        config={config}
-        call={call}
-        error={null}
-        dragging={dragging}
-      />,
+it.each([false, true])(
+  "drives the real preview and pauses originals during startup (play rejected: %s)",
+  async (rejectPlay) => {
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => recordingCanvas() as never);
+    vi.spyOn(HTMLMediaElement.prototype, "readyState", "get").mockReturnValue(2);
+    let frame: FrameRequestCallback | undefined;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frame = callback;
+      return 1;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    let state: UiState = { ...initialState(), project: path, playing: true, playhead: { at: "10s" } };
+    const dragging = { current: false };
+    const update = (next: typeof state) => {
+      state = next;
+      render();
+    };
+    const render = () =>
+      root?.render(
+        <TimelinePreview
+          project={project}
+          state={state}
+          update={update}
+          config={config}
+          call={call}
+          error={null}
+          dragging={dragging}
+        />,
+      );
+    root = createRoot(host);
+    await act(async () => render());
+    holdAppend = true;
+    await act(() => frame?.(100));
+    await settle();
+    const video = host.querySelector<HTMLVideoElement>('video[data-preview-mode="mse"]');
+    if (!video) throw new Error("Missing stream player");
+    expect(video.style.visibility).toBe("");
+    expect(video.style.zIndex).toBe("0");
+    expect(video.style.opacity).toBe("0");
+    const originals = [...host.querySelectorAll<HTMLVideoElement>('video[data-preview-mode="preroll"]')];
+    for (const original of originals) {
+      expect(vi.mocked(HTMLMediaElement.prototype.pause).mock.contexts).toContain(original);
+      expect(original.muted).toBe(true);
+    }
+    const plays = vi.mocked(HTMLMediaElement.prototype.play).mock.calls.length;
+    await act(() => {
+      for (const original of originals) original.dispatchEvent(new Event("loadedmetadata"));
+    });
+    expect(vi.mocked(HTMLMediaElement.prototype.play).mock.calls).toHaveLength(plays);
+    if (rejectPlay) vi.mocked(HTMLMediaElement.prototype.play).mockRejectedValueOnce(new Error("decode failed"));
+    holdAppend = false;
+    finishAppend?.();
+    await settle();
+    if (rejectPlay) {
+      expect(video.style.opacity).toBe("0");
+      expect(originals[0]?.muted).toBe(false);
+      expect(vi.mocked(HTMLMediaElement.prototype.play).mock.contexts.slice(plays)).toEqual([video, originals[0]]);
+      return;
+    }
+    expect(video.style.opacity).toBe("1");
+    const status = cache();
+    status.segments[3]!.state = "missing";
+    await act(() => window.dispatchEvent(new CustomEvent("desktop-preview-cache", { detail: status })));
+    for (const [decoded, expected] of [
+      [2, "12s"],
+      [5, "15s"],
+      [10, "20s"],
+    ] as const) {
+      video.currentTime = decoded;
+      await act(() => frame?.(1000 + decoded * 1000));
+      expect(state.playhead).toEqual({ at: expected });
+      expect(host.querySelector('[aria-label="播放时码"]')?.textContent).toBe(`00:00:${expected.slice(0, -1)}:00`);
+    }
+    video.currentTime = 12;
+    await act(() => frame?.(14000));
+    expect(state.playhead).toEqual({ at: "22s" });
+    expect(video.style.opacity).toBe("0");
+    expect(video.style.visibility).toBe("");
+    expect(video.style.zIndex).toBe("0");
+    const original = host.querySelector<HTMLVideoElement>(
+      'video[data-preview-mode="preroll"][aria-label="时间线预览"]',
     );
-  root = createRoot(host);
-  await act(async () => render());
-  await act(() => frame?.(100));
-  await settle();
-  const video = host.querySelector<HTMLVideoElement>('video[data-preview-mode="mse"]');
-  if (!video) throw new Error("Missing stream player");
-  expect(video.style.visibility).toBe("visible");
-  const status = cache();
-  status.segments[3]!.state = "missing";
-  await act(() => window.dispatchEvent(new CustomEvent("desktop-preview-cache", { detail: status })));
-  for (const [decoded, expected] of [
-    [2, "12s"],
-    [5, "15s"],
-    [10, "20s"],
-  ] as const) {
-    video.currentTime = decoded;
-    await act(() => frame?.(1000 + decoded * 1000));
-    expect(state.playhead).toEqual({ at: expected });
-    expect(host.querySelector('[aria-label="播放时码"]')?.textContent).toBe(`00:00:${expected.slice(0, -1)}:00`);
-  }
-  video.currentTime = 12;
-  await act(() => frame?.(14000));
-  expect(state.playhead).toEqual({ at: "22s" });
-  expect(video.style.visibility).toBe("hidden");
-  const original = host.querySelector<HTMLVideoElement>('video[data-preview-mode="preroll"][aria-label="时间线预览"]');
-  expect(original?.currentTime).toBe(20);
-  expect(original?.style.visibility).toBe("");
-  expect(call).toHaveBeenCalledWith("preview_cache_hint", { at: "22s" });
-  status.segments[3]!.state = "ready";
-  await act(() => window.dispatchEvent(new CustomEvent("desktop-preview-cache", { detail: status })));
-  if (!original) throw new Error("Missing original player");
-  original.currentTime = 24;
-  await act(() => frame?.(15000));
-  expect(state.playhead).toEqual({ at: "26s" });
-  await act(() => frame?.(15100));
-  await settle();
-  expect(video.style.visibility).toBe("visible");
-  expect(sources).toHaveLength(2);
-});
+    expect(original?.currentTime).toBe(20);
+    expect(original?.style.visibility).toBe("");
+    expect(call).toHaveBeenCalledWith("preview_cache_hint", { at: "22s" });
+    status.segments[3]!.state = "ready";
+    await act(() => window.dispatchEvent(new CustomEvent("desktop-preview-cache", { detail: status })));
+    if (!original) throw new Error("Missing original player");
+    original.currentTime = 24;
+    await act(() => frame?.(15000));
+    expect(state.playhead).toEqual({ at: "26s" });
+    await act(() => frame?.(15100));
+    await settle();
+    expect(video.style.opacity).toBe("1");
+    expect(sources).toHaveLength(2);
+  },
+);
 
 it("maps fractional timeline positions using the appended table", async () => {
   const fractional = clips.slice(0, 3).map((clip, index) => ({
@@ -362,6 +427,115 @@ it("maps fractional timeline positions using the appended table", async () => {
   video.currentTime = 5;
   expect(stream.time()).toEqual({ at: "16/3s", ended: false });
   stream.dispose();
+});
+
+it("sums measured durations exactly and sets offsets and windows in order without reading buffered.end", async () => {
+  const video = document.createElement("video");
+  const durations = ["3288021/1000000s", "1001/300s", "1/3s"];
+  const segments = clips.slice(0, 3).map((clip, i) => ({ ...segment(clip), duration: durations[i]! }));
+  const stream = new PreviewStream(
+    video,
+    segments[0]!,
+    (clip) => segments[clips.indexOf(clip) + 1],
+    () => "10s",
+    vi.fn(),
+    vi.fn(),
+  );
+  const buffer = sources[0]!.buffer;
+  buffer.buffered.end = () => {
+    throw new Error("Buffered audio must not set the segment boundary");
+  };
+  await settle();
+  expect(buffer.mode).toBe("segments");
+  expect(stream.table.map(({ start, end }) => ({ start, end }))).toEqual([
+    { start: "0s", end: "3288021/1000000s" },
+    { start: "3288021/1000000s", end: "19874063/3000000s" },
+    { start: "19874063/3000000s", end: "6958021/1000000s" },
+  ]);
+  expect(buffer.settings).toEqual(
+    stream.table.flatMap(({ start, end }) => {
+      const seconds = (value: string) => {
+        const [n, d = "1"] = value.slice(0, -1).split("/");
+        return Number(n) / Number(d);
+      };
+      return [
+        ["appendWindowEnd", Infinity],
+        ["timestampOffset", seconds(start)],
+        ["appendWindowStart", seconds(start)],
+        ["appendWindowEnd", seconds(end)],
+      ];
+    }),
+  );
+  video.currentTime = 3288021 / 1000000;
+  expect(stream.time()).toEqual({ at: "14s", ended: false });
+  stream.dispose();
+});
+
+it.each([undefined, "0s", "bad", "2/2s"])("uses P2.1 when the host duration is %s", async (duration) => {
+  call.mockImplementationOnce(async () => {
+    const status = cache();
+    for (const item of status.segments) item.duration = duration;
+    return status;
+  });
+  await mount();
+  expect(sources).toHaveLength(0);
+  expect(api.active.current).toBe(false);
+  expect(host.querySelector("video")?.dataset.previewMode).toBe("preroll");
+});
+
+it("starts a lone ready segment while its successor has no duration", async () => {
+  call.mockImplementationOnce(async () => {
+    const status = cache();
+    for (const item of status.segments.slice(1)) item.duration = undefined;
+    return status;
+  });
+  await mount();
+  expect(events).toEqual(["append:0:segments", "play"]);
+  expect(await sample(4)).toBe("14s");
+  expect(api.active.current).toBe(false);
+});
+
+it("continues appending while the first play promise is pending", async () => {
+  let played: (() => void) | undefined;
+  vi.mocked(HTMLMediaElement.prototype.play).mockImplementation(
+    () =>
+      new Promise<void>((resolve) => {
+        played = resolve;
+      }),
+  );
+  await mount();
+  expect(events.filter((event) => event.startsWith("append"))).toHaveLength(3);
+  expect(api.preparing).toBe(true);
+  played?.();
+  await settle();
+  expect(api.visible).toBe(true);
+  expect(api.preparing).toBe(false);
+});
+
+it("does not activate a disposed stream when its pending play completes", async () => {
+  let played: (() => void) | undefined;
+  vi.mocked(HTMLMediaElement.prototype.play).mockImplementation(
+    () =>
+      new Promise<void>((resolve) => {
+        played = resolve;
+      }),
+  );
+  await mount();
+  enabled = false;
+  await act(async () => root?.render(<Player />));
+  played?.();
+  await settle();
+  expect(api.visible).toBe(false);
+  expect(api.active.current).toBe(false);
+});
+
+it("falls back if play is rejected", async () => {
+  vi.mocked(HTMLMediaElement.prototype.play).mockRejectedValueOnce(new Error("decode failed"));
+  await mount();
+  expect(api.active.current).toBe(false);
+  expect(api.visible).toBe(false);
+  expect(api.preparing).toBe(false);
+  expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1);
 });
 
 it("keeps buffered playback until the cut when a later cached file disappears", async () => {
@@ -393,8 +567,8 @@ it("shows video cache gaps at timeline positions and opens cache settings withou
     segment.state = i === 1 ? "building" : i < 4 ? "missing" : "ready";
   });
   status.segments.push(
-    { clip_id: "audio", key: "audio", state: "missing" },
-    { clip_id: "disabled", key: "disabled", state: "missing" },
+    { clip_id: "audio", key: "audio", state: "missing", duration: undefined },
+    { clip_id: "disabled", key: "disabled", state: "missing", duration: undefined },
   );
   const update = vi.fn();
   const settings = vi.fn();

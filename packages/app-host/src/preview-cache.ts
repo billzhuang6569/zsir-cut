@@ -17,16 +17,26 @@ import {
 } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
-import type { Clip, Media, Project, Rational } from "../../core/dist/index.js";
+import type { Clip, Media, Probe, Project, Rational } from "../../core/dist/index.js";
 import { runFfmpeg, thumbnailTask } from "./media.js";
 import { MediaCache, mediaKey } from "./media-cache.js";
 import type { DesktopPreferences } from "./preferences.js";
 
-const { add, sub, div, mul, rational, compare, floor, printRational }: typeof import("../../core/dist/index.js") =
-  await import(
-    new URL(import.meta.url.endsWith(".ts") ? "../../core/src/index.ts" : "../../core/dist/index.js", import.meta.url)
-      .href
-  );
+const {
+  add,
+  sub,
+  div,
+  mul,
+  rational,
+  compare,
+  floor,
+  printRational,
+  parseRational,
+  ffprobe,
+}: typeof import("../../core/dist/index.js") = await import(
+  new URL(import.meta.url.endsWith(".ts") ? "../../core/src/index.ts" : "../../core/dist/index.js", import.meta.url)
+    .href
+);
 const projectPattern = /^prj_[a-zA-Z0-9_-]+$/;
 const keyPattern = /^[a-f0-9]{32}$/;
 const canonical = (value: unknown): string =>
@@ -54,7 +64,7 @@ export function segmentKey(clip: Clip, media: Media, quality: string) {
         printRational(sourceEnd(clip), true),
         speed,
         quality,
-        "v1",
+        "v2",
       ].join("|"),
     )
     .digest("hex")
@@ -104,7 +114,7 @@ export function segmentArgs(
     audio.push("atempo=0.5");
     tempo = mul(tempo, rational(2n));
   }
-  audio.push(`atempo=${decimal(tempo)}`);
+  audio.push(`atempo=${decimal(tempo)}`, "apad");
   const gop = floor(add(div(media.video.rate, rational(2n)), rational(1n, 2n)));
   return [
     "-y",
@@ -145,6 +155,8 @@ export function segmentArgs(
     "+bitexact",
     "-flags:a",
     "+bitexact",
+    "-t",
+    decimal(clip.duration),
     "-f",
     "mp4",
     output,
@@ -153,7 +165,7 @@ export function segmentArgs(
 interface Index {
   project_path: string;
   last_opened: string;
-  segments: Record<string, { bytes: number }>;
+  segments: Record<string, { bytes: number; duration?: string }>;
 }
 type Segment = { clip: Clip; media: Media; key: string };
 export class PreviewCache {
@@ -193,6 +205,7 @@ export class PreviewCache {
     },
     private volumesRoot = "/Volumes",
     private encode = runFfmpeg,
+    private probe: Probe = ffprobe,
   ) {
     this.media = new MediaCache(
       () => this.settings().directory,
@@ -249,9 +262,13 @@ export class PreviewCache {
       typeof data.segments !== "object"
     )
       throw new Error("Invalid cache index");
-    for (const [key, value] of Object.entries(data.segments))
+    for (const [key, value] of Object.entries(data.segments)) {
       if (!keyPattern.test(key) || !Number.isSafeInteger(value.bytes) || value.bytes < 0)
         throw new Error("Invalid cache segment");
+      if (value.duration !== undefined) {
+        if (parseRational(value.duration, true).numerator <= 0n) throw new Error("Invalid cache duration");
+      }
+    }
     return data;
   }
   private async save(id: string, index: Index) {
@@ -263,6 +280,21 @@ export class PreviewCache {
     } finally {
       await rm(temp, { force: true });
     }
+  }
+  private async duration(path: string) {
+    const data = await this.probe(path);
+    const video = data.streams.find(
+      (stream) => stream.codec_type === "video" && stream.disposition?.attached_pic !== 1,
+    );
+    const packets = video && data.summaries?.get(video.index);
+    const first = packets?.first300[0],
+      last = packets?.last;
+    if (!video?.time_base || !first || !last) throw new Error("Video packet timing unavailable");
+    // Cache cuts can be a single frame, which the media import classifier rejects.
+    const ticks = last.pts - first.pts + last.duration;
+    const duration = mul(rational(ticks), parseRational(video.time_base, false, false));
+    if (duration.numerator <= 0n) throw new Error("Invalid cache duration");
+    return printRational(duration, true);
   }
   private control<T>(action: () => Promise<T>) {
     const next = this.controls.then(action);
@@ -371,8 +403,10 @@ export class PreviewCache {
         if (this.failed.has(segment.key)) continue;
         try {
           const file = await stat(join(await this.projectDir(project.id), `${segment.key}.mp4`));
-          if (!index.segments[segment.key]) {
-            index.segments[segment.key] = { bytes: file.size };
+          if (!index.segments[segment.key]?.duration) {
+            const path = join(await this.projectDir(project.id), `${segment.key}.mp4`);
+            const duration = await this.duration(path);
+            index.segments[segment.key] = { bytes: file.size, duration };
             await this.save(project.id, index);
           }
         } catch {
@@ -416,9 +450,11 @@ export class PreviewCache {
           );
         }
         controller.signal.throwIfAborted();
+        const duration = await this.duration(temp);
+        controller.signal.throwIfAborted();
         const file = join(dir, `${key}.mp4`);
         await rename(temp, file);
-        index.segments[key] = { bytes: (await stat(file)).size };
+        index.segments[key] = { bytes: (await stat(file)).size, duration };
         await this.save(project.id, index);
         await this.enforceLimit();
         index = await this.index(project.id);
@@ -537,18 +573,21 @@ export class PreviewCache {
     if (directory_ok) this.kick();
     const projects = directory_ok ? await this.projects() : [];
     const fs = directory_ok ? await statfs(this.settings().directory).catch(() => null) : null;
+    const index = directory_ok && this.project ? await this.index(this.project.id).catch(() => null) : null;
     const segments = await Promise.all(
       this.needed.map(async ({ clip, key }) => {
         let state = "missing";
+        let duration: string | undefined;
         if (directory_ok) {
           if (this.building === key) state = "building";
           else
             try {
               await stat(join(await this.projectDir(this.project?.id ?? ""), `${key}.mp4`));
               state = "ready";
+              duration = index?.segments[key]?.duration;
             } catch {}
         }
-        return { clip_id: clip.id, key, state };
+        return { clip_id: clip.id, key, state, ...(duration ? { duration } : {}) };
       }),
     );
     const mediaEntries = directory_ok ? await this.media.entries() : [];
