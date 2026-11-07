@@ -37,6 +37,21 @@ function toolResultFailed(value: unknown): boolean {
   );
 }
 
+function toolErrorCode(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    try {
+      return toolErrorCode(JSON.parse(value));
+    } catch {
+      return undefined;
+    }
+  }
+  if (Array.isArray(value)) return value.map(toolErrorCode).find(Boolean);
+  if (!value || typeof value !== "object") return undefined;
+  const result = value as Record<string, unknown>;
+  const error = result.error as { code?: string } | undefined;
+  return error?.code ?? [result.structuredContent, result.content, result.text].map(toolErrorCode).find(Boolean);
+}
+
 type Call = (verb: string, request: Record<string, unknown>) => Promise<unknown>;
 export interface AiNotice {
   chat: string;
@@ -110,6 +125,8 @@ export function useAiPanel({
   const [sessionId, setSessionId] = useState("");
   const [saving, setSaving] = useState(false);
   const [confirmApprove, setConfirmApprove] = useState<string>();
+  const [approvalConflicts, setApprovalConflicts] = useState<Record<string, string>>({});
+  const [reviewConflicts, setReviewConflicts] = useState<Set<string>>(() => new Set());
   const answers = useRef<string[]>([]);
   const consumed = useRef(0);
   const refresh = useCallback(async () => {
@@ -147,6 +164,8 @@ export function useAiPanel({
     setHistory(null);
     setAi({ sessions: [], batches: [] });
     setSessionId("");
+    setApprovalConflicts({});
+    setReviewConflicts(new Set());
     setEvents([]);
     currentChat.current = undefined;
     setChatId(undefined);
@@ -224,6 +243,26 @@ export function useAiPanel({
     }
     consumed.current = notices.length;
   }, [notices, refresh]);
+  useEffect(() => {
+    setReviewConflicts((old) => {
+      const next = new Set(old);
+      const tools = new Map<string, ChatEvent>();
+      for (const event of events) {
+        if (!event.id) continue;
+        if (event.type === "tool_start") tools.set(event.id, { ...tools.get(event.id), ...event });
+        if (event.type !== "tool_end") continue;
+        const tool = tools.get(event.id);
+        const id = (tool?.input as { session_id?: string } | undefined)?.session_id;
+        const verb = toolVerb(tool?.name ?? "");
+        if (!id) continue;
+        if (["session_review", "session_approve"].includes(verb)) {
+          if (toolErrorCode(event.input) === "E_CONFLICT") next.add(id);
+          else next.delete(id);
+        } else if (verb === "edit" && !event.failed && !toolResultFailed(event.input)) next.delete(id);
+      }
+      return next;
+    });
+  }, [events]);
   const send = async (text: string) => {
     if (generating || !text.trim()) return;
     if (!agents.some((item) => item.agent === agent && item.available)) {
@@ -261,8 +300,9 @@ export function useAiPanel({
       author: DESKTOP_AUTHOR,
       ...extra,
     });
-  const decisionSessions = ai.sessions.filter((item) => item.state !== "in_review" || item.pending_count > 0);
-  const session = decisionSessions.find((item) => item.session_id === sessionId) ?? decisionSessions.at(-1);
+  // The host lists UUIDv7 session IDs from oldest to newest.
+  const draftSessions = ai.sessions.filter((item) => ["open", "in_review"].includes(item.state)).reverse();
+  const session = draftSessions.find((item) => item.session_id === sessionId) ?? draftSessions[0];
   const decisions = [...(session?.decisions ?? [])].sort((a, b) => a.seq - b.seq);
   const pending = decisions.filter((item) => item.state === "pending");
   const decision = pending[0];
@@ -293,7 +333,7 @@ export function useAiPanel({
     }
   };
   const approve = async (item: Session, pendingCount = item.pending_count) => {
-    if (saving || generating || item.state !== "in_review") return false;
+    if (approvalReason(item)) return false;
     if (pendingCount && confirmApprove !== item.session_id) {
       setConfirmApprove(item.session_id);
       return false;
@@ -306,6 +346,8 @@ export function useAiPanel({
       await refresh().catch((e: Error) => setError(e.message));
       return true;
     } catch (e) {
+      if ((e as { code?: string }).code === "E_CONFLICT")
+        setApprovalConflicts((old) => ({ ...old, [item.session_id]: item.draft_revision }));
       setError(String(e));
       return false;
     } finally {
@@ -414,6 +456,15 @@ export function useAiPanel({
     }
   }
   const available = agents.filter((item) => item.available);
+  const approvalReason = (item: Session) => {
+    if (reviewConflicts.has(item.session_id) || approvalConflicts[item.session_id] === item.draft_revision)
+      return "工程在这之后又改过";
+    if (item.state !== "in_review") return "AI 还没交审";
+    if (!item.changes?.length) return "这一版没有改动";
+    if (generating) return "AI 正在处理，请稍候";
+    if (saving) return "正在保存，请稍候";
+    return "";
+  };
   const header = (
     <div className="zc-panel-head zc-ai-head">
       <h2>AI</h2>
@@ -680,95 +731,97 @@ export function useAiPanel({
         ))}
       </div>
       <div ref={draftCards} className="zc-draft-list">
-        {ai.sessions
-          .filter((item) => item.state === "in_review" || (item.state === "open" && item.revision_count > 0))
-          .map((item) => {
-            const changes = item.changes ?? [];
-            return (
-              <section className="zc-draft" aria-label="AI 草稿" key={item.session_id}>
-                <strong>方案 · {item.intent || item.label || "剪辑方案"}</strong>
-                <div className="zc-draft-counts">
-                  {[
-                    { icon: "list", label: "步", count: item.revision_count },
-                    {
-                      icon: "clip",
-                      label: "片段",
-                      count: changes.filter((change) => change.entity === "clip").length,
-                    },
-                    {
-                      icon: "subtitle",
-                      label: "字幕改动",
-                      count: changes.filter((change) =>
-                        ["cue", "transcript", "run", "token", "override", "free_cue", "style"].includes(change.entity),
-                      ).length,
-                    },
-                  ]
-                    .filter((entry) => entry.count > 0)
-                    .map((entry) => (
-                      <span
-                        role="img"
-                        key={entry.label}
-                        aria-label={`${entry.count} ${entry.label}`}
-                        title={entry.label}
-                      >
-                        <Icon name={entry.icon} />
-                        {entry.count} {entry.label}
-                      </span>
-                    ))}
-                </div>
-                {confirmApprove === item.session_id && (
-                  <p role="alert">还有 {item.pending_count} 件决定未答，仍要批准吗？</p>
-                )}
+        {draftSessions.map((item) => {
+          const changes = item.changes ?? [];
+          const reason = approvalReason(item);
+          const title = item.intent || item.label || "剪辑方案";
+          return (
+            <section
+              className={`zc-draft${session?.session_id === item.session_id ? " is-selected" : ""}`}
+              aria-label="AI 草稿"
+              key={item.session_id}
+            >
+              <button
+                type="button"
+                className="zc-draft-select"
+                aria-label={`选择方案：${title}`}
+                aria-pressed={session?.session_id === item.session_id}
+                disabled={saving}
+                onClick={() => {
+                  setSessionId(item.session_id);
+                  setConfirmApprove(undefined);
+                  answers.current = [];
+                }}
+              />
+              <strong>方案 · {title}</strong>
+              <div className="zc-draft-counts">
+                {[
+                  { icon: "list", label: "步", count: item.revision_count },
+                  {
+                    icon: "clip",
+                    label: "片段",
+                    count: changes.filter((change) => change.entity === "clip").length,
+                  },
+                  {
+                    icon: "subtitle",
+                    label: "字幕改动",
+                    count: changes.filter((change) =>
+                      ["cue", "transcript", "run", "token", "override", "free_cue", "style"].includes(change.entity),
+                    ).length,
+                  },
+                ]
+                  .filter((entry) => entry.count > 0)
+                  .map((entry) => (
+                    <span role="img" key={entry.label} aria-label={`${entry.count} ${entry.label}`} title={entry.label}>
+                      <Icon name={entry.icon} />
+                      {entry.count} {entry.label}
+                    </span>
+                  ))}
+              </div>
+              {confirmApprove === item.session_id && (
+                <p role="alert">还有 {item.pending_count} 件决定未答，仍要批准吗？</p>
+              )}
+              {reason && <p className="zc-draft-reason">{reason}</p>}
+              <Button
+                variant="approve"
+                icon="check"
+                disabled={Boolean(reason)}
+                onClick={() => {
+                  void approve(item);
+                }}
+              >
+                {confirmApprove === item.session_id ? "仍然批准" : "全部批准"}
+              </Button>
+              {reason === "工程在这之后又改过" && (
                 <Button
-                  variant="approve"
-                  icon="check"
-                  disabled={saving || generating || item.state !== "in_review"}
-                  onClick={() => {
-                    void approve(item);
-                  }}
+                  disabled={saving || generating || !available.some((item) => item.agent === agent)}
+                  onClick={() =>
+                    void send(
+                      `请基于主工程的最新版本重做「${title}」（原编辑会话 ${item.session_id}），新建 manual 编辑会话，完成后用 session_review 重新交审。`,
+                    )
+                  }
                 >
-                  {confirmApprove === item.session_id ? "仍然批准" : "全部批准"}
+                  让 AI 按新版本重做
                 </Button>
-                {changes.length > 0 && (
-                  <Button icon="image" onClick={() => void showReview(item)}>
-                    看对比
-                  </Button>
-                )}
-              </section>
-            );
-          })}
+              )}
+              {reason === "这一版没有改动" && (
+                <Button disabled={saving || generating} onClick={() => void reject(item.session_id)}>
+                  丢掉这一版
+                </Button>
+              )}
+              {changes.length > 0 && (
+                <Button icon="image" onClick={() => void showReview(item)}>
+                  看对比
+                </Button>
+              )}
+            </section>
+          );
+        })}
       </div>
       {runningBatch && (
         <output>
           AI 正在做第 {Math.min(runningBatch.count, runningBatch.applied.length + 1)} / {runningBatch.count} 步
         </output>
-      )}
-      {decisionSessions.length > 1 && (
-        <div className="zc-tabs zc-session-tabs" role="tablist" aria-label="编辑会话">
-          {decisionSessions.map((item) => {
-            const title = item.label?.trim() || item.intent?.trim() || "编辑会话";
-            return (
-              <button
-                key={item.session_id}
-                type="button"
-                role="tab"
-                className="zc-tab"
-                aria-selected={session?.session_id === item.session_id}
-                disabled={saving}
-                title={title}
-                onClick={() => {
-                  setSessionId(item.session_id);
-                  answers.current = [];
-                }}
-              >
-                <span className="zc-session-title">{title.length > 20 ? `${title.slice(0, 20)}…` : title}</span>
-                <span role="img" className="zc-session-count" aria-label={`${item.pending_count} 件未答`}>
-                  {item.pending_count}
-                </span>
-              </button>
-            );
-          })}
-        </div>
       )}
       {decision ? (
         <DecisionCard

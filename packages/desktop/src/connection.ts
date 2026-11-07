@@ -216,7 +216,7 @@ export function connectHost(
             ? requestError(envelope)
             : `${envelope.error?.code ?? ""} ${envelope.error?.message ?? ""}`.trim(),
         });
-        Object.assign(error, { manual: envelope.error?.details?.manual });
+        Object.assign(error, { code: envelope.error?.code, manual: envelope.error?.details?.manual });
         if (envelope.error?.code === "E_CONFLICT") {
           void refresh().then(
             () => item?.reject(error),

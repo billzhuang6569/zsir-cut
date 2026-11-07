@@ -23,6 +23,15 @@ it("exposes revision events to subscribers while refreshing the project and subt
       const message = JSON.parse(raw);
       messages.push(message);
       requests.push(message.verb ?? message.type);
+      if (message.verb === "session_approve") {
+        queueMicrotask(() =>
+          this.receive({
+            id: message.id,
+            envelope: { ok: false, error: { code: "E_CONFLICT", message: "Session replay failed" } },
+          }),
+        );
+        return;
+      }
       const result =
         message.request?.view === "brief"
           ? { project: { name: "项目", revision: { id: "rev_2", seq: 2 } }, transcripts: [] }
@@ -94,6 +103,15 @@ it("exposes revision events to subscribers while refreshing the project and subt
     await disconnect.call("preview_data", { session_id: "ses_test", at_revision: "rev_draft" });
     expect(messages.at(-1)).toMatchObject({ type: "preview_data", session_id: "ses_test", at_revision: "rev_draft" });
     expect(messages.at(-1)).not.toHaveProperty("verb");
+    const diagnostic = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await expect(disconnect.call("session_approve", { session_id: "ses_test" })).rejects.toMatchObject({
+        code: "E_CONFLICT",
+        cause: "E_CONFLICT Session replay failed",
+      });
+    } finally {
+      diagnostic.mockRestore();
+    }
   } finally {
     window.removeEventListener("desktop-preview-cache", previewCache);
     disconnect();

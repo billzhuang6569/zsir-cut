@@ -426,6 +426,23 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
 }
+.zc-draft-list > .zc-draft {
+  position: relative;
+}
+.zc-draft.is-selected {
+  border-color: var(--selection);
+}
+.zc-draft-select {
+  position: absolute;
+  inset: 0;
+  border: none;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+.zc-draft > .zc-btn {
+  position: relative;
+}
 .zc-ai-chat a {
   color: var(--accent);
 }
@@ -437,7 +454,8 @@
   color: var(--accent);
 }
 
-.zc-q-note {
+.zc-q-note,
+.zc-draft-reason {
   display: block;
   color: var(--text-4);
   font-size: var(--label-size);
@@ -482,8 +500,7 @@
 .zc-chat-history-row > time {
   flex-shrink: 0;
 }
-.zc-chat-history-title,
-.zc-session-title {
+.zc-chat-history-title {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -493,20 +510,6 @@
   flex: 1;
 }
 .zc-chat-history-row > time {
-  color: var(--text-4);
-  font-size: var(--label-size);
-}
-.zc-session-tabs {
-  flex-wrap: wrap;
-}
-.zc-session-tabs > .zc-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  max-width: 100%;
-}
-.zc-session-count {
-  flex-shrink: 0;
   color: var(--text-4);
   font-size: var(--label-size);
 }

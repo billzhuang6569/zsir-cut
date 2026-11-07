@@ -179,7 +179,7 @@ function host() {
             draft_revision: "rev_draft",
             pending_count: 1,
             revision_count: 4,
-            changes: [],
+            changes: [...current.timeline_changes, ...current.subtitle_changes],
             decisions: [],
           },
         ],
