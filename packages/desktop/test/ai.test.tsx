@@ -487,7 +487,7 @@ it("groups consecutive successful and mixed tool calls while preserving order an
   }
 });
 
-it("switches named session tabs, shows option notes and hides empty draft counts", async () => {
+it("selects draft cards newest first without tabs, switches decisions and keeps action buttons independent", async () => {
   let multiple = true;
   const sessions = [
     {
@@ -529,20 +529,7 @@ it("switches named session tabs, shows option notes and hides empty draft counts
     if (verb === "chat_agents") return [{ agent: "claude", available: true }];
     if (verb === "chat_list") return [];
     return {
-      sessions: multiple
-        ? [
-            ...sessions,
-            {
-              ...sessions[0],
-              session_id: "ses_done",
-              label: "已完成审阅",
-              pending_count: 0,
-              decisions: [],
-              revision_count: 0,
-              changes: [],
-            },
-          ]
-        : sessions.slice(0, 1),
+      sessions: multiple ? sessions : sessions.slice(0, 1),
       batches: [],
     };
   });
@@ -550,12 +537,20 @@ it("switches named session tabs, shows option notes and hides empty draft counts
   const root = createRoot(container);
   try {
     await act(async () => root.render(<Harness call={call} path="/project" />));
-    const tabs = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
-    expect(tabs.map((node) => node.textContent)).toEqual(["精简节奏2", `${sessions[1]?.intent?.slice(0, 20)}…1`]);
+    const cards = [...container.querySelectorAll<HTMLElement>(".zc-draft")];
+    const selectors = [...container.querySelectorAll<HTMLButtonElement>(".zc-draft-select")];
+    expect(cards.map((node) => node.querySelector("strong")?.textContent)).toEqual([
+      `方案 · ${sessions[1]?.intent}`,
+      `方案 · ${sessions[0]?.intent}`,
+    ]);
+    expect(container.querySelector('[role="tablist"]')).toBeNull();
     expect(container.querySelector('select[aria-label="编辑会话"]')).toBeNull();
     expect(container.textContent).not.toMatch(/ses_first|ses_second/);
-    await act(() => tabs[0]?.click());
-    expect(tabs[0]?.getAttribute("aria-selected")).toBe("true");
+    expect(selectors[0]?.getAttribute("aria-pressed")).toBe("true");
+    expect(cards[0]?.classList.contains("is-selected")).toBe(true);
+    expect(container.querySelector(".zc-q-question")?.textContent).toBe("第二件？");
+    await act(() => selectors[1]?.click());
+    expect(selectors[1]?.getAttribute("aria-pressed")).toBe("true");
     expect(container.querySelector(".zc-q-question")?.textContent).toBe("第一件？");
     expect(container.querySelectorAll(".zc-q-note")).toHaveLength(1);
     expect(container.querySelector(".zc-q-note")?.textContent).toBe("适合短视频平台");
@@ -570,16 +565,174 @@ it("switches named session tabs, shows option notes and hides empty draft counts
       ["1 字幕改动", "1 字幕改动"],
     ]);
     expect(container.querySelectorAll(".zc-draft-counts svg")).toHaveLength(2);
-    expect(button(container, "批准").classList.contains("zc-btn-approve")).toBe(true);
-    await act(() => tabs[1]?.click());
+    expect(button(container, "全部批准").classList.contains("zc-btn-approve")).toBe(true);
+    await act(() => selectors[0]?.click());
     expect(container.querySelector(".zc-q-question")?.textContent).toBe("第二件？");
+    await act(() => button(cards[1] as HTMLElement, "全部批准").click());
+    expect(container.querySelector(".zc-q-question")?.textContent).toBe("第二件？");
+    expect(cards[1]?.textContent).toContain("还有 2 件决定未答");
+    expect(call.mock.calls.some(([verb]) => verb === "session_approve")).toBe(false);
+    document.body.append(container);
+    await act(() => selectors[1]?.focus());
+    expect(document.activeElement).toBe(selectors[1]);
+    expect(selectors[1]?.tagName).toBe("BUTTON");
+    expect(selectors[1]?.tabIndex).toBe(0);
     multiple = false;
     await act(async () => root.render(<Harness call={call} path="/project" revision={1} />));
     expect(container.querySelector('[aria-label="编辑会话"]')).toBeNull();
+    expect(container.querySelectorAll(".zc-draft")).toHaveLength(1);
+    expect(container.querySelector(".zc-q-question")?.textContent).toBe("第一件？");
+  } finally {
+    await act(() => root.unmount());
+    container.remove();
+  }
+});
+
+it("explains unsubmitted and empty plans, and discards only the empty session through the kernel verb", async () => {
+  let sessions = [
+    {
+      session_id: "ses_empty",
+      intent: "空方案",
+      state: "in_review",
+      draft_revision: "rev_empty",
+      pending_count: 0,
+      revision_count: 2,
+      decisions: [],
+      changes: [],
+    },
+    {
+      session_id: "ses_writing",
+      intent: "还在剪",
+      state: "open",
+      draft_revision: "rev_writing",
+      pending_count: 0,
+      revision_count: 1,
+      decisions: [],
+      changes: [{ entity: "clip" }],
+    },
+  ];
+  const call = vi.fn(async (verb: string, request: Record<string, unknown>) => {
+    if (verb === "chat_agents") return [{ agent: "claude", available: true }];
+    if (verb === "chat_list") return [];
+    if (verb === "ai_state") return { sessions, batches: [] };
+    if (verb === "session_reject") sessions = sessions.filter((item) => item.session_id !== request.session_id);
+    return {};
+  });
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(
+        <Harness call={call} path="/project" project={{ revision: { id: "rev_main", seq: 2 } } as ProjectView} />,
+      ),
+    );
+    const cards = [...container.querySelectorAll<HTMLElement>(".zc-draft")];
+    expect(cards[0]?.textContent).toContain("AI 还没交审");
+    expect(cards[1]?.textContent).toContain("这一版没有改动");
+    for (const card of cards) expect(button(card, "全部批准").disabled).toBe(true);
+    expect(cards[0]?.textContent).not.toContain("丢掉这一版");
+    await act(async () => button(cards[1] as HTMLElement, "丢掉这一版").click());
+    expect(call).toHaveBeenCalledWith(
+      "session_reject",
+      expect.objectContaining({ project: "/project", session_id: "ses_empty", base_revision: "rev_main" }),
+    );
+    expect(container.querySelectorAll(".zc-draft")).toHaveLength(1);
+    expect(container.querySelector(".zc-draft")?.textContent).toContain("还在剪");
+    expect(call.mock.calls.some(([verb]) => verb === "session_approve")).toBe(false);
   } finally {
     await act(() => root.unmount());
   }
 });
+
+it.each(["review", "approve"])(
+  "explains a %s conflict and sends a redo request to the current Agent",
+  async (source) => {
+    const session = {
+      session_id: "ses_conflict",
+      intent: "精简节奏",
+      state: source === "review" ? "open" : "in_review",
+      draft_revision: "rev_draft",
+      pending_count: 0,
+      revision_count: 2,
+      decisions: [],
+      changes: [{ entity: "clip" }],
+    };
+    const call = vi.fn(async (verb: string, _request: Record<string, unknown>) => {
+      if (verb === "chat_agents") return [{ agent: "codex", available: true }];
+      if (verb === "chat_list") return [];
+      if (verb === "ai_state") return { sessions: [session], batches: [] };
+      if (verb === "session_approve") throw Object.assign(new Error("工程刚被别处改过"), { code: "E_CONFLICT" });
+      if (verb === "chat_send") return { id: "chat_test" };
+      return {};
+    });
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const notices: AiNotice[] =
+      source === "review"
+        ? [
+            {
+              chat: "chat_test",
+              event: {
+                type: "tool_start",
+                id: "review",
+                name: "mcp__zsir-cut__zcut_session_review",
+                input: { session_id: session.session_id },
+              },
+            },
+            {
+              chat: "chat_test",
+              event: {
+                type: "tool_end",
+                id: "review",
+                input: [{ type: "text", text: JSON.stringify({ ok: false, error: { code: "E_CONFLICT" } }) }],
+              },
+            },
+          ]
+        : [];
+    try {
+      const render = (revision = 0) =>
+        root.render(<Harness call={call} path="/project" notices={[...notices]} revision={revision} />);
+      await act(async () => render());
+      const selector = container.querySelector<HTMLSelectElement>('select[aria-label="Agent"]');
+      if (selector) {
+        await act(() => {
+          selector.value = "codex";
+          selector.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+      }
+      if (source === "approve") await act(async () => button(container, "全部批准").click());
+      expect(container.querySelector(".zc-draft")?.textContent).toContain("工程在这之后又改过");
+      expect(button(container, "全部批准").disabled).toBe(true);
+      await act(async () => button(container, "让 AI 按新版本重做").click());
+      expect(call).toHaveBeenCalledWith("chat_send", expect.objectContaining({ agent: "codex" }));
+      const text = call.mock.calls.find(([verb]) => verb === "chat_send")?.[1];
+      expect(text).toMatchObject({
+        text: expect.stringMatching(/最新版本.*精简节奏.*ses_conflict.*session_review.*交审/),
+      });
+      // A successful subsequent submission (or a changed draft) makes approval available again.
+      session.state = "in_review";
+      session.draft_revision = "rev_redone";
+      notices.push(
+        {
+          chat: "chat_test",
+          event: {
+            type: "tool_start",
+            id: "review_success",
+            name: "zcut_session_review",
+            input: { session_id: session.session_id },
+          },
+        },
+        { chat: "chat_test", event: { type: "tool_end", id: "review_success", input: { ok: true } } },
+        { chat: "chat_test", event: { type: "end" } },
+      );
+      await act(async () => render(1));
+      expect(container.querySelector(".zc-draft")?.textContent).not.toContain("工程在这之后又改过");
+      expect(button(container, "全部批准").disabled).toBe(false);
+    } finally {
+      await act(() => root.unmount());
+    }
+  },
+);
 
 it("restores complete recent history, scrolls down, highlights rows and reloads after reconnect", async () => {
   const now = Date.now();
