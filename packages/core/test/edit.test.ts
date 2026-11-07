@@ -164,6 +164,110 @@ describe("edit examples", () => {
   });
 });
 
+describe("token ranges on linked clips", () => {
+  const tokens = { transcript_id: "trs_linked", from_token: "tok_linked_0", to_token: "tok_linked_1" };
+  beforeEach(async () => {
+    await copyFile(new URL("../../../fixtures/regressions/token-linked.zcut.json", import.meta.url), path);
+  });
+  it.each(["clp_v1", "clp_a1", undefined])("removes linked video and audio with clip_id %s", async (clip_id) => {
+    const before = await read();
+    const result = await edit([{ op: "remove_span", tokens: { ...tokens, clip_id }, ripple: true, tracks: "all" }]);
+    expect(result.status, JSON.stringify(result)).toBe("applied");
+    const after = await read();
+    expect(clips(after, "trk_v1")).toEqual([]);
+    expect(clips(after, "trk_a1")).toEqual([]);
+    expect(after.transcripts).toEqual(before.transcripts);
+    await validateAndUndo(before);
+  });
+  it.each(["occ_1", "occ_2"])("keeps two uses ambiguous with second occurrence %s", async (occurrence_id) => {
+    const before = await read();
+    for (const trackId of ["trk_v1", "trk_a1"]) {
+      const items = clips(before, trackId);
+      items.push({ ...items[0]!, id: `${items[0]!.id}_second`, occurrence_id, timeline_start: rational(2n) });
+    }
+    await writeFile(path, serializeProject(before));
+    const bytes = await readFile(path, "utf8");
+    const ambiguous = await edit([{ op: "remove_span", tokens }]);
+    expect(ambiguous.status).toBe("rejected");
+    expect(ambiguous.error).toMatchObject({
+      code: "E_VALIDATION",
+      message: "Token range must project onto exactly one clip",
+    });
+    expect(await readFile(path, "utf8")).toBe(bytes);
+    for (const clip_id of ["clp_v1", "clp_v1_second"]) {
+      const result = await edit([{ op: "remove_span", tokens: { ...tokens, clip_id }, ripple: true, tracks: "all" }]);
+      expect(result.status, JSON.stringify(result)).toBe("applied");
+      const after = await read();
+      for (const trackId of ["trk_v1", "trk_a1"]) {
+        const original = clips(before, trackId)[clip_id === "clp_v1" ? 1 : 0]!;
+        expect(clips(after, trackId)).toEqual([{ ...original, timeline_start: rational(0n) }]);
+      }
+      await validateAndUndo(before);
+    }
+  });
+  it.each(["clp_v1", "clp_a2", undefined])("groups overlapping carriers with clip_id %s", async (clip_id) => {
+    const before = await read();
+    const timeline = before.timelines[0]!;
+    const audio = timeline.tracks.find((track) => track.id === "trk_a1")!;
+    if (audio.kind !== "audio") throw new Error("Missing audio track");
+    timeline.tracks.push({ ...structuredClone(audio), id: "trk_a2", clips: [{ ...audio.clips[0]!, id: "clp_a2" }] });
+    const subtitle = timeline.tracks.find((track) => track.kind === "subtitle")!;
+    if (subtitle.kind !== "subtitle") throw new Error("Missing subtitle track");
+    subtitle.carrier_tracks.push("trk_a2");
+    await writeFile(path, serializeProject(before));
+    const result = await edit([{ op: "remove_span", tokens: { ...tokens, clip_id } }]);
+    expect(result.status, JSON.stringify(result)).toBe("applied");
+    const after = await read();
+    for (const trackId of ["trk_v1", "trk_a1", "trk_a2"]) expect(clips(after, trackId)).toEqual([]);
+    await validateAndUndo(before);
+  });
+  it.each(["unrelated", "touching", "missing"])("rejects a %s video selection without writing", async (kind) => {
+    const before = await read();
+    const video = clips(before, "trk_v1")[0]!;
+    if (kind === "unrelated") video.occurrence_id = "occ_other";
+    if (kind === "touching") video.timeline_start = rational(2n);
+    await writeFile(path, serializeProject(before));
+    const bytes = await readFile(path, "utf8");
+    const result = await edit([
+      { op: "remove_span", tokens: { ...tokens, clip_id: kind === "missing" ? "clp_missing" : video.id } },
+    ]);
+    expect(result.status).toBe("rejected");
+    expect(result.error?.code).toBe(kind === "missing" ? "E_NOT_FOUND" : "E_VALIDATION");
+    expect(await readFile(path, "utf8")).toBe(bytes);
+  });
+  it.each(["clp_v1", "clp_a1"])("uses audio pause boundaries for a J/L cut selected via %s", async (clip_id) => {
+    await copyFile(new URL("../../../fixtures/regressions/remove-span-pause.zcut.json", import.meta.url), path);
+    const before = await read();
+    Object.assign(clips(before, "trk_v1")[0]!, {
+      timeline_start: rational(8n),
+      source_start: rational(3n),
+      duration: rational(3n),
+    });
+    await writeFile(path, serializeProject(before));
+    const result = await edit([
+      {
+        op: "remove_span",
+        tokens: {
+          transcript_id: "trs_pause",
+          from_token: "tok_pause_2",
+          to_token: "tok_pause_2",
+          clip_id,
+          pause: "0s",
+        },
+      },
+    ]);
+    expect(result.status, JSON.stringify(result)).toBe("applied");
+    const after = await read();
+    expect(clips(after, "trk_v1")).toEqual([]);
+    expect(clips(after, "trk_a1").map((clip) => [clip.timeline_start, clip.duration, clip.source_start])).toEqual([
+      [rational(5n), rational(2n), rational(0n)],
+      [rational(7n), rational(2n), rational(8n)],
+    ]);
+    expect(result.verification.issues.some((issue) => issue.code === "W_SYNC")).toBe(false);
+    await validateAndUndo(before);
+  });
+});
+
 describe("subtitle edit operations", () => {
   it.each([undefined, { "test.keep": true, "zsir.proofread": { by: "previous" } }])(
     "marks a protected transcript without changing anything else, overwrites the author and supports undo",
