@@ -42,6 +42,13 @@
   text-align: left;
   cursor: pointer;
 }
+.zc-settings-nav .zc-row:focus:not(:focus-visible) {
+  outline: none;
+}
+.zc-settings-nav .zc-row:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
 .zc-settings-nav .zc-row.is-active {
   background: var(--raised);
   color: var(--text);

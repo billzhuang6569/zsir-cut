@@ -340,3 +340,19 @@ it("keeps read grouping, write steps, stopped calls and denied calls distinct", 
   expect(node.querySelectorAll(".zc-step.is-stopped")).toHaveLength(2);
   expect(node.querySelector(".zc-step.is-failed")).toBeNull();
 });
+
+it("hides comparison entry points for a draft with no remaining changes and labels its steps", async () => {
+  const { node, root } = mount();
+  const call = host().mockImplementation(async (verb) => {
+    if (verb === "chat_agents") return [{ agent: "claude", available: true }];
+    if (verb === "chat_list") return [];
+    if (verb === "ai_state") return { sessions: [{ ...draft, changes: [] }], batches: [] };
+    return {};
+  });
+  await act(async () => root.render(<Panel call={call} />));
+  const card = node.querySelector(".zc-draft");
+  expect(card?.textContent).toContain("2 步");
+  expect(card?.textContent).not.toContain("看对比");
+  expect(node.querySelector(".zc-chat-pointer")).toBeNull();
+  expect(node.querySelectorAll('[aria-label="AI 草稿"]')).toHaveLength(1);
+});

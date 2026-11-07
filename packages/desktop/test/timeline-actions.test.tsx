@@ -400,7 +400,7 @@ it("persists toolbar toggles and reports a failed preference write", async () =>
   await click(get('[aria-label="磁性"]'));
   expect(get('[role="alert"]').textContent).toBe("保存失败");
   expect(ui.magnetic).toBe(false);
-  expect(get(".zc-cache-bar").hidden).toBe(true);
+  expect(get(".zc-cache-bar")).toBeNull();
   expect(call.mock.calls.some(([verb]) => verb.startsWith("preview_cache"))).toBe(false);
 });
 

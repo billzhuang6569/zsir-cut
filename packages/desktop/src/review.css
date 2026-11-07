@@ -41,6 +41,9 @@
   margin-bottom: var(--space-2);
 }
 .zc-review-track-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: var(--track-label-w);
   flex-shrink: 0;
   color: var(--text-4);

@@ -166,25 +166,72 @@ h3 {
 }
 .zc-tabs {
   display: flex;
-  gap: var(--space-1);
-  padding: 0 var(--space-4);
+  justify-content: flex-start;
+  flex-shrink: 0;
+  gap: 20px;
+  padding: 0;
+  height: 36px;
   border-bottom: 1px solid var(--line);
 }
 .zc-tab {
-  height: calc(var(--control-h) + var(--space-3));
-  padding: 0 var(--space-6);
-  border: none;
-  border-bottom: var(--space-1) solid transparent;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  height: 36px;
+  padding: 0;
+  border: 0;
   background: transparent;
-  color: var(--text-4);
+  color: var(--text-3);
+  font-size: 13px;
   cursor: pointer;
 }
 .zc-tab:hover {
   color: var(--text-2);
 }
-.zc-tab[aria-selected="true"] {
+.zc-tab[aria-selected="true"],
+.zc-tab.is-active {
   color: var(--text);
-  border-bottom-color: var(--text);
+}
+.zc-tab[aria-selected="true"]::after,
+.zc-tab.is-active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--text);
+}
+.zc-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin: 0;
+  padding: 3px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+}
+.zc-seg > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 12px;
+  cursor: pointer;
+}
+.zc-seg > button[aria-pressed="true"],
+.zc-seg > button.is-active {
+  background: var(--raised-2);
+  color: var(--text);
 }
 :focus-visible {
   outline: 2px solid var(--focus);

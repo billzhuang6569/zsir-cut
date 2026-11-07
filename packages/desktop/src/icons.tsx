@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 
 export const ICONS: Record<string, ReactNode> = {
+  edit: <path d="M4 20l4-1 12-12-3-3L5 16zM14 7l3 3" />,
+  up: <path d="M6 15l6-6 6 6" />,
   ai: (
     <>
       <path d="M12 3.5l1.8 4.5 4.5 1.8-4.5 1.8L12 16.1l-1.8-4.5-4.5-1.8 4.5-1.8z" />
@@ -177,10 +179,7 @@ export const ICONS: Record<string, ReactNode> = {
   ),
   grid: (
     <>
-      <rect x="4" y="4" width="7" height="7" rx="1.5" />
-      <rect x="13" y="4" width="7" height="7" rx="1.5" />
-      <rect x="4" y="13" width="7" height="7" rx="1.5" />
-      <rect x="13" y="13" width="7" height="7" rx="1.5" />
+      <path d="M5.5 4h4A1.5 1.5 0 0 1 11 5.5v4A1.5 1.5 0 0 1 9.5 11h-4A1.5 1.5 0 0 1 4 9.5v-4A1.5 1.5 0 0 1 5.5 4zM14.5 4h4A1.5 1.5 0 0 1 20 5.5v4a1.5 1.5 0 0 1-1.5 1.5h-4A1.5 1.5 0 0 1 13 9.5v-4A1.5 1.5 0 0 1 14.5 4zM5.5 13h4a1.5 1.5 0 0 1 1.5 1.5v4A1.5 1.5 0 0 1 9.5 20h-4A1.5 1.5 0 0 1 4 18.5v-4A1.5 1.5 0 0 1 5.5 13zM14.5 13h4a1.5 1.5 0 0 1 1.5 1.5v4a1.5 1.5 0 0 1-1.5 1.5h-4a1.5 1.5 0 0 1-1.5-1.5v-4a1.5 1.5 0 0 1 1.5-1.5z" />
     </>
   ),
   list: (
@@ -263,7 +262,7 @@ export const ICONS: Record<string, ReactNode> = {
   ),
   target: (
     <>
-      <circle cx="12" cy="12" r="8" />
+      <path d="M20 12a8 8 0 1 1-16 0 8 8 0 0 1 16 0z" />
       <circle cx="12" cy="12" r="3" />
     </>
   ),
@@ -298,7 +297,7 @@ export const ICONS: Record<string, ReactNode> = {
   ),
   stop: (
     <>
-      <rect x="6.5" y="6.5" width="11" height="11" rx="2" fill="currentColor" />
+      <path d="M8.5 6.5h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z" fill="currentColor" />
     </>
   ),
   alignLeft: (

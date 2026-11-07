@@ -215,7 +215,7 @@ describe("AI panel", () => {
       expect(container.textContent).toContain("AI 正在做第 2 / 4 步");
       expect(
         [...container.querySelectorAll(".zc-draft-counts > span")].map((node) => node.getAttribute("aria-label")),
-      ).toEqual(["1 修订", "1 片段", "1 字幕改动"]);
+      ).toEqual(["1 步", "1 片段", "1 字幕改动"]);
       expect(button(container, "批准").querySelector("svg")).not.toBeNull();
       await act(() => button(container, "批准").click());
       expect(container.textContent).toContain("还有 2 件决定未答");
@@ -566,8 +566,8 @@ it("switches named session tabs, shows option notes and hides empty draft counts
         node.getAttribute("aria-label"),
       ]),
     ).toEqual([
-      ["3", "3 修订"],
-      ["1", "1 字幕改动"],
+      ["3 步", "3 步"],
+      ["1 字幕改动", "1 字幕改动"],
     ]);
     expect(container.querySelectorAll(".zc-draft-counts svg")).toHaveLength(2);
     expect(button(container, "批准").classList.contains("zc-btn-approve")).toBe(true);

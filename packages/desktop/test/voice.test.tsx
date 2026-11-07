@@ -27,9 +27,10 @@ async function mount(
   responder: (verb: string, request: Record<string, unknown>) => unknown,
   settingsPage = false,
   projectView = { revision: { id: "rev_1", seq: 1 } } as ProjectView,
+  sub: string | null = "clone",
 ) {
   const call = vi.fn(async (verb: string, request: Record<string, unknown>) => responder(verb, request));
-  let state: UiState = { ...initialState(), project: "/project.zcut.json", panel: "voice", sub: "clone" };
+  let state: UiState = { ...initialState(), project: "/project.zcut.json", panel: "voice", sub };
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
@@ -85,12 +86,32 @@ async function mount(
   return { call, container, click, input, find, state: () => state };
 }
 const respond = (verb: string) => (verb === "voice_list" ? { voices } : {});
-it("exposes all voice sub-pages through UI state and defaults to clone", () => {
+it("exposes explicit voice sub-pages and defers the default until the voice library loads", () => {
   for (const sub of ["clone", "generate", "results"]) {
     const state = applyUi(initialState(), "ui_show_panel", { panel: "voice", sub });
     expect(applyUi(state, "ui_state", {})).toMatchObject({ panel: "voice", sub });
   }
-  expect(applyUi(initialState(), "ui_show_panel", { panel: "voice" }).sub).toBe("clone");
+  expect(applyUi(initialState(), "ui_show_panel", { panel: "voice" }).sub).toBeNull();
+});
+it.each([true, false])("defaults to generation only when voices exist: %s", async (available) => {
+  const h = await mount(
+    (verb) => (verb === "voice_list" ? { voices: available ? voices : [] } : {}),
+    false,
+    undefined,
+    null,
+  );
+  expect(h.state().sub).toBe(available ? "generate" : "clone");
+  expect(h.container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe(
+    available ? "生成" : "克隆音色",
+  );
+  expect(h.container.querySelector(".zc-voice-results")?.textContent).toContain("还没有配音");
+  expect([...h.container.querySelectorAll("button")].some((button) => button.textContent === "结果")).toBe(false);
+  if (!available) {
+    const path = h.find("参考音频路径");
+    const drop = h.find("参考音频");
+    expect(drop.contains(path)).toBe(false);
+    expect(drop.compareDocumentPosition(path) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  }
 });
 it("marks only the current voice sub-tab selected using the subtitle tab style", async () => {
   const h = await mount(respond);
@@ -234,8 +255,8 @@ it("generates free items with a human revision request, omitted defaults, and pr
       params: { speed: 1.2, volume: -2, temperature: 0, top_p: 0.8, normalize_loudness: false },
     }),
   );
-  await h.click("结果");
-  expect(h.container.textContent).toContain("配音结果在右侧");
+  expect(h.container.querySelector(".zc-voice-results")).not.toBeNull();
+  expect(h.state().sub).toBe("generate");
 });
 it("renders long-job progress and safe failure text without displaying upstream messages", async () => {
   let finish: (value: unknown) => void = () => {};
@@ -418,9 +439,27 @@ it("reads real voice metadata, plays authenticated audio and reuses media placem
   const panel = h.container.querySelector(".zc-voice-results");
   expect(panel?.querySelectorAll("section.zc-card")).toHaveLength(2);
   expect(panel?.textContent).toContain("第一段配音");
+  expect(panel?.textContent).toContain("配音 01");
+  expect(panel?.textContent).toContain("00:06");
+  expect(panel?.textContent).not.toContain("还没有配音");
   expect(panel?.querySelector(".is-approved")?.textContent).toBe("在时间线");
   expect(panel?.querySelector<HTMLAudioElement>("audio")?.src).toContain("/media?token=test-token&media_id=med_free");
   expect(panel?.textContent).not.toMatch(/med_|trk_|voc_/);
+  const audio = panel?.querySelector<HTMLAudioElement>("audio");
+  if (!audio) throw new Error("Missing take audio");
+  const play = vi.spyOn(audio, "play").mockImplementation(async () => {
+    audio.dispatchEvent(new Event("play"));
+  });
+  const pause = vi.spyOn(audio, "pause").mockImplementation(() => {
+    audio.dispatchEvent(new Event("pause"));
+  });
+  vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+  await h.click("播放配音 01");
+  expect(play).toHaveBeenCalledOnce();
+  Object.defineProperty(audio, "paused", { configurable: true, value: false });
+  await h.click("暂停配音 01");
+  expect(pause).toHaveBeenCalledOnce();
+  expect(h.find("播放配音 01")).toBeTruthy();
   await h.click("加到时间线");
   expect(h.call).toHaveBeenCalledWith(
     "edit",

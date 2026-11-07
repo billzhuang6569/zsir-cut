@@ -256,12 +256,16 @@ it("keeps long subtitle text in flow beside seconds-only time and overlays actio
   // jsdom has no layout engine: assert the sizing rules that prevent flex rows from shrinking below their text.
   expect(getComputedStyle(row).flexShrink).toBe("0");
   expect(getComputedStyle(row).height).toBe("auto");
-  expect(getComputedStyle(row).gridTemplateColumns).toBe("max-content minmax(0, 1fr)");
+  expect(getComputedStyle(row).gridTemplateColumns).toBe("40px minmax(0, 1fr)");
   expect(getComputedStyle(row).position).toBe("relative");
   expect(getComputedStyle(editor).whiteSpace).toBe("pre-wrap");
   expect(getComputedStyle(editor).overflowWrap).toBe("anywhere");
   expect(getComputedStyle(editor).minWidth).toBe("0");
   expect(getComputedStyle(actions).position).toBe("absolute");
+  expect(getComputedStyle(actions).right).toBe("6px");
+  expect(getComputedStyle(editor).fontWeight).toBe("400");
+  expect(getComputedStyle(row).alignItems).toBe("baseline");
+  expect(getComputedStyle(h.find("选择字幕 1")).padding).toBe("0px");
   expect(getComputedStyle(actions).visibility).toBe("hidden");
   expect(actions.querySelectorAll("button")).toHaveLength(2);
   expect(getComputedStyle(h.find("选择字幕 1")).fontWeight).toBe("400");
@@ -431,13 +435,13 @@ it.each([0, 1, 2].flatMap((row) => [0, 1, 2].map((column) => [row, column])))(
 );
 it("previews slider movement, writes once after the release merge window, and keeps metadata out of the update", async () => {
   const h = await mount(project, "style");
-  const slider = await h.input("字号", "0.06");
+  const slider = await h.input("字号", "12");
   expect(h.call).not.toHaveBeenCalled();
   await act(async () => slider.dispatchEvent(new Event("pointerup", { bubbles: true })));
   await h.blur("字号");
   await h.settle();
   expect(h.call).toHaveBeenCalledTimes(1);
-  expect(h.call.mock.lastCall?.[1].ops).toEqual([{ op: "update_style", style_id: "sty_1", font_size: 0.06 }]);
+  expect(h.call.mock.lastCall?.[1].ops).toEqual([{ op: "update_style", style_id: "sty_1", font_size: 12 / 180 }]);
   const ops = h.call.mock.lastCall?.[1].ops as Record<string, unknown>[];
   expect(ops[0]).not.toHaveProperty("version");
   expect(ops[0]).not.toHaveProperty("id");
@@ -635,10 +639,10 @@ it("shows the selected track style and applies edits to every style when scope i
     },
     "style",
   );
-  expect(h.find<HTMLInputElement>("字号").value).toBe("0.045");
+  expect(h.find<HTMLInputElement>("字号").value).toBe("8");
   expect(h.container.querySelector(".zc-sub-sample")).toBeNull();
   await h.click("English");
-  expect(h.find<HTMLInputElement>("字号").value).toBe("0.07");
+  expect(h.find<HTMLInputElement>("字号").value).toBe("13");
   expect(h.find<HTMLButtonElement>("字幕样式轨道").textContent).toContain("English");
   expect(h.call).not.toHaveBeenCalled();
   await h.input("文字颜色", "#FFD84A");
@@ -816,6 +820,10 @@ it("does not show unmarked transcript cues before pass state arrives", async () 
 });
 
 async function selectOption(h: Awaited<ReturnType<typeof mount>>, label: string, value: string) {
+  if (label === "应用到") {
+    await h.click(value === "selected" ? `选中 ${h.state().selected.length} 条` : "全部");
+    return;
+  }
   await act(async () => {
     const element = h.find<HTMLSelectElement>(label);
     element.value = value;
@@ -828,10 +836,10 @@ it("merges releases within one second and copies only selected cues in the same 
   await h.click(cue.text);
   await h.click("样式");
   await selectOption(h, "应用到", "selected");
-  const first = await h.input("字号", "0.06");
+  const first = await h.input("字号", "12");
   await act(async () => first.dispatchEvent(new Event("pointerup", { bubbles: true })));
   await act(async () => vi.advanceTimersByTimeAsync(600));
-  const second = await h.input("字号", "0.07");
+  const second = await h.input("字号", "14");
   await act(async () => second.dispatchEvent(new Event("pointerup", { bubbles: true })));
   await act(async () => vi.advanceTimersByTimeAsync(999));
   expect(h.call).not.toHaveBeenCalled();
@@ -839,7 +847,7 @@ it("merges releases within one second and copies only selected cues in the same 
   expect(h.call).toHaveBeenCalledTimes(1);
   const ops = h.call.mock.lastCall?.[1].ops as Record<string, unknown>[];
   expect(ops).toHaveLength(2);
-  expect(ops[0]).toMatchObject({ op: "add_style", font_size: 0.07 });
+  expect(ops[0]).toMatchObject({ op: "add_style", font_size: 14 / 180 });
   expect(ops[0]).not.toHaveProperty("version");
   expect(ops[1]).toEqual({ op: "set_cue", cue_id: cue.cue_id, style_id: ops[0]?.id });
 });
@@ -1604,11 +1612,7 @@ it("uses the selected subtitle style copy rule for word animation", async () => 
   const h = await mount();
   await h.click("你好世界");
   await h.click("样式");
-  await act(async () => {
-    const select = h.find<HTMLSelectElement>("应用到");
-    select.value = "selected";
-    select.dispatchEvent(new Event("change", { bubbles: true }));
-  });
+  await selectOption(h, "应用到", "selected");
   await h.click("动画");
   await h.click("逐字：跳动");
   await h.settle();
@@ -2005,4 +2009,132 @@ it("starts the search-bar AI action for all subtitles when there is no selection
   await h.click("AI 重新分行");
   await h.click("开始");
   expect(h.call).toHaveBeenCalledWith("subtitle_tidy", {});
+});
+
+it("shows real proofreading counts, an empty terms hint, and adds a subtitle track through edit", async () => {
+  const h = await mount({
+    ...project,
+    tracks: [
+      ...project.tracks,
+      { id: "trk_a", name: "声音 A", kind: "audio", enabled: true, clips: [] },
+      { id: "trk_v", name: "视频 A", kind: "video", enabled: true, clips: [] },
+    ],
+    recognition: { language: "zh", terms: [] },
+    subtitlePass: {
+      running: true,
+      phase: "proofread",
+      warnings: [],
+      progress: [{ transcript_id: "tra_1", done: 4, total: 6, phase: "proofread" }],
+    },
+  });
+  const stages = h.container.querySelector('[aria-label="字幕整理进度"]');
+  expect(stages?.textContent).toBe("概要分行校对 4/6");
+  expect(stages?.children[2]?.className).toBe("is-active");
+  expect(h.find("专有名词").textContent).toContain("添加人名、品牌或行业术语");
+  await h.click("样式");
+  expect(h.container.querySelector(".zc-sub-controls h3")?.textContent).toBe("字幕轨");
+  await h.click("添加字幕轨");
+  expect(h.call).toHaveBeenCalledWith(
+    "edit",
+    expect.objectContaining({
+      base_revision: "rev_1",
+      ops: [{ op: "add_subtitle_track", language: "zh", carrier_tracks: ["trk_a"], default_style_id: "sty_1" }],
+    }),
+  );
+  expect(h.container.querySelectorAll(".zc-sub-apply button")).toHaveLength(2);
+  expect(h.container.querySelector('.zc-sub-apply button[aria-pressed="true"]')?.textContent).toBe("全部");
+});
+
+it("renders the current subtitle at zero seconds while paused in the timeline viewer", async () => {
+  const h = await mount(
+    { ...project, cues: [{ ...cue, start: "0s", text: "以前要花两天的时" }] },
+    "subtitles",
+    () => ({}),
+    true,
+  );
+  expect(h.state().playing).toBe(false);
+  expect(h.container.querySelector(".zc-picture .zc-subtitle-canvas")?.getAttribute("aria-label")).toBe(
+    "以前要花两天的时",
+  );
+});
+
+it.each([1080, 2160, 180])("displays pixel font sizes at timeline height %s and writes fractions", async (height) => {
+  vi.useFakeTimers();
+  const h = await mount({ ...project, format: { width: 1920, height } }, "style");
+  expect(h.find<HTMLInputElement>("字号").value).toBe(String(Math.round(0.045 * height)));
+  expect(h.find("字号").title).toBe("字号（px）");
+  await h.input("字号", String(height / 10));
+  await h.blur("字号");
+  await h.settle();
+  expect(h.call.mock.lastCall?.[1].ops).toEqual([{ op: "update_style", style_id: "sty_1", font_size: 0.1 }]);
+});
+
+it.each([
+  ["描边 1 宽度", "3", "5", { outlines: [{ color: "#000000", width: 0.1 }] }],
+  ["阴影模糊", "5", "10", { shadow: { color: "#00000099", blur: 0.2, distance: 0.2, angle: 90 } }],
+  ["阴影距离", "10", "15", { shadow: { color: "#00000099", blur: 0.1, distance: 0.3, angle: 90 } }],
+  ["发光模糊", "10", "15", { glow: { color: "#FFFFFF", blur: 0.3 } }],
+  ["内边距", "10", "15", { box: { color: "#00000099", padding: 0.3, radius: 0.1 } }],
+  ["圆角", "5", "10", { box: { color: "#00000099", padding: 0.2, radius: 0.2 } }],
+  ["字间距", "5", "10", { letter_spacing: 0.2 }],
+  ["上下边距", "80", "100", { position: { ...defaultStyle.position, margin_v: 0.1 } }],
+  ["水平位置", "0", "100", { position: { ...defaultStyle.position, offset_x: 0.05 } }],
+  ["最大宽度", "80", "70", { position: { ...defaultStyle.position, max_width: 0.7 } }],
+] as const)("edits %s in readable units without changing the storage contract", async (label, shown, input, patch) => {
+  vi.useFakeTimers();
+  const h = await mount(
+    {
+      ...project,
+      format: { width: 2000, height: 1000 },
+      styles: [
+        {
+          ...defaultStyle,
+          id: "sty_1",
+          font_size: 0.05,
+          outline: { color: "#000000", width: 0.06 },
+          shadow: { color: "#00000099", blur: 0.1, distance: 0.2, angle: 90 },
+          glow: { color: "#FFFFFF", blur: 0.2 },
+          box: { color: "#00000099", padding: 0.2, radius: 0.1 },
+          letter_spacing: 0.1,
+        },
+      ],
+    },
+    "style",
+  );
+  const control = `${label}数值`;
+  expect(h.find<HTMLInputElement>(control).value).toBe(shown);
+  expect(h.find(control).title).toBe(`${label}（${label === "最大宽度" ? "%" : "px"}）`);
+  await h.input(control, input);
+  await h.blur(control);
+  await h.settle();
+  expect(h.call.mock.lastCall?.[1].ops).toEqual([{ op: "update_style", style_id: "sty_1", ...patch }]);
+});
+
+it("keeps preset captions below their samples, current fonts visible and track buttons in one row", async () => {
+  const style = document.createElement("style");
+  style.textContent = readFileSync("packages/desktop/src/subtitles.css", "utf8");
+  document.head.append(style);
+  cleanups.push(async () => style.remove());
+  const h = await mount(project, "style");
+  const tracks = h.find("字幕样式轨道");
+  expect(getComputedStyle(tracks).flexDirection).toBe("row");
+  expect(getComputedStyle(tracks).flexWrap).toBe("nowrap");
+  expect(h.find("添加字幕轨").parentElement).toBe(tracks);
+  const cell = h.container.querySelector<HTMLElement>(".zc-sub-preset-cell");
+  if (!cell) throw new Error("Missing preset cell");
+  expect([...cell.children].map((child) => child.tagName)).toEqual(["CANVAS", "SPAN"]);
+  expect(getComputedStyle(cell).display).toBe("grid");
+  expect(getComputedStyle(cell.lastElementChild as HTMLElement).position).toBe("static");
+  expect(h.find("应用到").querySelector("select, svg")).toBeNull();
+  const font = h.find<HTMLSelectElement>("字体族");
+  expect(font.value).toBe("PingFang SC");
+  expect(font.selectedOptions[0]?.textContent).toBe("苹方");
+  const selectRule = [...(style.sheet?.cssRules ?? [])].find(
+    (rule) => rule instanceof CSSStyleRule && rule.selectorText === ".zc-sub-font-row .zc-sub-select",
+  ) as CSSStyleRule;
+  expect(selectRule.style.getPropertyValue("font-size")).toBe("var(--label-size)");
+  await h.view({ ...project, styles: [{ ...defaultStyle, id: "sty_1", font_family: "Custom Font" }] });
+  expect(font.value).toBe("Custom Font");
+  expect(font.selectedOptions[0]?.textContent).toBe("Custom Font");
+  expect(h.find<HTMLInputElement>("其他字体").value).toBe("Custom Font");
 });

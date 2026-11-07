@@ -664,7 +664,7 @@ it("queues settings reads until bootstrap and renders the exact captured agents_
   expect(container.textContent).not.toContain("codex-cli");
   expect(container.textContent).toContain("/Users/billzhuang/.nvm/versions/node/v24.14.1/bin/claude");
   expect(container.querySelector('[aria-current="page"]')?.textContent).toBe("Agent");
-  expect(document.activeElement).toBe(container.querySelector('[aria-current="page"]'));
+  expect(document.activeElement).toBe(container.querySelector('[aria-label="关闭"]'));
   expect(container.querySelector(".zc-settings-agent .zc-chip")?.textContent).toBe("默认");
 });
 it.each(["close", "disconnect"])("rejects queued requests on %s before bootstrap", async (action) => {
