@@ -249,16 +249,34 @@
   border-radius: 2px;
   background: var(--approved);
 }
+.zc-chapter-edge {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 6px;
+  height: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 2;
+}
+.zc-chapter-edge:hover {
+  background: var(--selection);
+}
 .zc-chapter-bar.is-alternate {
   background: var(--line-strong);
 }
 .zc-marker {
   position: absolute;
   top: 13px;
+  width: 7px;
+  height: 7px;
+  transform: translateX(-50%) rotate(45deg);
   border: 0;
   padding: 0;
-  color: var(--attention);
-  background: transparent;
+  background: var(--attention);
   cursor: pointer;
   z-index: 1;
 }
@@ -496,21 +514,6 @@
 }
 .zc-seam:focus-visible {
   outline: 2px solid var(--focus);
-}
-.zc-cut-tick {
-  position: absolute;
-  bottom: 0;
-  width: 2px;
-  height: 7px;
-  margin-left: -1px;
-  border-radius: 1px 1px 0 0;
-  background: var(--text-2);
-  pointer-events: none;
-}
-.zc-cut-tick.is-selected {
-  z-index: 1;
-  height: 10px;
-  background: var(--selection);
 }
 .zc-cache-bar {
   position: absolute;

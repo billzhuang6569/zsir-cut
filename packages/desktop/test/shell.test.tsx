@@ -162,6 +162,12 @@ it("opens the project through inspect and receives UI commands", async () => {
   const writes: Record<string, unknown>[] = [];
   const replies: { id: string; result: unknown }[] = [];
   let socket: FakeSocket | undefined;
+  const prefsUi = {
+    snap: true,
+    magnetic: true,
+    track_height: "m",
+    layout: { left_width: 420, right_width: 400, timeline_height: 0.43 },
+  };
   class FakeSocket {
     onopen: (() => void) | null = null;
     onmessage: ((event: MessageEvent) => void) | null = null;
@@ -179,14 +185,15 @@ it("opens the project through inspect and receives UI commands", async () => {
       if (message.type === "ui_ready") {
         this.receive({ type: "bootstrap", project: "/interview.zcut.json", fcpIcon: null });
       } else if (message.type === "ui_result") replies.push(message);
-      else if (message.verb === "prefs_get") {
+      else if (message.verb === "prefs_get" || message.verb === "prefs_set") {
+        Object.assign(prefsUi.layout, message.request?.patch?.ui?.layout);
         queueMicrotask(() =>
           this.receive({
             id: message.id,
             envelope: {
               ok: true,
               error: null,
-              result: { prefs: { ui: { snap: true, magnetic: true, track_height: "m" } }, ...mergeKeymap("fcp", {}) },
+              result: { prefs: { ui: prefsUi }, ...mergeKeymap("fcp", {}) },
             },
           }),
         );
@@ -237,6 +244,10 @@ it("opens the project through inspect and receives UI commands", async () => {
   try {
     await act(async () => root.render(<App config={{ port: 1234, token: "test token" }} />));
     expect(socket?.url).toBe("ws://127.0.0.1:1234/?token=test%20token");
+    const shell = container.querySelector<HTMLElement>(".zc-shell");
+    expect(shell?.style.getPropertyValue("--layout-left-request")).toBe("420px");
+    expect(shell?.style.getPropertyValue("--layout-right-request")).toBe("400px");
+    expect(shell?.style.getPropertyValue("--layout-timeline")).toBe("0.43");
     expect(container.querySelector('[aria-label="菜单栏"]')?.textContent).toContain(fixture.name);
     expect(container.querySelector('[aria-label="菜单栏"]')?.textContent).toContain(`r${fixture.revision.seq}`);
     expect(
@@ -285,8 +296,13 @@ it("opens the project through inspect and receives UI commands", async () => {
     await act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
     expect(document.body.querySelector('[role="dialog"][aria-label="历史"]')).toBeNull();
     const divider = container.querySelector<HTMLElement>('[aria-label="预览与时间线分界"]');
-    await act(() => divider?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true })));
-    expect(divider?.getAttribute("aria-valuenow")).toBe("52");
+    const editor = container.querySelector<HTMLElement>(".zc-editor");
+    if (!editor) throw new Error("Missing editor");
+    vi.spyOn(editor, "getBoundingClientRect").mockReturnValue({ height: 800 } as DOMRect);
+    await act(async () => divider?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true })));
+    expect(divider?.getAttribute("aria-valuenow")).toBe("0.45");
+    expect(prefsUi.layout.timeline_height).toBe(0.45);
+    expect(container.querySelectorAll(".zc-layout-divider")).toHaveLength(3);
     expect(container.querySelector(".zc-editor .zc-viewer")).not.toBeNull();
     expect(container.querySelector(".zc-editor .zc-timeline")).not.toBeNull();
     const timecodeAtStart = container.querySelector('[aria-label="播放时码"]')?.textContent;

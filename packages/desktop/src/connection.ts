@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { Layout } from "../../app-host/src/preferences.js";
 import type { ProjectChanged } from "../../app-host/src/revision-events.js";
 import { UI_VERBS, type UiState, type UiVerb } from "../../app-host/src/ui.js";
 
@@ -252,7 +253,7 @@ export function connectHost(
 
 interface TimelinePreferences {
   keymap: Record<string, string | null>;
-  prefs: { ui: { snap: boolean; magnetic: boolean; track_height: "s" | "m" | "l" } };
+  prefs: { ui: { snap: boolean; magnetic: boolean; track_height: "s" | "m" | "l"; layout?: Layout } };
 }
 export function useTimelinePreferences(
   call: (verb: string, request: Record<string, unknown>) => Promise<unknown>,
@@ -295,7 +296,9 @@ export function useTimelinePreferences(
       window.removeEventListener("focus", refresh);
     };
   }, [call, acceptPrefs]);
-  const setUi = async (patch: Partial<TimelinePreferences["prefs"]["ui"]>) => {
+  const setUi = async (
+    patch: Partial<Omit<TimelinePreferences["prefs"]["ui"], "layout">> & { layout?: Partial<Layout> },
+  ) => {
     if (patch.snap !== undefined) update({ ...state, snap: patch.snap });
     try {
       const value = (await call("prefs_set", { patch: { ui: patch } })) as TimelinePreferences;
@@ -310,6 +313,7 @@ export function useTimelinePreferences(
     snap: state.snap ?? true,
     magnetic: preferences?.prefs.ui.magnetic ?? true,
     trackHeight: preferences?.prefs.ui.track_height ?? "m",
+    layout: preferences?.prefs.ui.layout,
     setUi,
   };
 }

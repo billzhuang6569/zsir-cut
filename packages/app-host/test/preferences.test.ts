@@ -279,3 +279,43 @@ it("replaces overrides wholesale and persists empty overrides when restoring pre
   expect(restarted.get().keymap).toEqual(presets.premiere);
   expect((await prefs.set({ keymap: { overrides: {} } })).status).toBe("no_op");
 });
+
+it("loads pre-layout preferences and validates, deep-merges and restores layout across restarts", async () => {
+  const file = join(home, "desktop.json");
+  const legacy = structuredClone(defaultPreferences);
+  Reflect.deleteProperty(legacy.ui, "layout");
+  await writeFile(file, JSON.stringify(legacy));
+  const store = new DesktopPreferences(home);
+  await store.load();
+  expect(store.warning).toBeUndefined();
+  expect(store.get().prefs.ui.layout).toEqual(defaultPreferences.ui.layout);
+  await store.set({ ui: { layout: { left_width: 560, right_width: 600, timeline_height: 0.75 } } });
+  await store.set({ ui: { layout: { left_width: 200 } } });
+  const restarted = new DesktopPreferences(home);
+  await restarted.load();
+  expect(restarted.get().prefs.ui.layout).toEqual({ left_width: 200, right_width: 600, timeline_height: 0.75 });
+  await restarted.set({ ui: { layout: { timeline_height: 0.432 } } });
+  await restarted.set({ ui: { snap: false } });
+  expect(restarted.get().prefs.ui.layout).toEqual({ left_width: 200, right_width: 600, timeline_height: 0.432 });
+  await restarted.set({ ui: { layout: { right_width: 240, timeline_height: 0.2 } } });
+  const before = await readFile(file, "utf8");
+  for (const layout of [
+    null,
+    { unknown: 1 },
+    { left_width: 199 },
+    { left_width: 561 },
+    { left_width: 300.5 },
+    { right_width: 239 },
+    { right_width: 601 },
+    { right_width: 340.1 },
+    { timeline_height: 0.199 },
+    { timeline_height: 0.751 },
+    { timeline_height: 0.4321 },
+  ])
+    await expect(restarted.set({ ui: { layout } })).rejects.toThrow();
+  expect(await readFile(file, "utf8")).toBe(before);
+  await restarted.set({ ui: { layout: { left_width: null, right_width: null, timeline_height: null } } });
+  const reset = new DesktopPreferences(home);
+  await reset.load();
+  expect(reset.get().prefs.ui.layout).toEqual(defaultPreferences.ui.layout);
+});

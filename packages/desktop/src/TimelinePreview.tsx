@@ -1425,7 +1425,7 @@ export function TimelinePreview({
                     }}
                   >
                     {project.markers
-                      .filter((marker) => marker.kind === "chapter" && marker.level !== 2)
+                      .filter((marker) => marker.kind === "chapter")
                       .sort((a, b) => compare(parseRational(a.at.t, true), parseRational(b.at.t, true)))
                       .map((marker, index, chapters) => (
                         <span
@@ -1440,15 +1440,51 @@ export function TimelinePreview({
                                 pixelAt(marker.at.t, scale),
                             ),
                           }}
-                        />
+                        >
+                          <button
+                            type="button"
+                            className="zc-chapter-edge"
+                            aria-label={`移动章节「${marker.text}」起点`}
+                            title={`章节：${marker.text}`}
+                            onPointerDown={(event) => {
+                              event.stopPropagation();
+                              if (busy || readOnly) return;
+                              const element = event.currentTarget.parentElement;
+                              const ruler = element?.parentElement;
+                              if (!element || !ruler) return;
+                              const left = element.style.left;
+                              const width = element.style.width;
+                              const reset = () => {
+                                element.style.left = left;
+                                element.style.width = width;
+                              };
+                              gestures.start(event, {
+                                move: (event) => {
+                                  const target = seekTarget(project, project.cues, {
+                                    at: dropPoint(event.clientX, ruler) ?? marker.at.t,
+                                  });
+                                  const end = pixelAt(chapters[index + 1]?.at.t ?? project.duration.t, scale);
+                                  element.style.left = `${pixelAt(target, scale)}px`;
+                                  element.style.width = `${Math.max(0, end - pixelAt(target, scale))}px`;
+                                },
+                                end: (event, moved) => {
+                                  reset();
+                                  if (!moved) return;
+                                  const target = seekTarget(project, project.cues, {
+                                    at: dropPoint(event.clientX, ruler) ?? marker.at.t,
+                                  });
+                                  if (target !== marker.at.t)
+                                    void write("edit", `移动章节「${marker.text}」`, [
+                                      { op: "update_marker", marker_id: marker.id, at: target },
+                                    ]);
+                                },
+                                cancel: reset,
+                              });
+                            }}
+                            onClick={() => seek(marker.at.t)}
+                          />
+                        </span>
                       ))}
-                    {points.map((point) => (
-                      <span
-                        key={`${point.track_id}:${point.at}`}
-                        className={`zc-cut-tick${state.edit_point?.track_id === point.track_id && state.edit_point.at === point.at ? " is-selected" : ""}`}
-                        style={{ left: pixelAt(point.at, scale) }}
-                      />
-                    ))}
                     {rulerTicks(width, scale, project.edit_rate).map((tick) => (
                       <span
                         key={tick.at}
@@ -1458,46 +1494,20 @@ export function TimelinePreview({
                         {tick.major ? tick.label : null}
                       </span>
                     ))}
-                    {project.markers.map((marker) => (
-                      <button
-                        type="button"
-                        key={marker.id}
-                        className="zc-marker"
-                        title={marker.text}
-                        aria-label={marker.text}
-                        style={{ left: pixelAt(marker.at.t, scale) }}
-                        onPointerDown={(event) => {
-                          event.stopPropagation();
-                          if (marker.kind !== "chapter" || busy || readOnly) return;
-                          const element = event.currentTarget;
-                          const ruler = element.parentElement;
-                          if (!ruler) return;
-                          const reset = () => {
-                            element.style.left = `${pixelAt(marker.at.t, scale)}px`;
-                          };
-                          gestures.start(event, {
-                            move: (event) => {
-                              element.style.left = `${pixelAt(seekTarget(project, project.cues, { at: dropPoint(event.clientX, ruler) ?? marker.at.t }), scale)}px`;
-                            },
-                            end: (event, moved) => {
-                              reset();
-                              if (!moved) return;
-                              const target = seekTarget(project, project.cues, {
-                                at: dropPoint(event.clientX, ruler) ?? marker.at.t,
-                              });
-                              if (target !== marker.at.t)
-                                void write("edit", `移动章节「${marker.text}」`, [
-                                  { op: "update_marker", marker_id: marker.id, at: target },
-                                ]);
-                            },
-                            cancel: reset,
-                          });
-                        }}
-                        onClick={() => seek(marker.at.t)}
-                      >
-                        ▼
-                      </button>
-                    ))}
+                    {project.markers
+                      .filter((marker) => marker.kind !== "chapter")
+                      .map((marker) => (
+                        <button
+                          type="button"
+                          key={marker.id}
+                          className="zc-marker"
+                          title={marker.text}
+                          aria-label={marker.text}
+                          style={{ left: pixelAt(marker.at.t, scale) }}
+                          onPointerDown={(event) => event.stopPropagation()}
+                          onClick={() => seek(marker.at.t)}
+                        />
+                      ))}
                   </div>
                 </div>
                 {previewTracks?.map((track) => (
