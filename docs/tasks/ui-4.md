@@ -22,3 +22,17 @@
 
 - U4.1：WebKit 截图里滚轮在任何区域都不移动窗口；三条边界拖动、双击复原、重开后保持；标尺上没有三角。
 - U4.2：用 Bill 的测试工程，清空缓存后打开，时间线所有片段的缩略图在 10 秒内齐全；第二次打开不再起 ffmpeg 抽缩略图（宿主日志或计数验证）；设置页显示素材缓存占用；`preview_cache_clear` 带 `project_id` 不删素材缓存，不带参数时删。
+
+## 第二批（Bill 2026-11-07 同日实测剪辑后补）
+
+5. 预览缓存没跟上剪辑：Bill 的 Mac 在用电池，`pause_on_battery` 默认 true，后台编码整个停了，新剪出来的片段全是 `missing`，播放退回两个播放器轮流，剪点处照旧卡。改默认为 false 并迁移一次；改完马上重做；播放时插队；时间线上加 FCP 式缓存条（虚线 = 没备好）。
+6. AI 用字词范围删一段时写了视频片段的 `clip_id`，内核只认字幕投影所在的声音片段，返回 `E_VALIDATION`「Token range must project onto exactly one clip」。同一次使用、序列上重叠的视音频片段算同一处。
+7. 「决定」里有两版草稿时出现一条会话标签条，标题叠在一起、只有一个「0」；去掉标签条，方案卡可点选；「全部批准」不能点时写原因。
+
+| 编号 | 内容 | 包 | 依赖 |
+|---|---|---|---|
+| U4.3 | 第 5 条：`desktop.json` 版本 2 迁移、队列立即重做与中止、播放插队、状态 `paused`、时间线缓存条 | app-host、desktop | 在 U4.1、U4.2 之后（同碰 `preview-cache.ts`、`TimelinePreview.tsx`） |
+| U4.4 | 第 6 条：`tokenRange` 按同一 `occurrence_id` 且重叠认片段；加回归 fixture | core | 无 |
+| U4.5 | 第 7 条：去掉会话标签条；方案卡可选；批准不可用时的原因和动作 | desktop | 在 U4.1 之后 |
+
+验收：U4.3 在电池供电下打开 Bill 的测试工程，剪一刀后 10 秒内新段 `ready`，缓存条虚线消失；全部 `ready` 后在 WebKit 里连播，剪点处不出现 `waiting`。U4.4 用 Bill 那次失败的请求重放（视频片段 `clip_id`）返回 `applied`。
