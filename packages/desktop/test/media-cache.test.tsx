@@ -31,7 +31,7 @@ it("locates nearest grid cells across rows, sheets, ties, stills and clamped end
   expect(thumbnailCell({ ...index, interval: "0s", count: 1 }, "999s").index).toBe(0);
   const style = thumbnailStyle(config, key, index, "198s", false, 96, 56);
   expect(style.backgroundImage).toContain("thumbs-000.jpg?token=secret");
-  expect(style.backgroundPosition).toBe("-928px -523px");
+  expect(style.backgroundPosition).toBe("-930.5px -523px");
   expect(style.backgroundSize).toBe("1030px 580px");
   expect(thumbnailStyle(config, key, index, "1/2s", true, 96, 56).backgroundImage).toContain(
     "/frame?token=secret&at=1%2F2s",
@@ -42,9 +42,12 @@ it("locates nearest grid cells across rows, sheets, ties, stills and clamped end
 });
 it.each([
   [37, 56],
+  [37, 55],
   [155.52, 48],
+  [155.52, 47.25],
+  [97, 57],
   [96, 56],
-])("keeps every visible pixel inside a single tile at %s x %s", (width, height) => {
+])("covers the whole cell with pixels from a single tile at %s x %s", (width, height) => {
   for (let i = 0; i < 201; i++) {
     const at = `${i * 2}s`;
     const cell = thumbnailCell(index, at);
@@ -55,9 +58,9 @@ it.each([
       throw new Error("missing sprite geometry");
     const tileWidth = sheetWidth / index.columns;
     const tileHeight = sheetHeight / index.rows;
-    expect([tileWidth, tileHeight, x, y].every(Number.isInteger)).toBe(true);
-    expect(Number(style.width)).toBeGreaterThanOrEqual(width);
-    expect(Number(style.height)).toBeGreaterThanOrEqual(height);
+    expect([tileWidth, tileHeight].every(Number.isInteger)).toBe(true);
+    expect(style.width).toBe(width);
+    expect(style.height).toBe(height);
     const left = -x + (Number(style.width) - width) / 2;
     const top = -y + (Number(style.height) - height) / 2;
     expect(left).toBeGreaterThanOrEqual(cell.column * tileWidth + 1);

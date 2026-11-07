@@ -125,17 +125,17 @@ export function thumbnailStyle(
       backgroundPosition: "center",
     };
   const cell = thumbnailCell(index, at);
-  // Inset one CSS pixel so interpolation cannot sample a neighbouring tile.
+  // Enlarge the tile so its one-pixel inset covers the whole cell.
   const scale = Math.max((width + 2) / index.tile_width, (height + 2) / index.tile_height);
   const tileWidth = Math.ceil(index.tile_width * scale);
   const tileHeight = Math.ceil(index.tile_height * scale);
   return cell.sheet
     ? {
-        width: tileWidth - 2,
-        height: tileHeight - 2,
+        width,
+        height,
         backgroundImage: `url("${mediaCacheUrl(config, key, cell.sheet)}")`,
         backgroundSize: `${tileWidth * index.columns}px ${tileHeight * index.rows}px`,
-        backgroundPosition: `${-cell.column * tileWidth - 1}px ${-cell.row * tileHeight - 1}px`,
+        backgroundPosition: `${-cell.column * tileWidth - (tileWidth - width) / 2}px ${-cell.row * tileHeight - (tileHeight - height) / 2}px`,
         backgroundRepeat: "no-repeat",
       }
     : {};
