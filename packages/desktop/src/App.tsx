@@ -41,7 +41,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
   const [revisionControls, setRevisionControls] = useState<HTMLSpanElement | null>(null);
   const [layoutDraft, setLayoutDraft] = useState<Partial<Layout>>({});
   const [viewerTarget, setViewerTarget] = useState<HTMLDivElement | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState<false | "通用" | "预览与缓存">(false);
   const [reviewSession, setReviewSession] = useState<string | null>(null);
   const reviewSessionRef = useRef(reviewSession);
   reviewSessionRef.current = reviewSession;
@@ -210,7 +210,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
       } else if (settingsKey && recordedKey(event) === settingsKey) {
         event.preventDefault();
         event.stopPropagation();
-        setSettingsOpen(true);
+        setSettingsOpen("通用");
       }
     };
     window.addEventListener("keydown", keydown, true);
@@ -314,7 +314,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
             </>
           )}
         </span>
-        {!project && <IconButton icon="settings" label="设置" onClick={() => setSettingsOpen(true)} />}
+        {!project && <IconButton icon="settings" label="设置" onClick={() => setSettingsOpen("通用")} />}
         <IconButton icon="search" label="命令面板 ⌘K" />
         <div className="zc-history-anchor" ref={history.anchor}>
           <IconButton
@@ -365,7 +365,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
             <button
               type="button"
               className="zc-rail-item"
-              onClick={() => setSettingsOpen(true)}
+              onClick={() => setSettingsOpen("通用")}
               title="设置"
               aria-label="设置"
             >
@@ -413,7 +413,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
                 {source && state.media && (
                   <TimelinePreview
                     preferences={preferences}
-                    onOpenSettings={() => setSettingsOpen(true)}
+                    onOpenSettings={(page) => setSettingsOpen(page ?? "通用")}
                     viewerOnly
                     project={source}
                     state={{ ...state, playhead: { at: state.media.at }, range: null, loop: false }}
@@ -475,7 +475,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
             ) : (
               <TimelinePreview
                 preferences={preferences}
-                onOpenSettings={() => setSettingsOpen(true)}
+                onOpenSettings={(page) => setSettingsOpen(page ?? "通用")}
                 viewerTarget={viewerTarget}
                 revisionControlsTarget={revisionControls}
                 hideViewer={Boolean(source)}
@@ -503,6 +503,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
       )}
       {settingsOpen && (
         <SettingsPage
+          initialPage={settingsOpen}
           call={rawCall}
           subscribe={subscribe}
           onPrefs={preferences.acceptPrefs}

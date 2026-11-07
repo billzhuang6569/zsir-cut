@@ -334,7 +334,7 @@ it("writes every cache preference, clears one project and then all projects", as
   await h.click("剪完自动在后台准备");
   expect(h.call).toHaveBeenCalledWith("prefs_set", { patch: { preview_cache: { auto: false } } });
   await h.click("用电池时暂停准备");
-  expect(h.call).toHaveBeenCalledWith("prefs_set", { patch: { preview_cache: { pause_on_battery: false } } });
+  expect(h.call).toHaveBeenCalledWith("prefs_set", { patch: { preview_cache: { pause_on_battery: true } } });
   await h.click("清掉采访工程");
   expect(h.call).toHaveBeenCalledWith("preview_cache_clear", { project_id: "prj_test" });
   expect(h.container.textContent).not.toContain("采访工程");

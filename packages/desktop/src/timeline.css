@@ -547,3 +547,37 @@
   --track-video-h: 80px;
   --track-audio-h: 80px;
 }
+
+.zc-render-bar {
+  position: absolute;
+  top: 3px;
+  height: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  z-index: 1;
+}
+.zc-render-bar::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: repeating-linear-gradient(to right, var(--attention) 0 6px, transparent 6px 12px);
+}
+.zc-render-bar.is-building::before {
+  animation: zc-render-building 3s linear infinite;
+}
+.zc-render-bar:focus-visible {
+  outline: 1px solid var(--attention);
+}
+@keyframes zc-render-building {
+  to {
+    background-position: 24px 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .zc-render-bar.is-building::before {
+    animation: none;
+  }
+}

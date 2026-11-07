@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
+import { on, once } from "node:events";
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { WebSocket } from "ws";
 import { parseProject, rational } from "../../core/src/index.ts";
 import { DesktopPreferences } from "../src/preferences.js";
 import { PreviewCache, segmentArgs, segmentKey } from "../src/preview-cache.js";
@@ -35,7 +37,19 @@ if (args.includes('image2')) {
   const count = Number(args[args.indexOf('-frames:v')+1]);
   for (let i=0; i<count; i++) fs.writeFileSync(args.at(-1).replace('%03d', String(i).padStart(3, '0')), 'sheet');
 } else if (args.at(-1) === 'pipe:1') process.stdout.write(Buffer.alloc(400));
-else setTimeout(() => fs.writeFileSync(args.at(-1), '0123456789'), 15);
+else if (fs.existsSync(${JSON.stringify(join(root, "hold"))})) {
+  fs.writeFileSync(args.at(-1), 'partial');
+  process.on('SIGTERM', () => {
+    fs.appendFileSync(${JSON.stringify(join(root, "killed"))}, args.at(-1)+'\\n');
+    process.exit(0);
+  });
+  const timer = setInterval(() => {
+    if (!fs.existsSync(${JSON.stringify(join(root, "hold"))})) {
+      clearInterval(timer);
+      fs.writeFileSync(args.at(-1), '0123456789');
+    }
+  }, 10);
+} else setTimeout(() => fs.writeFileSync(args.at(-1), '0123456789'), 15);
 `,
   );
   await chmod(join(root, "ffmpeg"), 0o755);
@@ -66,8 +80,9 @@ describe("preview cache", () => {
     cache = new PreviewCache(
       prefs,
       () => {},
-      async () => false,
+      async () => true,
     );
+    expect(prefs.get().prefs).toMatchObject({ version: 2, preview_cache: { pause_on_battery: false } });
     const directory = join(root, "home", "Movies", "庄Sir剪辑助手", "预览缓存");
     expect(prefs.get().preview_cache_directory).toBe(directory);
     await expect(stat(directory)).rejects.toMatchObject({ code: "ENOENT" });
@@ -288,9 +303,11 @@ describe("preview cache", () => {
     await cache.refresh();
     await cache.idle();
     expect((await cache.status()).segments.every((s) => s.state === "missing")).toBe(true);
+    expect(await cache.status()).toMatchObject({ paused: "battery" });
     battery.mockResolvedValue(false);
     await cache.refresh();
     await cache.idle();
+    expect(await cache.status()).not.toHaveProperty("paused");
     const segments = (await cache.status()).segments;
     const recorded = await calls();
     expect(recorded.map((args) => args.at(-1)?.split("/").at(-1)?.replace(".tmp", ""))).toEqual([
@@ -303,4 +320,150 @@ describe("preview cache", () => {
       expect((pushes[i]?.at ?? 0) - (pushes[i - 1]?.at ?? 0)).toBeGreaterThanOrEqual(500);
     expect(pushes.length).toBeGreaterThan(1);
   });
+});
+
+it("starts split keys immediately, aborts obsolete ffmpeg and removes its temporary file", async () => {
+  const project = await fixture();
+  const track = project.timelines[0]?.tracks.find((track) => track.kind === "video");
+  if (!track || track.kind !== "video" || !track.clips[0]) throw new Error("video");
+  const clip = track.clips[0];
+  track.clips = [clip];
+  const timeline = project.timelines[0];
+  if (!timeline) throw new Error("timeline");
+  timeline.tracks = [track];
+  await cache.open(project, join(root, "test.zcut.json"));
+  await cache.idle();
+  const before = await calls();
+  await writeFile(join(root, "hold"), "");
+  const changed = structuredClone(project);
+  const video = changed.timelines[0]?.tracks[0];
+  if (video?.kind !== "video" || !video.clips[0]) throw new Error("video");
+  video.clips[0].duration = rational(1n);
+  video.clips.push({
+    ...clip,
+    id: "clp_split",
+    source_start: rational(15n),
+    timeline_start: rational(1n),
+    duration: rational(2n),
+  });
+  await cache.refresh(changed);
+  await vi.waitFor(async () => expect((await cache.status()).segments[0]?.state).toBe("building"));
+  await vi.waitFor(async () => expect(await calls()).toHaveLength(before.length + 1));
+  const abandoned = (await cache.status()).segments[0]?.key;
+  const temp = (await calls()).at(-1)?.at(-1);
+  if (!temp || !abandoned) throw new Error("encoding");
+  expect(temp.endsWith(`${abandoned}.tmp`)).toBe(true);
+  await vi.waitFor(async () => expect(await readFile(temp, "utf8")).toBe("partial"));
+  video.clips.shift();
+  await cache.refresh(changed);
+  await vi.waitFor(async () => expect(await readFile(join(root, "killed"), "utf8")).toContain(temp));
+  await vi.waitFor(async () =>
+    expect((await cache.status()).segments[0]).toMatchObject({ clip_id: "clp_split", state: "building" }),
+  );
+  await expect(stat(temp)).rejects.toMatchObject({ code: "ENOENT" });
+  await expect(stat(temp.replace(".tmp", ".mp4"))).rejects.toMatchObject({ code: "ENOENT" });
+  expect((await calls()).filter((args) => args.at(-1) === temp)).toHaveLength(1);
+  await rm(join(root, "hold"));
+  await cache.idle();
+  expect((await cache.status()).segments[0]?.state).toBe("ready");
+});
+
+it("puts the hinted segment and its next two ahead of the remaining queue", async () => {
+  const project = await fixture();
+  const track = project.timelines[0]?.tracks.find((track) => track.kind === "video");
+  if (!track || track.kind !== "video" || !track.clips[0]) throw new Error("video");
+  const template = track.clips[0];
+  track.clips = Array.from({ length: 7 }, (_, i) => ({
+    ...template,
+    id: `clp_${i}`,
+    source_start: rational(BigInt(i)),
+    timeline_start: rational(BigInt(i)),
+    duration: rational(1n),
+  }));
+  const timeline = project.timelines[0];
+  if (!timeline) throw new Error("timeline");
+  timeline.tracks = [track];
+  await writeFile(join(root, "hold"), "");
+  await cache.open(project, join(root, "test.zcut.json"));
+  await vi.waitFor(async () => expect((await calls()).length).toBe(1));
+  cache.hint(rational(4n));
+  await rm(join(root, "hold"));
+  await cache.idle();
+  const media = project.media.find((media) => media.id === template.media_id);
+  if (!media) throw new Error("media");
+  const keys = track.clips.map((clip) => segmentKey(clip, media, "720p"));
+  expect((await calls()).map((args) => args.at(-1)?.split("/").at(-1)?.replace(".tmp", ""))).toEqual([
+    keys[0],
+    keys[4],
+    keys[5],
+    keys[6],
+    keys[3],
+    keys[2],
+    keys[1],
+  ]);
+});
+
+it("rebuilds split keys on the host project_changed path without waiting for a poll", async () => {
+  const { startHost } = await import("../src/index.js");
+  const { Agents } = await import("../src/agents.js");
+  const spy = vi.spyOn(Agents.prototype, "detect").mockResolvedValue([]);
+  const path = join(root, "project.zcut.json");
+  const source = JSON.parse(await readFile(new URL("../../../examples/minimal.zcut.json", import.meta.url), "utf8"));
+  await writeFile(path, JSON.stringify(source));
+  await writeFile(join(root, "hold"), "");
+  let host: Awaited<ReturnType<typeof startHost>> | undefined;
+  let socket: WebSocket | undefined;
+  try {
+    host = await startHost({ project: path, appDataDir: join(root, "prefs") });
+    socket = new WebSocket(`ws://127.0.0.1:${host.port}/?token=${host.token}`);
+    await once(socket, "open");
+    let sequence = 0;
+    const send = async (verb: string, request: Record<string, unknown> = {}) => {
+      const id = `render-${sequence++}`;
+      if (!socket) throw new Error("socket");
+      const replies = on(socket, "message", { signal: AbortSignal.timeout(3000) });
+      socket.send(JSON.stringify({ id, verb, request }));
+      for await (const [raw] of replies) {
+        const message = JSON.parse(raw.toString());
+        if (message.id === id) return message.envelope;
+      }
+      throw new Error("Missing response");
+    };
+    const messages = on(socket, "message", { signal: AbortSignal.timeout(3000) });
+    socket.send(JSON.stringify({ type: "ui_ready" }));
+    for await (const [raw] of messages) if (JSON.parse(raw.toString()).type === "bootstrap") break;
+    await vi.waitFor(async () =>
+      expect((await send("preview_cache_status")).result.segments[0].state).toBe("building"),
+    );
+    const previous = (await send("preview_cache_status")).result.segments[0].key;
+    const changes: unknown[] = [];
+    socket.on("message", (raw) => {
+      const message = JSON.parse(raw.toString());
+      if (message.type === "project_changed") changes.push(message);
+    });
+    expect(
+      await send("edit", {
+        project: path,
+        base_revision: source.revision.id,
+        idempotency_key: "split",
+        author: { kind: "human", name: "test" },
+        ops: [{ op: "split", clip_id: source.timelines[0].tracks[0].clips[0].id, at: "1s" }],
+      }),
+    ).toMatchObject({ status: "applied" });
+    expect(changes).toHaveLength(1);
+    await vi.waitFor(async () => {
+      const status = (await send("preview_cache_status")).result;
+      expect(status.segments).toHaveLength(2);
+      expect(
+        status.segments.some(
+          (segment: { key: string; state: string }) => segment.key !== previous && segment.state === "building",
+        ),
+      ).toBe(true);
+    });
+    expect(await send("preview_cache_hint", { at: "1s" })).toMatchObject({ ok: true });
+  } finally {
+    socket?.terminate();
+    await host?.close();
+    spy.mockRestore();
+  }
 });

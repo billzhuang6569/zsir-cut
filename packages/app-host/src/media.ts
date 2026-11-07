@@ -22,11 +22,14 @@ export function byteRange(header: string, size: number): [number, number] | null
     ? [start, end]
     : null;
 }
-export async function runFfmpeg(args: string[]): Promise<Buffer> {
+export async function runFfmpeg(args: string[], signal?: AbortSignal): Promise<Buffer> {
+  signal?.throwIfAborted();
   return new Promise((done, reject) => {
     const child = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error", "-nostdin", ...args], {
       stdio: ["ignore", "pipe", "pipe"],
     });
+    const abort = () => child.kill();
+    signal?.addEventListener("abort", abort, { once: true });
     const chunks: Buffer[] = [];
     let errors = "";
     child.stdout.on("data", (part: Buffer) => chunks.push(part));
@@ -34,9 +37,12 @@ export async function runFfmpeg(args: string[]): Promise<Buffer> {
       errors += part.toString();
     });
     child.on("error", reject);
-    child.on("close", (code) =>
-      code === 0 ? done(Buffer.concat(chunks)) : reject(new Error(errors || "ffmpeg failed")),
-    );
+    child.on("close", (code) => {
+      signal?.removeEventListener("abort", abort);
+      if (signal?.aborted) reject(signal.reason);
+      else if (code === 0) done(Buffer.concat(chunks));
+      else reject(new Error(errors || "ffmpeg failed"));
+    });
   });
 }
 // Shared by all media channels, including channels replaced when opening another project.
