@@ -38,13 +38,14 @@ const previewCache = z.strictObject({
 });
 const preferences = z.strictObject({
   schema: z.literal("zsir-cut/desktop"),
-  version: z.literal(2),
+  version: z.number().int().min(2),
   default_agent: z.enum(["claude", "codex"]).nullable(),
   keymap,
   preview_cache: previewCache,
   ui,
 });
 const patchSchema = preferences.partial().extend({
+  version: z.literal(2).optional(),
   keymap: keymap.partial().optional(),
   preview_cache: previewCache.partial().optional(),
   ui: ui.partial().extend({ chapters: chapters.partial().optional(), layout: layout.partial().optional() }).optional(),
@@ -71,15 +72,53 @@ export const defaultPreferences: Preferences = {
     layout: defaultLayout,
   },
 };
+function isObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
 function merge(base: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
-  const result = { ...base };
-  for (const [key, value] of Object.entries(patch)) {
-    result[key] =
-      value !== null && typeof value === "object" && !Array.isArray(value)
-        ? merge(base[key] as Record<string, unknown>, value as Record<string, unknown>)
-        : value;
+  return Object.fromEntries([
+    ...Object.entries(base),
+    ...Object.entries(patch).map(([key, value]) => [
+      key,
+      isObject(value) ? merge(Object.hasOwn(base, key) && isObject(base[key]) ? base[key] : {}, value) : value,
+    ]),
+  ]);
+}
+function readItem(
+  schema: z.core.$ZodType,
+  stored: unknown,
+  fallback: unknown,
+  invalid: string[],
+  path = "",
+): { value: unknown; extras: Record<string, unknown> } {
+  const inner = schema instanceof z.ZodDefault ? schema.unwrap() : schema;
+  if ((inner instanceof z.ZodObject || inner instanceof z.ZodRecord) && isObject(stored)) {
+    const shape: z.ZodRawShape =
+      inner instanceof z.ZodObject
+        ? inner.shape
+        : Object.fromEntries(
+            Object.keys(stored)
+              .filter((key) => z.safeParse(inner.keyType, key).success)
+              .map((key) => [key, inner.valueType]),
+          );
+    const extras = Object.fromEntries(Object.entries(stored).filter(([key]) => !Object.hasOwn(shape, key)));
+    const entries = Object.entries(shape).map(([key, child]) => {
+      const item = readItem(
+        child,
+        Object.hasOwn(stored, key) ? stored[key] : undefined,
+        isObject(fallback) ? fallback[key] : undefined,
+        invalid,
+        path ? `${path}.${key}` : key,
+      );
+      if (Object.keys(item.extras).length) extras[key] = item.extras;
+      return [key, item.value];
+    });
+    return { value: Object.fromEntries(entries.filter(([, value]) => value !== undefined)), extras };
   }
-  return result;
+  const parsed = z.safeParse(schema, stored);
+  if (parsed.success) return { value: parsed.data, extras: {} };
+  if (stored !== undefined) invalid.push(path);
+  return { value: structuredClone(fallback), extras: {} };
 }
 function serialize(value: unknown) {
   return `${JSON.stringify(value, (_key, item) =>
@@ -91,6 +130,7 @@ function serialize(value: unknown) {
 export class DesktopPreferences {
   private file: string;
   private value = structuredClone(defaultPreferences);
+  private extras: Record<string, unknown> = {};
   private writes = Promise.resolve();
   warning: { type: "warning"; code: "W_PREFS_RESET"; message: string } | undefined;
   constructor(
@@ -101,27 +141,41 @@ export class DesktopPreferences {
     this.file = join(directory, "desktop.json");
   }
   async load() {
-    let migrated = false;
+    let stored: unknown;
+    this.warning = undefined;
+    this.extras = {};
     try {
-      const stored = JSON.parse(await readFile(this.file, "utf8"));
-      if (stored?.version === 1) {
-        const legacy = preferences.extend({ version: z.literal(1) }).parse(stored);
-        this.value = { ...legacy, version: 2, preview_cache: { ...legacy.preview_cache, pause_on_battery: false } };
-        migrated = true;
-      } else this.value = preferences.parse(stored);
+      stored = JSON.parse(await readFile(this.file, "utf8"));
+      if (!isObject(stored)) throw new Error("Preferences must be an object");
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
         this.warning = { type: "warning", code: "W_PREFS_RESET", message: "应用偏好无法读取，已恢复默认设置" };
         await rename(this.file, `${this.file}.broken`).catch(() => {});
       }
       this.value = structuredClone(defaultPreferences);
+      return;
     }
-    if (migrated) await this.persist(this.value);
+    const migrated = stored.version === 1;
+    const invalid: string[] = [];
+    const loaded = readItem(preferences, migrated ? { ...stored, version: 2 } : stored, defaultPreferences, invalid);
+    this.value = preferences.parse(loaded.value);
+    this.extras = loaded.extras;
+    if (invalid.length) {
+      this.warning = {
+        type: "warning",
+        code: "W_PREFS_RESET",
+        message: `这几项设置无效，已恢复默认：${invalid.join("、")}`,
+      };
+    }
+    if (migrated) {
+      this.value.preview_cache.pause_on_battery = false;
+      await this.persist(this.value);
+    }
   }
   private async persist(next: Preferences) {
     await mkdir(dirname(this.file), { recursive: true });
     const temporary = `${this.file}.${randomUUID()}.tmp`;
-    await writeFile(temporary, serialize(next));
+    await writeFile(temporary, serialize(merge(this.extras, next)));
     await rename(temporary, this.file);
     this.value = next;
   }
@@ -139,6 +193,8 @@ export class DesktopPreferences {
     const parsed = patchSchema.parse(patch);
     const operation = this.writes.then(async () => {
       const merged = merge(this.value, parsed);
+      // Patches must not downgrade a file written by a newer version.
+      merged.version = this.value.version;
       if (parsed.keymap?.overrides !== undefined)
         (merged.keymap as Preferences["keymap"]).overrides = parsed.keymap.overrides;
       const next = preferences.parse(merged);
