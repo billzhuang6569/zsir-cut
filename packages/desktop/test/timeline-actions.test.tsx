@@ -341,7 +341,8 @@ it("selects a seam, exposes it in ui_state, rolls one exact NTSC frame and prese
   const seam = get(".zc-seam");
   await click(seam);
   expect(applyUi(state, "ui_state", {}).edit_point).toEqual({ track_id: "t0", at: frameTime(120n, project.edit_rate) });
-  expect(get(".zc-cut-tick.is-selected")).not.toBeNull();
+  expect(get(".zc-seam.is-selected")).not.toBeNull();
+  expect(get(".zc-cut-tick")).toBeNull();
   await key(",");
   const to = frameTime(119n, project.edit_rate);
   expect(lastOps()).toEqual([{ op: "roll", clip_id: "c00", edge: "out", to }]);

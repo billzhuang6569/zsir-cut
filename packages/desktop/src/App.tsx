@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import type { Layout } from "../../app-host/src/preferences.js";
 import type { ProjectChanged } from "../../app-host/src/revision-events.js";
 import { PANELS, type Panel } from "../../app-host/src/ui.js";
 import { type AiNotice, useAiPanel } from "./AiPanel.js";
@@ -13,6 +14,7 @@ import {
 } from "./connection.js";
 import { ExportPanel } from "./ExportPanel.js";
 import { useHistoryPanel } from "./HistoryPanel.js";
+import { LayoutDivider } from "./LayoutDivider.js";
 import { useMediaPanel } from "./MediaPanel.js";
 import { sourceProject } from "./media.js";
 import { ProjectEntry } from "./ProjectEntry.js";
@@ -37,7 +39,7 @@ const parameters: Record<Panel, string> = {
 export function App({ config }: { config?: { port: number; token: string } }) {
   const uniqueId = useId();
   const [revisionControls, setRevisionControls] = useState<HTMLSpanElement | null>(null);
-  const [previewPercent, setPreviewPercent] = useState(57);
+  const [layoutDraft, setLayoutDraft] = useState<Partial<Layout>>({});
   const [viewerTarget, setViewerTarget] = useState<HTMLDivElement | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [reviewSession, setReviewSession] = useState<string | null>(null);
@@ -159,6 +161,34 @@ export function App({ config }: { config?: { port: number; token: string } }) {
     };
   }, [config, update]);
   const preferences = useTimelinePreferences(rawCall, setError, state, update);
+  const layout = { ...preferences.layout, ...layoutDraft };
+  const divider = (field: keyof Layout, label: string) => (
+    <LayoutDivider
+      field={field}
+      label={label}
+      value={layout[field] ?? null}
+      dragging={dragging}
+      change={(value) => setLayoutDraft((old) => ({ ...old, [field]: value }))}
+      cancel={() =>
+        setLayoutDraft((old) => {
+          const next = { ...old };
+          delete next[field];
+          return next;
+        })
+      }
+      commit={(value) => {
+        setLayoutDraft((old) => ({ ...old, [field]: value }));
+        void preferences.setUi({ layout: { [field]: value } }).then(() =>
+          setLayoutDraft((old) => {
+            if (old[field] !== value) return old;
+            const next = { ...old };
+            delete next[field];
+            return next;
+          }),
+        );
+      }}
+    />
+  );
   const history = useHistoryPanel({ project, state, update, call: rawCall, subscribe });
   const settingsKey = preferences.keymap.open_settings;
   const historyKey = preferences.keymap.toggle_history;
@@ -239,7 +269,16 @@ export function App({ config }: { config?: { port: number; token: string } }) {
     [update],
   );
   return (
-    <main className="zc zc-shell">
+    <main
+      className="zc zc-shell"
+      style={
+        {
+          "--layout-left-request": layout.left_width == null ? "var(--panel-w)" : `${layout.left_width}px`,
+          "--layout-right-request": layout.right_width == null ? "var(--inspector-w)" : `${layout.right_width}px`,
+          "--layout-timeline": layout.timeline_height ?? 0.43,
+        } as CSSProperties
+      }
+    >
       <section aria-label="菜单栏" className="zc-menubar">
         <svg className="zc-logo" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
           <rect width="24" height="24" rx="7" fill="var(--cream)" />
@@ -367,13 +406,8 @@ export function App({ config }: { config?: { port: number; token: string } }) {
               </div>
             </div>
           </section>
-          <section
-            className="zc-editor"
-            aria-label="剪辑区"
-            style={{
-              gridTemplateRows: `minmax(160px, ${previewPercent}fr) 8px minmax(120px, ${100 - previewPercent}fr)`,
-            }}
-          >
+          {divider("left_width", "功能区与预览分界")}
+          <section className="zc-editor" aria-label="剪辑区">
             <div className="zc-upper-row">
               <div className="zc-preview-slot" ref={setViewerTarget}>
                 {source && state.media && (
@@ -391,6 +425,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
                   />
                 )}
               </div>
+              {divider("right_width", "预览与参数区分界")}
               <section
                 ref={setReviewTarget}
                 aria-label="参数区"
@@ -462,37 +497,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
                 call={call}
               />
             )}
-            <hr
-              className="zc-editor-divider"
-              aria-label="预览与时间线分界"
-              aria-orientation="horizontal"
-              tabIndex={0}
-              aria-valuemin={25}
-              aria-valuemax={75}
-              aria-valuenow={previewPercent}
-              onKeyDown={(event) => {
-                if (!["ArrowUp", "ArrowDown"].includes(event.key)) return;
-                event.preventDefault();
-                setPreviewPercent((value) => Math.max(25, Math.min(75, value + (event.key === "ArrowUp" ? -5 : 5))));
-              }}
-              onPointerDown={(event) => {
-                dragging.current = true;
-                event.currentTarget.setPointerCapture(event.pointerId);
-              }}
-              onPointerMove={(event) => {
-                if (!dragging.current || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
-                const bounds = event.currentTarget.parentElement?.getBoundingClientRect();
-                if (bounds?.height)
-                  setPreviewPercent(Math.max(25, Math.min(75, ((event.clientY - bounds.top) / bounds.height) * 100)));
-              }}
-              onPointerUp={(event) => {
-                dragging.current = false;
-                event.currentTarget.releasePointerCapture(event.pointerId);
-              }}
-              onLostPointerCapture={() => {
-                dragging.current = false;
-              }}
-            />
+            {divider("timeline_height", "预览与时间线分界")}
           </section>
         </>
       )}

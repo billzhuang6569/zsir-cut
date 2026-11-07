@@ -319,17 +319,18 @@ it("anchors to the pointer when the playhead is offscreen, leaving ordinary scro
   expect(scale()).toBe(value);
 });
 it("restores chapter preview on cancel, commits only an existing chapter drag, and clears on unmount", async () => {
-  const marker = get(".zc-marker");
-  await pointer(marker, "pointerdown", 656, 60);
-  await pointer(marker, "pointermove", 700, 60);
+  const edge = get(".zc-chapter-edge");
+  const marker = edge.parentElement as HTMLElement;
+  await pointer(edge, "pointerdown", 656, 60);
+  await pointer(edge, "pointermove", 700, 60);
   expect(marker.style.left).not.toBe("576px");
-  await pointer(marker, "pointercancel", 700, 60);
+  await pointer(edge, "pointercancel", 700, 60);
   expect(marker.style.left).toBe("576px");
   expect(call).not.toHaveBeenCalled();
-  await pointer(marker, "pointerdown", 656, 60);
-  await pointer(marker, "pointermove", 704, 60);
-  await pointer(marker, "pointerup", 704, 60);
-  await click(marker);
+  await pointer(edge, "pointerdown", 656, 60);
+  await pointer(edge, "pointermove", 704, 60);
+  await pointer(edge, "pointerup", 704, 60);
+  await click(edge);
   expect(call).toHaveBeenCalledTimes(1);
   expect(call).toHaveBeenCalledWith(
     "edit",
@@ -999,4 +1000,49 @@ it("has no trim handle on an internal cue edge created by cutting the carrier", 
   await act(render);
   expect(get('[data-selection-id="q"] [data-trim-edge="in"]')).toBeNull();
   expect(get('[data-selection-id="q"] [data-trim-edge="out"]')).not.toBeNull();
+});
+
+it("renders every chapter as a bar edge, shows only non-chapter diamonds and seeks without editing", async () => {
+  project.markers.push(
+    { id: "section", kind: "chapter", level: 2, at: { t: "14s" }, text: "小节" },
+    ...(["note", "todo", "review"] as const).map((kind, index) => ({
+      id: kind,
+      kind,
+      at: { t: `${15 + index}s` },
+      text: `${kind} 文字`,
+    })),
+  );
+  await act(render);
+  expect(host.querySelectorAll(".zc-chapter-bar")).toHaveLength(2);
+  expect(host.querySelectorAll(".zc-chapter-edge")).toHaveLength(2);
+  expect(host.querySelector(".zc-cut-tick")).toBeNull();
+  const markers = [...host.querySelectorAll<HTMLElement>(".zc-marker")];
+  expect(markers).toHaveLength(3);
+  expect(markers.map((node) => node.title)).toEqual(["note 文字", "todo 文字", "review 文字"]);
+  expect(markers.every((node) => node.textContent === "")).toBe(true);
+  for (const [index, marker] of markers.entries()) {
+    await pointer(marker, "pointerdown", 100, 60);
+    expect(dragging.current).toBe(false);
+    await click(marker);
+    expect(state.playhead).toEqual({ at: `${15 + index}s` });
+  }
+  expect(call).not.toHaveBeenCalled();
+});
+it("snaps a chapter edge to an existing cut and blocks chapter writes in history", async () => {
+  const edge = get(".zc-chapter-edge");
+  await pointer(edge, "pointerdown", 656, 50);
+  await pointer(edge, "pointermove", 558, 50);
+  await pointer(edge, "pointerup", 558, 50);
+  expect(call).toHaveBeenLastCalledWith(
+    "edit",
+    expect.objectContaining({ ops: [{ op: "update_marker", marker_id: "chapter", at: "10s" }] }),
+  );
+  call.mockClear();
+  readOnly = true;
+  await act(render);
+  await pointer(edge, "pointerdown", 656, 50);
+  await pointer(edge, "pointermove", 704, 50);
+  await pointer(edge, "pointerup", 704, 50);
+  expect(call).not.toHaveBeenCalled();
+  expect(dragging.current).toBe(false);
 });

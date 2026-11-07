@@ -10,12 +10,20 @@ const chapters = z.strictObject({
   zoom: z.number().min(0.5).max(4),
   folded: z.array(z.string()),
 });
+const layout = z.strictObject({
+  left_width: z.number().int().min(200).max(560).nullable(),
+  right_width: z.number().int().min(240).max(600).nullable(),
+  timeline_height: z.number().min(0.2).max(0.75).multipleOf(0.001).nullable(),
+});
+const defaultLayout = { left_width: null, right_width: null, timeline_height: null };
+export type Layout = z.infer<typeof layout>;
 const ui = z.strictObject({
   snap: z.boolean(),
   magnetic: z.boolean(),
   timeline_zoom: z.number().positive().nullable(),
   track_height: z.enum(["s", "m", "l"]),
   chapters,
+  layout: layout.default(defaultLayout),
 });
 const keymap = z.strictObject({
   preset: z.enum(["fcp", "premiere"]),
@@ -39,7 +47,7 @@ const preferences = z.strictObject({
 const patchSchema = preferences.partial().extend({
   keymap: keymap.partial().optional(),
   preview_cache: previewCache.partial().optional(),
-  ui: ui.partial().extend({ chapters: chapters.partial().optional() }).optional(),
+  ui: ui.partial().extend({ chapters: chapters.partial().optional(), layout: layout.partial().optional() }).optional(),
 });
 export type Preferences = z.infer<typeof preferences>;
 export const defaultPreferences: Preferences = {
@@ -60,6 +68,7 @@ export const defaultPreferences: Preferences = {
     timeline_zoom: null,
     track_height: "m",
     chapters: { view: "outline", zoom: 1, folded: [] },
+    layout: defaultLayout,
   },
 };
 function merge(base: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
