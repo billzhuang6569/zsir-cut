@@ -37,7 +37,12 @@
 
 放在 `~/Library/Application Support/zsir-cut/desktop.json`，和 `recent.json` 同目录，跟随 `HOME`。内核的 `settings.json`（`voice.md` 1.1）是另一个文件，宿主不写它，两个文件各有一个写入者。
 
-写入：zod 校验，写临时文件再改名，键按字母序序列化。文件不存在时用默认值；文件损坏或校验不过时用默认值，给界面推一条 `{type: "warning", code: "W_PREFS_RESET", message}`，并把坏文件改名为 `desktop.json.broken`，不崩。
+写入：zod 校验，写临时文件再改名，键按字母序序列化。文件不存在时用默认值。读入按项宽容（2026-11-07 改：原来任何一项校验不过就整份换默认，旧版本 App 读到新版本加的键时把 Bill 的设置全丢了）：
+
+- 不认识的键（新版本加的、或以后去掉的）原样保留，写回时照写，不报警告。
+- 某一项的值校验不过（类型不对、超出范围），只把这一项换回默认值，其他项照用；给界面推一条 `{type: "warning", code: "W_PREFS_RESET", message}`，`message` 写出是哪几项；写回时这几项写默认值。
+- `version` 比本版本认识的大时，照上面两条读，不降版本号，写回时保留原来的 `version`。
+- 只有文件不是合法 JSON、或顶层不是对象时，才整份用默认值，推 `W_PREFS_RESET`，并把坏文件改名为 `desktop.json.broken`。都不崩。
 
 ```json
 {
