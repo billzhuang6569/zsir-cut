@@ -50,7 +50,7 @@
     "limit_gb": 20,
     "quality": "720p",
     "auto": true,
-    "pause_on_battery": true
+    "pause_on_battery": false
   },
   "ui": {
     "snap": true,
@@ -72,7 +72,7 @@
 | `preview_cache.limit_gb` | 1 到 2000 的整数 |
 | `preview_cache.quality` | `540p`、`720p`、`1080p` |
 | `preview_cache.auto` | 打开工程时自动在后台准备 |
-| `preview_cache.pause_on_battery` | 用电池时暂停生成 |
+| `preview_cache.pause_on_battery` | 用电池时暂停生成，默认 false（2026-11-07 改：原默认 true，Bill 用笔记本插不插电都要流畅播放，FCP 也不因电池停后台渲染）。`version` 1 的文件读入时把这一项改成 false 并升到 `version` 2，只做这一次 |
 | `ui.snap` | 吸附开关，时间线和章节时间轴共用 |
 | `ui.magnetic` | 磁性开关，见第 3.2 节 |
 | `ui.timeline_zoom` | 每秒多少像素，null 表示缩放到整条 |
@@ -212,7 +212,10 @@ Agent 通过宿主的 MCP 调用会碰到工程外面的动词时，宿主先停
 
 - 打开工程且 `auto` 为 true 时开始；工程变了（`project_changed`）后重新算需要哪些键，已有的不重做。
 - 顺序：播放头所在片段，然后往后，然后往前。同时只编码一段。
-- `pause_on_battery` 为 true 且在用电池时暂停（用 `pmset -g batt` 判断，查不到按插电处理）。
+- `pause_on_battery` 为 true 且在用电池时暂停（用 `pmset -g batt` 判断，查不到按插电处理）。暂停时状态里 `paused: "battery"`，界面在时间线的缓存条上说明（见下）。
+- **改完马上重做。** `project_changed` 后立刻重算键并开始编码变了的段，不等空闲；正在编码的段如果已经不在新时间线上，中止它。
+- **按下播放时插队。** 界面播放时用 `preview_cache_hint` 报播放头（现有），宿主把播放头所在段和后面两段排到队首。
+- **缓存条（2026-11-07 补，仿 FCP）。** 时间线标尺上方、章节色条下面画一条 2 像素的细线，按片段在序列上的位置分段：`missing` 画虚线（`--attention` 色），`building` 画虚线并从左到右按进度变实，`ready` 不画。纯音频和静帧片段不需要缓存，不画。整条都 `ready` 时这一行什么都没有。悬停虚线显示「这段还没准备好，播放到这里可能卡顿」；暂停时显示「用电池时暂停了预览准备，可在设置里关掉」。
 - 缓存目录不存在时先建它（含上级目录），建不了才算不可用。例外：路径在 `/Volumes/<卷名>/` 下而这个卷没挂上（外接盘拔了），不建，免得在启动盘上建出一个同名目录（2026-11-06 补）。
 - 缓存目录不可用或写不进去时不报错：所有段按 `missing`，队列停下，状态里 `directory_ok: false`；卷重新挂上后下一次状态检查恢复。
 

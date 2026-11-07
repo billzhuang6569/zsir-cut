@@ -515,7 +515,7 @@
 |---|---|---|
 | `place` | `media_id`、`source_start` 和 `duration` 或 `tokens`、`at`、`video_track`、`audio_track`、`mode` | 把一段素材放上时间线，新建一个 `occurrence_id` 和对应的视音频片段。`mode` 取 `insert` 或 `overwrite`。`tokens` 按字词选段，`at` 可写 `"end"` |
 | `remove` | `clip_ids`、`linked`、`ripple` | 删片段；`ripple` 为 true 时后面的内容跟上来（删除并合拢），默认留下空隙 |
-| `remove_span` | `range` 或 `tokens`、`tracks`、`ripple`、`snap` | 删一段序列区间。可以用 token 范围指定，内核按投影换算成序列时间。`tracks` 默认全部轨道，保持同步。`snap` 取 `out`、`in`、`nearest`，默认 `out`，保证说过的字被完整删掉 |
+| `remove_span` | `range` 或 `tokens`、`tracks`、`ripple`、`snap` | 删一段序列区间。可以用 token 范围指定，内核按投影换算成序列时间。`tokens.clip_id` 可选，用来在同一段话出现多次时指明是哪一处；它可以写这段话所在的视频片段，也可以写声音片段：同一 `occurrence_id`、在序列上有重叠的片段算同一处（2026-11-07 补，原实现只认字幕投影所在的那一条，写视频片段会被拒）。`tracks` 默认全部轨道，保持同步。`snap` 取 `out`、`in`、`nearest`，默认 `out`，保证说过的字被完整删掉 |
 | `trim` | `clip_id`、`edge`、`to`、`ripple`、`linked` | 改入点或出点。`linked` 为 true 时同一次使用的视音频一起改；J/L cut 就是只改其中一个 |
 | `split` | `clip_id`、`at`、`new_id` | 在序列时刻切开，后半段拿新 ID |
 | `roll` | `clip_id`、`edge`、`to`、`linked` | 移动剪点：前一段出点和后一段入点一起变，总时长不变 |
