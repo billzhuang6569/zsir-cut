@@ -45,6 +45,58 @@ afterEach(async () => {
 });
 
 describe("CLI and MCP", () => {
+  it.each(["clp_v1", "clp_a1"])("shares token-linked removal via %s, dry-run and replay", async (clip_id) => {
+    await copyFile(new URL("../../../fixtures/regressions/token-linked.zcut.json", import.meta.url), project);
+    const bytes = await readFile(project, "utf8");
+    const server = createServer();
+    const client = new Client({ name: "token-linked-parity", version: "1" });
+    const [left, right] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(left), client.connect(right)]);
+    try {
+      const input = {
+        project,
+        base_revision: "rev_example_1",
+        idempotency_key: "token-linked",
+        author,
+        label: "删除联动片段",
+        ops: [
+          {
+            op: "remove_span",
+            tokens: { transcript_id: "trs_linked", from_token: "tok_linked_0", to_token: "tok_linked_1", clip_id },
+            ripple: true,
+            tracks: "all",
+          },
+        ],
+      };
+      for (const dry_run of [true, false]) {
+        const request = { ...input, dry_run };
+        const cli = invokeCli("edit", request);
+        expect(cli.code).toBe(0);
+        expect(cli.envelope.status, JSON.stringify(cli.envelope)).toBe(dry_run ? "dry_run" : "applied");
+        const mcp = (await client.callTool({ name: "zcut_edit", arguments: request })).structuredContent as Record<
+          string,
+          unknown
+        >;
+        expect(validateEnvelope(mcp).valid).toBe(true);
+        if (!dry_run) {
+          expect(mcp.receipt).toMatchObject({ replayed: true });
+          mcp.receipt = { ...(mcp.receipt as Record<string, unknown>), replayed: false };
+        }
+        expect(withoutRequestId(cli.envelope)).toEqual(withoutRequestId(mcp));
+        if (dry_run) expect(await readFile(project, "utf8")).toBe(bytes);
+        else {
+          const saved = parseProject(await readFile(project, "utf8"));
+          if (!saved.ok) throw new Error("Invalid project");
+          for (const track of saved.project.timelines[0]?.tracks ?? [])
+            if (track.kind !== "subtitle") expect(track.clips).toEqual([]);
+        }
+      }
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
   it("shares reason validation, session steps and approved history", async () => {
     const server = createServer();
     const client = new Client({ name: "review-steps", version: "1" });

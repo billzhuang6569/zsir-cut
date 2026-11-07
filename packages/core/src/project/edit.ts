@@ -280,15 +280,26 @@ function tokenRange(project: Project, timeline: Timeline, op: Op): [Rational, Ra
     !transcript.tokens.some((token) => token.id === selection.to_token)
   )
     fail("E_NOT_FOUND", "Token not found");
-  if (selection.clip_id) clip(timeline, selection.clip_id);
+  const selected = selection.clip_id ? clip(timeline, selection.clip_id).clip : undefined;
   const cues = projectSubtitles(project, timeline.id, undefined, false).cues;
   const starts = new Set(cues.filter((cue) => cue.token_ids.includes(selection.from_token)).map((cue) => cue.clip_id));
   const ends = new Set(cues.filter((cue) => cue.token_ids.includes(selection.to_token)).map((cue) => cue.clip_id));
-  const candidates = [...starts].filter(
-    (value) => value && ends.has(value) && (!selection.clip_id || selection.clip_id === value),
-  );
+  const linked = (a: Clip, b: Clip) =>
+    a.occurrence_id === b.occurrence_id && lt(a.timeline_start, end(b)) && lt(b.timeline_start, end(a));
+  const carriers = [...starts]
+    .filter((value) => value && ends.has(value))
+    .map((value) => clip(timeline, value).clip)
+    .sort((a, b) => compare(a.timeline_start, b.timeline_start));
+  const groups: Clip[][] = [];
+  // Start order ensures an overlapping carrier cannot bridge two already separate groups.
+  for (const carrier of carriers) {
+    const group = groups.find((items) => items.some((item) => linked(item, carrier)));
+    if (group) group.push(carrier);
+    else groups.push([carrier]);
+  }
+  const candidates = groups.filter((items) => !selected || items.some((item) => linked(item, selected)));
   if (candidates.length !== 1) fail("E_VALIDATION", "Token range must project onto exactly one clip");
-  const target = clip(timeline, candidates[0]).clip;
+  const target = candidates[0]!.find((item) => item.id === selected?.id) ?? candidates[0]![0]!;
   const first = transcript.tokens.find((token) => token.id === selection.from_token)!;
   const last = transcript.tokens.find((token) => token.id === selection.to_token)!;
   if (!lt(first.align.start, last.align.end)) fail("E_VALIDATION", "Token range is reversed");
