@@ -53,6 +53,18 @@ else if (fs.existsSync(${JSON.stringify(join(root, "hold"))})) {
 `,
   );
   await chmod(join(root, "ffmpeg"), 0o755);
+  await writeFile(
+    join(root, "ffprobe"),
+    `#!/usr/bin/env node
+const fs = require('node:fs');
+if (fs.existsSync(${JSON.stringify(join(root, "probe-fail"))})) process.exit(1);
+fs.appendFileSync(${JSON.stringify(join(root, "probes"))}, process.argv.at(-1)+'\\n');
+console.log(process.argv.includes('-show_packets')
+  ? (fs.existsSync(${JSON.stringify(join(root, "one-frame"))}) ? 'stream_index=0|pts=0|duration=1001' : 'stream_index=0|pts=0|duration=1001\\nstream_index=0|pts=1001|duration=1001')
+  : JSON.stringify({streams:[{index:0,codec_type:'video',r_frame_rate:'30000/1001',width:1280,height:720,time_base:'1/30000'}]}));
+`,
+  );
+  await chmod(join(root, "ffprobe"), 0o755);
   originalPath = process.env.PATH;
   process.env.PATH = `${root}:${originalPath}`;
   pushes = [];
@@ -150,7 +162,7 @@ describe("preview cache", () => {
     if (!clip || !media) throw new Error("media");
     expect(segmentKey(clip, media, "720p")).toBe(
       createHash("sha256")
-        .update(`${media.fingerprint.value}|1001/100s|3003/200s|1|720p|v1`)
+        .update(`${media.fingerprint.value}|1001/100s|3003/200s|1|720p|v2`)
         .digest("hex")
         .slice(0, 32),
     );
@@ -207,7 +219,9 @@ describe("preview cache", () => {
     expect(args).toContain(
       "reverse,setpts=(PTS-STARTPTS)*1/2,scale=w='if(gte(iw,ih),-2,540)':h='if(gte(iw,ih),540,-2)'",
     );
-    expect(args).toContain("areverse,atempo=2.000000000");
+    expect(args).toContain("areverse,atempo=2.000000000,apad");
+    expect(args?.slice(args.indexOf("-t"), args.indexOf("-t") + 2)).toEqual(["-t", "4.000000000"]);
+    expect(args?.slice(args.lastIndexOf("-t"), args.lastIndexOf("-t") + 2)).toEqual(["-t", "2.000000000"]);
     expect(args?.slice(args.indexOf("-g"), args.indexOf("-g") + 2)).toEqual(["-g", "15"]);
     const key = segmentKey(clip, media, "540p");
     clip.time_map = clip.time_map.map((p) => ({ source: p.source, interp: p.interp, at: p.at }));
@@ -320,6 +334,67 @@ describe("preview cache", () => {
       expect((pushes[i]?.at ?? 0) - (pushes[i - 1]?.at ?? 0)).toBeGreaterThanOrEqual(500);
     expect(pushes.length).toBeGreaterThan(1);
   });
+});
+
+it("persists the probed picture duration and includes it only for ready segments, including pushes", async () => {
+  const parsed = parseProject(
+    await readFile(new URL("../../../fixtures/regressions/preview-cache-seam.zcut.json", import.meta.url), "utf8"),
+  );
+  if (!parsed.ok) throw new Error("fixture");
+  const project = parsed.project;
+  await prefs.set({ preview_cache: { auto: false } });
+  await cache.open(project, join(root, "seam.zcut.json"));
+  await cache.idle();
+  expect((await cache.status()).segments.every((item) => !("duration" in item))).toBe(true);
+  await cache.updatePreferences({ preview_cache: { auto: true } });
+  await cache.idle();
+  const status = await cache.status();
+  expect(status.segments).toHaveLength(2);
+  expect(status.segments.every((item) => item.state === "ready" && item.duration === "1001/15000s")).toBe(true);
+  const index = JSON.parse(await readFile(join(root, "cache", project.id, "index.json"), "utf8"));
+  for (const segment of status.segments)
+    expect(index.segments[segment.key]).toEqual({ bytes: 10, duration: "1001/15000s" });
+  const probes = await readFile(join(root, "probes"), "utf8");
+  await cache.open(project, join(root, "seam.zcut.json"));
+  await cache.idle();
+  expect(await readFile(join(root, "probes"), "utf8")).toBe(probes);
+  expect((await cache.status()).segments).toEqual(status.segments);
+  await vi.waitFor(() =>
+    expect(pushes).toContainEqual(
+      expect.objectContaining({ value: expect.objectContaining({ segments: status.segments }) }),
+    ),
+  );
+});
+
+it("keeps a segment missing and removes the temporary output when duration probing fails", async () => {
+  await writeFile(join(root, "probe-fail"), "");
+  const project = await fixture();
+  await cache.open(project, join(root, "test.zcut.json"));
+  await cache.idle();
+  const status = await cache.status();
+  for (const item of status.segments) {
+    expect(item.state).toBe("missing");
+    expect(item).not.toHaveProperty("duration");
+    await expect(stat(join(root, "cache", project.id, `${item.key}.tmp`))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    expect(await cache.file(project.id, item.key)).toBeUndefined();
+  }
+});
+
+it("keeps a one-frame cut ready with its exact packet duration", async () => {
+  await writeFile(join(root, "one-frame"), "");
+  const parsed = parseProject(
+    await readFile(new URL("../../../fixtures/regressions/preview-cache-seam.zcut.json", import.meta.url), "utf8"),
+  );
+  if (!parsed.ok) throw new Error("fixture");
+  const project = parsed.project;
+  const track = project.timelines[0]?.tracks[0];
+  if (track?.kind !== "video" || !track.clips[0]) throw new Error("video");
+  track.clips = [{ ...track.clips[0], duration: rational(1n, 25n) }];
+  await cache.open(project, join(root, "frame.zcut.json"));
+  await cache.idle();
+  expect((await cache.status()).segments[0]).toMatchObject({ state: "ready", duration: "1001/30000s" });
 });
 
 it("starts split keys immediately, aborts obsolete ffmpeg and removes its temporary file", async () => {
