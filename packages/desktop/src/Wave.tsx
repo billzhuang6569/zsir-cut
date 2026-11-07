@@ -9,6 +9,7 @@
  * Copyright 2025-2026 OpenCut. Full licenses: THIRD_PARTY_NOTICES.md.
  */
 import { memo, useEffect, useRef, useState } from "react";
+import { loadMediaResource, useMediaCache } from "./media-cache.js";
 import {
   add,
   type ClipView,
@@ -24,29 +25,6 @@ import {
 } from "./timeline.js";
 
 type Config = { port: number; token: string };
-const caches = new WeakMap<Config, Map<string, Promise<number[]>>>();
-function loadPeaks(config: Config, id: string): Promise<number[]> {
-  let cache = caches.get(config);
-  if (!cache) {
-    cache = new Map();
-    caches.set(config, cache);
-  }
-  const existing = cache.get(id);
-  if (existing) return existing;
-  const query = new URLSearchParams({ token: config.token, media_id: id });
-  const pending = fetch(`http://127.0.0.1:${config.port}/peaks?${query}`, {})
-    .then(async (response) => {
-      if (!response.ok) return [];
-      const data: unknown = await response.json();
-      return Array.isArray(data) && data.every((value) => typeof value === "number" && Number.isFinite(value))
-        ? (data as number[])
-        : [];
-    })
-    .catch(() => []);
-  cache.set(id, pending);
-  return pending;
-}
-
 // Canvas slots are aligned to the 3px bar grid and never grow with clip duration.
 export function waveChunks(width: number, left: number, right: number) {
   const chunks: { left: number; width: number }[] = [];
@@ -58,7 +36,7 @@ export function waveChunks(width: number, left: number, right: number) {
 
 export function wavePeak(
   clip: ClipView,
-  peaks: number[],
+  peaks: number[] | Uint8Array,
   x: number,
   endX: number,
   scale: number | ReturnType<typeof rational>,
@@ -92,7 +70,8 @@ export function wavePeak(
     const high = compare(from, to) <= 0 ? to : from;
     const lo = Math.max(0, Number(floor(mul(low, rational(100n)))));
     const hi = Math.min(peaks.length, compare(low, high) === 0 ? lo + 1 : Number(ceil(mul(high, rational(100n)))));
-    for (let sample = lo; sample < hi; sample++) maximum = Math.max(maximum, Math.abs(peaks[sample] ?? 0));
+    for (let sample = lo; sample < hi; sample++)
+      maximum = Math.max(maximum, Math.abs(peaks[sample] ?? 0) / (peaks instanceof Uint8Array ? 255 : 1));
   }
   return maximum;
 }
@@ -111,18 +90,32 @@ export const Wave = memo(function Wave({
   hasAudio?: boolean;
 }) {
   const container = useRef<HTMLSpanElement>(null);
-  const [peaks, setPeaks] = useState<number[]>([]);
+  const [peaks, setPeaks] = useState<Uint8Array>(new Uint8Array());
+  const media = useMediaCache(config, clip.media_id);
   useEffect(() => {
     let active = true;
-    setPeaks([]);
-    if (config && hasAudio)
-      void loadPeaks(config, clip.media_id).then((data) => {
-        if (active) setPeaks(data);
+    setPeaks(new Uint8Array());
+    if (config && hasAudio && media?.fallback) {
+      const query = new URLSearchParams({ token: config.token, media_id: clip.media_id });
+      void fetch(`http://127.0.0.1:${config.port}/peaks?${query}`)
+        .then(async (response) => (response.ok ? ((await response.json()) as number[]) : []))
+        .then((values) => {
+          if (active) setPeaks(Uint8Array.from(values, (value) => Math.round(value * 255)));
+        })
+        .catch(() => {});
+    } else if (config && hasAudio && media?.key && media.peaks)
+      void loadMediaResource(
+        config,
+        media.key,
+        "peaks.bin",
+        async (response) => new Uint8Array(await response.arrayBuffer()),
+      ).then((data) => {
+        if (active && data) setPeaks(data);
       });
     return () => {
       active = false;
     };
-  }, [config, clip.media_id, hasAudio]);
+  }, [config, clip.media_id, media?.key, media?.peaks, media?.fallback, hasAudio]);
   // Primitive dependencies also survive fresh project snapshots and rational scale objects.
   const mapping = JSON.stringify([clip.timeline_in, clip.timeline_out, clip.source_in, clip.source_out, clip.time_map]);
   const scaleKey = typeof scale === "number" ? `${scale}` : printRational(scale);
@@ -179,5 +172,12 @@ export const Wave = memo(function Wave({
       element.replaceChildren();
     };
   }, [peaks, mapping, scaleKey, width]);
-  return <span ref={container} className="zc-wave" style={{ width, height: 48 }} aria-hidden="true" />;
+  return (
+    <span
+      ref={container}
+      className={`zc-wave${peaks.length ? "" : " is-pending"}`}
+      style={{ width, height: 48 }}
+      aria-hidden="true"
+    />
+  );
 });

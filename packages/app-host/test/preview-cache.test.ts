@@ -31,7 +31,11 @@ const fs = require('node:fs');
 const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(join(root, "calls"))}, JSON.stringify(args)+'\\n');
 if (args.includes('h264_videotoolbox') && fs.existsSync(${JSON.stringify(join(root, "fallback"))})) process.exit(1);
-setTimeout(() => fs.writeFileSync(args.at(-1), '0123456789'), 15);
+if (args.includes('image2')) {
+  const count = Number(args[args.indexOf('-frames:v')+1]);
+  for (let i=0; i<count; i++) fs.writeFileSync(args.at(-1).replace('%03d', String(i).padStart(3, '0')), 'sheet');
+} else if (args.at(-1) === 'pipe:1') process.stdout.write(Buffer.alloc(400));
+else setTimeout(() => fs.writeFileSync(args.at(-1), '0123456789'), 15);
 `,
   );
   await chmod(join(root, "ffmpeg"), 0o755);
@@ -51,7 +55,8 @@ const calls = async () =>
   (await readFile(join(root, "calls"), "utf8"))
     .trim()
     .split("\n")
-    .map((line) => JSON.parse(line) as string[]);
+    .map((line) => JSON.parse(line) as string[])
+    .filter((args) => args.includes("mp4"));
 
 describe("preview cache", () => {
   it("creates the default cache directory under a fresh HOME and starts encoding", async () => {
@@ -240,6 +245,7 @@ describe("preview cache", () => {
   it("evicts the least recently opened project at 1 GB and then current segments by use time", async () => {
     const project = await fixture();
     await prefs.set({ preview_cache: { limit_gb: 1, auto: false } });
+    project.media = [];
     const key = "a".repeat(32);
     for (const [id, date] of [
       ["prj_old", "2025-01-01"],

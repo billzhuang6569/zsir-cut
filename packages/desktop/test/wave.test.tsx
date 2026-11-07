@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { updateMediaCache } from "../src/media-cache.js";
 import type { ClipView } from "../src/timeline.js";
 import { rational } from "../src/timeline.js";
 import { Wave, waveChunks, wavePeak } from "../src/Wave.js";
@@ -96,9 +97,15 @@ it("shares pending and resolved source data, handles DPR/scroll/zoom, and ignore
   const canvas = recordingCanvas();
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => canvas.context);
   vi.stubGlobal("devicePixelRatio", 2);
-  const fetcher = vi.fn(async () => ({ ok: true, json: async () => Array(200).fill(0.5) }));
+  const fetcher = vi.fn(async () => ({
+    ok: true,
+    arrayBuffer: async () => Uint8Array.from(Array(200).fill(128)).buffer,
+  }));
   vi.stubGlobal("fetch", fetcher);
   const config = { port: 1, token: "wave-test" };
+  updateMediaCache(config, {
+    media: [{ media_id: clip.media_id, key: "a".repeat(32), peaks: "ready", thumbs: "ready" }],
+  });
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
@@ -154,10 +161,12 @@ it.each(["network", "http", "invalid", "empty", "silent"])("degrades quietly for
   document.body.append(host);
   const root = createRoot(host);
   try {
+    const config = { port: 1, token: failure };
+    updateMediaCache(config, {
+      media: [{ media_id: clip.media_id, key: "a".repeat(32), peaks: "ready", thumbs: "ready" }],
+    });
     await act(async () =>
-      root.render(
-        <Wave clip={clip} width={24} scale={12} config={{ port: 1, token: failure }} hasAudio={failure !== "silent"} />,
-      ),
+      root.render(<Wave clip={clip} width={24} scale={12} config={config} hasAudio={failure !== "silent"} />),
     );
     expect(host.querySelectorAll("canvas")).toHaveLength(0);
     expect(fetcher).toHaveBeenCalledTimes(failure === "silent" ? 0 : 1);

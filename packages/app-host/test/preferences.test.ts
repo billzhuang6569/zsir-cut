@@ -1,4 +1,4 @@
-import { once } from "node:events";
+import { on, once } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -33,9 +33,11 @@ async function connect() {
   const socket = new WebSocket(`ws://127.0.0.1:${host.port}/?token=${host.token}`);
   sockets.push(socket);
   await once(socket, "open");
-  const bootstrap = once(socket, "message");
+  const messages = on(socket, "message", { signal: AbortSignal.timeout(3000) });
   socket.send(JSON.stringify({ type: "ui_ready" }));
-  expect(JSON.parse((await bootstrap)[0].toString()).type).toBe("bootstrap");
+  for await (const [raw] of messages) {
+    if (JSON.parse(raw.toString()).type === "bootstrap") break;
+  }
   return socket;
 }
 async function send(socket: WebSocket, verb: string, request: unknown = {}) {

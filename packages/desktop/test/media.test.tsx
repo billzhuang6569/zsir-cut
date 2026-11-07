@@ -7,6 +7,7 @@ import type { UiState } from "../../app-host/src/ui.js";
 import type { ProjectView } from "../src/connection.js";
 import { useMediaPanel } from "../src/MediaPanel.js";
 import { middle, placeMedia, sourceProject } from "../src/media.js";
+import { updateMediaCache } from "../src/media-cache.js";
 import { initialState } from "../src/state.js";
 import { recordingCanvas } from "./canvas.js";
 import { TimelinePreview } from "./timeline-preview.js";
@@ -71,10 +72,19 @@ const config = { port: 1234, token: "test" };
 const palette = Array.from({ length: 9 }, (_, i) => `#${String(i).repeat(6)}`);
 async function mount(nativeMode = false, preview = false, view = project, withConfig = false) {
   native.enabled = nativeMode;
+  updateMediaCache(config, {
+    media: view.media.map((item) => ({
+      media_id: item.id,
+      key: item.id.padEnd(32, "a"),
+      peaks: "ready",
+      thumbs: "missing",
+    })),
+  });
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string) => ({
       ok: true,
+      arrayBuffer: async () => Uint8Array.from([64, 191, 255]).buffer,
       json: async () => (url.includes("/peaks?") ? [0.25, 0.75, 1] : palette),
     })),
   );
@@ -492,7 +502,7 @@ it("renders cached peaks for audio cards and a single image thumbnail", async ()
     expect(cards[0]?.querySelector(".zc-wave canvas")).not.toBeNull();
     expect(canvas.calls.some((call) => call[0] === "fillRect" && call[4] === 26)).toBe(true);
     expect(cards[0]?.querySelector(".zc-media-used .zc-icon path")?.getAttribute("d")).toContain("M4 9.5");
-    expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/peaks?token=test&media_id=audio"), expect.anything());
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/media-cache/audio"));
     expect(cards[1]?.querySelectorAll("img")).toHaveLength(1);
     expect(cards[1]?.querySelector("img")?.getAttribute("src")).toContain("/thumb?token=test&media_id=image&at=0s");
   } finally {

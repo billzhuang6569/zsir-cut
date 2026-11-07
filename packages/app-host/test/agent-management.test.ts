@@ -1,4 +1,4 @@
-import { once } from "node:events";
+import { on, once } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
@@ -156,9 +156,11 @@ async function connect() {
   host = await startHost({ appDataDir: directory, agentOptions: { registryUrl, directories: [directory] } });
   socket = new WebSocket(`ws://127.0.0.1:${host.port}/?token=${host.token}`);
   await once(socket, "open");
-  const bootstrap = once(socket, "message");
+  const messages = on(socket, "message", { signal: AbortSignal.timeout(3000) });
   socket.send(JSON.stringify({ type: "ui_ready" }));
-  await bootstrap;
+  for await (const [raw] of messages) {
+    if (JSON.parse(raw.toString()).type === "bootstrap") break;
+  }
   return socket;
 }
 function send(client: WebSocket, verb: string, request: unknown = {}) {
