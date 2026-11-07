@@ -31,6 +31,8 @@ interface AgentList {
   npm: string | null;
 }
 interface CacheStatus {
+  media?: { media_id: string; peaks: string; thumbs: string }[];
+  media_bytes?: number;
   directory: string;
   directory_ok: boolean;
   free_bytes: number;
@@ -562,6 +564,14 @@ export function SettingsPage({
                   value={cache.used_bytes}
                   max={cache.limit_bytes || 1}
                 />
+              )}
+              {cache && (
+                <p className="zc-meta">
+                  波形和缩略图：{cache.media?.length ?? 0} 个素材，
+                  {cache.media?.filter((item) => item.peaks === "ready" || item.thumbs === "ready").length ?? 0}{" "}
+                  个已就绪，占用{" "}
+                  {((cache.media_bytes ?? 0) / 1024 ** 2).toLocaleString("zh-CN", { maximumFractionDigits: 1 })} MB
+                </p>
               )}
               {prefs && (
                 <fieldset className="zc-settings-options" disabled={busy || !cache}>

@@ -5,6 +5,8 @@ import { mkdir, readFile, realpath, rename, stat, unlink, writeFile } from "node
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { dirname, extname, join, resolve } from "node:path";
 import { type Project, readVoices, voiceDataPath } from "../../core/dist/index.js";
+import type { MediaCache } from "./media-cache.js";
+import { mediaKey } from "./media-cache.js";
 
 export const authorized = (supplied: string, token: string) => {
   const a = Buffer.from(supplied),
@@ -40,7 +42,7 @@ export async function runFfmpeg(args: string[]): Promise<Buffer> {
 // Shared by all media channels, including channels replaced when opening another project.
 let activeThumbnails = 0;
 const thumbnailQueue: (() => void)[] = [];
-async function thumbnailTask(run: () => Promise<Buffer>, signal: AbortSignal): Promise<Buffer> {
+export async function thumbnailTask(run: () => Promise<Buffer>, signal: AbortSignal): Promise<Buffer> {
   await new Promise<void>((resolve, reject) => {
     const abort = () => {
       const index = thumbnailQueue.indexOf(start);
@@ -73,6 +75,7 @@ export function mediaChannel(
   load: () => Promise<Project>,
   run = runFfmpeg,
   cacheFile?: (project: string, key: string) => Promise<string | undefined>,
+  mediaCache?: MediaCache,
 ) {
   const pending = new Map<string, { work: Promise<Buffer>; controller: AbortController; users: number }>();
   async function cached(file: string, generate: (signal: AbortSignal) => Promise<Buffer>, signal: AbortSignal) {
@@ -139,7 +142,27 @@ export function mediaChannel(
       let projectId = "";
       let media: Project["media"][number] | undefined;
       const cache = /^\/cache\/(prj_[a-zA-Z0-9_-]+)\/([a-f0-9]{32})\.mp4$/.exec(url.pathname);
-      if (cache) {
+      const mediaRoute = /^\/media-cache\/([a-f0-9]{32})\/(peaks\.bin|thumbs\.json|thumbs-\d{3,}\.jpg|frame)$/.exec(
+        url.pathname,
+      );
+      if (mediaRoute) {
+        if (
+          [...url.searchParams.keys()].some((key) => key !== "token" && !(mediaRoute[2] === "frame" && key === "at"))
+        ) {
+          response.writeHead(404).end();
+          return;
+        }
+        const file = await mediaCache?.file(
+          mediaRoute[1] ?? "",
+          mediaRoute[2] ?? "",
+          url.searchParams.get("at") ?? undefined,
+        );
+        if (!file) {
+          response.writeHead(404).end();
+          return;
+        }
+        source = file;
+      } else if (cache) {
         const file = await cacheFile?.(cache[1] ?? "", cache[2] ?? "");
         if (!file || [...url.searchParams.keys()].some((key) => key !== "token")) {
           response.writeHead(404).end();
@@ -207,6 +230,23 @@ export function mediaChannel(
         const time = parseRational(at, true);
         if (compare(time, media.duration) > 0) {
           response.writeHead(400).end();
+          return;
+        }
+        if (mediaCache && url.pathname !== "/palette" && (await mediaCache.directoryOK())) {
+          const file = await mediaCache.file(mediaKey(media), url.pathname === "/peaks" ? "peaks.bin" : "frame", at);
+          if (!file) {
+            response.writeHead(404).end();
+            return;
+          }
+          const data = await readFile(file);
+          const bytes =
+            url.pathname === "/peaks" ? Buffer.from(JSON.stringify(Array.from(data, (value) => value / 255))) : data;
+          response
+            .writeHead(200, {
+              "Content-Type": url.pathname === "/peaks" ? "application/json" : "image/jpeg",
+              "Content-Length": bytes.length,
+            })
+            .end(request.method === "HEAD" ? undefined : bytes);
           return;
         }
         const ns = floor(mul(time, rational(1_000_000_000n)));
@@ -302,6 +342,7 @@ export function mediaChannel(
         ".mp3": "audio/mpeg",
         ".jpg": "image/jpeg",
         ".png": "image/png",
+        ".json": "application/json",
       };
       response.writeHead(range ? 206 : 200, {
         "Content-Type": types[extname(source).toLowerCase()] ?? "application/octet-stream",

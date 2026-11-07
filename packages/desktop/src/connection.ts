@@ -3,6 +3,7 @@ import type { Layout } from "../../app-host/src/preferences.js";
 import type { ProjectChanged } from "../../app-host/src/revision-events.js";
 import { UI_VERBS, type UiState, type UiVerb } from "../../app-host/src/ui.js";
 
+import { updateMediaCache } from "./media-cache.js";
 import type { UiState as DesktopUiState } from "./state.js";
 import type { PreviewData, TimelineView, TranscriptView } from "./timeline.js";
 export interface ProjectView extends TimelineView, PreviewData {
@@ -153,10 +154,12 @@ export function connectHost(
       window.dispatchEvent(new Event("desktop-host-ready"));
       handlers.icon(message.fcpIcon);
       handlers.project(project, null);
+      void call("preview_cache_status", {}).catch(() => {});
       void refresh().catch((error: Error) =>
         handlers.error(`工程文件打不开：${error.message}`, String(error.cause ?? error.message)),
       );
     } else if (message.type === "preview_cache") {
+      updateMediaCache(config, message);
       window.dispatchEvent(new CustomEvent("desktop-preview-cache", { detail: message }));
     } else if (message.type === "chat_event") {
       handlers.chat?.(message);
@@ -195,6 +198,8 @@ export function connectHost(
       pending.delete(message.id);
       const envelope = message.envelope as ResultEnvelope;
       if (envelope.ok) {
+        if (item?.verb === "preview_cache_status")
+          updateMediaCache(config, envelope.result as Parameters<typeof updateMediaCache>[1]);
         item?.resolve(envelope.result);
         if (item?.verb === "prefs_set") window.dispatchEvent(new Event("desktop-prefs-changed"));
       } else {

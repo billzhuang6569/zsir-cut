@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import {
   access,
@@ -18,7 +18,8 @@ import {
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import type { Clip, Media, Project, Rational } from "../../core/dist/index.js";
-import { runFfmpeg } from "./media.js";
+import { runFfmpeg, thumbnailTask } from "./media.js";
+import { MediaCache, mediaKey } from "./media-cache.js";
 import type { DesktopPreferences } from "./preferences.js";
 
 const { add, sub, div, mul, rational, compare, floor, printRational }: typeof import("../../core/dist/index.js") =
@@ -156,6 +157,7 @@ interface Index {
 }
 type Segment = { clip: Clip; media: Media; key: string };
 export class PreviewCache {
+  readonly media: MediaCache;
   private project: Project | undefined;
   private path = "";
   private playhead = rational(0n);
@@ -164,6 +166,8 @@ export class PreviewCache {
   private failed = new Set<string>();
   private opened = new Date().toISOString();
   private work: Promise<void> | undefined;
+  private rerun = false;
+  private eviction = Promise.resolve();
   private stopped = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private poll: ReturnType<typeof setInterval>;
@@ -171,9 +175,12 @@ export class PreviewCache {
   private statusVersion = 0;
   private lastPush = 0;
   private lastStatus = "";
+  private lastMedia = new Map<string, { peaks: string; thumbs: string }>();
   constructor(
     private prefs: DesktopPreferences,
-    private emit: (status: Awaited<ReturnType<PreviewCache["status"]>>) => void,
+    private emit: (
+      status: Awaited<ReturnType<PreviewCache["status"]>> & { media_ready: { media_id: string; key: string }[] },
+    ) => void,
     private battery = async () => {
       try {
         return /Now drawing from 'Battery Power'/.test(
@@ -184,7 +191,16 @@ export class PreviewCache {
       }
     },
     private volumesRoot = "/Volumes",
+    private encode = runFfmpeg,
   ) {
+    this.media = new MediaCache(
+      () => this.settings().directory,
+      () => this.directoryOK(),
+      (args) => thumbnailTask(() => this.encode(args), new AbortController().signal),
+      () => {
+        void this.push();
+      },
+    );
     this.poll = setInterval(() => {
       this.kick();
       void this.push();
@@ -239,9 +255,13 @@ export class PreviewCache {
   }
   private async save(id: string, index: Index) {
     const dir = await this.projectDir(id, true);
-    const temp = join(dir, "index.json.tmp");
-    await writeFile(temp, `${canonical(index)}\n`);
-    await rename(temp, join(dir, "index.json"));
+    const temp = join(dir, `index.json.${randomUUID()}.tmp`);
+    try {
+      await writeFile(temp, `${canonical(index)}\n`);
+      await rename(temp, join(dir, "index.json"));
+    } finally {
+      await rm(temp, { force: true });
+    }
   }
   private control<T>(action: () => Promise<T>) {
     const next = this.controls.then(action);
@@ -256,6 +276,7 @@ export class PreviewCache {
       await this.stopWork();
       this.project = project;
       this.path = path ? resolve(path) : "";
+      await this.media.open(project, this.path);
       this.playhead = rational(0n);
       this.opened = new Date().toISOString();
       this.failed.clear();
@@ -276,6 +297,7 @@ export class PreviewCache {
   }
   async refresh(project = this.project) {
     this.project = project;
+    this.media.refresh(project);
     const quality = this.settings().quality;
     this.needed =
       project?.timelines[0]?.tracks.flatMap((track) =>
@@ -288,19 +310,23 @@ export class PreviewCache {
                 : [{ clip, media, key: segmentKey(clip, media, quality) }];
             }),
       ) ?? [];
+    this.rerun = true;
     this.kick();
     await this.push();
   }
   hint(at: Rational) {
     this.playhead = at;
+    this.rerun = true;
     this.kick();
   }
   private kick() {
-    if (this.work || this.stopped || !this.project || !this.settings().auto) return;
+    if (this.work || this.stopped || !this.project) return;
+    this.rerun = false;
     this.work = this.run()
       .catch(() => {})
       .finally(() => {
         this.work = undefined;
+        if (this.rerun) this.kick();
       });
   }
   private async run() {
@@ -315,9 +341,17 @@ export class PreviewCache {
     }
     index.last_opened = this.opened;
     index.project_path = this.path;
-    await this.save(project.id, index);
-    while (!this.stopped && this.project?.id === project.id && this.settings().auto) {
-      if (this.settings().pause_on_battery && (await this.battery())) break;
+    if (this.settings().auto) await this.save(project.id, index);
+    while (!this.stopped && this.project?.id === project.id) {
+      const orderedMedia = this.orderedMedia();
+      const missing = [];
+      for (const item of orderedMedia) if (await this.media.needs(item)) missing.push(item);
+      if (missing.length) {
+        await Promise.all(missing.slice(0, 2).map((item) => this.media.build(item)));
+        await this.enforceLimit();
+        continue;
+      }
+      if (!this.settings().auto || (this.settings().pause_on_battery && (await this.battery()))) break;
       if (!(await this.directoryOK())) break;
       const ordered = [...this.needed].sort((a, b) => {
         const rank = (s: Segment) =>
@@ -357,11 +391,21 @@ export class PreviewCache {
       await this.push();
       try {
         try {
-          await runFfmpeg(args);
+          await thumbnailTask(() => this.encode(args), new AbortController().signal);
         } catch {
-          await runFfmpeg(
-            segmentArgs(clip, media, this.settings().quality, resolve(dirname(this.path), media.path), temp, false) ??
-              [],
+          await thumbnailTask(
+            () =>
+              this.encode(
+                segmentArgs(
+                  clip,
+                  media,
+                  this.settings().quality,
+                  resolve(dirname(this.path), media.path),
+                  temp,
+                  false,
+                ) ?? [],
+              ),
+            new AbortController().signal,
           );
         }
         if (this.stopped) {
@@ -382,6 +426,30 @@ export class PreviewCache {
         await this.push();
       }
     }
+    await this.enforceLimit();
+  }
+  private orderedMedia() {
+    const clips =
+      this.project?.timelines[0]?.tracks.flatMap((track) => (track.kind === "subtitle" ? [] : track.clips)) ?? [];
+    const distance = (id: string) => {
+      const uses = clips.filter((clip) => clip.media_id === id);
+      if (!uses.length) return undefined;
+      return uses
+        .map((clip) => {
+          const end = add(clip.timeline_start, clip.duration);
+          return compare(this.playhead, clip.timeline_start) < 0
+            ? sub(clip.timeline_start, this.playhead)
+            : compare(this.playhead, end) >= 0
+              ? sub(this.playhead, end)
+              : rational(0n);
+        })
+        .sort(compare)[0];
+    };
+    return [...(this.project?.media ?? [])].sort((a, b) => {
+      const da = distance(a.id),
+        db = distance(b.id);
+      return da && db ? compare(da, db) : da ? -1 : db ? 1 : 0;
+    });
   }
   private async projects() {
     const projects: { project_id: string; name: string; path: string; bytes: number; last_opened: string }[] = [];
@@ -408,9 +476,15 @@ export class PreviewCache {
     }
     return projects;
   }
-  async enforceLimit() {
+  enforceLimit() {
+    const next = this.eviction.then(() => this.evict());
+    this.eviction = next.catch(() => {});
+    return next;
+  }
+  private async evict() {
     const projects = await this.projects();
-    let total = projects.reduce((sum, p) => sum + p.bytes, 0);
+    const media = await this.media.entries();
+    let total = projects.reduce((sum, p) => sum + p.bytes, 0) + media.reduce((sum, m) => sum + m.bytes, 0);
     const limit = this.settings().limit_gb * 1_000_000_000;
     projects.sort(
       (a, b) =>
@@ -442,6 +516,16 @@ export class PreviewCache {
       }
       await this.save(project.project_id, index);
     }
+    const current = new Set(this.project?.media.map(mediaKey));
+    media.sort(
+      (a, b) =>
+        Number(current.has(a.media_key)) - Number(current.has(b.media_key)) || a.last_used.localeCompare(b.last_used),
+    );
+    for (const entry of media) {
+      if (total <= limit) break;
+      await this.media.remove(entry.media_key);
+      total -= entry.bytes;
+    }
   }
   async status() {
     const directory_ok = await this.directoryOK();
@@ -462,12 +546,16 @@ export class PreviewCache {
         return { clip_id: clip.id, key, state };
       }),
     );
+    const mediaEntries = directory_ok ? await this.media.entries() : [];
+    const media_bytes = mediaEntries.reduce((sum, entry) => sum + entry.bytes, 0);
     return {
+      media: await this.media.status(directory_ok),
+      media_bytes,
       segments,
       directory: this.settings().directory,
       directory_ok,
       free_bytes: fs ? fs.bavail * fs.bsize : 0,
-      used_bytes: projects.reduce((sum, p) => sum + p.bytes, 0),
+      used_bytes: projects.reduce((sum, p) => sum + p.bytes, 0) + media_bytes,
       limit_bytes: this.settings().limit_gb * 1_000_000_000,
       projects,
     };
@@ -484,7 +572,18 @@ export class PreviewCache {
             if (value !== this.lastStatus && !this.stopped) {
               this.lastStatus = value;
               this.lastPush = Date.now();
-              this.emit(status);
+              const previous = this.lastMedia;
+              const media_ready = status.media
+                .filter((item) => {
+                  const before = previous.get(item.key);
+                  return (
+                    (item.peaks === "ready" && before?.peaks !== "ready") ||
+                    (item.thumbs === "ready" && before?.thumbs !== "ready")
+                  );
+                })
+                .map(({ media_id, key }) => ({ media_id, key }));
+              this.lastMedia = new Map(status.media.map((item) => [item.key, item]));
+              this.emit({ ...status, media_ready });
             }
           })
           .catch(() => {})
@@ -514,6 +613,8 @@ export class PreviewCache {
   private async stopWork() {
     this.stopped = true;
     await this.work;
+    await this.media.idle();
+    await this.eviction;
     if (this.timer) clearTimeout(this.timer);
     this.timer = undefined;
   }
@@ -521,6 +622,7 @@ export class PreviewCache {
     return this.control(async () => {
       await this.stopWork();
       try {
+        if (!id) await this.media.clear();
         for (const project of await this.projects()) {
           if (!id || project.project_id === id)
             await rm(await this.projectDir(project.project_id), { recursive: true });
@@ -539,6 +641,7 @@ export class PreviewCache {
       } finally {
         this.stopped = false;
         this.failed.clear();
+        this.media.failed.clear();
         await this.refresh();
       }
     });
@@ -548,6 +651,6 @@ export class PreviewCache {
     return this.control(() => this.stopWork());
   }
   async idle() {
-    await this.work;
+    while (this.work) await this.work;
   }
 }

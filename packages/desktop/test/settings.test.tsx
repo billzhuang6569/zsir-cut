@@ -55,6 +55,11 @@ const agentList = () => ({
   ],
 });
 const cacheStatus = () => ({
+  media: [
+    { media_id: "med_a", peaks: "ready", thumbs: "ready" },
+    { media_id: "med_b", peaks: "missing", thumbs: "building" },
+  ],
+  media_bytes: 1024 ** 2,
   directory: "/cache",
   directory_ok: true,
   free_bytes: 100 * 1024 ** 3,
@@ -318,6 +323,7 @@ it("writes every cache preference, clears one project and then all projects", as
   const h = await mount();
   await h.click("预览与缓存");
   expect(h.container.textContent).toContain("100 GB");
+  expect(h.container.textContent).toContain("波形和缩略图：2 个素材，1 个已就绪，占用 1 MB");
   expect(h.container.textContent).toContain("采访工程");
   await h.input("缓存上限", "50");
   expect(h.call).toHaveBeenCalledWith("prefs_set", { patch: { preview_cache: { limit_gb: 50 } } });

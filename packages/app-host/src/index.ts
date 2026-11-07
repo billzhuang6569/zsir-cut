@@ -335,7 +335,7 @@ export async function startHost(
     if (ui?.readyState === WebSocket.OPEN) ui.send(JSON.stringify({ type: "preview_cache", ...status }));
   });
   const cacheFile = (project: string, key: string) => cache.file(project, key);
-  let serve = mediaChannel(options.project, token, load, runFfmpeg, cacheFile);
+  let serve = mediaChannel(options.project, token, load, runFfmpeg, cacheFile, cache.media);
   let entryQueue = Promise.resolve();
   let projectEpoch = 0;
   const httpServers = new Set<Server>();
@@ -940,7 +940,14 @@ export async function startHost(
     if (path) options.project = resolve(path);
     else delete options.project;
     await cache.open(next, path ?? "");
-    serve = mediaChannel(path ?? undefined, token, path ? () => loadPath(path) : load, runFfmpeg, cacheFile);
+    serve = mediaChannel(
+      path ?? undefined,
+      token,
+      path ? () => loadPath(path) : load,
+      runFfmpeg,
+      cacheFile,
+      cache.media,
+    );
     if (options.project && next)
       agents = new Agents({
         project: options.project,

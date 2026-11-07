@@ -8,6 +8,7 @@ import type { ProjectChanged } from "../../app-host/src/revision-events.js";
 import type { EntityChange } from "../../core/dist/index.js";
 import { useAiPanel } from "../src/AiPanel.js";
 import { type ProjectView, useTimelinePreferences } from "../src/connection.js";
+import { updateMediaCache } from "../src/media-cache.js";
 import { type ReviewSummary, ReviewView } from "../src/ReviewView.js";
 import { initialState, type UiState } from "../src/state.js";
 import type { ClipView } from "../src/timeline.js";
@@ -268,7 +269,7 @@ it("formats summary durations from each inspected timeline even when preview dat
 });
 it("fills both half lanes with normal clips and keeps only the original faded", async () => {
   const { call } = host();
-  const fetcher = vi.fn(async () => ({ ok: true, json: async () => Array(1000).fill(0.5) }));
+  const fetcher = vi.fn(async () => ({ ok: true, arrayBuffer: async () => new Uint8Array(1000).fill(128).buffer }));
   vi.stubGlobal("fetch", fetcher);
   vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1000);
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
@@ -304,7 +305,11 @@ it("fills both half lanes with normal clips and keeps only the original faded", 
     .join("\n");
   document.head.append(style);
   try {
-    await act(async () => root.render(<Fixture call={call} config={{ port: 1, token: "review-test" }} />));
+    const config = { port: 1, token: "review-test" };
+    updateMediaCache(config, {
+      media: [{ media_id: "med_interview", key: "a".repeat(32), peaks: "ready", thumbs: "missing" }],
+    });
+    await act(async () => root.render(<Fixture call={call} config={config} />));
     for (const side of ["original", "plan"]) {
       for (const kind of ["video", "audio", "subtitle"]) {
         const item = node.querySelector<HTMLElement>(`.zc-review-lane.is-${side} .zc-clip-${kind}`);

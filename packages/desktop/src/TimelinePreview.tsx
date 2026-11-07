@@ -7,6 +7,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Clip, Icon, IconButton } from "./components.js";
 import { DESKTOP_AUTHOR, type ProjectView, type useTimelinePreferences } from "./connection.js";
+import { loadMediaResource, type Thumbs, thumbnailStyle, useMediaCache } from "./media-cache.js";
 import { usePreviewStream } from "./preview-stream.js";
 import { useReverseAudio } from "./reverse-audio.js";
 import { SubtitleCanvas } from "./SubtitleCanvas.js";
@@ -66,33 +67,80 @@ const Film = memo(function Film({
   scale: number;
   config: Config | undefined;
 }) {
+  const film = useRef<HTMLSpanElement>(null);
+  const [height, setHeight] = useState(0);
+  useEffect(() => {
+    const element = film.current;
+    if (!element) return;
+    const measure = () => setHeight(element.getBoundingClientRect().height);
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(measure);
+    observer?.observe(element);
+    return () => observer?.disconnect();
+  }, []);
+  const media = useMediaCache(config, clip.media_id);
+  const [thumbs, setThumbs] = useState<Thumbs>();
+  const [color, setColor] = useState<string>();
+  useEffect(() => {
+    let live = true;
+    setThumbs(undefined);
+    if (config && media?.key && media.thumbs)
+      void loadMediaResource(config, media.key, "thumbs.json", (response) => response.json() as Promise<Thumbs>).then(
+        (value) => {
+          if (live) setThumbs(value);
+        },
+      );
+    return () => {
+      live = false;
+    };
+  }, [config, media?.key, media?.thumbs]);
+  useEffect(() => {
+    if (!config) return;
+    const controller = new AbortController();
+    void fetch(mediaUrl(config, "palette", clip.media_id), { signal: controller.signal })
+      .then((response) => (response.ok ? response.json() : []))
+      .then((colors: string[]) => {
+        if (!controller.signal.aborted) setColor(colors[4]);
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [config, clip.media_id]);
+  const sources = Array.from({ length: Math.max(1, Math.ceil(width / 96)) }, (_, index) => {
+    const at = printRational(
+      add(parseRational(clip.timeline_in.t, true), div(rational(BigInt(index * 96)), rational(BigInt(scale)))),
+      true,
+    );
+    return printRational(sourceAt(clip, at), true);
+  });
   return (
-    <span className="zc-film" aria-hidden="true">
-      {Array.from({ length: Math.max(1, Math.ceil(width / 96)) }, (_, index) => {
-        const at = printRational(
-          add(parseRational(clip.timeline_in.t, true), div(rational(BigInt(index * 96)), rational(BigInt(scale)))),
-          true,
-        );
-        const source = printRational(sourceAt(clip, at), true);
+    <span ref={film} className="zc-film" aria-hidden="true" style={{ backgroundColor: color }}>
+      {sources.map((source, index) => {
+        const other = sources[index + 1] ?? sources[index - 1];
+        const gap = other ? sub(parseRational(other, true), parseRational(source, true)) : rational(96n, BigInt(scale));
+        const span = gap.numerator < 0n ? mul(gap, rational(-1n)) : gap;
+        const fine = Boolean(thumbs && compare(span, parseRational(thumbs.interval, true)) < 0);
         return (
-          <span
-            key={source + index}
-            className="zc-film-frame"
-            style={
-              config
-                ? {
-                    backgroundImage: `url("${mediaUrl(config, "thumb", clip.media_id, source)}")`,
-                    backgroundSize: "cover",
-                    backgroundPosition: "center",
-                  }
-                : {}
-            }
-          />
+          <span key={source + index} className="zc-film-frame">
+            <span
+              style={
+                config && media?.fallback
+                  ? {
+                      backgroundImage: `url("${mediaUrl(config, "thumb", clip.media_id, source)}")`,
+                      backgroundSize: "cover",
+                      backgroundPosition: "center",
+                    }
+                  : config && media && thumbs
+                    ? thumbnailStyle(config, media.key, thumbs, source, fine, 96, height)
+                    : {}
+              }
+            />
+          </span>
         );
       })}
     </span>
   );
 });
+
 export function TimelinePreview({
   preferences,
   project,
