@@ -49,12 +49,12 @@
   flex-shrink: 0;
   height: auto;
   display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
+  grid-template-columns: 40px minmax(0, 1fr);
   gap: var(--space-3);
-  align-items: start;
+  align-items: baseline;
   background: var(--panel);
   border-bottom: 1px solid var(--line);
-  min-height: calc(var(--control-h) + var(--space-6));
+  min-height: 38px;
   padding-block: var(--space-4);
 }
 .zc-sub-row > span {
@@ -85,11 +85,11 @@
 }
 .zc-sub-actions {
   position: absolute;
-  top: var(--space-4);
-  right: 0;
+  top: 7px;
+  right: 6px;
   display: flex;
   visibility: hidden;
-  background: inherit;
+  background: var(--panel);
 }
 .zc-sub-row:hover .zc-sub-actions,
 .zc-sub-row.is-editing .zc-sub-actions {
@@ -190,6 +190,7 @@
 }
 .zc-sub-select select {
   appearance: none;
+  background-image: none;
   padding-right: var(--control-h);
   cursor: pointer;
 }
@@ -441,6 +442,7 @@
 }
 .zc-sub-font-row .zc-sub-select {
   min-width: 0;
+  font-size: var(--label-size);
 }
 .zc-sub-size input[type="number"] {
   appearance: auto;
@@ -532,18 +534,19 @@
 }
 .zc-sub-preset-cell {
   position: relative;
-  aspect-ratio: 3 / 2;
+  height: 58px;
   overflow: hidden;
   padding: 0;
 }
 .zc-sub-preset-cell > span {
-  position: absolute;
-  inset: auto var(--space-2) var(--space-2);
+  display: block;
+  position: static;
+  line-height: 16px;
   font-size: var(--caption-size);
   color: var(--text-2);
 }
 .zc-sub-preset-cell canvas {
-  height: 100%;
+  height: 40px;
 }
 .zc-subtitle-hit {
   position: absolute;
@@ -616,13 +619,17 @@
   font-size: var(--label-size);
   font-weight: 400;
   white-space: nowrap;
-  padding: var(--space-3);
+  padding: 0;
+  text-align: left;
+  justify-content: flex-start;
+  line-height: 20px;
   cursor: pointer;
-  min-height: var(--icon-btn-compact);
+  min-height: 20px;
 }
 .zc-sub-text {
   min-width: 0;
-  min-height: var(--icon-btn-compact);
+  min-height: 20px;
+  font-size: 14px;
   cursor: text;
   overflow-wrap: anywhere;
 }
@@ -638,7 +645,6 @@
 }
 .zc-sub-row.is-current {
   box-shadow: inset 2px 0 var(--info);
-  background: var(--panel-2);
 }
 .zc-sub-row.is-running {
   opacity: 0.55;
@@ -749,6 +755,13 @@ fieldset.zc-sub-list {
 
 .zc-sub-animation-cell.zc-sub-preset-cell {
   padding: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) 16px;
+}
+.zc-sub-animation-cell.zc-sub-preset-cell canvas {
+  height: 100%;
+  min-height: 0;
+  object-fit: contain;
 }
 
 .zc-sub-overlays {
@@ -794,6 +807,11 @@ fieldset.zc-sub-list {
 }
 .zc-sub-controls .zc-sub-tracks {
   flex: none;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  min-height: var(--control-h);
+  overflow-x: auto;
 }
 .zc-sub-controls .zc-sub-overlays {
   border: 0;
@@ -840,8 +858,8 @@ fieldset.zc-sub-list {
 .zc-sub-row {
   border: 0;
   border-radius: var(--radius-sm);
-  padding: var(--space-2);
-  min-height: 36px;
+  padding: 7px 6px;
+  min-height: 38px;
   background: transparent;
   gap: var(--space-2);
 }
@@ -855,15 +873,22 @@ fieldset.zc-sub-list {
 .zc-sub-row .zc-sub-text {
   padding: 0;
   line-height: 20px;
-}
-.zc-sub-row.is-selected {
-  padding-right: 64px;
+  font-weight: 400;
 }
 .zc-sub-row.is-selected .zc-sub-actions,
 .zc-sub-row:focus-within .zc-sub-actions {
   visibility: visible;
 }
+.zc-sub-row.is-selected {
+  background: var(--raised);
+}
+.zc-sub-row.is-selected .zc-sub-actions {
+  background: var(--raised);
+}
 .zc-sub-presets {
+  max-height: 122px;
+  overflow-y: auto;
+  flex-shrink: 0;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-2);
@@ -895,4 +920,76 @@ fieldset.zc-sub-list {
   align-items: center;
   gap: var(--space-2);
   padding-block: var(--space-2);
+}
+
+.zc-sub-actions .zc-icon-btn {
+  width: 24px;
+  height: 24px;
+}
+.zc-sub-progress {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  color: var(--text-3);
+  font-size: 11px;
+  line-height: 14px;
+}
+.zc-sub-progress > span {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.zc-sub-progress > span > span {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--raised-2);
+}
+.zc-sub-progress .is-complete > span {
+  background: var(--approved);
+}
+.zc-sub-progress .is-active > span {
+  background: var(--attention);
+}
+.zc-sub-controls h3 {
+  margin: 0;
+}
+.zc-sub-controls .zc-sub-setting {
+  margin-block: 0;
+}
+.zc-sub-controls > fieldset {
+  gap: 10px;
+}
+.zc-sub-apply {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.zc-sub-apply .zc-seg {
+  flex: 1;
+}
+.zc-sub-apply button {
+  flex: 1;
+}
+.zc-sub-style {
+  overflow-y: auto;
+  min-height: 0;
+}
+.zc-sub-style > details {
+  flex-shrink: 0;
+}
+.zc-sub-track-heading {
+  margin-top: 6px;
+}
+
+.zc-sub-style > details {
+  padding-block: 4px;
+}
+.zc-sub-style .zc-sub-text-more {
+  border: 0;
+  padding: 0;
+}
+.zc-sub-text-more > summary {
+  color: var(--text-4);
+  min-height: 24px;
 }

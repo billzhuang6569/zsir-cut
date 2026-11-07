@@ -519,9 +519,8 @@ export function ReviewView({
             <div className="zc-review-tracks">
               {tracks.map((track) => (
                 <div className="zc-review-track" key={track.id} data-track={track.id}>
-                  <span className="zc-review-track-head" title={track.name}>
+                  <span className="zc-review-track-head" role="img" aria-label={track.name} title={track.name}>
                     <Icon name={track.kind === "video" ? "eye" : track.kind === "audio" ? "audio" : "subtitle"} />
-                    <span>{track.name}</span>
                   </span>
                   <div className="zc-review-lanes">
                     {(["original", "plan"] as const)

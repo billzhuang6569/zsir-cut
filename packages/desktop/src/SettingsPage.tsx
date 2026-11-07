@@ -116,7 +116,7 @@ export function SettingsPage({
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     dialog.current?.showModal();
-    dialog.current?.querySelector<HTMLButtonElement>('[aria-current="page"]')?.focus();
+    dialog.current?.querySelector<HTMLButtonElement>('[aria-label="关闭"]')?.focus();
     return () => previous?.focus();
   }, []);
   useEffect(() => {

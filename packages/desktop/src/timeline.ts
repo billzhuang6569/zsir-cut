@@ -152,6 +152,27 @@ export function timecode(at: string, timeline: TimelineView) {
     timeline.start_timecode,
   );
 }
+export function rulerTicks(width: number, scale: number, rate: string) {
+  const fps = parseRational(rate);
+  const seconds = [1n, 2n, 5n, 10n].find((step) => step * BigInt(scale) >= 96n);
+  const frames =
+    seconds !== undefined && scale <= 96
+      ? ceil(mul(rational(seconds), fps))
+      : ceil(div(mul(rational(96n), fps), rational(BigInt(scale) * 5n))) * 5n;
+  const spacing = numberOf(div(mul(rational(frames), rational(BigInt(scale))), fps));
+  return Array.from({ length: Math.ceil(width / spacing) * 5 }, (_, index) => {
+    const frame = (BigInt(index) * frames) / 5n;
+    const at = frameTime(frame, rate);
+    const seconds = floor(parseRational(at, true));
+    const label = `${String(seconds / 60n).padStart(2, "0")}:${String(seconds % 60n).padStart(2, "0")}`;
+    return {
+      at,
+      left: pixelAt(at, scale),
+      major: index % 5 === 0,
+      label: scale > 96 ? frameToTimecode(frame, rate, false, "00:00:00:00").slice(3) : label,
+    };
+  });
+}
 export const contains = (start: string, end: string, at: string) =>
   compare(parseRational(at, true), parseRational(start, true)) >= 0 &&
   compare(parseRational(at, true), parseRational(end, true)) < 0;

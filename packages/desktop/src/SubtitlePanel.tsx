@@ -88,6 +88,9 @@ function Terms({ label, values, save }: { label: string; values: string[]; save:
   const [text, setText] = useState("");
   return (
     <fieldset className="zc-sub-terms" aria-label={label}>
+      {label === "专有名词" && !values.length && !adding && (
+        <span className="zc-hint">添加人名、品牌或行业术语，帮助识别更准确</span>
+      )}
       {values.map((value) => (
         <span className="zc-chip is-sm" key={value}>
           {value}
@@ -195,6 +198,7 @@ function NumberSetting({
   save,
   preview,
   slider = true,
+  unit = "",
 }: {
   label: string;
   value: number;
@@ -204,13 +208,17 @@ function NumberSetting({
   save: (value: number) => void;
   preview: (value: number) => void;
   slider?: boolean;
+  unit?: string;
 }) {
   const commit = (input: HTMLInputElement) => {
     if (input.checkValidity() && input.value !== "") save(Number(input.value));
   };
   return (
     <label className={`zc-field zc-sub-setting zc-sub-number${slider ? "" : " zc-sub-size"}`}>
-      <span>{label}</span>
+      <span>
+        {label}
+        {unit && `（${unit}）`}
+      </span>
       {slider && (
         <input
           aria-label={label}
@@ -229,6 +237,7 @@ function NumberSetting({
         aria-label={slider ? `${label}数值` : label}
         className="zc-input"
         type="number"
+        title={unit ? `${label}（${unit}）` : label}
         min={min}
         max={max}
         step={step}
@@ -780,6 +789,7 @@ export function useSubtitlePanel({
     step: number,
     patch: (value: number) => Partial<StyleView>,
     slider = true,
+    unit = "",
   ) => (
     <NumberSetting
       label={label}
@@ -788,10 +798,32 @@ export function useSubtitlePanel({
       min={min}
       max={max}
       step={step}
+      unit={unit}
       preview={(n) => changeStyle(patch(n), false, label)}
       save={(n) => changeStyle(patch(n), true, label)}
     />
   );
+  const height = project?.format?.height ?? 1080;
+  const width = project?.format?.width ?? 1920;
+  const fontPixels = styleDraft.font_size * height;
+  const pixels = (
+    label: string,
+    value: number,
+    min: number,
+    max: number,
+    scale: number,
+    patch: (value: number) => Partial<StyleView>,
+  ) =>
+    number(
+      label,
+      Math.round(value * scale * 10) / 10,
+      Math.round(min * scale * 10) / 10,
+      Math.round(max * scale * 10) / 10,
+      0.1,
+      (value) => patch(value / scale),
+      true,
+      "px",
+    );
   const position = styleDraft.position ?? defaultStyle.position;
   const box = styleDraft.box ?? { color: "#00000000", padding: 0, radius: 0 };
   const outlines = styleDraft.outlines ?? (styleDraft.outline ? [styleDraft.outline] : []);
@@ -815,6 +847,11 @@ export function useSubtitlePanel({
   const pending = !!project?.unprocessedTranscripts?.length;
   const done = manual?.done ?? passProgress.reduce((sum, item) => sum + item.done, 0);
   const total = manual?.total ?? passProgress.reduce((sum, item) => sum + item.total, 0);
+  const proofreadProgress = passProgress.filter((item) => item.phase === "proofread" || (!item.phase && proofreading));
+  const proofreadDone =
+    latestPass?.kind === "proofread" ? latestPass.done : proofreadProgress.reduce((sum, item) => sum + item.done, 0);
+  const proofreadTotal =
+    latestPass?.kind === "proofread" ? latestPass.total : proofreadProgress.reduce((sum, item) => sum + item.total, 0);
   const controls = (
     <div className="zc-panel-body zc-sub-controls">
       <p className={`zc-card zc-sub-status${project?.recognized ? " is-recognized" : ""}`}>
@@ -845,27 +882,65 @@ export function useSubtitlePanel({
           </span>
         )}
       </p>
+      <section className="zc-sub-progress" aria-label="字幕整理进度">
+        {[
+          { label: "概要", complete: !!project?.recognized && !pending, active: pending },
+          {
+            label: "分行",
+            complete: !!project?.recognized && !pending && !breaking && !failed.length,
+            active: breaking,
+          },
+          {
+            label: `校对 ${proofreadDone}/${proofreadTotal}`,
+            complete: !!project?.recognized && !running && !pending && !warnings.length,
+            active: proofreading,
+          },
+        ].map((step) => (
+          <span key={step.label} className={step.complete ? "is-complete" : step.active ? "is-active" : ""}>
+            <span aria-hidden="true" />
+            {step.label}
+          </span>
+        ))}
+      </section>
       {state.sub === "style" ? (
         <>
           <p className="zc-hint">在画面上拖字幕改位置，拖角改大小；靠近中线会吸附。</p>
-          {subtitleTracks.length > 0 && (
-            <fieldset className="zc-seg zc-sub-tracks" aria-label="字幕样式轨道">
-              {subtitleTracks.map((track) => (
-                <button
-                  type="button"
-                  className="zc-btn zc-btn-ghost"
-                  key={track.id}
-                  aria-pressed={track.id === styleTrack?.id}
-                  onClick={() => {
-                    setStyleTrackId(track.id);
-                    setCustomFont(false);
-                  }}
-                >
-                  {track.name}
-                </button>
-              ))}
-            </fieldset>
-          )}
+          <h3 className="zc-sub-track-heading">字幕轨</h3>
+          <fieldset className="zc-seg zc-sub-tracks" aria-label="字幕样式轨道">
+            {subtitleTracks.map((track) => (
+              <button
+                type="button"
+                className="zc-btn zc-btn-ghost"
+                key={track.id}
+                aria-pressed={track.id === styleTrack?.id}
+                onClick={() => {
+                  setStyleTrackId(track.id);
+                  setCustomFont(false);
+                }}
+              >
+                {track.name}
+              </button>
+            ))}
+            <IconButton
+              icon="plus"
+              label="添加字幕轨"
+              disabled={!project || !styleId || busy}
+              onClick={() =>
+                void write(
+                  [
+                    {
+                      op: "add_subtitle_track",
+                      language: recognition.language ?? "zh",
+                      carrier_tracks:
+                        project?.tracks.filter((track) => track.kind === "audio").map((track) => track.id) ?? [],
+                      default_style_id: styleId,
+                    },
+                  ],
+                  "添加字幕轨",
+                )
+              }
+            />
+          </fieldset>
           <section aria-label="叠层导出" className="zc-sub-overlays">
             <span className="zc-muted">叠层导出</span>
             {(project?.subtitleOverlays ?? [])
@@ -1603,19 +1678,25 @@ export function useSubtitlePanel({
         </>
       ) : (
         <>
-          <SelectSetting
-            label="应用到"
-            value={selectedOnly ? "selected" : "all"}
-            options={[
-              ["all", "全部字幕"],
-              ["selected", "选中的字幕"],
-            ]}
-            save={(v) => {
-              flushStyle();
-              setPreviewPatch(null);
-              setSelectedOnly(v === "selected");
-            }}
-          />
+          <div className="zc-sub-apply">
+            <span>应用到</span>
+            <fieldset className="zc-seg" aria-label="应用到">
+              {[false, true].map((only) => (
+                <button
+                  type="button"
+                  key={String(only)}
+                  aria-pressed={selectedOnly === only}
+                  onClick={() => {
+                    flushStyle();
+                    setPreviewPatch(null);
+                    setSelectedOnly(only);
+                  }}
+                >
+                  {only ? `选中 ${selected.length} 条` : "全部"}
+                </button>
+              ))}
+            </fieldset>
+          </div>
           <div className="zc-tabs" role="tablist" aria-label="字幕样式设置">
             {[
               ["style", "样式"],
@@ -1764,18 +1845,23 @@ export function useSubtitlePanel({
                 <div className="zc-sub-font-row">
                   <SelectSetting
                     label="字体族"
-                    value={
-                      customFont || !fonts.some(([value]) => value === styleDraft.font_family)
-                        ? "other"
-                        : styleDraft.font_family
-                    }
+                    value={customFont ? "other" : styleDraft.font_family}
                     options={[...fonts, ["other", "其他…"]]}
                     save={(font_family) => {
                       setCustomFont(font_family === "other");
                       if (font_family !== "other") changeStyle({ font_family }, true);
                     }}
                   />
-                  {number("字号", styleDraft.font_size, 0.01, 0.2, 0.001, (font_size) => ({ font_size }), false)}
+                  {number(
+                    "字号",
+                    Math.round(fontPixels),
+                    Math.ceil(0.01 * height),
+                    Math.floor(0.2 * height),
+                    1,
+                    (font_size) => ({ font_size: font_size / height }),
+                    false,
+                    "px",
+                  )}
                 </div>
                 {(customFont || !fonts.some(([value]) => value === styleDraft.font_family)) && (
                   <TextSetting
@@ -1833,17 +1919,29 @@ export function useSubtitlePanel({
                   )}
                   {color("文字颜色", styleDraft.color, (color) => ({ color }))}
                 </fieldset>
-                {number("字间距", styleDraft.letter_spacing ?? 0, -0.2, 1, 0.01, (letter_spacing) => ({
-                  letter_spacing,
-                }))}
-                {number("行距", styleDraft.line_spacing ?? 1.2, 0.5, 3, 0.1, (line_spacing) => ({ line_spacing }))}
-                <SelectSetting
-                  label="字重"
-                  value={String(styleDraft.font_weight ?? 400)}
-                  options={Array.from({ length: 9 }, (_, i) => [String((i + 1) * 100), String((i + 1) * 100)])}
-                  save={(value) => changeStyle({ font_weight: Number(value) }, true)}
-                />
-                {number("最多行数", styleDraft.max_lines ?? 2, 1, 3, 1, (max_lines) => ({ max_lines }))}
+                <details className="zc-sub-text-more">
+                  <summary>更多文字设置</summary>
+                  {pixels("字间距", styleDraft.letter_spacing ?? 0, -0.2, 1, fontPixels, (letter_spacing) => ({
+                    letter_spacing,
+                  }))}
+                  {number(
+                    "行距",
+                    styleDraft.line_spacing ?? 1.2,
+                    0.5,
+                    3,
+                    0.1,
+                    (line_spacing) => ({ line_spacing }),
+                    true,
+                    "倍",
+                  )}
+                  <SelectSetting
+                    label="字重"
+                    value={String(styleDraft.font_weight ?? 400)}
+                    options={Array.from({ length: 9 }, (_, i) => [String((i + 1) * 100), String((i + 1) * 100)])}
+                    save={(value) => changeStyle({ font_weight: Number(value) }, true)}
+                  />
+                  {number("最多行数", styleDraft.max_lines ?? 2, 1, 3, 1, (max_lines) => ({ max_lines }))}
+                </details>
               </details>
               <details>
                 <summary>
@@ -1858,7 +1956,7 @@ export function useSubtitlePanel({
                     // biome-ignore lint/suspicious/noArrayIndexKey: Outline controls are numbered layer slots, with no row state.
                     <div key={index} className="zc-sub-outline">
                       {color(`描边 ${index + 1} 颜色`, outline.color, (color) => patch({ color }))}
-                      {number(`描边 ${index + 1} 宽度`, outline.width, 0, 0.3, 0.01, (width) => patch({ width }))}
+                      {pixels(`描边 ${index + 1} 宽度`, outline.width, 0, 0.3, fontPixels, (width) => patch({ width }))}
                       <IconButton
                         icon="trash"
                         label={`删除描边 ${index + 1}`}
@@ -1917,10 +2015,12 @@ export function useSubtitlePanel({
                     {effect && (
                       <>
                         {color(`${label}颜色`, effect.color, (color) => ({ [key]: { ...effect, color } }))}
-                        {number(`${label}模糊`, effect.blur, 0, 2, 0.01, (blur) => ({ [key]: { ...effect, blur } }))}
+                        {pixels(`${label}模糊`, effect.blur, 0, 2, fontPixels, (blur) => ({
+                          [key]: { ...effect, blur },
+                        }))}
                         {key === "shadow" && styleDraft.shadow && (
                           <>
-                            {number("阴影距离", styleDraft.shadow.distance, 0, 2, 0.01, (distance) => ({
+                            {pixels("阴影距离", styleDraft.shadow.distance, 0, 2, fontPixels, (distance) => ({
                               shadow: {
                                 color: "#00000099",
                                 blur: 0.1,
@@ -1929,15 +2029,24 @@ export function useSubtitlePanel({
                                 distance,
                               },
                             }))}
-                            {number("阴影角度", styleDraft.shadow.angle, 0, 359, 1, (angle) => ({
-                              shadow: {
-                                color: "#00000099",
-                                blur: 0.1,
-                                distance: 0.1,
-                                ...styleDraft.shadow,
-                                angle,
-                              },
-                            }))}
+                            {number(
+                              "阴影角度",
+                              styleDraft.shadow.angle,
+                              0,
+                              359,
+                              1,
+                              (angle) => ({
+                                shadow: {
+                                  color: "#00000099",
+                                  blur: 0.1,
+                                  distance: 0.1,
+                                  ...styleDraft.shadow,
+                                  angle,
+                                },
+                              }),
+                              true,
+                              "°",
+                            )}
                           </>
                         )}
                       </>
@@ -1968,8 +2077,8 @@ export function useSubtitlePanel({
                 {styleDraft.box && (
                   <>
                     {color("底板颜色", box.color, (color) => ({ box: { ...box, color } }))}
-                    {number("内边距", box.padding ?? 0, 0, 2, 0.05, (padding) => ({ box: { ...box, padding } }))}
-                    {number("圆角", box.radius ?? 0, 0, 2, 0.05, (radius) => ({ box: { ...box, radius } }))}
+                    {pixels("内边距", box.padding ?? 0, 0, 2, fontPixels, (padding) => ({ box: { ...box, padding } }))}
+                    {pixels("圆角", box.radius ?? 0, 0, 2, fontPixels, (radius) => ({ box: { ...box, radius } }))}
                   </>
                 )}
               </details>
@@ -2006,15 +2115,24 @@ export function useSubtitlePanel({
                     }),
                   )}
                 </fieldset>
-                {number("上下边距", position?.margin_v ?? 0.08, 0, 1, 0.01, (margin_v) => ({
+                {pixels("上下边距", position?.margin_v ?? 0.08, 0, 1, height, (margin_v) => ({
                   position: { anchor: "bottom", ...position, margin_v },
                 }))}
-                {number("水平位置", position?.offset_x ?? 0, -0.5, 0.5, 0.01, (offset_x) => ({
+                {pixels("水平位置", position?.offset_x ?? 0, -0.5, 0.5, width, (offset_x) => ({
                   position: { anchor: "bottom", margin_v: 0.08, ...position, offset_x },
                 }))}
-                {number("最大宽度", position?.max_width ?? 0.8, 0.1, 1, 0.01, (max_width) => ({
-                  position: { anchor: "bottom", margin_v: 0.08, ...position, max_width },
-                }))}
+                {number(
+                  "最大宽度",
+                  (position?.max_width ?? 0.8) * 100,
+                  10,
+                  100,
+                  1,
+                  (max_width) => ({
+                    position: { anchor: "bottom", margin_v: 0.08, ...position, max_width: max_width / 100 },
+                  }),
+                  true,
+                  "%",
+                )}
               </details>
             </fieldset>
           )}

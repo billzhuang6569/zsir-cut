@@ -312,7 +312,9 @@ export function useAiPanel({
       setSaving(false);
     }
   };
-  const showReview = (item: Session) => openReview(item.session_id);
+  const showReview = (item: Session) => {
+    if (item.changes?.length) openReview(item.session_id);
+  };
   const reject = async (id: string) => {
     const item = ai.sessions.find((item) => item.session_id === id);
     if (!item || saving) return false;
@@ -546,7 +548,7 @@ export function useAiPanel({
                           name={tool.name}
                           failed={tool.failed}
                           stopped={tool.stopped ?? false}
-                          {...(reviewSession && ["open", "in_review"].includes(reviewSession.state)
+                          {...(reviewSession?.changes?.length && ["open", "in_review"].includes(reviewSession.state)
                             ? { onReview: () => void showReview(reviewSession) }
                             : {})}
                           failureCount={tool.failureCount ?? Number(tool.failed)}
@@ -567,12 +569,12 @@ export function useAiPanel({
                 )}
               </div>
             ))}
-            {ai.sessions.some((item) => item.state === "in_review") && (
+            {ai.sessions.some((item) => item.state === "in_review" && item.changes?.length) && (
               <Button
                 className="zc-chat-pointer"
                 icon="ask"
                 onClick={() => {
-                  const item = ai.sessions.find((item) => item.state === "in_review");
+                  const item = ai.sessions.find((item) => item.state === "in_review" && item.changes?.length);
                   if (item) showReview(item);
                 }}
               >
@@ -687,7 +689,7 @@ export function useAiPanel({
                 <strong>方案 · {item.intent || item.label || "剪辑方案"}</strong>
                 <div className="zc-draft-counts">
                   {[
-                    { icon: "list", label: "修订", count: item.revision_count },
+                    { icon: "list", label: "步", count: item.revision_count },
                     {
                       icon: "clip",
                       label: "片段",
@@ -710,7 +712,7 @@ export function useAiPanel({
                         title={entry.label}
                       >
                         <Icon name={entry.icon} />
-                        {entry.count}
+                        {entry.count} {entry.label}
                       </span>
                     ))}
                 </div>
@@ -727,9 +729,11 @@ export function useAiPanel({
                 >
                   {confirmApprove === item.session_id ? "仍然批准" : "全部批准"}
                 </Button>
-                <Button icon="image" onClick={() => void showReview(item)}>
-                  看对比
-                </Button>
+                {changes.length > 0 && (
+                  <Button icon="image" onClick={() => void showReview(item)}>
+                    看对比
+                  </Button>
+                )}
               </section>
             );
           })}

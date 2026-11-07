@@ -183,10 +183,10 @@ export function renderPreset(
     }
   return renderSubtitle(
     ctx,
-    "庄Sir剪辑助手",
+    "庄Sir",
     {
       ...style,
-      font_size: style.font_size * 3.5,
+      font_size: 0.36,
       position: { anchor: "middle", margin_v: 0, max_width: 0.94 },
     },
     width,
@@ -194,7 +194,7 @@ export function renderPreset(
     {
       t: rational(BigInt(milliseconds), 1000n),
       duration: rational(2n),
-      words: ["庄Sir", "剪辑", "助手"].map((text, i) => ({
+      words: ["庄", "Sir"].map((text, i) => ({
         text,
         start: rational(BigInt(i * 2), 3n),
         end: rational(BigInt((i + 1) * 2), 3n),

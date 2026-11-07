@@ -510,7 +510,7 @@ export function useMediaPanel({
             onChange={(e) => setSearch(e.target.value)}
           />
         </label>
-        <span className="zc-seg">
+        <fieldset className="zc-seg" aria-label="素材显示">
           {["grid", "list"].map((v) => (
             <IconButton
               key={v}
@@ -521,7 +521,7 @@ export function useMediaPanel({
               onClick={() => update({ ...state, sub: v })}
             />
           ))}
-        </span>
+        </fieldset>
       </header>
       <div className="zc-media-filters">
         <span className="zc-media-scope">
@@ -654,7 +654,7 @@ export function useMediaPanel({
         <Icon name="export" />
         把视频、音频、图片拖到这里
       </section>
-      <p className="zc-hint zc-media-shortcuts">
+      <p className="zc-hint zc-media-shortcuts zc-media-hint">
         <kbd>I</kbd> <kbd>O</kbd> 设范围　<kbd>Q</kbd> 加到时间线
       </p>
     </div>

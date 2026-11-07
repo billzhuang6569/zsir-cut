@@ -222,6 +222,9 @@ export function useVoicePanel({
     };
   }, [call, project, state.panel, state.project]);
   const [voices, setVoices] = useState<Voice[]>([]);
+  const [voicesLoaded, setVoicesLoaded] = useState(false);
+  const [playingTake, setPlayingTake] = useState<string | null>(null);
+  const takeAudio = useRef(new Map<string, HTMLAudioElement>());
   const [voiceId, setVoiceId] = useState("");
   const [file, setFile] = useState("");
   const [name, setName] = useState("");
@@ -246,7 +249,10 @@ export function useVoicePanel({
   }, []);
   const refresh = useCallback(async () => {
     const result = (await call("voice_list", {})) as { voices: Voice[] };
-    if (alive.current) setVoices(result.voices);
+    if (alive.current) {
+      setVoices(result.voices);
+      setVoicesLoaded(true);
+    }
   }, [call]);
   useEffect(() => {
     if (state.panel === "voice") void refresh().catch(() => setError("无法读取音色库，请切换标签后重试"));
@@ -254,7 +260,10 @@ export function useVoicePanel({
   useEffect(() => {
     if (!voices.some((voice) => voice.id === voiceId)) setVoiceId(voices[0]?.id ?? "");
   }, [voices, voiceId]);
-  const sub = state.sub ?? "clone";
+  const sub = state.sub ?? (voices.length ? "generate" : "clone");
+  useEffect(() => {
+    if (state.panel === "voice" && state.sub === null && voicesLoaded) update({ ...state, sub });
+  }, [state, sub, update, voicesLoaded]);
   const choose = (path: string) => {
     setFile(path);
     if (!name)
@@ -415,17 +424,18 @@ export function useVoicePanel({
               >
                 选择文件
               </button>
-            ) : (
-              <input
-                className="zc-input"
-                aria-label="参考音频路径"
-                placeholder="本机文件的绝对路径"
-                value={file}
-                onChange={(e) => choose(e.target.value)}
-              />
-            )}
+            ) : null}
             {isTauri() && file && <p>{file.split(/[\\/]/).pop()}</p>}
           </section>
+          {!isTauri() && (
+            <input
+              className="zc-input"
+              aria-label="参考音频路径"
+              placeholder="本机文件的绝对路径"
+              value={file}
+              onChange={(e) => choose(e.target.value)}
+            />
+          )}
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -747,8 +757,19 @@ export function useVoicePanel({
               }}
             >
               <div className="zc-voice-row">
+                <IconButton
+                  icon={playingTake === media.id ? "pause" : "play"}
+                  label={`${playingTake === media.id ? "暂停" : "播放"}${name}`}
+                  disabled={!config}
+                  onClick={() => {
+                    const audio = takeAudio.current.get(media.id);
+                    if (!audio) return;
+                    if (audio.paused) void audio.play().catch(() => setError("配音无法播放，请重试"));
+                    else audio.pause();
+                  }}
+                />
                 <strong>{name}</strong>
-                <span className="zc-meta">{chapterTime(media.duration ?? "0s")}</span>
+                <span className="zc-meta">{chapterTime(media.duration ?? "0s").padStart(5, "0")}</span>
                 {used ? (
                   <span className="zc-chip is-sm is-approved">在时间线</span>
                 ) : (
@@ -792,17 +813,32 @@ export function useVoicePanel({
               {config && (
                 // biome-ignore lint/a11y/useMediaCaption: The spoken text is displayed above the player.
                 <audio
-                  controls
+                  ref={(audio) => {
+                    if (audio) takeAudio.current.set(media.id, audio);
+                    else takeAudio.current.delete(media.id);
+                  }}
+                  hidden
                   preload="none"
-                  aria-label={`播放${name}`}
+                  aria-label={`${name}音频`}
                   src={mediaUrl(config, "media", media.id)}
-                  onError={() => setError("配音无法播放，请重试")}
+                  onPlay={(event) => {
+                    for (const audio of takeAudio.current.values()) if (audio !== event.currentTarget) audio.pause();
+                    setPlayingTake(media.id);
+                  }}
+                  onPause={() => setPlayingTake((id) => (id === media.id ? null : id))}
+                  onEnded={() => setPlayingTake((id) => (id === media.id ? null : id))}
+                  onError={() => {
+                    setPlayingTake((id) => (id === media.id ? null : id));
+                    setError("配音无法播放，请重试");
+                  }}
                 />
               )}
             </section>
           );
         })}
-      <p className="zc-hint">生成的配音会存入工程，可在素材中试听并加到时间线。</p>
+      {takes.project === project && !takes.rows.length && !resultError && (
+        <p className="zc-hint">还没有配音，生成后可在这里试听并加到时间线。</p>
+      )}
       <button
         className="zc-btn is-secondary"
         type="button"
@@ -810,9 +846,6 @@ export function useVoicePanel({
       >
         <Icon name="audio" />
         查看配音素材
-      </button>
-      <button className="zc-btn" type="button" onClick={() => update({ ...state, sub: "results" })}>
-        结果
       </button>
       <p className="zc-hint zc-voice-library">
         <Icon name="audio" />

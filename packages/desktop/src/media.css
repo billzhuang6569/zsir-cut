@@ -6,8 +6,7 @@
   overflow: auto;
   flex: 1;
 }
-.zc-media-head,
-.zc-seg {
+.zc-media-head {
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -227,11 +226,6 @@
   color: var(--text-4);
   font-size: var(--label-size);
 }
-.zc-seg {
-  background: var(--raised);
-  border-radius: var(--radius-md);
-  padding: 2px;
-}
 
 .zc-media-scope {
   position: relative;
@@ -329,6 +323,24 @@
 }
 .zc-media-head .zc-seg button {
   width: 36px;
+  padding: 0;
+  background: transparent;
+}
+.zc-media-head .zc-seg button[aria-pressed="true"] {
+  background: var(--raised-2);
+}
+.zc-media-hint kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--raised);
+  color: var(--text-2);
+  font: 11px var(--font-mono);
 }
 .zc-media-filters {
   display: flex;

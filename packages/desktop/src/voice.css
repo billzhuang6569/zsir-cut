@@ -128,6 +128,15 @@
   padding: var(--space-3);
   border: 0;
 }
-.zc-voice-results audio {
-  width: 100%;
+.zc-voice-results .zc-voice-row {
+  gap: var(--space-2);
+}
+.zc-voice-results .zc-voice-row strong {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+}
+.zc-voice-results .zc-voice-row > .zc-btn {
+  height: 24px;
+  padding-inline: 6px;
 }

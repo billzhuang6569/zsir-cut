@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
     "build": "vite build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "pnpm --dir ../.. exec vitest run packages/desktop"
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.3",

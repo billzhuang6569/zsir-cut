@@ -347,6 +347,10 @@ it("uses read-only host views; outlines match each change and only-original uses
     at_revision: "rev_draft",
   });
   expect(call.mock.calls.some(([verb]) => verb === "diff" || verb === "session_review")).toBe(false);
+  const heads = [...node.querySelectorAll(".zc-review-track-head")];
+  expect(heads.map((head) => head.getAttribute("aria-label"))).toEqual(["视频 A", "视频 B", "字幕 A"]);
+  expect(heads.every((head) => head.querySelector("svg") && !head.textContent)).toBe(true);
+  expect(node.querySelectorAll('.zc-seg[aria-label="时间线显示"] button[aria-pressed="true"]')).toHaveLength(1);
   const outlines = [...node.querySelectorAll<HTMLElement>("[data-change-key]")];
   expect(outlines.map((outline) => [outline.dataset.changeKey, outline.dataset.start, outline.dataset.end])).toEqual([
     ["clp_delete1", "0s", "2s"],

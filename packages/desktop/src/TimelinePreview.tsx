@@ -30,6 +30,7 @@ import {
   pointerTime,
   printRational,
   rational,
+  rulerTicks,
   seekTarget,
   sourceAt,
   sourceSpeed,
@@ -1423,7 +1424,24 @@ export function TimelinePreview({
                         point(event.clientX, ruler);
                     }}
                   >
-                    <span className="zc-cache-bar" hidden aria-hidden="true" />
+                    {project.markers
+                      .filter((marker) => marker.kind === "chapter" && marker.level !== 2)
+                      .sort((a, b) => compare(parseRational(a.at.t, true), parseRational(b.at.t, true)))
+                      .map((marker, index, chapters) => (
+                        <span
+                          key={marker.id}
+                          className={`zc-chapter-bar${index % 2 ? " is-alternate" : ""}`}
+                          title={`章节：${marker.text}`}
+                          style={{
+                            left: pixelAt(marker.at.t, scale),
+                            width: Math.max(
+                              0,
+                              pixelAt(chapters[index + 1]?.at.t ?? project.duration.t, scale) -
+                                pixelAt(marker.at.t, scale),
+                            ),
+                          }}
+                        />
+                      ))}
                     {points.map((point) => (
                       <span
                         key={`${point.track_id}:${point.at}`}
@@ -1431,12 +1449,13 @@ export function TimelinePreview({
                         style={{ left: pixelAt(point.at, scale) }}
                       />
                     ))}
-                    {Array.from({ length: Math.ceil(width / 96) }, (_, index) => (
-                      <span key={index} className="zc-tick" style={{ left: index * 96 }}>
-                        {timecode(
-                          printRational(div(rational(BigInt(index * 96)), rational(BigInt(scale))), true),
-                          project,
-                        )}
+                    {rulerTicks(width, scale, project.edit_rate).map((tick) => (
+                      <span
+                        key={tick.at}
+                        className={`zc-tick${tick.major ? " is-major" : ""}`}
+                        style={{ left: tick.left }}
+                      >
+                        {tick.major ? tick.label : null}
                       </span>
                     ))}
                     {project.markers.map((marker) => (

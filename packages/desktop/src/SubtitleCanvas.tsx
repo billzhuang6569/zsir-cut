@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { renderSubtitle } from "../../exporters/src/subtitle-render.ts";
 import { defaultStyle } from "./subtitles.js";
 import { type CueView, parseRational, type StyleView, sub } from "./timeline.js";
@@ -33,6 +33,8 @@ export function SubtitleCanvas({
   dragging?: React.MutableRefObject<boolean>;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
+  const stage = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
   const measuringCanvas = useRef<HTMLCanvasElement | null>(null);
   const [bounds, setBounds] = useState<Bounds[]>([]);
   const [guide, setGuide] = useState(false);
@@ -55,6 +57,20 @@ export function SubtitleCanvas({
   );
   const width = format?.width ?? 1920,
     height = format?.height ?? 1080;
+  useLayoutEffect(() => {
+    const container = stage.current?.parentElement;
+    if (!container) return;
+    const measure = () => {
+      const rect = container.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const scale = Math.min(rect.width / width, rect.height / height);
+      setSize({ width: width * scale, height: height * scale });
+    };
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(measure);
+    observer?.observe(container);
+    return () => observer?.disconnect();
+  }, [width, height]);
   useEffect(() => {
     if (!cues.length && canvas.current) {
       canvas.current.width = width;
@@ -104,10 +120,7 @@ export function SubtitleCanvas({
     [dragging],
   );
   return (
-    <div
-      className="zc-subtitle-stage"
-      style={{ width: `min(100%, ${(100 * width) / height}cqh)`, height: `min(100%, ${(100 * height) / width}cqw)` }}
-    >
+    <div ref={stage} className="zc-subtitle-stage" style={size ?? { width: "100%", height: "100%" }}>
       <canvas
         className="zc-subtitle-canvas"
         ref={canvas}

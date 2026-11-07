@@ -224,11 +224,33 @@
 }
 .zc-tick {
   position: absolute;
+  top: 8px;
+  bottom: 0;
   font-family: var(--font-mono);
   font-size: var(--caption-size);
   color: var(--text-4);
-  border-left: 1px solid var(--line-strong);
   padding-left: var(--space-2);
+}
+.zc-tick::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 4px;
+  border-left: 1px solid var(--line-strong);
+}
+.zc-tick.is-major::after {
+  height: 8px;
+}
+.zc-chapter-bar {
+  position: absolute;
+  top: 0;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--approved);
+}
+.zc-chapter-bar.is-alternate {
+  background: var(--line-strong);
 }
 .zc-marker {
   position: absolute;
