@@ -38,7 +38,7 @@ const previewCache = z.strictObject({
 });
 const preferences = z.strictObject({
   schema: z.literal("zsir-cut/desktop"),
-  version: z.literal(1),
+  version: z.literal(2),
   default_agent: z.enum(["claude", "codex"]).nullable(),
   keymap,
   preview_cache: previewCache,
@@ -52,7 +52,7 @@ const patchSchema = preferences.partial().extend({
 export type Preferences = z.infer<typeof preferences>;
 export const defaultPreferences: Preferences = {
   schema: "zsir-cut/desktop",
-  version: 1,
+  version: 2,
   default_agent: null,
   keymap: { preset: "fcp", overrides: {} },
   preview_cache: {
@@ -60,7 +60,7 @@ export const defaultPreferences: Preferences = {
     limit_gb: 20,
     quality: "720p",
     auto: true,
-    pause_on_battery: true,
+    pause_on_battery: false,
   },
   ui: {
     snap: true,
@@ -101,8 +101,14 @@ export class DesktopPreferences {
     this.file = join(directory, "desktop.json");
   }
   async load() {
+    let migrated = false;
     try {
-      this.value = preferences.parse(JSON.parse(await readFile(this.file, "utf8")));
+      const stored = JSON.parse(await readFile(this.file, "utf8"));
+      if (stored?.version === 1) {
+        const legacy = preferences.extend({ version: z.literal(1) }).parse(stored);
+        this.value = { ...legacy, version: 2, preview_cache: { ...legacy.preview_cache, pause_on_battery: false } };
+        migrated = true;
+      } else this.value = preferences.parse(stored);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
         this.warning = { type: "warning", code: "W_PREFS_RESET", message: "应用偏好无法读取，已恢复默认设置" };
@@ -110,6 +116,14 @@ export class DesktopPreferences {
       }
       this.value = structuredClone(defaultPreferences);
     }
+    if (migrated) await this.persist(this.value);
+  }
+  private async persist(next: Preferences) {
+    await mkdir(dirname(this.file), { recursive: true });
+    const temporary = `${this.file}.${randomUUID()}.tmp`;
+    await writeFile(temporary, serialize(next));
+    await rename(temporary, this.file);
+    this.value = next;
   }
   get() {
     const prefs = structuredClone(this.value);
@@ -130,11 +144,7 @@ export class DesktopPreferences {
       const next = preferences.parse(merged);
       const content = serialize(next);
       if (content === serialize(this.value)) return { status: "no_op" as const, result: this.get() };
-      await mkdir(dirname(this.file), { recursive: true });
-      const temporary = `${this.file}.${randomUUID()}.tmp`;
-      await writeFile(temporary, content);
-      await rename(temporary, this.file);
-      this.value = next;
+      await this.persist(next);
       return { status: "applied" as const, result: this.get() };
     });
     this.writes = operation.then(

@@ -163,6 +163,7 @@ export class PreviewCache {
   private playhead = rational(0n);
   private needed: Segment[] = [];
   private building: string | undefined;
+  private controller: AbortController | undefined;
   private failed = new Set<string>();
   private opened = new Date().toISOString();
   private work: Promise<void> | undefined;
@@ -310,6 +311,7 @@ export class PreviewCache {
                 : [{ clip, media, key: segmentKey(clip, media, quality) }];
             }),
       ) ?? [];
+    if (this.building && !this.needed.some((segment) => segment.key === this.building)) this.controller?.abort();
     this.rerun = true;
     this.kick();
     await this.push();
@@ -387,12 +389,16 @@ export class PreviewCache {
         this.failed.add(key);
         continue;
       }
+      if (this.stopped || !this.needed.some((segment) => segment.key === key)) continue;
+      const controller = new AbortController();
+      this.controller = controller;
       this.building = key;
       await this.push();
       try {
         try {
-          await thumbnailTask(() => this.encode(args), new AbortController().signal);
+          await thumbnailTask(() => this.encode(args, controller.signal), controller.signal);
         } catch {
+          controller.signal.throwIfAborted();
           await thumbnailTask(
             () =>
               this.encode(
@@ -404,14 +410,12 @@ export class PreviewCache {
                   temp,
                   false,
                 ) ?? [],
+                controller.signal,
               ),
-            new AbortController().signal,
+            controller.signal,
           );
         }
-        if (this.stopped) {
-          await rm(temp, { force: true });
-          break;
-        }
+        controller.signal.throwIfAborted();
         const file = join(dir, `${key}.mp4`);
         await rename(temp, file);
         index.segments[key] = { bytes: (await stat(file)).size };
@@ -419,10 +423,11 @@ export class PreviewCache {
         await this.enforceLimit();
         index = await this.index(project.id);
       } catch {
-        this.failed.add(key);
+        if (!controller.signal.aborted) this.failed.add(key);
         await rm(temp, { force: true }).catch(() => {});
       } finally {
         this.building = undefined;
+        this.controller = undefined;
         await this.push();
       }
     }
@@ -548,7 +553,9 @@ export class PreviewCache {
     );
     const mediaEntries = directory_ok ? await this.media.entries() : [];
     const media_bytes = mediaEntries.reduce((sum, entry) => sum + entry.bytes, 0);
+    const paused = this.settings().pause_on_battery && (await this.battery());
     return {
+      ...(paused ? { paused: "battery" as const } : {}),
       media: await this.media.status(directory_ok),
       media_bytes,
       segments,
@@ -612,6 +619,7 @@ export class PreviewCache {
   }
   private async stopWork() {
     this.stopped = true;
+    this.controller?.abort();
     await this.work;
     await this.media.idle();
     await this.eviction;

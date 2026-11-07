@@ -19,6 +19,7 @@ export interface CacheStatus {
   segments: { clip_id: string; key: string; state: "ready" | "building" | "missing" }[];
   projects: { project_id: string; path: string }[];
   directory_ok: boolean;
+  paused?: "battery";
 }
 export interface StreamSegment {
   clip: ClipView;
@@ -228,6 +229,7 @@ export function usePreviewStream({
   const video = useRef<HTMLVideoElement>(null);
   const engine = useRef<PreviewStream>();
   const cache = useRef<CacheStatus>();
+  const [cacheStatus, setCacheStatus] = useState<CacheStatus>();
   const attempted = useRef<string>();
   const active = useRef(false);
   const [visible, setVisible] = useState(false);
@@ -243,13 +245,18 @@ export function usePreviewStream({
     if (!config || !path) return;
     let live = true;
     cache.current = undefined;
+    setCacheStatus(undefined);
     const receive = (event: Event) => {
       cache.current = (event as CustomEvent<CacheStatus>).detail;
+      setCacheStatus(cache.current);
     };
     const refresh = () => {
       void call("preview_cache_status", {})
         .then((reply) => {
-          if (live) cache.current = (reply as { result?: CacheStatus })?.result;
+          if (live) {
+            cache.current = reply as CacheStatus;
+            setCacheStatus(cache.current);
+          }
         })
         .catch(() => {});
     };
@@ -262,9 +269,10 @@ export function usePreviewStream({
       window.removeEventListener("desktop-host-ready", refresh);
     };
   }, [config, path, call]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Starting playback must reprioritize even without a seek.
   useEffect(() => {
-    if (config && path) void call("preview_cache_playhead", { at }).catch(() => {});
-  }, [at, config, path, call]);
+    if (config && path) void call("preview_cache_hint", { at }).catch(() => {});
+  }, [at, enabled, config, path, call]);
   useEffect(() => {
     if (!enabled || at !== playbackAt.current) {
       stop();
@@ -348,5 +356,5 @@ export function usePreviewStream({
     },
     [enabled, top, config, path, project, stop],
   );
-  return { video, visible, active, sample };
+  return { video, visible, active, sample, cacheStatus };
 }

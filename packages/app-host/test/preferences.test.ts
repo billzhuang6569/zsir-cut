@@ -138,7 +138,7 @@ it("persists nested patches across host restarts, replaces arrays and rejects in
   expect(await send(socket, "prefs_set", { patch: { ui: { snap: false } } })).toMatchObject({ status: "no_op" });
   expect(await readFile(file, "utf8")).toBe(before);
 });
-it.each(["{broken", JSON.stringify({ ...defaultPreferences, version: 2 })])(
+it.each(["{broken", JSON.stringify({ ...defaultPreferences, version: 3 })])(
   "recovers corrupt or invalid files and pushes a UI warning: %s",
   async (content) => {
     const directory = join(home, "data");
@@ -193,6 +193,7 @@ it("never advertises or accepts prefs verbs via MCP", async () => {
       "preview_cache_clear",
       "preview_cache_move",
       "preview_cache_playhead",
+      "preview_cache_hint",
     ]) {
       expect(names).not.toContain(`zcut_${verb}`);
       await expect(client.callTool({ name: `zcut_${verb}`, arguments: {} })).rejects.toThrow("Unknown tool");
@@ -235,7 +236,7 @@ it("validates and restores the single-file store without a listener", async () =
     await expect(restarted.set(patch)).rejects.toThrow();
   }
   expect(await readFile(file, "utf8")).toBe(content);
-  for (const broken of ["{broken", JSON.stringify({ ...defaultPreferences, version: 2 })]) {
+  for (const broken of ["{broken", JSON.stringify({ ...defaultPreferences, version: 3 })]) {
     await writeFile(file, broken);
     const recovered = new DesktopPreferences(home);
     await recovered.load();
@@ -321,3 +322,29 @@ it("loads pre-layout preferences and validates, deep-merges and restores layout 
   await reset.load();
   expect(reset.get().prefs.ui.layout).toEqual(defaultPreferences.ui.layout);
 });
+
+it.each([true, false])(
+  "migrates v1 battery=%s exactly once and preserves other preferences",
+  async (pause_on_battery) => {
+    const file = join(home, "desktop.json");
+    const legacy = structuredClone(defaultPreferences);
+    legacy.preview_cache.pause_on_battery = pause_on_battery;
+    legacy.ui.snap = false;
+    await writeFile(file, JSON.stringify({ ...legacy, version: 1 }));
+    const store = new DesktopPreferences(home);
+    await store.load();
+    expect(store.warning).toBeUndefined();
+    expect(store.get().prefs).toEqual({
+      ...legacy,
+      version: 2,
+      preview_cache: { ...legacy.preview_cache, pause_on_battery: false },
+    });
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual(store.get().prefs);
+    await store.set({ preview_cache: { pause_on_battery: true } });
+    const content = await readFile(file, "utf8");
+    const restarted = new DesktopPreferences(home);
+    await restarted.load();
+    expect(restarted.get().prefs.preview_cache.pause_on_battery).toBe(true);
+    expect(await readFile(file, "utf8")).toBe(content);
+  },
+);

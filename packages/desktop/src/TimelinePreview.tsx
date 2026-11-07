@@ -177,7 +177,7 @@ export function TimelinePreview({
   viewerOnly?: boolean;
   hideTimeline?: boolean;
   hideViewer?: boolean;
-  onOpenSettings?: () => void;
+  onOpenSettings?: (page?: "预览与缓存") => void;
   onMediaDrop?: (id: string, at: string, track: string) => void;
   project: ProjectView | null;
   state: UiState;
@@ -450,6 +450,7 @@ export function TimelinePreview({
     visible: streamVisible,
     active: streamActive,
     sample: sampleStream,
+    cacheStatus,
   } = usePreviewStream({
     project,
     top,
@@ -1533,6 +1534,43 @@ export function TimelinePreview({
                           />
                         </span>
                       ))}
+                    {!readOnly &&
+                      !viewerOnly &&
+                      project.tracks.flatMap((track) =>
+                        track.kind !== "video" || !track.enabled
+                          ? []
+                          : track.clips.flatMap((clip) => {
+                              if (
+                                !clip.enabled ||
+                                project.media.find((media) => media.id === clip.media_id)?.kind !== "video"
+                              )
+                                return [];
+                              const segment = cacheStatus?.segments?.find((segment) => segment.clip_id === clip.id);
+                              if (!segment || segment.state === "ready") return [];
+                              const message =
+                                cacheStatus?.paused === "battery"
+                                  ? "用电池时暂停了预览准备，可在设置里关掉"
+                                  : "这段还没准备好，播放到这里可能卡顿";
+                              return (
+                                <button
+                                  key={clip.id}
+                                  type="button"
+                                  className={`zc-render-bar${segment.state === "building" ? " is-building" : ""}`}
+                                  title={message}
+                                  aria-label={`${message}，打开预览与缓存设置`}
+                                  style={{
+                                    left: pixelAt(clip.timeline_in.t, scale),
+                                    width: Math.max(
+                                      0,
+                                      pixelAt(clip.timeline_out.t, scale) - pixelAt(clip.timeline_in.t, scale),
+                                    ),
+                                  }}
+                                  onPointerDown={(event) => event.stopPropagation()}
+                                  onClick={() => onOpenSettings?.("预览与缓存")}
+                                />
+                              );
+                            }),
+                      )}
                     {rulerTicks(width, scale, project.edit_rate).map((tick) => (
                       <span
                         key={tick.at}

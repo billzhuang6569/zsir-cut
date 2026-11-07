@@ -604,6 +604,7 @@ export async function startHost(
             "preview_cache_clear",
             "preview_cache_move",
             "preview_cache_playhead",
+            "preview_cache_hint",
           ].includes(message.verb)
         ) {
           if (client !== ui) throw new Error("界面未连接");
@@ -630,7 +631,7 @@ export async function startHost(
               } else if (message.verb === "preview_cache_move") {
                 const parsed = z.strictObject({ directory: z.string() }).parse(request);
                 await cache.updatePreferences({ preview_cache: { directory: parsed.directory } });
-              } else if (message.verb === "preview_cache_playhead") {
+              } else if (["preview_cache_playhead", "preview_cache_hint"].includes(message.verb)) {
                 const parsed = z.strictObject({ at: time }).parse(request);
                 cache.hint(parseRational(parsed.at, true));
               } else z.strictObject({}).parse(request);

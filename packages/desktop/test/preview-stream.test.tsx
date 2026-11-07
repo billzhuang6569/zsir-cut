@@ -196,7 +196,7 @@ const project = {
   media: [{ id: "m", kind: "video" }],
   tracks: [{ id: "v", name: "video", kind: "video", enabled: true, clips }],
 } as ProjectView;
-const call = vi.fn(async () => ({ result: cache() }));
+const call = vi.fn(async () => cache());
 function Player() {
   api = usePreviewStream({ project, top: project.tracks[0], path, config, call, enabled, at, playbackAt });
   return (
@@ -211,7 +211,7 @@ async function mount() {
   playbackAt.current = at;
   call.mockClear();
   root = createRoot(host);
-  await act(() => root?.render(<Player />));
+  await act(async () => root?.render(<Player />));
   await act(() => api.sample(at));
   await settle();
 }
@@ -231,15 +231,15 @@ it.each(["building", "missing"] as const)(
     // c0-c2 are already appended. c3 must remain on the original player.
     const status = cache();
     status.segments[3]!.state = state;
-    window.dispatchEvent(new CustomEvent("desktop-preview-cache", { detail: status }));
+    await act(() => window.dispatchEvent(new CustomEvent("desktop-preview-cache", { detail: status })));
     expect(await sample(12)).toBe("22s");
     expect(host.querySelector("video")?.dataset.previewMode).toBe("preroll");
     expect(sources).toHaveLength(1);
     status.segments[3]!.state = "ready";
-    window.dispatchEvent(new CustomEvent("desktop-preview-cache", { detail: status }));
+    await act(() => window.dispatchEvent(new CustomEvent("desktop-preview-cache", { detail: status })));
     at = "26s";
     playbackAt.current = at;
-    await act(() => root?.render(<Player />));
+    await act(async () => root?.render(<Player />));
     await act(() => api.sample(at));
     await settle();
     expect(sources).toHaveLength(2);
@@ -253,16 +253,16 @@ it.each(["building", "missing"] as const)(
 it("resets the source and segment table on seek and pause, and sends playhead hints", async () => {
   await mount();
   at = "15s";
-  await act(() => root?.render(<Player />));
+  await act(async () => root?.render(<Player />));
   expect(host.querySelector("video")?.dataset.previewMode).toBe("preroll");
   expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1);
   await act(() => api.sample(at));
   await settle();
   expect(sources).toHaveLength(2);
   expect(await sample(1)).toBe("15s");
-  expect(call).toHaveBeenCalledWith("preview_cache_playhead", { at: "15s" });
+  expect(call).toHaveBeenCalledWith("preview_cache_hint", { at: "15s" });
   enabled = false;
-  await act(() => root?.render(<Player />));
+  await act(async () => root?.render(<Player />));
   expect(host.querySelector("video")?.dataset.previewMode).toBe("preroll");
   expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2);
 });
@@ -301,7 +301,7 @@ it("drives the real preview playhead and timecode through three cached clips, th
       />,
     );
   root = createRoot(host);
-  await act(render);
+  await act(async () => render());
   await act(() => frame?.(100));
   await settle();
   const video = host.querySelector<HTMLVideoElement>('video[data-preview-mode="mse"]');
@@ -309,7 +309,7 @@ it("drives the real preview playhead and timecode through three cached clips, th
   expect(video.style.visibility).toBe("visible");
   const status = cache();
   status.segments[3]!.state = "missing";
-  window.dispatchEvent(new CustomEvent("desktop-preview-cache", { detail: status }));
+  await act(() => window.dispatchEvent(new CustomEvent("desktop-preview-cache", { detail: status })));
   for (const [decoded, expected] of [
     [2, "12s"],
     [5, "15s"],
@@ -327,9 +327,9 @@ it("drives the real preview playhead and timecode through three cached clips, th
   const original = host.querySelector<HTMLVideoElement>('video[data-preview-mode="preroll"][aria-label="时间线预览"]');
   expect(original?.currentTime).toBe(20);
   expect(original?.style.visibility).toBe("");
-  expect(call).toHaveBeenCalledWith("preview_cache_playhead", { at: "22s" });
+  expect(call).toHaveBeenCalledWith("preview_cache_hint", { at: "22s" });
   status.segments[3]!.state = "ready";
-  window.dispatchEvent(new CustomEvent("desktop-preview-cache", { detail: status }));
+  await act(() => window.dispatchEvent(new CustomEvent("desktop-preview-cache", { detail: status })));
   if (!original) throw new Error("Missing original player");
   original.currentTime = 24;
   await act(() => frame?.(15000));
@@ -375,4 +375,80 @@ it("keeps buffered playback until the cut when a later cached file disappears", 
   expect(host.querySelector("video")?.dataset.previewMode).toBe("mse");
   expect(await sample(8)).toBe("18s");
   expect(host.querySelector("video")?.dataset.previewMode).toBe("preroll");
+});
+
+it("shows video cache gaps at timeline positions and opens cache settings without seeking", async () => {
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => recordingCanvas() as never);
+  vi.stubGlobal("requestAnimationFrame", () => 1);
+  vi.stubGlobal("cancelAnimationFrame", () => {});
+  const view = structuredClone(project);
+  const videoTrack = view.tracks[0]!;
+  videoTrack.clips[2]!.enabled = false;
+  view.media.push({ ...view.media[0]!, id: "image", kind: "image" });
+  videoTrack.clips[3]!.media_id = "image";
+  view.tracks.push({ ...videoTrack, id: "audio", kind: "audio", clips: [{ ...clips[0]!, id: "audio" }] });
+  view.tracks.push({ ...videoTrack, id: "disabled", enabled: false, clips: [{ ...clips[0]!, id: "disabled" }] });
+  const status = cache();
+  status.segments.forEach((segment, i) => {
+    segment.state = i === 1 ? "building" : i < 4 ? "missing" : "ready";
+  });
+  status.segments.push(
+    { clip_id: "audio", key: "audio", state: "missing" },
+    { clip_id: "disabled", key: "disabled", state: "missing" },
+  );
+  const update = vi.fn();
+  const settings = vi.fn();
+  const state = { ...initialState(), project: path };
+  const invoke = vi.fn(async () => status);
+  root = createRoot(host);
+  await act(async () =>
+    root?.render(
+      <TimelinePreview
+        project={view}
+        state={state}
+        update={update}
+        config={config}
+        call={invoke}
+        error={null}
+        dragging={{ current: false }}
+        onOpenSettings={settings}
+      />,
+    ),
+  );
+  const bars = host.querySelectorAll<HTMLButtonElement>(".zc-render-bar");
+  expect(bars).toHaveLength(2);
+  expect(bars[0]!.style.left).toBe("480px");
+  expect(bars[0]!.style.width).toBe("192px");
+  expect(bars[1]!.classList.contains("is-building")).toBe(true);
+  expect(bars[0]!.title).toBe("这段还没准备好，播放到这里可能卡顿");
+  const pointer = new Event("pointerdown", { bubbles: true });
+  await act(() => {
+    bars[0]!.dispatchEvent(pointer);
+    bars[0]!.click();
+  });
+  expect(settings).toHaveBeenCalledWith("预览与缓存");
+  expect(update).not.toHaveBeenCalled();
+  await act(() =>
+    window.dispatchEvent(new CustomEvent("desktop-preview-cache", { detail: { ...status, paused: "battery" } })),
+  );
+  expect(host.querySelector<HTMLButtonElement>(".zc-render-bar")!.title).toBe("用电池时暂停了预览准备，可在设置里关掉");
+  await act(() =>
+    window.dispatchEvent(
+      new CustomEvent("desktop-preview-cache", {
+        detail: { ...status, segments: status.segments.map((segment) => ({ ...segment, state: "ready" })) },
+      }),
+    ),
+  );
+  expect(host.querySelector(".zc-render-bar")).toBeNull();
+});
+
+it("sends a new hint when playback starts at the same playhead", async () => {
+  at = "10s";
+  enabled = false;
+  root = createRoot(host);
+  await act(async () => root?.render(<Player />));
+  call.mockClear();
+  enabled = true;
+  await act(async () => root?.render(<Player />));
+  expect(call).toHaveBeenCalledWith("preview_cache_hint", { at: "10s" });
 });
