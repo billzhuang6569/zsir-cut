@@ -333,12 +333,6 @@
 .zc-timeline-content {
   touch-action: none;
 }
-.zc-timeline input,
-.zc-timeline textarea,
-.zc-timeline [contenteditable="true"] {
-  -webkit-user-select: text;
-  user-select: text;
-}
 .zc-selection-box {
   position: absolute;
   pointer-events: none;

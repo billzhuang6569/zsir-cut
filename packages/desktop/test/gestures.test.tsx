@@ -47,18 +47,19 @@ const render = () =>
       readOnly={readOnly}
     />,
   );
-function pointer(
+async function pointer(
   target: HTMLElement,
   type: string,
   x: number,
   y: number,
   extra: MouseEventInit & { pointerId?: number } = {},
 ) {
-  const event = new MouseEvent(type, { bubbles: true, clientX: x, clientY: y, button: 0, ...extra });
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0, ...extra });
   Object.defineProperty(event, "pointerId", { value: extra.pointerId ?? 1 });
-  return act(async () => {
+  await act(async () => {
     target.dispatchEvent(event);
   });
+  return event;
 }
 const click = (target: HTMLElement, extra: MouseEventInit = {}) =>
   act(async () => {
@@ -1044,5 +1045,35 @@ it("snaps a chapter edge to an existing cut and blocks chapter writes in history
   await pointer(edge, "pointermove", 704, 50);
   await pointer(edge, "pointerup", 704, 50);
   expect(call).not.toHaveBeenCalled();
+  expect(dragging.current).toBe(false);
+});
+
+it.each([".zc-timeline", ".zc-track-lane", ".zc-ruler", ".zc-clip", ".zc-chapter-edge"])(
+  "prevents native text selection from %s without interrupting gestures",
+  async (selector) => {
+    const textarea = document.createElement("textarea");
+    host.append(textarea);
+    textarea.focus();
+    expect(document.activeElement).toBe(textarea);
+    const range = document.createRange();
+    range.selectNodeContents(get(".zc-track-name"));
+    window.getSelection()?.addRange(range);
+    const event = await pointer(get(selector), "pointerdown", 100, 100);
+    expect(event.defaultPrevented).toBe(true);
+    expect(document.activeElement).not.toBe(textarea);
+    expect(window.getSelection()?.rangeCount).toBe(0);
+    expect(dragging.current).toBe(true);
+    await pointer(captures.get(1) as HTMLElement, "pointercancel", 100, 100);
+  },
+);
+
+it("keeps text editors and secondary clicks available inside the timeline", async () => {
+  const input = document.createElement("input");
+  timeline().append(input);
+  input.focus();
+  expect((await pointer(input, "pointerdown", 100, 100)).defaultPrevented).toBe(false);
+  expect(document.activeElement).toBe(input);
+  expect((await pointer(timeline(), "pointerdown", 100, 100, { button: 2 })).defaultPrevented).toBe(false);
+  expect(document.activeElement).toBe(input);
   expect(dragging.current).toBe(false);
 });

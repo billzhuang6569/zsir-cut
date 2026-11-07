@@ -189,6 +189,23 @@ export function App({ config }: { config?: { port: number; token: string } }) {
       }}
     />
   );
+  useEffect(() => {
+    const keydown = (event: KeyboardEvent) => {
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        event.key.toLowerCase() === "a" &&
+        !event.altKey &&
+        !event.isComposing &&
+        !(
+          event.target instanceof Element &&
+          event.target.closest('input,textarea,[contenteditable]:not([contenteditable="false"])')
+        )
+      )
+        event.preventDefault();
+    };
+    window.addEventListener("keydown", keydown);
+    return () => window.removeEventListener("keydown", keydown);
+  }, []);
   const history = useHistoryPanel({ project, state, update, call: rawCall, subscribe });
   const settingsKey = preferences.keymap.open_settings;
   const historyKey = preferences.keymap.toggle_history;

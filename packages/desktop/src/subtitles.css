@@ -630,7 +630,6 @@
   min-width: 0;
   min-height: 20px;
   font-size: 14px;
-  cursor: text;
   overflow-wrap: anywhere;
 }
 .zc-sub-text:focus-visible,

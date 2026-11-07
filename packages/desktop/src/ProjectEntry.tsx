@@ -162,7 +162,7 @@ export function ProjectEntry({
       {failureDetail && (
         <details>
           <summary>错误详情</summary>
-          <pre>{failureDetail}</pre>
+          <pre className="zc-selectable">{failureDetail}</pre>
         </details>
       )}
     </>

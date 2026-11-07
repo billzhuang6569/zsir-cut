@@ -301,7 +301,7 @@ export function SettingsPage({
                               ? `已找到${agent.version ? ` · ${agent.version.match(/\b\d+\.\d+\.\d+\b/)?.[0] ?? agent.version}` : ""}`
                               : "没有找到"}
                           </p>
-                          {agent.path && <p className="zc-meta zc-settings-path">{agent.path}</p>}
+                          {agent.path && <p className="zc-meta zc-settings-path zc-selectable">{agent.path}</p>}
                         </div>
                         {agent.found && (
                           <button
