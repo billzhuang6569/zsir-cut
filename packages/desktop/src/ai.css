@@ -202,9 +202,6 @@
   display: inline-flex;
   color: var(--text-4);
 }
-.zc-q-other {
-  cursor: text;
-}
 .zc-q-other-input {
   flex-grow: 1;
   min-width: 0;

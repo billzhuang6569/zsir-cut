@@ -1,5 +1,6 @@
 import { type MutableRefObject, type PointerEvent, useEffect, useRef, useState } from "react";
 import type { Layout } from "../../app-host/src/preferences.js";
+import { preventPointerSelection } from "./selection.js";
 
 export function LayoutDivider({
   field,
@@ -112,8 +113,9 @@ export function LayoutDivider({
       }}
       onPointerDown={(event) => {
         if (event.button !== 0 || dragging.current) return;
-        event.preventDefault();
+        preventPointerSelection(event);
         event.currentTarget.focus({ preventScroll: true });
+        window.getSelection()?.removeAllRanges();
         const current = measure(event.currentTarget);
         session.current = {
           ...current,

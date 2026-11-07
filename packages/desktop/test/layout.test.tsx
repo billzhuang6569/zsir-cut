@@ -158,3 +158,21 @@ it("fixes the overflowing shell and constrains content tracks instead of only hi
   expect(css).toMatch(/\.zc-upper-row\s*\{[^}]*minmax\(0, 1fr\)[^}]*overflow: hidden/s);
   expect(css).toMatch(/\.zc-function-panel\s*\{\s*overflow: auto/s);
 });
+
+it.each(fields)("clears copied text when dragging %s", async (field) => {
+  const textarea = document.createElement("textarea");
+  container.append(textarea);
+  textarea.focus();
+  expect(document.activeElement).toBe(textarea);
+  const range = document.createRange();
+  range.selectNodeContents(container);
+  window.getSelection()?.addRange(range);
+  const event = new MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0 });
+  Object.defineProperty(event, "pointerId", { value: 1 });
+  await act(() => divider(field).dispatchEvent(event));
+  expect(event.defaultPrevented).toBe(true);
+  expect(document.activeElement).toBe(divider(field));
+  expect(window.getSelection()?.rangeCount).toBe(0);
+  expect(dragging.current).toBe(true);
+  await pointer(field, "pointercancel", 0);
+});

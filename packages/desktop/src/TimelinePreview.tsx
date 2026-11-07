@@ -11,6 +11,7 @@ import { loadMediaResource, type Thumbs, thumbnailStyle, useMediaCache } from ".
 import { usePreviewStream } from "./preview-stream.js";
 import { useReverseAudio } from "./reverse-audio.js";
 import { SubtitleCanvas } from "./SubtitleCanvas.js";
+import { preventPointerSelection } from "./selection.js";
 import type { UiState } from "./state.js";
 import { subtitleStyleOps } from "./subtitles.js";
 import {
@@ -1183,6 +1184,11 @@ export function TimelinePreview({
       </div>
       <div
         className="zc-picture"
+        onPointerDownCapture={(event) => {
+          if (event.button !== 0) return;
+          preventPointerSelection(event);
+          window.getSelection()?.removeAllRanges();
+        }}
         style={{ aspectRatio: `${project?.format?.width ?? 1920} / ${project?.format?.height ?? 1080}` }}
       >
         {src && media?.kind === "image" ? (
@@ -1447,7 +1453,16 @@ export function TimelinePreview({
             className={`zc-timeline zc-track-height-${trackHeight}`}
             ref={gestures.scroller}
             {...gestures.handlers}
-            onPointerDownCapture={() => {
+            onPointerDownCapture={(event) => {
+              if (
+                event.button === 0 &&
+                !(event.target as Element).closest(
+                  'input,textarea,select,[contenteditable]:not([contenteditable="false"]),.zc-selectable,p[role="alert"]',
+                )
+              ) {
+                preventPointerSelection(event);
+                window.getSelection()?.removeAllRanges();
+              }
               if (state.preview === "media") update({ ...state, preview: "timeline", playing: false });
             }}
           >

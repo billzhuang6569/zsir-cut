@@ -385,7 +385,7 @@ export function StepRow({
         </Button>
       )}
       {expanded && (
-        <pre className="zc-step-detail">
+        <pre className="zc-step-detail zc-selectable">
           {typeof detail === "string"
             ? detail.replace(/\b(?:ses|rev|med|clp|occ|trk|dec|prm|req)_[A-Za-z0-9_-]+\b/g, "…")
             : JSON.stringify(
@@ -500,5 +500,5 @@ export function Markdown({ text }: { text: string }) {
       blocks.push(ordered ? <ol key={i}>{items}</ol> : <ul key={i}>{items}</ul>);
     } else blocks.push(<p key={i}>{inline(line)}</p>);
   }
-  return <div className="zc-markdown">{blocks}</div>;
+  return <div className="zc-markdown zc-selectable">{blocks}</div>;
 }

@@ -220,6 +220,7 @@ it("shows missing Codex, installs with streamed output and reacts to agent chang
   expect(h.container.textContent).toContain("没有找到");
   expect(h.container.textContent).toContain("有新版");
   expect(h.container.textContent).toContain("/bin/claude");
+  expect(h.container.querySelector(".zc-settings-path")?.classList.contains("zc-selectable")).toBe(true);
   expect(h.container.textContent).not.toContain("登录");
   await h.click("安装 Codex");
   expect(h.call).toHaveBeenCalledWith("agents_install", { id: "codex" });
