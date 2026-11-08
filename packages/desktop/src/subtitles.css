@@ -294,8 +294,55 @@
 }
 .zc-sub-replace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: var(--space-3);
+}
+.zc-sub-replace-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+}
+.zc-sub-find {
+  position: relative;
+  min-width: 0;
+}
+.zc-sub-find .zc-input {
+  padding-right: var(--control-h);
+}
+.zc-sub-match-case {
+  position: absolute;
+  right: var(--space-1);
+  top: 50%;
+  transform: translateY(-50%);
+  width: var(--icon-btn-compact);
+  height: var(--icon-btn-compact);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-3);
+}
+.zc-sub-match-case[aria-pressed="true"] {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.zc-sub-replace-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+.zc-sub-replace-actions .zc-btn {
+  flex: 1;
+  min-width: 0;
+  justify-content: center;
+  background: var(--raised);
+  white-space: nowrap;
+}
+.zc-sub-replace-actions .zc-btn:hover:not(:disabled) {
+  background: var(--raised-2);
+}
+.zc-sub-replace-actions .zc-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .zc-sub-tracks {
   display: flex;
@@ -657,8 +704,7 @@
   background: var(--attention-soft);
 }
 .zc-sub-toolbar,
-.zc-sub-heading,
-.zc-sub-ai {
+.zc-sub-heading {
   display: flex;
   align-items: center;
   flex-wrap: wrap;

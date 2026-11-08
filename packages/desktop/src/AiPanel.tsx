@@ -113,6 +113,14 @@ export function useAiPanel({
   const [events, setEvents] = useState<ChatEvent[]>([]);
   const [generating, setGenerating] = useState(false);
   const [input, setInput] = useState("");
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const focusInput = useRef(false);
+  useEffect(() => {
+    if (!focusInput.current || !agents.length || !inputRef.current) return;
+    focusInput.current = false;
+    inputRef.current.focus();
+    inputRef.current.setSelectionRange(input.length, input.length);
+  }, [input, agents.length]);
   const [suggestion, setSuggestion] = useState("");
   const permissionCards = useRef<HTMLDivElement>(null);
   const draftCards = useRef<HTMLDivElement>(null);
@@ -654,6 +662,7 @@ export function useAiPanel({
           )}
           <div className="zc-chat-input">
             <textarea
+              ref={inputRef}
               aria-label="发给 AI"
               rows={3}
               value={input}
@@ -868,6 +877,11 @@ export function useAiPanel({
     parameters,
     send,
     setInput,
+    appendInput: (text: string) => {
+      focusInput.current = true;
+      setSuggestion("");
+      setInput((previous) => (previous ? `${previous}\n\n${text}` : text));
+    },
     canSend: Boolean(path) && !generating && available.some((item) => item.agent === agent),
   };
 }

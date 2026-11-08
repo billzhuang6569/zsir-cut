@@ -264,7 +264,17 @@ export function App({ config }: { config?: { port: number; token: string } }) {
       void ai.send(text);
     },
   });
-  const subtitles = useSubtitlePanel({ project, state, update, call, config });
+  const subtitles = useSubtitlePanel({
+    project,
+    state,
+    update,
+    call,
+    config,
+    promptAi: (text) => {
+      update(applyUi(current.current, "ui_show_panel", { panel: "ai" }));
+      ai.appendInput(text);
+    },
+  });
   const voice = useVoicePanel({ call, state, update, project, config });
   const source = useMemo(
     () =>
