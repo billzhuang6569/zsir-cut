@@ -147,7 +147,7 @@
 | `lift_delete` | `remove` | `remove` |
 | 键盘 `Delete`（随习惯落到上面两个动作之一） | 按动作 | 按动作 |
 | 拖片段边缘、`trim_start_to_playhead` / `trim_end_to_playhead` | `trim`，`ripple: true` | `trim`，`ripple: false` |
-| 拖剪点、`nudge_edit_*`（选中剪点时）、`extend_edit` | `roll` | `roll` |
+| 用滚动工具拖剪点、`nudge_edit_*`（选中剪点时）、`extend_edit` | `roll` | `roll` |
 | `split_at_playhead` | `split` | `split` |
 | `split_all_at_playhead` | 一个 `edit` 里，对所有轨道上横跨播放头的每个片段各一个 `split`，`linked: false` | 同左 |
 
@@ -172,7 +172,7 @@
 | Option 点 | 只切点到的这一个片段：`split` 带 `linked: false` |
 | 不改的 | 不移动播放头；不改变选中；`split_at_playhead`、`split_all_at_playhead` 仍按 3.2 节在播放头处切 |
 
-**选择工具拖片段边缘。** 指针放在片段边缘时边缘先高亮，指针按将要发的操作换形状：波纹修剪（磁性开，或 `premiere` 下按住 `⌘`）是带胶片方向的单括号，普通修剪是单括号；放在剪点正中（两段相接、左右各 4px 内）时是滚动指针（双括号），拖动发 `roll`。
+**选择工具拖片段边缘。** 指针放在片段边缘时边缘先高亮，指针按将要发的操作换形状：波纹修剪（磁性开，或 `premiere` 下按住 `⌘`）是带胶片方向的单括号，普通修剪是单括号；选择工具拖边缘只修剪，不滚动，相接处也一样（两家都是这样：滚动要换滚动工具）；要滚动就用滚动工具，或选中剪点后用 `nudge_edit_*`、`extend_edit`（2026-11-08 Claude 实测后改：原来剪点正中左右 4px 算滚动，和修剪手柄重叠，指针显示修剪、拖下去却是滚动）。
 
 **滚动工具（`tool_roll`）。** 片段相接处和与另一段相接的边缘都显示滚动指针，拖动发 `roll`；旁边是空隙的边缘按选择工具的修剪规则；片段本身不能拖动，指针是箭头。
 
