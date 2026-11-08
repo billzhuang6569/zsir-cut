@@ -1343,6 +1343,78 @@ it.each(["tidy", "proofread"] as const)(
   },
 );
 
+it.each([
+  ["更多字幕操作", "更多字幕操作"],
+  ["样式", "字幕样式"],
+])("dismisses %s on outside pointerdown while keeping inside presses open", async (trigger, label) => {
+  const h = await mount(listProject);
+  await h.update({ selected: [cue.cue_id, nextCue.cue_id] });
+  const menu = () => h.container.querySelector(`[role="menu"][aria-label="${label}"]`);
+  await h.click(trigger);
+  await act(async () => menu()?.firstElementChild?.dispatchEvent(new Event("pointerdown", { bubbles: true })));
+  expect(menu()).not.toBeNull();
+  await act(async () => document.body.dispatchEvent(new Event("pointerdown", { bubbles: true })));
+  expect(menu()).toBeNull();
+  expect(h.find(trigger).getAttribute("aria-expanded")).toBe("false");
+  expect(h.call).not.toHaveBeenCalled();
+  expect(h.promptAi).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["更多字幕操作", "更多字幕操作"],
+  ["样式", "字幕样式"],
+])("dismisses %s on Escape and returns focus to its trigger", async (trigger, label) => {
+  const h = await mount(listProject);
+  await h.update({ selected: [cue.cue_id, nextCue.cue_id] });
+  const menu = () => h.container.querySelector(`[role="menu"][aria-label="${label}"]`);
+  await h.click(trigger);
+  const item = menu()?.querySelector("button");
+  expect(item).toBeTruthy();
+  item?.focus();
+  await h.key(item as HTMLButtonElement, "ArrowDown");
+  expect(menu()).not.toBeNull();
+  await h.key(item as HTMLButtonElement, "Escape");
+  expect(menu()).toBeNull();
+  expect(document.activeElement).toBe(h.find(trigger));
+});
+
+it.each([
+  ["更多字幕操作", "更多字幕操作"],
+  ["样式", "字幕样式"],
+])("toggles %s through pointerdown then click on its icon", async (trigger, label) => {
+  const h = await mount(listProject);
+  await h.update({ selected: [cue.cue_id, nextCue.cue_id] });
+  for (const open of [true, false, true, false]) {
+    const icon = h.find(trigger).querySelector("path");
+    expect(icon).not.toBeNull();
+    await act(async () => icon?.dispatchEvent(new Event("pointerdown", { bubbles: true })));
+    await act(async () => icon?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(!!h.container.querySelector(`[role="menu"][aria-label="${label}"]`)).toBe(open);
+  }
+});
+
+it.each([
+  ["更多字幕操作", "更多字幕操作", "全部重新分行"],
+  ["更多字幕操作", "更多字幕操作", "全部校对"],
+  ["样式", "字幕样式", "正文"],
+])("closes %s after choosing %s / %s", async (trigger, label, action) => {
+  const h = await mount(listProject);
+  await h.update({ selected: [cue.cue_id, nextCue.cue_id] });
+  await h.click(trigger);
+  const menu = h.container.querySelector(`[role="menu"][aria-label="${label}"]`);
+  const button = [...(menu?.querySelectorAll("button") ?? [])].find((item) => item.textContent === action);
+  expect(button).toBeTruthy();
+  await act(async () => button?.dispatchEvent(new Event("pointerdown", { bubbles: true })));
+  await h.click(action);
+  expect(h.container.querySelector(`[role="menu"][aria-label="${label}"]`)).toBeNull();
+  if (trigger === "样式")
+    expect(h.call.mock.lastCall?.[1].ops).toEqual([
+      { op: "set_cue", cue_id: cue.cue_id, style_id: "sty_1" },
+      { op: "set_cue", cue_id: nextCue.cue_id, style_id: "sty_1" },
+    ]);
+  else expect(h.promptAi).toHaveBeenCalledOnce();
+});
+
 it.each(["toolbar", "selection", "context", "all"] as const)(
   "fills both exact prompts from the %s entry, switches to AI, appends and focuses without requests",
   async (entry) => {

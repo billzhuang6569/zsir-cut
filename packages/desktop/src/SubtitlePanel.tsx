@@ -518,6 +518,36 @@ export function useSubtitlePanel({
   }, [menu]);
   const [more, setMore] = useState(false);
   const [stylePicker, setStylePicker] = useState(false);
+  const parametersRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!more && !stylePicker) return;
+    const dismiss = (event: PointerEvent | KeyboardEvent) => {
+      const keyboard = event instanceof KeyboardEvent;
+      if (keyboard && event.key !== "Escape") return;
+      for (const [open, label, menuLabel, close] of [
+        [more, "更多字幕操作", "更多字幕操作", setMore],
+        [stylePicker, "样式", "字幕样式", setStylePicker],
+      ] as const) {
+        if (!open) continue;
+        const button = parametersRef.current?.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+        const popup = parametersRef.current?.querySelector(`[role="menu"][aria-label="${menuLabel}"]`);
+        if (
+          !keyboard &&
+          event.target instanceof Node &&
+          (button?.contains(event.target) || popup?.contains(event.target))
+        )
+          continue;
+        close(false);
+        if (keyboard) button?.focus();
+      }
+    };
+    window.addEventListener("pointerdown", dismiss);
+    window.addEventListener("keydown", dismiss);
+    return () => {
+      window.removeEventListener("pointerdown", dismiss);
+      window.removeEventListener("keydown", dismiss);
+    };
+  }, [more, stylePicker]);
   const [aiRows, setAiRows] = useState<string[] | null>(null);
   const [matchPosition, setMatchPosition] = useState<{ key: string; offset: number } | null>(null);
   const [skipped, setSkipped] = useState<string[]>([]);
@@ -1206,7 +1236,7 @@ export function useSubtitlePanel({
     </button>
   );
   const parameters = (
-    <div className="zc-panel-body zc-sub-parameters">
+    <div ref={parametersRef} className="zc-panel-body zc-sub-parameters">
       <div className="zc-tabs" role="tablist" aria-label="字幕参数">
         {["subtitles", "style"].map((sub) => (
           <button
@@ -1391,7 +1421,12 @@ export function useSubtitlePanel({
                 disabled={busy || selected.some(cueLocked)}
                 onClick={() => deleteRows(selected)}
               />
-              <IconButton icon="subtitle" label="样式" onClick={() => setStylePicker(!stylePicker)} />
+              <IconButton
+                icon="subtitle"
+                label="样式"
+                aria-expanded={stylePicker}
+                onClick={() => setStylePicker(!stylePicker)}
+              />
               <IconButton
                 icon="spark"
                 label="AI 重新分行"
