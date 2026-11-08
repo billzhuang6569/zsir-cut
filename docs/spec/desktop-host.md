@@ -60,6 +60,7 @@
   "ui": {
     "snap": true,
     "magnetic": true,
+    "skimming": false,
     "timeline_zoom": null,
     "track_height": "m",
     "chapters": { "view": "outline", "zoom": 1, "folded": [] },
@@ -79,7 +80,8 @@
 | `preview_cache.auto` | 打开工程时自动在后台准备 |
 | `preview_cache.pause_on_battery` | 用电池时暂停生成，默认 false（2026-11-07 改：原默认 true，Bill 用笔记本插不插电都要流畅播放，FCP 也不因电池停后台渲染）。`version` 1 的文件读入时把这一项改成 false 并升到 `version` 2，只做这一次 |
 | `ui.snap` | 吸附开关，时间线和章节时间轴共用 |
-| `ui.magnetic` | 磁性开关，见第 3.2 节 |
+| `ui.magnetic` | 磁性开关，见第 3.2 节。在设置里切换 `keymap.preset` 时，界面在同一次 `prefs_set` 里把它设成该习惯的默认：`fcp` 开，`premiere` 关（2026-11-08 补）；之后照常手动开关 |
+| `ui.skimming` | 浏览条开关，默认 false，见第 3.3 节（2026-11-08 加）。文件里没有这一项时用默认值，不升 `version` |
 | `ui.timeline_zoom` | 每秒多少像素，null 表示缩放到整条 |
 | `ui.track_height` | `s`、`m`、`l` |
 | `ui.chapters.view` | `outline` 或 `timeline` |
@@ -126,6 +128,7 @@
 | `lift_delete` | 删除留空隙 | `Delete` | `⇧Delete` |
 | `toggle_snap` | 吸附开关 | `S` | `N` |
 | `toggle_magnetic` ◇ | 磁性开关 | `⇧M` | `P` |
+| `toggle_skimming` | 浏览条开关（2026-11-08 加） | `⇧S` ◇ | `S` |
 | `add_marker` | 加标记 | `M` | `M` |
 | `undo` / `redo` | 撤销 / 重做 | `⌘Z` / `⇧⌘Z` | `⌘Z` / `⇧⌘Z` |
 | `toggle_history` ◇ | 历史悬浮窗 | `⌥⌘H` | `⌥⌘H` |
@@ -148,7 +151,36 @@
 | `split_at_playhead` | `split` | `split` |
 | `split_all_at_playhead` | 一个 `edit` 里，对所有轨道上横跨播放头的每个片段各一个 `split`，`linked: false` | 同左 |
 
+`premiere` 习惯下多一条：拖片段或片段边缘时按住 `⌘`，这一次按磁性开关的反面发（开时发 `place` / `ripple: false`，关时发 `insert` / `ripple: true`），松开 `⌘` 后下一次拖动恢复。`fcp` 习惯没有这个修饰键。
+
 剪点：两个片段相接处。选中剪点时界面记 `{track_id, at}`（`command-protocol.md` 9.6 的 `ui_state.edit_point`），`roll` 的 `clip_id` 取剪点左边的片段、`edge: "out"`。
+
+### 3.3 工具和指针的手感
+
+2026-11-08 Bill 定：对标 Final Cut Pro 和 Premiere Pro，手感跟着 `keymap.preset` 走；`overrides` 只改键，不改手感。下面没写习惯的条目两套一样。
+
+**换工具和临时工具。** 按工具键（`tool_select`、`tool_blade`、`tool_roll`）只换工具，不做任何剪辑。按下工具键不放时就换过去；松开时，如果按住超过 300 毫秒，或者按住期间在时间线上按过鼠标，就回到按下前的工具（临时工具）；否则留在新工具上。工具栏的按钮跟着显示当前工具。切完一刀后仍是切割工具。
+
+**切割工具。**
+
+| 项 | 规则 |
+|---|---|
+| 指针 | 在视频、声音轨的片段上是剃刀形指针；在空白处、字幕轨、标尺上是禁止指针 |
+| 落点线 | 指针在片段上移动时，从这条轨顶到底画一条 1px 虚线，位置是指针所在帧的开头（按帧取整）；同一组联动的片段所在的轨一起画。顶上贴一个时码小标签，写这一帧的时码。开着吸附时，线在吸附距离内吸到播放头、剪点、标记，吸住时虚线变实线 |
+| 点一下 | 在落点线处切开：一个 `edit`，`split` 的 `at` 是落点线的时刻，`linked` 默认 true（视音频一起）。落点不在片段内部（正好在入点或出点上）时不切 |
+| Shift 点 | 落点线贯穿所有视频、声音轨；点下去时对所有轨上横跨这一时刻的片段各一个 `split`，`linked: false`，规则同 `split_all_at_playhead` |
+| Option 点 | 只切点到的这一个片段：`split` 带 `linked: false` |
+| 不改的 | 不移动播放头；不改变选中；`split_at_playhead`、`split_all_at_playhead` 仍按 3.2 节在播放头处切 |
+
+**选择工具拖片段边缘。** 指针放在片段边缘时边缘先高亮，指针按将要发的操作换形状：波纹修剪（磁性开，或 `premiere` 下按住 `⌘`）是带胶片方向的单括号，普通修剪是单括号；放在剪点正中（两段相接、左右各 4px 内）时是滚动指针（双括号），拖动发 `roll`。
+
+**滚动工具（`tool_roll`）。** 片段相接处和与另一段相接的边缘都显示滚动指针，拖动发 `roll`；旁边是空隙的边缘按选择工具的修剪规则；片段本身不能拖动，指针是箭头。
+
+**拖动时的反馈。** 修剪、滚动、移动时，指针旁显示变化量时码（例如 `+00:00:00:12`、`−00:00:01:03`）和拖完后的片段时长；吸附线上不写像素距离。修剪或滚动到素材头尾、再拖不动时，那条边变成 `--attention` 色。
+
+**点时间线。** `fcp`：用选择工具点片段或轨道空白处（按下后没有拖动），播放头跳到点的那一帧，点片段同时选中它。`premiere`：播放头不动，只改选中。两套点标尺都移动播放头，点剪点都选中剪点。
+
+**浏览条（`ui.skimming`）。** 打开时，指针在时间线的轨道区或标尺上移动，画一条和播放头不同色的竖线（浏览条），预览区显示这一帧，按帧取整，开着吸附时同样吸附；指针离开时间线，预览回到播放头那一帧。播放中不浏览，浏览条隐藏。浏览条开着且指针在时间线上时，`split_at_playhead`、`trim_start_to_playhead`、`trim_end_to_playhead`、`extend_edit`、`add_marker` 用浏览条的位置代替播放头（同 FCP）；指针不在时间线上时仍用播放头。切割工具下浏览条和落点线合成一条。只显示画面，不播放声音。
 
 ## 4. Agent 管理
 
