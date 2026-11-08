@@ -53,15 +53,27 @@ export function editPoints(project: ProjectView) {
     );
 }
 
+function crossingAt(project: ProjectView, cut: string) {
+  return project.tracks
+    .filter((track) => track.kind !== "subtitle")
+    .flatMap((track) => track.clips)
+    .filter(
+      (clip) =>
+        compare(parseRational(clip.timeline_in.t, true), parseRational(cut, true)) < 0 &&
+        compare(parseRational(clip.timeline_out.t, true), parseRational(cut, true)) > 0,
+    );
+}
+
+export function splitAllAt(project: ProjectView, at: string) {
+  const cut = frameTime(frameAt(at, project.edit_rate), project.edit_rate);
+  return crossingAt(project, cut).map((clip) => ({ op: "split", clip_id: clip.id, at: cut, linked: false }));
+}
+
 export function timelineEdit(action: string, project: ProjectView, state: UiState, at: string, magnetic: boolean) {
   const clips = project.tracks.filter((track) => track.kind !== "subtitle").flatMap((track) => track.clips);
   const selected = clips.filter((clip) => state.selected.includes(clip.id));
   const cut = frameTime(frameAt(at, project.edit_rate), project.edit_rate);
-  const crossing = clips.filter(
-    (clip) =>
-      compare(parseRational(clip.timeline_in.t, true), parseRational(cut, true)) < 0 &&
-      compare(parseRational(clip.timeline_out.t, true), parseRational(cut, true)) > 0,
-  );
+  const crossing = crossingAt(project, cut);
   const point =
     state.edit_point &&
     editPoints(project).find(
@@ -69,27 +81,23 @@ export function timelineEdit(action: string, project: ProjectView, state: UiStat
         point.track_id === state.edit_point?.track_id &&
         compare(parseRational(point.at, true), parseRational(state.edit_point.at, true)) === 0,
     );
-  if (action === "split_at_playhead" || action === "split_all_at_playhead") {
-    const all = action === "split_all_at_playhead";
+  if (action === "split_all_at_playhead") return { label: "所有轨道在播放头切开", ops: splitAllAt(project, cut) };
+  if (action === "split_at_playhead") {
     const top = project.tracks.find(
       (track) =>
         track.kind === "video" && track.enabled && track.clips.some((clip) => clip.enabled && crossing.includes(clip)),
     );
-    const targets = all
-      ? crossing
-      : selected.length
-        ? selected.filter((clip) => crossing.includes(clip))
-        : (top?.clips.filter((clip) => clip.enabled && crossing.includes(clip)).slice(0, 1) ?? []);
+    const targets = selected.length
+      ? selected.filter((clip) => crossing.includes(clip))
+      : (top?.clips.filter((clip) => clip.enabled && crossing.includes(clip)).slice(0, 1) ?? []);
     return {
-      label: all ? "所有轨道在播放头切开" : "在播放头切开",
+      label: "在播放头切开",
       ops: targets
         .filter(
           (clip, index) =>
-            all ||
-            !clip.occurrence_id ||
-            targets.findIndex((other) => other.occurrence_id === clip.occurrence_id) === index,
+            !clip.occurrence_id || targets.findIndex((other) => other.occurrence_id === clip.occurrence_id) === index,
         )
-        .map((clip) => ({ op: "split", clip_id: clip.id, at: cut, ...(all ? { linked: false } : {}) })),
+        .map((clip) => ({ op: "split", clip_id: clip.id, at: cut })),
     };
   }
   if (action === "ripple_delete" || action === "lift_delete")

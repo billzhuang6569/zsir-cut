@@ -29,6 +29,7 @@ import {
   numberOf,
   parseRational,
   pixelAt,
+  pointerFrameTime,
   pointerTime,
   printRational,
   rational,
@@ -39,7 +40,7 @@ import {
   sub,
   timecode,
 } from "./timeline.js";
-import { editPoints, keyboardKey, timelineEdit } from "./timelineActions.js";
+import { editPoints, keyboardKey, splitAllAt, timelineEdit } from "./timelineActions.js";
 import { moveClipPreview, moveGroup, moveInsert, moveTarget, snapEdges } from "./timelineMove.js";
 import { cueTrimTarget, type TrimEdge, trimTarget } from "./timelineTrim.js";
 import { useTimelineGestures } from "./useTimelineGestures.js";
@@ -377,6 +378,8 @@ export function TimelinePreview({
     },
   });
   const [tool, setTool] = useState("select");
+  const temporaryTool = useRef<{ key: string; previous: string; started: number; used: boolean } | null>(null);
+  const [bladeHover, setBladeHover] = useState<{ id: string; x: number; shift: boolean; alt: boolean } | null>(null);
   const [writeError, setWriteError] = useState<string | null>(null);
   const [writeErrorDetail, setWriteErrorDetail] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
@@ -928,7 +931,12 @@ export function TimelinePreview({
       },
     ]);
   useEffect(() => {
+    const modifiers = (event: KeyboardEvent) => {
+      if (event.key === "Shift" || event.key === "Alt")
+        setBladeHover((hover) => hover && { ...hover, shift: event.shiftKey, alt: event.altKey });
+    };
     const keydown = (event: KeyboardEvent) => {
+      modifiers(event);
       if (event.defaultPrevented || event.isComposing || state.export?.open) return;
       if (
         event.target instanceof Element &&
@@ -1001,6 +1009,14 @@ export function TimelinePreview({
       }
       if (!project || dragging.current) return;
       if (action.startsWith("tool_")) {
+        if (event.repeat) return;
+        temporaryTool.current = {
+          key: event.code || event.key.toLowerCase(),
+          previous: temporaryTool.current?.previous ?? tool,
+          started: performance.now(),
+          used: false,
+        };
+        setBladeHover(null);
         setTool(action.slice(5));
         return;
       }
@@ -1073,9 +1089,52 @@ export function TimelinePreview({
           },
         });
     };
+    const keyup = (event: KeyboardEvent) => {
+      modifiers(event);
+      const held = temporaryTool.current;
+      if (!held || held.key !== (event.code || event.key.toLowerCase())) return;
+      temporaryTool.current = null;
+      if (held.used || performance.now() - held.started >= 300) {
+        setTool(held.previous);
+        setBladeHover(null);
+      }
+    };
+    const blur = () => {
+      if (temporaryTool.current) setTool(temporaryTool.current.previous);
+      temporaryTool.current = null;
+      setBladeHover(null);
+    };
     window.addEventListener("keydown", keydown);
-    return () => window.removeEventListener("keydown", keydown);
+    window.addEventListener("keyup", keyup);
+    window.addEventListener("blur", blur);
+    return () => {
+      window.removeEventListener("keydown", keydown);
+      window.removeEventListener("keyup", keyup);
+      window.removeEventListener("blur", blur);
+    };
   });
+  const bladePoint = (x: number) => {
+    const scroller = gestures.scroller.current;
+    const ruler = scroller?.querySelector<HTMLElement>(".zc-ruler");
+    if (!project || !scroller || !ruler) return null;
+    const left = scroller.getBoundingClientRect().left;
+    const label = ruler.getBoundingClientRect().left - left + scroller.scrollLeft;
+    const cut = pointerFrameTime(x - left + scroller.scrollLeft - label, scale, project.edit_rate);
+    return snapEdges(project, [], ["0s"], rational(0n), parseRational(cut, true), scale, snap, at);
+  };
+  const bladeTarget = tool === "blade" && bladeHover && !dragging.current ? bladePoint(bladeHover.x) : null;
+  const bladeClip = project?.tracks.flatMap((track) => track.clips).find((clip) => clip.id === bladeHover?.id);
+  const bladeTracks =
+    project?.tracks.filter(
+      (track) =>
+        track.kind !== "subtitle" &&
+        (bladeHover?.shift ||
+          track.clips.some(
+            (clip) =>
+              clip.id === bladeClip?.id ||
+              (!bladeHover?.alt && bladeClip?.occurrence_id && clip.occurrence_id === bladeClip.occurrence_id),
+          )),
+    ) ?? [];
   const dropPoint = (x: number, element: HTMLElement) => {
     if (!project) return;
     let target = pointerTime(x - element.getBoundingClientRect().left, scale, project.edit_rate);
@@ -1390,7 +1449,10 @@ export function TimelinePreview({
               icon="select"
               label={`选择 ${keymap.tool_select ?? ""}`}
               pressed={tool === "select"}
-              onClick={() => setTool("select")}
+              onClick={() => {
+                setBladeHover(null);
+                setTool("select");
+              }}
             />
             <IconButton
               icon="blade"
@@ -1398,6 +1460,7 @@ export function TimelinePreview({
               pressed={tool === "blade"}
               disabled={!project || busy || readOnly}
               onClick={() => {
+                setBladeHover(null);
                 setTool("blade");
               }}
             />
@@ -1426,7 +1489,10 @@ export function TimelinePreview({
               icon="roll"
               label={`滚动编辑 ${keymap.tool_roll ?? ""}`}
               pressed={tool === "roll"}
-              onClick={() => setTool("roll")}
+              onClick={() => {
+                setBladeHover(null);
+                setTool("roll");
+              }}
             />
             <span className="zc-grow" />
             <span className="zc-count" title="片段">
@@ -1448,12 +1514,32 @@ export function TimelinePreview({
               onChange={(event) => gestures.zoom(Number(event.target.value))}
             />
           </section>
+          {/* biome-ignore lint/a11y/useKeyWithClickEvents: Timeline keyboard actions are handled by the window listener. */}
           <section
             aria-label="时间线"
-            className={`zc-timeline zc-track-height-${trackHeight}`}
+            className={`zc-timeline zc-track-height-${trackHeight}${tool === "blade" ? " is-blade" : ""}`}
             ref={gestures.scroller}
             {...gestures.handlers}
+            onPointerDown={(event) => {
+              if (tool !== "blade" || (event.target as Element).closest(".zc-clip-video,.zc-clip-audio"))
+                gestures.handlers.onPointerDown(event);
+            }}
+            onClick={(event) => {
+              if (tool !== "blade") gestures.handlers.onClick(event);
+            }}
+            onPointerMove={(event) => {
+              gestures.handlers.onPointerMove(event);
+              const clip = (event.target as Element).closest<HTMLElement>(".zc-clip-video,.zc-clip-audio");
+              setBladeHover(
+                tool === "blade" && clip && !dragging.current
+                  ? { id: clip.dataset.selectionId ?? "", x: event.clientX, shift: event.shiftKey, alt: event.altKey }
+                  : null,
+              );
+            }}
+            onPointerLeave={() => setBladeHover(null)}
             onPointerDownCapture={(event) => {
+              if (temporaryTool.current) temporaryTool.current.used = true;
+              setBladeHover(null);
               if (
                 event.button === 0 &&
                 !(event.target as Element).closest(
@@ -1463,7 +1549,8 @@ export function TimelinePreview({
                 preventPointerSelection(event);
                 window.getSelection()?.removeAllRanges();
               }
-              if (state.preview === "media") update({ ...state, preview: "timeline", playing: false });
+              if (tool !== "blade" && state.preview === "media")
+                update({ ...state, preview: "timeline", playing: false });
             }}
           >
             {hideViewer && (error || writeError) && (
@@ -1662,6 +1749,15 @@ export function TimelinePreview({
                         setDrop(null);
                       }}
                     >
+                      {bladeTarget && bladeTracks.some((item) => item.id === track.id) && (
+                        <span
+                          aria-hidden="true"
+                          className={`zc-blade-line${bladeTarget.line !== null ? " is-snapped" : ""}`}
+                          style={{ left: pixelAt(bladeTarget.to, scale) }}
+                        >
+                          {bladeTracks[0]?.id === track.id && <output>{timecode(bladeTarget.to, project)}</output>}
+                        </span>
+                      )}
                       {drop?.track === track.id && (
                         <span className="zc-drop-preview" style={{ left: pixelAt(drop.at, scale) }} />
                       )}
@@ -1679,6 +1775,7 @@ export function TimelinePreview({
                             style={{ left: pixelAt(point.at, scale) }}
                             onClick={(event) => {
                               event.stopPropagation();
+                              if (tool === "blade") return;
                               update({
                                 ...latest.current.state,
                                 selected: [],
@@ -1689,6 +1786,7 @@ export function TimelinePreview({
                             }}
                             onPointerDown={(event) => {
                               event.stopPropagation();
+                              if (tool === "blade") return;
                               update({
                                 ...latest.current.state,
                                 selected: [],
@@ -1812,19 +1910,32 @@ export function TimelinePreview({
                                 : {}),
                             }}
                             onClick={(event) => {
-                              gestures.select([item.id], event);
+                              if (tool !== "blade") {
+                                gestures.select([item.id], event);
+                                return;
+                              }
+                              if (busy || readOnly || track.kind === "subtitle") return;
+                              const target = bladePoint(event.clientX);
                               if (
-                                tool === "blade" &&
-                                contains(item.timeline_in.t, item.timeline_out.t, at) &&
-                                compare(parseRational(at, true), parseRational(item.timeline_in.t, true)) > 0
+                                !target ||
+                                !contains(item.timeline_in.t, item.timeline_out.t, target.to) ||
+                                compare(parseRational(target.to, true), parseRational(item.timeline_in.t, true)) <= 0
                               )
-                                void write("edit", "切开片段", [
-                                  {
-                                    op: "split",
-                                    clip_id: item.id,
-                                    at: frameTime(frameAt(at, project.edit_rate), project.edit_rate),
-                                  },
-                                ]);
+                                return;
+                              void write(
+                                "edit",
+                                event.shiftKey ? "所有轨道在落点切开" : "切开片段",
+                                event.shiftKey
+                                  ? splitAllAt(project, target.to)
+                                  : [
+                                      {
+                                        op: "split",
+                                        clip_id: item.id,
+                                        at: target.to,
+                                        ...(event.altKey ? { linked: false } : {}),
+                                      },
+                                    ],
+                              );
                             }}
                           >
                             {track.kind !== "subtitle" &&
@@ -1888,9 +1999,11 @@ export function TimelinePreview({
                                   cursor: "not-allowed",
                                   ...(trimming ? { opacity: 0.5, zIndex: 4 } : {}),
                                 }}
-                                onClick={(event) => gestures.select([cue.cue_id], event)}
+                                onClick={(event) => {
+                                  if (tool !== "blade") gestures.select([cue.cue_id], event);
+                                }}
                                 onDoubleClick={() => {
-                                  if (readOnly) return;
+                                  if (readOnly || tool === "blade") return;
                                   update({
                                     ...latest.current.state,
                                     panel: "subtitles",

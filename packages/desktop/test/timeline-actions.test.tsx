@@ -82,9 +82,9 @@ async function key(notation: string, target: EventTarget = window) {
 const action = (name: Action) => key(reply().keymap[name] as string);
 const writes = () => call.mock.calls.filter(([verb]) => !verb.startsWith("prefs_"));
 const lastOps = () => writes().at(-1)?.[1].ops;
-async function pointer(target: HTMLElement, type: string, x: number, y = 40) {
+async function pointer(target: HTMLElement, type: string, x: number, y = 40, options: MouseEventInit = {}) {
   await act(async () => {
-    const event = new MouseEvent(type, { bubbles: true, clientX: x, clientY: y, button: 0 });
+    const event = new MouseEvent(type, { bubbles: true, clientX: x, clientY: y, button: 0, ...options });
     Object.defineProperty(event, "pointerId", { value: 1 });
     target.dispatchEvent(event);
   });
@@ -535,4 +535,198 @@ it("reports selected edit points and the viewed history revision to the host", a
     connection();
     vi.unstubAllGlobals();
   }
+});
+
+describe("blade tool", () => {
+  const clip = () => get('[data-selection-id="c00"]');
+  const release = (key: string) =>
+    act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keyup", { key }));
+    });
+  const pressed = (name: string) => get(`[aria-label^="${name} "]`).getAttribute("aria-pressed");
+  const lines = () => host.querySelectorAll(".zc-blade-line");
+
+  it("cuts the clicked frame after viewport, label and scroll offsets without changing UI state", async () => {
+    state.selected = ["c11"];
+    await act(async () => render());
+    const before = structuredClone(state);
+    const scroller = get(".zc-timeline");
+    scroller.scrollLeft = 120;
+    vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue({ left: 30 } as DOMRect);
+    vi.spyOn(get(".zc-ruler"), "getBoundingClientRect").mockReturnValue({ left: -10 } as DOMRect);
+    await key("B");
+    expect(writes()).toHaveLength(0);
+    await pointer(clip(), "pointermove", 39);
+    expect(lines()[0]?.getAttribute("style")).toBe("left: 48px;");
+    expect(lines()[0]?.textContent).toBe("00:00:01:00");
+    await pointer(clip(), "pointerdown", 39);
+    expect(lines()).toHaveLength(0);
+    await pointer(clip(), "pointerup", 39);
+    await pointer(clip(), "click", 39);
+    expect(lastOps()).toEqual([{ op: "split", clip_id: "c00", at: "1s" }]);
+    expect(state).toEqual(before);
+    expect(pressed("切割")).toBe("true");
+  });
+
+  it("Shift cuts each crossing video/audio clip once, including disabled tracks, in one edit", async () => {
+    const audio = project.tracks[2];
+    if (audio) audio.enabled = false;
+    project.tracks.push({ id: "subtitle", name: "字幕", kind: "subtitle", enabled: true, clips: [] });
+    await act(async () => render());
+    await key("B");
+    await pointer(clip(), "click", 49, 40, { shiftKey: true, altKey: true });
+    expect(writes()).toHaveLength(1);
+    expect(lastOps()).toEqual(
+      ["c00", "c10", "c20"].map((id) => ({
+        op: "split",
+        clip_id: id,
+        at: "1s",
+        linked: false,
+      })),
+    );
+  });
+
+  it("Option cuts only the clicked clip with linked false", async () => {
+    await key("B");
+    await pointer(clip(), "click", 49, 40, { altKey: true });
+    expect(lastOps()).toEqual([{ op: "split", clip_id: "c00", at: "1s", linked: false }]);
+  });
+
+  it("does not cut at the in/out point or change selection on blank space or seams", async () => {
+    await key("B");
+    const before = structuredClone(state);
+    await pointer(clip(), "click", 0);
+    await pointer(clip(), "click", 192);
+    await pointer(get(".zc-track-lane"), "pointerdown", 300);
+    await pointer(get(".zc-track-lane"), "click", 300);
+    await pointer(get(".zc-seam"), "pointerdown", 192);
+    await pointer(get(".zc-seam"), "click", 192);
+    expect(writes()).toHaveLength(0);
+    expect(state).toEqual(before);
+  });
+
+  it("updates linked, Option and Shift landing lines immediately on key changes", async () => {
+    const unrelated = project.tracks[2]?.clips[0];
+    if (unrelated) unrelated.occurrence_id = "other";
+    await act(async () => render());
+    await key("B");
+    await pointer(clip(), "pointermove", 49);
+    expect(lines()).toHaveLength(2);
+    await key("⌥Alt");
+    expect(lines()).toHaveLength(1);
+    await key("⇧Shift");
+    expect(lines()).toHaveLength(3);
+    await release("Shift");
+    expect(lines()).toHaveLength(2);
+    await pointer(get(".zc-track-lane"), "pointermove", 300);
+    expect(lines()).toHaveLength(0);
+    await pointer(clip(), "pointermove", 49);
+    await pointer(clip(), "pointerout", 49, 40, { relatedTarget: document.body });
+    expect(lines()).toHaveLength(0);
+    await pointer(clip(), "pointermove", 49);
+    await click(get('[aria-label="选择 A"]'));
+    expect(lines()).toHaveLength(0);
+  });
+
+  it.each([false, true])("draws landing lines on the linked lanes when Option is %s", async (altKey) => {
+    const unrelated = project.tracks[2]?.clips[0];
+    if (unrelated) unrelated.occurrence_id = "other";
+    await act(async () => render());
+    await key("B");
+    await pointer(clip(), "pointermove", 49, 40, { altKey });
+    expect(Array.from(lines(), (line) => line.closest<HTMLElement>(".zc-track-lane")?.dataset.trackId)).toEqual(
+      altKey ? ["t0"] : ["t0", "t1"],
+    );
+    for (const line of lines()) expect((line as HTMLElement).style.left).toBe("48px");
+    expect(writes()).toHaveLength(0);
+  });
+
+  it.each([
+    ["playhead", "2s", 93],
+    ["edit", "4s", 189],
+    ["marker", "6s", 285],
+  ])("uses a solid landing line and the same snapped %s time when clicked", async (_kind, at, x) => {
+    ui.snap = true;
+    await refresh();
+    await key("B");
+    const target = get(`[data-selection-id="${at === "6s" ? "c01" : "c00"}"]`);
+    await pointer(target, "pointermove", Number(x));
+    expect(lines()[0]?.classList.contains("is-snapped")).toBe(true);
+    await pointer(target, "click", Number(x));
+    if (at === "4s") expect(writes()).toHaveLength(0);
+    else expect(lastOps()).toEqual([{ op: "split", clip_id: at === "6s" ? "c01" : "c00", at }]);
+  });
+
+  it("hides the landing line while dragging", async () => {
+    await key("B");
+    await pointer(clip(), "pointermove", 49);
+    expect(lines().length).toBeGreaterThan(0);
+    dragging.current = true;
+    await pointer(clip(), "pointermove", 50);
+    expect(lines()).toHaveLength(0);
+  });
+
+  it("suppresses the release click after dragging with the blade tool", async () => {
+    await key("B");
+    await pointer(clip(), "pointerdown", 49);
+    await pointer(clip(), "pointermove", 70);
+    expect(lines()).toHaveLength(0);
+    await pointer(clip(), "pointerup", 70);
+    await pointer(clip(), "click", 70, 40, { detail: 1 });
+    expect(writes()).toHaveLength(0);
+    expect(state.selected).toEqual([]);
+  });
+
+  it.each([
+    ["B", "切割"],
+    ["T", "滚动编辑"],
+    ["A", "选择"],
+  ])("%s is temporary after 300ms and short taps retain the new tool", async (toolKey, label) => {
+    if (toolKey === "A") await click(get('[aria-label="切割 B"]'));
+    const original = toolKey === "A" ? "切割" : "选择";
+    let now = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    await key(toolKey);
+    expect(pressed(label)).toBe("true");
+    now = 300;
+    await release(toolKey);
+    expect(pressed(original)).toBe("true");
+    await key(toolKey);
+    now = 599;
+    await release(toolKey);
+    expect(pressed(label)).toBe("true");
+    expect(writes()).toHaveLength(0);
+  });
+
+  it("restores the previous tool after a pointerdown even with a short hold", async () => {
+    await key("B");
+    await pointer(clip(), "pointerdown", 49);
+    await pointer(clip(), "pointerup", 49);
+    await pointer(clip(), "click", 49);
+    await release("B");
+    expect(pressed("选择")).toBe("true");
+    expect(writes()).toHaveLength(1);
+  });
+
+  it("ignores repeat keydown without resetting the hold timer", async () => {
+    let now = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    await key("B");
+    now = 250;
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "B", repeat: true, cancelable: true }));
+    });
+    now = 300;
+    await release("B");
+    expect(pressed("选择")).toBe("true");
+    expect(writes()).toHaveLength(0);
+  });
+
+  it("restores a held tool on blur and ignores its later keyup", async () => {
+    await key("B");
+    await act(async () => window.dispatchEvent(new Event("blur")));
+    expect(pressed("选择")).toBe("true");
+    await release("B");
+    expect(pressed("选择")).toBe("true");
+  });
 });
