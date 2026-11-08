@@ -42,7 +42,7 @@ import {
 } from "./timeline.js";
 import { editPoints, keyboardKey, splitAllAt, timelineEdit } from "./timelineActions.js";
 import { moveClipPreview, moveGroup, moveInsert, moveTarget, snapEdges } from "./timelineMove.js";
-import { cueTrimTarget, type TrimEdge, trimTarget } from "./timelineTrim.js";
+import { cueTrimTarget, rollTarget, type TrimEdge, trimTarget } from "./timelineTrim.js";
 import { useTimelineGestures } from "./useTimelineGestures.js";
 import { Wave } from "./Wave.js";
 
@@ -50,6 +50,14 @@ export { Wave } from "./Wave.js";
 import "./timeline.css";
 
 let prerollLead = 0.3;
+
+function editCursor(mode: "trim" | "ripple" | "roll", edge: TrimEdge = "out") {
+  const bracket = edge === "in" ? "M15 5H10V19H15" : "M9 5H14V19H9";
+  const path = mode === "roll" ? "M9 5H6V19H9M15 5H18V19H15M9 12H15" : bracket;
+  const film = mode === "ripple" ? '<path d="M2 8V16M5 8V16M19 12H23M21 10L23 12L21 14"/>' : "";
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><g fill="none" stroke="black" stroke-width="4"><path d="${path}"/></g><g fill="none" stroke="white" stroke-width="2"><path d="${path}"/>${film}</g></svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}") 12 12, ew-resize`;
+}
 
 const cueKey = (cue: CueView) => `${cue.track_id}:${cue.cue_id}:${cue.piece}:${cue.start}`;
 
@@ -200,7 +208,29 @@ export function TimelinePreview({
     y: number;
     target: ReturnType<typeof moveTarget> & { insert?: NonNullable<ReturnType<typeof moveInsert>>["insert"] };
   } | null>(null);
-  const [trimPreview, setTrimPreview] = useState<(ReturnType<typeof trimTarget> & { edge: TrimEdge }) | null>(null);
+  const [trimPreview, setTrimPreview] = useState<
+    (ReturnType<typeof trimTarget> & { edge: TrimEdge; following?: ClipView[] }) | null
+  >(null);
+  const [metaKey, setMetaKey] = useState(false);
+  const [dragFeedback, setDragFeedback] = useState<{
+    x: number;
+    y: number;
+    delta: string;
+    durations: string[];
+    cursor: string;
+  } | null>(null);
+  useEffect(() => {
+    const modifiers = (event: KeyboardEvent) => setMetaKey(event.metaKey);
+    const reset = () => setMetaKey(false);
+    window.addEventListener("keydown", modifiers);
+    window.addEventListener("keyup", modifiers);
+    window.addEventListener("blur", reset);
+    return () => {
+      window.removeEventListener("keydown", modifiers);
+      window.removeEventListener("keyup", modifiers);
+      window.removeEventListener("blur", reset);
+    };
+  }, []);
   const [cuePreview, setCuePreview] = useState<{
     cue: CueView;
     edge: TrimEdge;
@@ -234,14 +264,14 @@ export function TimelinePreview({
     scale,
     setScale,
     clipDrag: (event, element) => {
-      if (!project || busy || readOnly || tool !== "select") return;
+      if (!project || busy || readOnly || (tool !== "select" && tool !== "roll")) return;
       const id = element.dataset.selectionId;
       const edge = (event.target as Element).closest<HTMLElement>("[data-trim-edge]")?.dataset.trimEdge as
         | TrimEdge
         | undefined;
       if (element.dataset.cueKey) {
         const cue = project.cues.find((cue) => cueKey(cue) === element.dataset.cueKey);
-        if (!cue || !edge) return;
+        if (!cue || !edge || tool !== "select") return;
         const origin = Math.round(event.clientX);
         const scroll = gestures.scroller.current?.scrollLeft ?? 0;
         const calculate = (point: { clientX: number }) =>
@@ -273,12 +303,19 @@ export function TimelinePreview({
         (track) => track.kind !== "subtitle" && track.clips.some((clip) => clip.id === id),
       );
       if (!id || !track) return;
+      if (edge && tool === "roll") {
+        const anchor = track.clips.find((clip) => clip.id === id);
+        const at = edge === "in" ? anchor?.timeline_in.t : anchor?.timeline_out.t;
+        const point = points.find((point) => point.track_id === track.id && point.at === at);
+        const left = track.clips.find((clip) => clip.id === point?.clip_id);
+        if (left) return rollDrag(event, left, point);
+      }
       if (edge) {
         const anchor = track.clips.find((clip) => clip.id === id);
         if (!anchor || anchor.time_map || anchor.speed === "map") return;
         const origin = Math.round(event.clientX);
         const scroll = gestures.scroller.current?.scrollLeft ?? 0;
-        const calculate = (point: { clientX: number; altKey: boolean }) =>
+        const calculate = (point: { clientX: number; altKey: boolean; metaKey: boolean }) =>
           trimTarget(
             project,
             anchor,
@@ -288,12 +325,27 @@ export function TimelinePreview({
             scale,
             snapRef.current,
             seekTarget(project, project.cues, latest.current.state.playhead),
-            magnetic,
+            dragMagnetic(point.metaKey),
           );
         return {
-          move: (point) => setTrimPreview({ ...calculate(point), edge }),
+          move: (point) => {
+            const target = calculate(point);
+            setTrimPreview({ ...target, edge });
+            const to = parseRational(target.to, true);
+            feedback(
+              point,
+              sub(to, parseRational(edge === "in" ? anchor.timeline_in.t : anchor.timeline_out.t, true)),
+              [
+                edge === "in"
+                  ? sub(parseRational(anchor.timeline_out.t, true), to)
+                  : sub(to, parseRational(anchor.timeline_in.t, true)),
+              ],
+              editCursor(dragMagnetic(point.metaKey) ? "ripple" : "trim", edge),
+            );
+          },
           end: (point, moved) => {
             setTrimPreview(null);
+            setDragFeedback(null);
             if (!moved) return;
             const result = calculate(point);
             if (result.blocked) {
@@ -303,17 +355,29 @@ export function TimelinePreview({
             }
             if (result.to === (edge === "in" ? anchor.timeline_in.t : anchor.timeline_out.t)) return;
             void write("edit", edge === "in" ? "修剪片段入点" : "修剪片段出点", [
-              { op: "trim", clip_id: id, edge, to: result.to, ripple: magnetic, linked: !point.altKey },
+              {
+                op: "trim",
+                clip_id: id,
+                edge,
+                to: result.to,
+                ripple: dragMagnetic(point.metaKey),
+                linked: !point.altKey,
+              },
             ]);
           },
-          cancel: () => setTrimPreview(null),
+          cancel: () => {
+            setTrimPreview(null);
+            setDragFeedback(null);
+          },
         };
       }
+      if (tool !== "select") return;
       const group = moveGroup(project, state.selected, id);
       const origin = Math.round(event.clientX);
       const scroll = gestures.scroller.current?.scrollLeft ?? 0;
       const lane = element.closest<HTMLElement>(".zc-track-lane");
-      const calculate = (event: { clientX: number; clientY: number }) => {
+      const calculate = (event: { clientX: number; clientY: number; metaKey: boolean }) => {
+        const magnetic = dragMagnetic(event.metaKey);
         const targetLane = [...(gestures.scroller.current?.querySelectorAll<HTMLElement>(".zc-track-lane") ?? [])].find(
           (lane) => {
             const rect = lane.getBoundingClientRect();
@@ -346,6 +410,14 @@ export function TimelinePreview({
       return {
         move: (event) => {
           const preview = calculate(event);
+          const anchor = group.moving.find((clip) => clip.id === id);
+          if (anchor)
+            feedback(
+              event,
+              sub(parseRational(preview.target.to, true), group.earliest),
+              [sub(parseRational(anchor.timeline_out.t, true), parseRational(anchor.timeline_in.t, true))],
+              dragMagnetic(event.metaKey) ? "copy" : "grabbing",
+            );
           setMovePreview({
             ids: group.moving.map((clip) => clip.id),
             anchor: id,
@@ -356,6 +428,7 @@ export function TimelinePreview({
         },
         end: (event, moved) => {
           setMovePreview(null);
+          setDragFeedback(null);
           if (!moved) return;
           const result = calculate(event);
           if (result.blocked) {
@@ -368,12 +441,15 @@ export function TimelinePreview({
               op: "move",
               clip_ids: group.requested.map((clip) => clip.id),
               to: result.target.to,
-              mode: magnetic ? "insert" : "place",
+              mode: dragMagnetic(event.metaKey) ? "insert" : "place",
               ...(result.trackId !== track.id ? { track_id: result.trackId } : {}),
             },
           ]);
         },
-        cancel: () => setMovePreview(null),
+        cancel: () => {
+          setMovePreview(null);
+          setDragFeedback(null);
+        },
       };
     },
   });
@@ -383,9 +459,82 @@ export function TimelinePreview({
   const [writeError, setWriteError] = useState<string | null>(null);
   const [writeErrorDetail, setWriteErrorDetail] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
-  const { keymap, snap, magnetic, trackHeight, setUi } = preferences;
+  const { keymap, preset, snap, magnetic, trackHeight, setUi } = preferences;
   const snapRef = useRef(snap);
   snapRef.current = snap;
+  function dragMagnetic(meta: boolean) {
+    return preset === "premiere" && meta ? !magnetic : magnetic;
+  }
+  function feedback(
+    point: { clientX: number; clientY: number },
+    delta: ReturnType<typeof rational>,
+    durations: ReturnType<typeof rational>[],
+    cursor: string,
+  ) {
+    if (!project) return;
+    const elapsed = { ...project, start_timecode: "00:00:00:00" };
+    const negative = delta.numerator < 0n;
+    setDragFeedback({
+      x: point.clientX + 16,
+      y: point.clientY + 20,
+      cursor,
+      delta: `${negative ? "−" : "+"}${timecode(printRational(negative ? mul(delta, rational(-1n)) : delta, true), elapsed)}`,
+      durations: durations.map((duration) => timecode(printRational(duration, true), elapsed)),
+    });
+  }
+  function rollDrag(
+    event: React.PointerEvent<HTMLElement>,
+    left: ClipView,
+    point?: ReturnType<typeof editPoints>[number],
+  ) {
+    if (!project) return {};
+    const origin = Math.round(event.clientX);
+    const scroll = gestures.scroller.current?.scrollLeft ?? 0;
+    const calculate = (point: { clientX: number }) =>
+      rollTarget(
+        project,
+        left,
+        Math.round(point.clientX) - origin + Math.round((gestures.scroller.current?.scrollLeft ?? 0) - scroll),
+        scale,
+        snapRef.current,
+        seekTarget(project, project.cues, latest.current.state.playhead),
+      );
+    const reset = () => {
+      setTrimPreview(null);
+      setDragFeedback(null);
+    };
+    return {
+      move: (event: { clientX: number; clientY: number }) => {
+        const target = calculate(event);
+        setTrimPreview({ ...target, edge: "out" });
+        const to = parseRational(target.to, true);
+        feedback(
+          event,
+          sub(to, parseRational(left.timeline_out.t, true)),
+          [
+            sub(to, parseRational(left.timeline_in.t, true)),
+            ...target.following.slice(0, 1).map((right) => sub(parseRational(right.timeline_out.t, true), to)),
+          ],
+          editCursor("roll"),
+        );
+      },
+      end: (event: React.PointerEvent<HTMLElement>, moved: boolean) => {
+        reset();
+        if (!moved) return;
+        const target = calculate(event);
+        if (target.blocked) {
+          setWriteError(target.reason);
+          setWriteErrorDetail(undefined);
+          return;
+        }
+        if (target.to !== left.timeline_out.t)
+          void write("edit", "拖动剪点", [{ op: "roll", clip_id: left.id, edge: "out", to: target.to }]).then((ok) => {
+            if (ok && point) updateRollSelection(point, target.to);
+          });
+      },
+      cancel: reset,
+    };
+  }
   const [direction, setDirection] = useState(1n);
   const videos = useRef<(HTMLVideoElement | null)[]>([]);
   const activeVideo = useRef(0);
@@ -1529,6 +1678,7 @@ export function TimelinePreview({
             }}
             onPointerMove={(event) => {
               gestures.handlers.onPointerMove(event);
+              setMetaKey(event.metaKey);
               const clip = (event.target as Element).closest<HTMLElement>(".zc-clip-video,.zc-clip-audio");
               setBladeHover(
                 tool === "blade" && clip && !dragging.current
@@ -1558,6 +1708,21 @@ export function TimelinePreview({
                 {error || writeError}
               </p>
             )}
+            {dragFeedback &&
+              createPortal(
+                <>
+                  <style>{`body * { cursor: ${dragFeedback.cursor} !important; }`}</style>
+                  <output
+                    className="zc-drag-feedback"
+                    aria-label="拖动反馈"
+                    style={{ left: dragFeedback.x, top: dragFeedback.y }}
+                  >
+                    <span>{dragFeedback.delta}</span>
+                    <span>时长 {dragFeedback.durations.join(" / ")}</span>
+                  </output>
+                </>,
+                document.body,
+              )}
             {project && (
               <div className="zc-timeline-content" style={{ width: `calc(var(--track-label-w) + ${width}px)` }}>
                 {movePreview?.target.insert && (
@@ -1572,9 +1737,7 @@ export function TimelinePreview({
                   <div
                     className="zc-snap-line"
                     style={{ left: `calc(var(--track-label-w) + ${pixelAt(snapPreview.line, scale)}px)` }}
-                  >
-                    <output aria-label="吸附距离">{snapPreview.distance?.toFixed(1)}px</output>
-                  </div>
+                  />
                 )}
                 <div className="zc-ruler-row">
                   <span className="zc-track-name" />
@@ -1771,8 +1934,17 @@ export function TimelinePreview({
                             aria-pressed={
                               state.edit_point?.track_id === point.track_id && state.edit_point.at === point.at
                             }
-                            className={`zc-seam${state.edit_point?.track_id === point.track_id && state.edit_point.at === point.at ? " is-selected" : ""}`}
-                            style={{ left: pixelAt(point.at, scale) }}
+                            className={`zc-seam${trimPreview?.blocked && trimPreview.following && trimPreview.clips.some((clip) => clip.id === point.clip_id) ? " is-blocked" : ""}${state.edit_point?.track_id === point.track_id && state.edit_point.at === point.at ? " is-selected" : ""}`}
+                            data-edit-cursor={tool === "roll" ? "roll" : undefined}
+                            style={{
+                              left: pixelAt(
+                                trimPreview?.following && trimPreview.clips.some((clip) => clip.id === point.clip_id)
+                                  ? trimPreview.to
+                                  : point.at,
+                                scale,
+                              ),
+                              cursor: tool === "roll" ? editCursor("roll") : "default",
+                            }}
                             onClick={(event) => {
                               event.stopPropagation();
                               if (tool === "blade") return;
@@ -1794,57 +1966,21 @@ export function TimelinePreview({
                                 playing: false,
                                 edit_point: { track_id: point.track_id, at: point.at },
                               });
-                              if (readOnly || busy || tool === "blade") return;
-                              const origin = Math.round(event.clientX);
-                              const scroll = gestures.scroller.current?.scrollLeft ?? 0;
-                              const element = event.currentTarget;
-                              const reset = () => {
-                                element.style.left = `${pixelAt(point.at, scale)}px`;
-                              };
-                              const calculate = (x: number) => {
-                                const originTime = parseRational(point.at, true);
-                                const pixels =
-                                  Math.round(x) -
-                                  origin +
-                                  Math.round((gestures.scroller.current?.scrollLeft ?? 0) - scroll);
-                                return snapEdges(
-                                  project,
-                                  track.clips.map((clip) => clip.id),
-                                  [point.at],
-                                  originTime,
-                                  add(originTime, div(rational(BigInt(pixels)), rational(BigInt(scale)))),
-                                  scale,
-                                  snapRef.current,
-                                  seekTarget(project, project.cues, latest.current.state.playhead),
-                                ).to;
-                              };
-                              gestures.start(event, {
-                                move: (event) => {
-                                  const target = calculate(event.clientX);
-                                  element.style.left = `${pixelAt(target, scale)}px`;
-                                },
-                                end: (event, moved) => {
-                                  reset();
-                                  const target = calculate(event.clientX);
-                                  if (moved && target !== point.at)
-                                    void write("edit", "拖动剪点", [
-                                      { op: "roll", clip_id: point.clip_id, edge: "out", to: target },
-                                    ]).then((ok) => {
-                                      if (ok) updateRollSelection(point, target);
-                                    });
-                                },
-                                cancel: reset,
-                              });
+                              if (readOnly || busy || tool !== "roll") return;
+                              const left = track.clips.find((clip) => clip.id === point.clip_id);
+                              if (left) gestures.start(event, rollDrag(event, left, point));
                             }}
                           />
                         ))}
                       {track.clips.map((original) => {
-                        const trimming = trimPreview?.clips.some((clip) => clip.id === original.id);
+                        const following = trimPreview?.following?.some((clip) => clip.id === original.id);
+                        const trimming = following || trimPreview?.clips.some((clip) => clip.id === original.id);
+                        const previewEdge = following ? "in" : trimPreview?.edge;
                         const item =
                           trimming && trimPreview
                             ? {
                                 ...original,
-                                ...(trimPreview.edge === "in"
+                                ...(previewEdge === "in"
                                   ? {
                                       timeline_in: { t: trimPreview.to },
                                       source_in: {
@@ -1888,13 +2024,13 @@ export function TimelinePreview({
                               (state.selected.length > 0 && !state.selected.includes(item.id))
                             }
                             style={{
+                              cursor: tool === "roll" ? "default" : undefined,
                               left: pixelAt(item.timeline_in.t, scale),
                               width: clipWidth,
                               ...(trimming
                                 ? {
                                     opacity: 0.5,
                                     outline: trimPreview?.blocked ? "2px solid var(--attention)" : undefined,
-                                    cursor: trimPreview?.blocked ? "not-allowed" : "ew-resize",
                                     zIndex: 4,
                                   }
                                 : {}),
@@ -1939,24 +2075,37 @@ export function TimelinePreview({
                             }}
                           >
                             {track.kind !== "subtitle" &&
-                              tool === "select" &&
+                              (tool === "select" || tool === "roll") &&
                               !readOnly &&
                               !busy &&
                               !original.time_map &&
                               original.speed !== "map" &&
-                              (["in", "out"] as const).map((edge) => (
-                                <span
-                                  key={edge}
-                                  aria-hidden="true"
-                                  data-trim-edge={edge}
-                                  className={`zc-trim-handle zc-trim-${edge}${trimming && trimPreview?.blocked ? " is-blocked" : ""}`}
-                                  title={
-                                    edge === "in"
-                                      ? "拖动修剪入点；Option/Alt 只修剪单轨"
-                                      : "拖动修剪出点；Option/Alt 只修剪单轨"
-                                  }
-                                />
-                              ))}
+                              (["in", "out"] as const).map((edge) => {
+                                const connected = points.some(
+                                  (point) =>
+                                    point.track_id === track.id &&
+                                    point.at === (edge === "in" ? original.timeline_in.t : original.timeline_out.t),
+                                );
+                                const mode =
+                                  tool === "roll" && connected ? "roll" : dragMagnetic(metaKey) ? "ripple" : "trim";
+                                return (
+                                  <span
+                                    key={edge}
+                                    aria-hidden="true"
+                                    data-trim-edge={edge}
+                                    data-edit-cursor={mode}
+                                    style={{ cursor: editCursor(mode, edge) }}
+                                    className={`zc-trim-handle zc-trim-${edge}${trimming && previewEdge === edge && trimPreview?.blocked ? " is-blocked" : ""}`}
+                                    title={
+                                      mode === "roll"
+                                        ? "拖动滚动剪点"
+                                        : edge === "in"
+                                          ? "拖动修剪入点；Option/Alt 只修剪单轨"
+                                          : "拖动修剪出点；Option/Alt 只修剪单轨"
+                                    }
+                                  />
+                                );
+                              })}
                             {track.kind === "video" ? (
                               <Film clip={item} width={clipWidth} scale={scale} config={config} />
                             ) : (

@@ -364,7 +364,9 @@ export function SettingsPage({
                       className={`zc-settings-card${prefs.prefs.keymap.preset === preset ? " is-active" : ""}`}
                       aria-pressed={prefs.prefs.keymap.preset === preset}
                       disabled={busy}
-                      onClick={() => void run(() => save({ keymap: { preset, overrides: {} } }))}
+                      onClick={() =>
+                        void run(() => save({ keymap: { preset, overrides: {} }, ui: { magnetic: preset === "fcp" } }))
+                      }
                     >
                       <Icon name="keyboard" />
                       <strong>{preset === "premiere" ? "Premiere" : "Final Cut Pro"}</strong>

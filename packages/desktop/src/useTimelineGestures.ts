@@ -26,8 +26,8 @@ type Session = {
   element: HTMLElement;
   origin: Position;
   moved: boolean;
-  last: { clientX: number; clientY: number; altKey: boolean };
-  move?: (event: { clientX: number; clientY: number; altKey: boolean }) => void;
+  last: { clientX: number; clientY: number; altKey: boolean; metaKey: boolean };
+  move?: (event: { clientX: number; clientY: number; altKey: boolean; metaKey: boolean }) => void;
   end?: (event: PointerEvent<HTMLElement>, moved: boolean) => void;
   cancel?: () => void;
 };
@@ -87,8 +87,20 @@ export function useTimelineGestures({
         finish(true);
       }
     };
+    const modifiers = (event: KeyboardEvent) => {
+      const active = session.current;
+      if (!active || !["Meta", "Alt"].includes(event.key)) return;
+      active.last = { ...active.last, altKey: event.altKey, metaKey: event.metaKey };
+      if (active.moved) active.move?.(active.last);
+    };
     window.addEventListener("keydown", keydown);
-    return () => window.removeEventListener("keydown", keydown);
+    window.addEventListener("keydown", modifiers);
+    window.addEventListener("keyup", modifiers);
+    return () => {
+      window.removeEventListener("keydown", keydown);
+      window.removeEventListener("keydown", modifiers);
+      window.removeEventListener("keyup", modifiers);
+    };
   });
   const start = (
     event: PointerEvent<HTMLElement>,
@@ -100,7 +112,7 @@ export function useTimelineGestures({
     session.current = {
       pointerId: event.pointerId,
       element,
-      last: { clientX: event.clientX, clientY: event.clientY, altKey: event.altKey },
+      last: { clientX: event.clientX, clientY: event.clientY, altKey: event.altKey, metaKey: event.metaKey },
       origin: { x: event.clientX, y: event.clientY },
       moved: false,
       ...callbacks,
@@ -271,7 +283,7 @@ export function useTimelineGestures({
         const active = session.current;
         if (!active || active.pointerId !== event.pointerId) return;
         if (Math.hypot(event.clientX - active.origin.x, event.clientY - active.origin.y) >= 4) active.moved = true;
-        active.last = { clientX: event.clientX, clientY: event.clientY, altKey: event.altKey };
+        active.last = { clientX: event.clientX, clientY: event.clientY, altKey: event.altKey, metaKey: event.metaKey };
         if (active.moved) active.move?.(event);
       },
       onScroll() {

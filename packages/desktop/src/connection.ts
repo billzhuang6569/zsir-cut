@@ -258,7 +258,10 @@ export function connectHost(
 
 interface TimelinePreferences {
   keymap: Record<string, string | null>;
-  prefs: { ui: { snap: boolean; magnetic: boolean; track_height: "s" | "m" | "l"; layout?: Layout } };
+  prefs: {
+    keymap?: { preset: "fcp" | "premiere" };
+    ui: { snap: boolean; magnetic: boolean; track_height: "s" | "m" | "l"; layout?: Layout };
+  };
 }
 export function useTimelinePreferences(
   call: (verb: string, request: Record<string, unknown>) => Promise<unknown>,
@@ -315,6 +318,7 @@ export function useTimelinePreferences(
   return {
     keymap: preferences?.keymap ?? { open_settings: "⌘," },
     acceptPrefs,
+    preset: preferences?.prefs.keymap?.preset ?? "fcp",
     snap: state.snap ?? true,
     magnetic: preferences?.prefs.ui.magnetic ?? true,
     trackHeight: preferences?.prefs.ui.track_height ?? "m",

@@ -8,7 +8,7 @@ import { applyEdit } from "../../core/src/project/edit.js";
 import { inspect } from "../../core/src/read-views.js";
 import type { ProjectView } from "../src/connection.js";
 import { add, frameAt, frameTime, parseRational, rational, sub, type TranscriptView } from "../src/timeline.js";
-import { cueTrimTarget, trimGroup, trimTarget } from "../src/timelineTrim.js";
+import { cueTrimTarget, rollTarget, trimGroup, trimTarget } from "../src/timelineTrim.js";
 
 function fixture() {
   const parsed = parseProject(readFileSync("fixtures/regressions/trim-source-ntsc.zcut.json", "utf8"));
@@ -437,4 +437,48 @@ it("keeps a manual edge at a retime knot on its original token's forward segment
   cue.start = "13s";
   expect(cueTrimTarget(view, cue, "in", -24, 48, false, "0s")?.op.timing).toMatchObject({ start: "563/25s" });
   expect(cueTrimTarget(view, cue, "in", 24, 48, false, "0s")?.to).toBe("13s");
+});
+
+it("previews rolling on an exact NTSC frame through core and preserves the pair's total duration", () => {
+  const { project, timeline, view, anchor } = fixture();
+  for (const track of view.tracks) {
+    const left = track.clips[0];
+    if (!left) continue;
+    track.clips.push({
+      ...left,
+      id: `${left.id}_right`,
+      occurrence_id: "occ_right",
+      timeline_in: { t: left.timeline_out.t },
+      timeline_out: { t: "3003/500s" },
+      source_in: { t: "1001/1000s" },
+      source_out: { t: "3003/1000s" },
+    });
+  }
+  for (const track of timeline.tracks) {
+    if (track.kind === "subtitle") continue;
+    const left = track.clips[0];
+    if (!left) continue;
+    track.clips.push({
+      ...left,
+      id: `${left.id}_right`,
+      occurrence_id: "occ_right",
+      timeline_start: parseRational(anchor.timeline_out.t, true),
+      source_start: parseRational("1001/1000s", true),
+    });
+  }
+  const result = rollTarget(view, anchor, 48, 48, false, "0s");
+  expect(result).toMatchObject({ blocked: false, to: frameTime(150n, view.edit_rate) });
+  expect(result.clips).toHaveLength(2);
+  expect(result.following).toHaveLength(2);
+  applyEdit(project, [{ op: "roll", clip_id: anchor.id, edge: "out", to: result.to }], {}, "test");
+  for (const track of timeline.tracks) {
+    if (track.kind === "subtitle") continue;
+    const [left, right] = track.clips;
+    expect(printRational(add(left!.duration, right!.duration), true)).toBe("1001/250s");
+    expect(printRational(right!.timeline_start, true)).toBe(result.to);
+  }
+  const limited = rollTarget(view, anchor, -96, 48, false, "0s");
+  expect(limited).toMatchObject({ blocked: true, to: "3003/1000s" });
+  view.tracks[1]!.clips.pop();
+  expect(rollTarget(view, anchor, 48, 48, false, "0s").blocked).toBe(true);
 });
