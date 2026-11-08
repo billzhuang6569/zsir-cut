@@ -14,10 +14,11 @@ import { mergeKeymap } from "../../app-host/src/keymap.js";
 import type { UiState } from "../../app-host/src/ui.js";
 import { transcriptIds } from "../../core/src/project/id.ts";
 import { renderSubtitle as exportRenderer } from "../../exporters/src/subtitle-render.ts";
+import { useAiPanel } from "../src/AiPanel.js";
 import type { ProjectView } from "../src/connection.js";
 import { renderSubtitle, SubtitleCanvas } from "../src/SubtitleCanvas.js";
 import { useSubtitlePanel } from "../src/SubtitlePanel.js";
-import { initialState } from "../src/state.js";
+import { applyUi, initialState } from "../src/state.js";
 import { renderPreset, subtitlePresets } from "../src/subtitle-presets.js";
 import {
   alignment,
@@ -100,11 +101,18 @@ async function mount(
   sub = "subtitles",
   responder: (verb: string, request: Record<string, unknown>) => unknown = () => ({}),
   withPreview = false,
+  withAi = false,
 ) {
   let state: UiState = { ...initialState(), project: "/示例.zcut.json", panel: "subtitles", sub };
   let setView: (view: ProjectView) => void = () => {};
   let setUi: (state: UiState) => void = () => {};
   const call = vi.fn(async (verb: string, request: Record<string, unknown>) => responder(verb, request));
+  const aiCall = vi.fn(async (verb: string) => {
+    if (verb === "chat_agents") return [{ agent: "claude", available: true, version: "1" }];
+    if (verb === "chat_list") return [];
+    return { sessions: [], batches: [] };
+  });
+  const promptAi = vi.fn();
   const editCue = vi.fn();
   const container = document.createElement("div");
   document.body.append(container);
@@ -119,11 +127,29 @@ async function mount(
     setView = updateView;
     setUi = update;
     state = ui;
-    const panel = useSubtitlePanel({ project: current, state: ui, update, call });
+    const ai = useAiPanel({
+      call: aiCall,
+      path: withAi ? ui.project : null,
+      project: current,
+      notices: [],
+      revision: 0,
+    });
+    const panel = useSubtitlePanel({
+      project: current,
+      state: ui,
+      update,
+      call,
+      promptAi: (text) => {
+        promptAi(text);
+        update((previous) => applyUi(previous, "ui_show_panel", { panel: "ai" }));
+        ai.appendInput(text);
+      },
+    });
     return (
       <>
         {panel.controls}
         {panel.parameters}
+        {withAi && <div hidden={ui.panel !== "ai"}>{ai.chat}</div>}
         {withPreview && (
           <TimelinePreview
             project={view}
@@ -202,6 +228,8 @@ async function mount(
     container,
     call,
     editCue,
+    promptAi,
+    aiCall,
     settle,
     find,
     click,
@@ -1299,40 +1327,77 @@ it.each(["locked", "approved"])("shows a lock and read-only text for %s cues", a
   expect(h.state().subtitle_selection?.editing).toBeNull();
 });
 it.each(["tidy", "proofread"] as const)(
-  "runs selected AI %s with optional requirements, dims the range, and retries failure",
+  "keeps AI %s progress, row dimming and failure retry without starting from an entry",
   async (kind) => {
-    const h = await mount(listProject, "subtitles", () => ({ pass_id: "pass_1" }));
-    await h.key(h.find("字幕列表"), "a", { metaKey: true });
-    await h.click(kind === "tidy" ? "AI 重新分行" : "AI 校对");
-    await h.input("有什么要求？（可以不填）", "短一点");
-    await h.click("开始");
-    expect(h.call.mock.lastCall).toEqual([`subtitle_${kind}`, { cue_ids: ["cue_1", "cue_2"], request: "短一点" }]);
-    const running = {
-      pass_id: "pass_1",
-      kind,
-      state: "running" as const,
-      done: 1,
-      total: 2,
-      reason: "",
-    };
+    const h = await mount(listProject);
+    const running = { pass_id: "pass_1", kind, state: "running" as const, done: 1, total: 2, reason: "" };
     await h.view({ ...listProject, subtitle_pass: running, subtitlePass: { running: true, warnings: [] } });
     expect(h.container.querySelectorAll(".is-running")).toHaveLength(2);
-    expect(h.container.querySelectorAll(".zc-sub-row")).toHaveLength(2);
     expect(h.container.textContent).toContain(`${kind === "tidy" ? "AI 重新分行" : "AI 校对"} · 1/2`);
+    expect(h.call).not.toHaveBeenCalled();
     await h.view({ ...listProject, subtitle_pass: { ...running, state: "failed", reason: "Agent 超时" } });
     expect(h.container.textContent).toContain("Agent 超时");
     expect(h.container.querySelectorAll(".is-running")).toHaveLength(0);
     await h.click("重试 AI 操作");
-    expect(h.call).toHaveBeenCalledTimes(2);
-    await h.click("AI 校对");
-    await h.click("开始");
-    expect(h.call.mock.lastCall).toEqual(["subtitle_proofread", { cue_ids: ["cue_1", "cue_2"] }]);
-    await h.click("更多字幕操作");
-    await h.click("全部校对");
-    await h.click("开始");
-    expect(h.call.mock.lastCall).toEqual(["subtitle_proofread", {}]);
+    expect(h.call.mock.calls).toEqual([["chat_subtitle_retry", {}]]);
   },
 );
+
+it.each(["toolbar", "selection", "context", "all"] as const)(
+  "fills both exact prompts from the %s entry, switches to AI, appends and focuses without requests",
+  async (entry) => {
+    const third = { ...nextCue, cue_id: "cue_3", start: "3660s", end: "3725s", text: "第三条" };
+    const h = await mount({ ...listProject, cues: [third, cue, nextCue] }, "subtitles", () => ({}), false, true);
+    if (entry !== "toolbar") await h.update({ selected: ["cue_3", "cue_1", "cue_2"] });
+    await h.input("发给 AI", "原来的要求");
+    for (const kind of ["tidy", "proofread"] as const) {
+      const label = kind === "tidy" ? "AI 重新分行" : "AI 校对";
+      await h.update({ panel: "subtitles" });
+      h.call.mockClear();
+      h.aiCall.mockClear();
+      if (entry === "context") {
+        await act(async () => h.find(cue.text).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true })));
+        const button = [...h.find("字幕菜单").querySelectorAll("button")].find((node) => node.textContent === label);
+        await act(async () => button?.click());
+      } else if (entry === "all") {
+        await h.click("更多字幕操作");
+        await h.click(kind === "tidy" ? "全部重新分行" : "全部校对");
+      } else {
+        const toolbar = h.container.querySelector(entry === "selection" ? ".zc-sub-toolbar" : ".zc-sub-search-row");
+        const button = toolbar?.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`);
+        expect(button).toBeTruthy();
+        await act(async () => button?.click());
+      }
+      const range = entry === "toolbar" || entry === "all" ? "全部字幕" : "选中的 3 条字幕（00:01–1:02:05）";
+      const prompt = kind === "tidy" ? `把${range}按意思重新分行。` : `校对${range}，只改错字和专有名词，不改意思。`;
+      expect(h.promptAi).toHaveBeenLastCalledWith(prompt);
+      expect(h.state().panel).toBe("ai");
+      expect(h.state().subtitle_selection?.cue_ids).toEqual(
+        entry === "toolbar" || entry === "all" ? [] : ["cue_1", "cue_2", "cue_3"],
+      );
+      const input = h.find<HTMLTextAreaElement>("发给 AI");
+      expect(input.value).toBe(`原来的要求\n\n${prompt}`);
+      expect(document.activeElement).toBe(input);
+      expect(input.selectionStart).toBe(input.value.length);
+      expect(input.selectionEnd).toBe(input.value.length);
+      expect(h.call).not.toHaveBeenCalled();
+      expect(h.aiCall).not.toHaveBeenCalled();
+      expect(h.container.querySelector(".zc-sub-ai")).toBeNull();
+      await h.input("发给 AI", "原来的要求");
+    }
+  },
+);
+it("uses the context row as the Agent selection when it was not selected", async () => {
+  const h = await mount(listProject);
+  await h.update({ selected: ["cue_2"] });
+  await act(async () => h.find(cue.text).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true })));
+  const button = [...h.find("字幕菜单").querySelectorAll("button")].find((node) => node.textContent === "AI 校对");
+  await act(async () => button?.click());
+  expect(h.promptAi).toHaveBeenCalledWith("校对选中的 1 条字幕（00:01–00:03），只改错字和专有名词，不改意思。");
+  expect(h.state().subtitle_selection?.cue_ids).toEqual(["cue_1"]);
+  expect(h.call).not.toHaveBeenCalled();
+});
+
 it("underlines edited words, exposes original text and restores through edit_text in the context menu", async () => {
   const h = await mount({
     ...listProject,
@@ -1358,8 +1423,13 @@ it("underlines edited words, exposes original text and restores through edit_tex
     { op: "edit_text", transcript_id: "tra_1", from_token: "tok_1", to_token: "tok_1", text: "您好" },
   ]);
 });
-it("finds previous/next matches, highlights the current occurrence and replaces only one", async () => {
-  const repeated = {
+it("counts all matches and replaces one at a time, moving the highlight and scrolling across rows", async () => {
+  const scroll = vi.fn();
+  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: scroll });
+  cleanups.push(async () => {
+    Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
+  });
+  const first = {
     ...cue,
     text: "你好你好",
     tokens: [
@@ -1367,22 +1437,96 @@ it("finds previous/next matches, highlights the current occurrence and replaces 
       { id: "tok_2", text: "你好" },
     ],
   };
-  const h = await mount({
-    ...listProject,
-    cues: [repeated, { ...nextCue, text: "你好", tokens: [{ id: "tok_3", text: "你好" }] }],
-  });
+  const second = { ...nextCue, text: "你好", tokens: [{ id: "tok_3", text: "你好" }] };
+  const h = await mount({ ...listProject, cues: [first, second] });
+  await h.input("搜索字幕", "不存在");
   await h.click("查找替换");
+  expect(h.container.querySelector(".zc-sub-replace output")).toBeNull();
+  expect(h.find<HTMLInputElement>("查找").placeholder).toBe("旧词");
+  expect(h.find<HTMLInputElement>("替换为").placeholder).toBe("新词");
+  for (const label of ["替换下一处", "全部替换"]) {
+    const button = [...h.container.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === label);
+    expect(button?.disabled).toBe(true);
+    expect(button?.title).toBeTruthy();
+  }
   await h.input("查找", "你好");
   await h.input("替换为", "您好");
+  expect(h.container.querySelector(".zc-sub-replace output")?.textContent).toBe("3 处");
   expect(h.container.querySelectorAll("mark")).toHaveLength(1);
-  await h.click("下一个");
-  await h.click("替换");
+  await h.click("替换下一处");
+  expect(h.call.mock.lastCall?.[1].ops).toEqual([expect.objectContaining({ from_token: "tok_1", text: "您好" })]);
+  const updated = {
+    ...first,
+    text: "您好你好",
+    tokens: [
+      { id: "tok_1", text: "您好" },
+      { id: "tok_2", text: "你好" },
+    ],
+  };
+  await h.view({ ...listProject, cues: [updated, second] });
+  expect(h.container.querySelector(".zc-sub-replace output")?.textContent).toBe("2 处");
+  expect(h.container.querySelector("mark")?.parentElement?.getAttribute("data-token")).toBe("tok_2");
+  await h.click("替换下一处");
+  expect(h.call.mock.lastCall?.[1].ops).toEqual([expect.objectContaining({ from_token: "tok_2", text: "您好" })]);
+  scroll.mockClear();
+  await h.view({
+    ...listProject,
+    cues: [{ ...updated, text: "您好您好", tokens: updated.tokens.map((t) => ({ ...t, text: "您好" })) }, second],
+  });
+  expect(h.container.querySelector(".zc-sub-replace output")?.textContent).toBe("1 处");
+  const row = h.container.querySelector("mark")?.closest(".zc-sub-row");
+  expect(row?.textContent).toContain("你好");
+  expect(scroll).toHaveBeenCalled();
+  expect(scroll.mock.instances.at(-1)).toBe(row);
+  expect(h.container.querySelector('[aria-label="上一个"], [aria-label="下一个"]')).toBeNull();
+  await h.input("查找", "没有这个词");
+  expect(h.container.querySelector(".zc-sub-replace output")?.textContent).toBe("没有找到");
+  expect(
+    [...h.container.querySelectorAll<HTMLButtonElement>(".zc-sub-replace-actions button")].every((b) => b.disabled),
+  ).toBe(true);
+  await h.input("查找", "");
+  expect(h.container.querySelector(".zc-sub-replace output")).toBeNull();
+  expect(
+    [...h.container.querySelectorAll<HTMLButtonElement>(".zc-sub-replace-actions button")].every((b) => b.disabled),
+  ).toBe(true);
+});
+
+it("counts locked matches, skips them for single replacement, and toggles case sensitivity with Aa", async () => {
+  const h = await mount({
+    ...project,
+    cues: [{ ...cue, locked: true, text: "Word word" }, { ...project.cues[1], text: "Word word" } as typeof cue],
+  });
+  await h.click("查找替换");
+  await h.input("查找", "Word");
+  expect(h.container.querySelector(".zc-sub-replace output")?.textContent).toBe("4 处");
+  expect(h.find("区分大小写").getAttribute("aria-pressed")).toBe("false");
+  expect(h.find("区分大小写").title).toBe("区分大小写");
+  await h.click("区分大小写");
+  expect(h.find("区分大小写").getAttribute("aria-pressed")).toBe("true");
+  expect(h.container.querySelector(".zc-sub-replace output")?.textContent).toBe("2 处");
+  await h.click("替换下一处");
   expect(h.call.mock.lastCall?.[1].ops).toEqual([
-    expect.objectContaining({ op: "edit_text", from_token: "tok_2", to_token: "tok_2", text: "您好" }),
+    { op: "remove_free_cue", track_id: "trk_s", id: "cue_free" },
+    expect.objectContaining({ op: "add_free_cue", track_id: "trk_s", id: "cue_free", text: " word" }),
   ]);
-  await h.click("上一个");
-  await h.click("替换");
-  expect(h.call.mock.lastCall?.[1].ops).toEqual([expect.objectContaining({ from_token: "tok_1", to_token: "tok_1" })]);
+});
+
+it("moves beyond replacement text that still contains the search term and retains the current match on failure", async () => {
+  const first = { ...project.cues[1], text: "词词" } as typeof cue;
+  let fails = true;
+  const h = await mount({ ...project, cues: [first] }, "subtitles", () => {
+    if (fails) throw new Error("失败");
+    return {};
+  });
+  await h.click("查找替换");
+  await h.input("查找", "词");
+  await h.input("替换为", "新词");
+  await h.click("替换下一处");
+  expect(h.container.querySelector("mark")?.previousSibling).toBeNull();
+  fails = false;
+  await h.click("替换下一处");
+  await h.view({ ...project, cues: [{ ...first, text: "新词词" }] });
+  expect(h.container.querySelector("mark")?.previousSibling?.textContent).toBe("新词");
 });
 it("follows playback except within three seconds of user scrolling", async () => {
   const scroll = vi.fn();
@@ -2004,11 +2148,11 @@ it("uses design-system subtitle rows and keeps overlay controls in the left styl
   expect(h.state().export).toMatchObject({ open: true, sub: "overlays" });
 });
 
-it("starts the search-bar AI action for all subtitles when there is no selection", async () => {
-  const h = await mount(listProject);
+it("fills an empty AI input without leading blank lines", async () => {
+  const h = await mount(listProject, "subtitles", () => ({}), false, true);
   await h.click("AI 重新分行");
-  await h.click("开始");
-  expect(h.call).toHaveBeenCalledWith("subtitle_tidy", {});
+  expect(h.find<HTMLTextAreaElement>("发给 AI").value).toBe("把全部字幕按意思重新分行。");
+  expect(h.call).not.toHaveBeenCalled();
 });
 
 it("shows real proofreading counts, an empty terms hint, and adds a subtitle track through edit", async () => {

@@ -227,6 +227,13 @@ it("opens the project through inspect and receives UI commands", async () => {
             envelope: { ok: true, result: { media: fixture.media, cues, styles: fixture.subtitle_styles } },
           }),
         );
+      } else if (message.verb === "chat_agents") {
+        queueMicrotask(() =>
+          this.receive({
+            id: message.id,
+            envelope: { ok: true, result: [{ agent: "claude", available: true, version: "1" }] },
+          }),
+        );
       } else if (message.verb === "voice_list") {
         queueMicrotask(() => this.receive({ id: message.id, envelope: { ok: true, result: { voices: [] } } }));
       } else {
@@ -360,6 +367,22 @@ it("opens the project through inspect and receives UI commands", async () => {
     expect(container.querySelector('[aria-label="参数区"] .zc-voice-results .zc-hint')?.textContent).toBe(
       "还没有配音，生成后可在这里试听并加到时间线。",
     );
+    await act(async () =>
+      socket?.receive({
+        type: "ui_request",
+        id: "subtitle-prompt",
+        verb: "ui_show_panel",
+        request: { panel: "subtitles" },
+      }),
+    );
+    const beforePrompt = writes.length;
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="AI 重新分行"]')?.click());
+    expect(container.querySelector('.zc-rail-item[title="AI"]')?.getAttribute("aria-selected")).toBe("true");
+    const promptInput = container.querySelector<HTMLTextAreaElement>('[aria-label="发给 AI"]');
+    expect(promptInput?.value).toBe("把全部字幕按意思重新分行。");
+    expect(document.activeElement).toBe(promptInput);
+    expect(promptInput?.selectionStart).toBe(promptInput?.value.length);
+    expect(writes).toHaveLength(beforePrompt);
     await act(async () => {
       socket?.receive({
         type: "ui_request",

@@ -479,12 +479,14 @@ export function useSubtitlePanel({
   state,
   update,
   call,
+  promptAi,
 }: {
   project: ProjectView | null;
   state: UiState;
   update: (state: UiState) => void;
   call: (verb: string, request: Record<string, unknown>) => Promise<unknown>;
   config?: { port: number; token: string } | undefined;
+  promptAi: (text: string) => void;
 }) {
   const [busy, setBusy] = useState(false),
     [progress, setProgress] = useState<number | null>(null);
@@ -516,12 +518,8 @@ export function useSubtitlePanel({
   }, [menu]);
   const [more, setMore] = useState(false);
   const [stylePicker, setStylePicker] = useState(false);
-  const [ai, setAi] = useState<{ verb: string; cue_ids?: string[] } | null>(null);
-  const [aiRequest, setAiRequest] = useState("");
-  const lastAi = useRef<{ verb: string; cue_ids?: string[]; request?: string } | null>(null);
   const [aiRows, setAiRows] = useState<string[] | null>(null);
-  const [aiStarting, setAiStarting] = useState(false);
-  const [matchIndex, setMatchIndex] = useState(0);
+  const [matchPosition, setMatchPosition] = useState<{ key: string; offset: number } | null>(null);
   const [skipped, setSkipped] = useState<string[]>([]);
   const [fillersOpen, setFillersOpen] = useState(false);
   const [replaceOpen, setReplaceOpen] = useState(false);
@@ -1056,7 +1054,10 @@ export function useSubtitlePanel({
     </div>
   );
   const visible = cues
-    .filter((cue) => cue.text.toLocaleLowerCase().includes(browser.search.toLocaleLowerCase()))
+    .filter(
+      (cue) =>
+        (replaceOpen && browser.find) || cue.text.toLocaleLowerCase().includes(browser.search.toLocaleLowerCase()),
+    )
     .sort((a, b) => compare(parseRational(a.start, true), parseRational(b.start, true)));
   const ordered = useMemo(
     () => [...cues].sort((a, b) => compare(parseRational(a.start, true), parseRational(b.start, true))),
@@ -1124,33 +1125,24 @@ export function useSubtitlePanel({
       );
     }
   };
-  const openAi = (verb: string, rows?: CueView[]) => {
+  const openAi = (verb: "subtitle_tidy" | "subtitle_proofread", rows?: CueView[]) => {
     setMenu(null);
     setMore(false);
-    setAiRequest("");
-    setAi(rows ? { verb, cue_ids: [...new Set(rows.map((cue) => cue.cue_id))] } : { verb });
-  };
-  const runAi = async (input: { verb: string; cue_ids?: string[]; request?: string }) => {
-    if (aiStarting) return;
-    setAiStarting(true);
-    setError("");
-    lastAi.current = input;
-    try {
-      const { verb, ...request } = input;
-      await call(verb, request);
-      setAiRows(input.cue_ids ?? cues.map((cue) => cue.cue_id));
-      setAi(null);
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "AI 字幕处理失败");
-    } finally {
-      setAiStarting(false);
-    }
+    selection(rows?.map((cue) => cue.cue_id) ?? []);
+    setAiRows(rows ? rows.map((cue) => cue.cue_id) : cues.map((cue) => cue.cue_id));
+    const first = rows?.[0],
+      last = rows?.at(-1);
+    const range =
+      first && last
+        ? `选中的 ${rows.length} 条字幕（${formatSubtitleTime(first.start)}–${formatSubtitleTime(last.end)}）`
+        : "全部字幕";
+    promptAi(verb === "subtitle_tidy" ? `把${range}按意思重新分行。` : `校对${range}，只改错字和专有名词，不改意思。`);
   };
   const manualPass = project?.subtitle_pass;
   useEffect(() => {
     if (manualPass && manualPass.state !== "running") setAiRows(null);
   }, [manualPass]);
-  const matches = visible.flatMap((cue) => {
+  const matches = (replaceOpen ? ordered : []).flatMap((cue, row) => {
     if (!browser.find) return [];
     const fold = (text: string) =>
       browser.matchCase
@@ -1161,17 +1153,22 @@ export function useSubtitlePanel({
           });
     const text = fold(cue.text),
       find = fold(browser.find);
-    const found: { cue: CueView; start: number; end: number }[] = [];
+    const found: { cue: CueView; row: number; start: number; end: number }[] = [];
     let start = text.indexOf(find);
     while (start >= 0) {
-      found.push({ cue, start, end: start + find.length });
+      found.push({ cue, row, start, end: start + find.length });
       start = text.indexOf(find, start + find.length);
     }
     return found;
   });
-  const currentMatch = matches.length
-    ? matches[((matchIndex % matches.length) + matches.length) % matches.length]
-    : undefined;
+  const editableMatches = matches.filter(({ cue }) => !cueLocked(cue));
+  const positionRow = matchPosition ? ordered.findIndex((cue) => cueKey(cue) === matchPosition.key) : -1;
+  const currentMatch =
+    editableMatches.find(
+      ({ row, start }) => row > positionRow || (row === positionRow && start >= (matchPosition?.offset ?? 0)),
+    ) ??
+    editableMatches[0] ??
+    matches[0];
   const reveal = useCallback((cue: CueView) => {
     followScroll.current = true;
     rowRefs.current.get(cueKey(cue))?.closest(".zc-sub-row")?.scrollIntoView?.({ block: "nearest" });
@@ -1242,28 +1239,6 @@ export function useSubtitlePanel({
           </div>
         )}
       </div>
-      {ai && (
-        <form
-          className="zc-sub-ai"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void runAi({ ...ai, ...(aiRequest.trim() ? { request: aiRequest.trim() } : {}) });
-          }}
-        >
-          <input
-            className="zc-input"
-            aria-label="有什么要求？（可以不填）"
-            placeholder="有什么要求？（可以不填）"
-            maxLength={200}
-            value={aiRequest}
-            onChange={(event) => setAiRequest(event.target.value)}
-          />
-          <button type="submit" className="zc-btn zc-btn-primary" disabled={aiStarting}>
-            开始
-          </button>
-          <IconButton icon="close" label="取消 AI 操作" onClick={() => setAi(null)} />
-        </form>
-      )}
       {manualPass?.state === "running" && (
         <output>
           {manualPass.kind === "tidy" ? "AI 重新分行" : "AI 校对"} · {manualPass.done}/{manualPass.total}
@@ -1272,14 +1247,8 @@ export function useSubtitlePanel({
       {(error || manualPass?.state === "failed") && (
         <p role="alert">
           {error || manualPass?.reason}
-          {lastAi.current && (
-            <IconButton
-              icon="refresh"
-              label="重试 AI 操作"
-              onClick={() => {
-                if (lastAi.current) void runAi(lastAi.current);
-              }}
-            />
+          {manualPass?.state === "failed" && (
+            <IconButton icon="refresh" label="重试 AI 操作" onClick={() => void call("chat_subtitle_retry", {})} />
           )}
         </p>
       )}
@@ -1310,13 +1279,13 @@ export function useSubtitlePanel({
             <IconButton
               icon="spark"
               label="AI 重新分行"
-              disabled={aiStarting || running || busy || !project}
+              disabled={running || busy || !project}
               onClick={() => openAi("subtitle_tidy", selected.length ? selected : undefined)}
             />
             <IconButton
               icon="edit"
               label="AI 校对"
-              disabled={aiStarting || running || busy || !project}
+              disabled={running || busy || !project}
               onClick={() => openAi("subtitle_proofread", selected.length ? selected : undefined)}
             />
             <IconButton
@@ -1328,77 +1297,81 @@ export function useSubtitlePanel({
           </div>
           {replaceOpen && (
             <div className="zc-sub-replace">
-              <input
-                className="zc-input"
-                aria-label="查找"
-                value={browser.find}
-                onChange={(e) => {
-                  setMatchIndex(0);
-                  setBrowser({ find: e.target.value });
-                }}
-              />
-              <input
-                className="zc-input"
-                aria-label="替换为"
-                value={browser.replace}
-                onChange={(e) => setBrowser({ replace: e.target.value })}
-              />
-              <label className="zc-switch-row">
+              <div className="zc-sub-replace-fields">
+                <div className="zc-sub-find">
+                  <input
+                    className="zc-input"
+                    aria-label="查找"
+                    placeholder="旧词"
+                    value={browser.find}
+                    onChange={(e) => {
+                      setMatchPosition(null);
+                      setBrowser({ find: e.target.value });
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="zc-sub-match-case"
+                    aria-label="区分大小写"
+                    title="区分大小写"
+                    aria-pressed={browser.matchCase}
+                    onClick={() => {
+                      setMatchPosition(null);
+                      setBrowser({ matchCase: !browser.matchCase });
+                    }}
+                  >
+                    Aa
+                  </button>
+                </div>
+                <span aria-hidden="true">→</span>
                 <input
-                  className="zc-switch"
-                  role="switch"
-                  aria-label="区分大小写"
-                  aria-checked={browser.matchCase}
-                  type="checkbox"
-                  checked={browser.matchCase}
-                  onChange={(e) => setBrowser({ matchCase: e.target.checked })}
+                  className="zc-input"
+                  aria-label="替换为"
+                  placeholder="新词"
+                  value={browser.replace}
+                  onChange={(e) => setBrowser({ replace: e.target.value })}
                 />
-                区分大小写
-              </label>
-              <IconButton
-                icon="prev"
-                label="上一个"
-                disabled={!matches.length}
-                onClick={() => setMatchIndex((matchIndex + matches.length - 1) % matches.length)}
-              />
-              <IconButton
-                icon="next"
-                label="下一个"
-                disabled={!matches.length}
-                onClick={() => setMatchIndex((matchIndex + 1) % matches.length)}
-              />
-              <button
-                type="button"
-                className="zc-btn zc-btn-secondary"
-                disabled={busy || !currentMatch || !!cueLocked(currentMatch.cue)}
-                onClick={() => {
-                  if (!currentMatch) return;
-                  const { cue, start, end } = currentMatch;
-                  void commitRow(cue, cue.text.slice(0, start) + browser.replace + cue.text.slice(end));
-                }}
-              >
-                替换
-              </button>
-              <button
-                className="zc-btn zc-btn-secondary"
-                type="button"
-                disabled={!project || busy || !browser.find}
-                onClick={() =>
-                  void write(
-                    [
-                      {
-                        op: "replace_text",
-                        find: browser.find,
-                        replace: browser.replace,
-                        match_case: browser.matchCase,
-                      },
-                    ],
-                    "全部替换字幕文字",
-                  )
-                }
-              >
-                全部替换
-              </button>
+              </div>
+              {browser.find && (
+                <output className="zc-muted">{matches.length ? `${matches.length} 处` : "没有找到"}</output>
+              )}
+              <div className="zc-sub-replace-actions">
+                <button
+                  type="button"
+                  className="zc-btn zc-btn-secondary"
+                  disabled={busy || !currentMatch || !!cueLocked(currentMatch.cue)}
+                  title="替换当前匹配并移到下一处，跳过锁定字幕"
+                  onClick={async () => {
+                    if (!currentMatch) return;
+                    const { cue, start, end } = currentMatch;
+                    if (await commitRow(cue, cue.text.slice(0, start) + browser.replace + cue.text.slice(end)))
+                      setMatchPosition({ key: cueKey(cue), offset: start + browser.replace.length });
+                  }}
+                >
+                  替换下一处
+                </button>
+                <button
+                  className="zc-btn zc-btn-secondary"
+                  type="button"
+                  disabled={!project || busy || !matches.length}
+                  title="替换全部匹配，跳过锁定字幕"
+                  onClick={() =>
+                    void write(
+                      [
+                        {
+                          op: "replace_text",
+                          find: browser.find,
+                          replace: browser.replace,
+                          match_case: browser.matchCase,
+                        },
+                      ],
+                      "全部替换字幕文字",
+                    )
+                  }
+                >
+                  全部替换
+                </button>
+              </div>
             </div>
           )}
           {!!skipped.length && <output className="zc-sub-attention">跳过 {skipped.length} 条锁定字幕</output>}
@@ -1422,13 +1395,13 @@ export function useSubtitlePanel({
               <IconButton
                 icon="spark"
                 label="AI 重新分行"
-                disabled={aiStarting || running || busy || !project}
+                disabled={running || busy || !project}
                 onClick={() => openAi("subtitle_tidy", selected.length ? selected : undefined)}
               />
               <IconButton
                 icon="check"
                 label="AI 校对"
-                disabled={aiStarting || running || busy || !project}
+                disabled={running || busy || !project}
                 onClick={() => openAi("subtitle_proofread", selected.length ? selected : undefined)}
               />
               <IconButton icon="close" label="取消选择" onClick={() => selection([])} />
@@ -1504,7 +1477,7 @@ export function useSubtitlePanel({
               const reasons = warnings.map((warning) =>
                 warning.code === "W_SUB_SHORT" ? "字幕显示时间过短" : "字幕超出宽度或行数",
               );
-              const running = !!aiRows?.includes(cue.cue_id) && (!manualPass || manualPass.state === "running");
+              const running = manualPass?.state === "running" && (aiRows === null || aiRows.includes(cue.cue_id));
               const nextTo = (direction: number) => ordered[ordered.indexOf(cue) + direction];
               return (
                 <div
