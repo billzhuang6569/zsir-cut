@@ -257,6 +257,7 @@ export function TimelinePreview({
     if (cueMenu) cueMenuRef.current?.querySelector("button")?.focus();
   }, [cueMenu]);
   const gestures = useTimelineGestures({
+    clickPlayhead: (x) => (preset === "fcp" && tool === "select" ? timelinePoint(x, skimming && snap)?.to : undefined),
     project,
     state,
     update,
@@ -455,11 +456,12 @@ export function TimelinePreview({
   });
   const [tool, setTool] = useState("select");
   const temporaryTool = useRef<{ key: string; previous: string; started: number; used: boolean } | null>(null);
+  const [hoverX, setHoverX] = useState<number | null>(null);
   const [bladeHover, setBladeHover] = useState<{ id: string; x: number; shift: boolean; alt: boolean } | null>(null);
   const [writeError, setWriteError] = useState<string | null>(null);
   const [writeErrorDetail, setWriteErrorDetail] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
-  const { keymap, preset, snap, magnetic, trackHeight, setUi } = preferences;
+  const { keymap, preset, snap, magnetic, skimming, trackHeight, setUi } = preferences;
   const snapRef = useRef(snap);
   snapRef.current = snap;
   function dragMagnetic(meta: boolean) {
@@ -584,6 +586,9 @@ export function TimelinePreview({
   const latest = useRef({ state, project });
   latest.current = { state, project };
   const at = project ? seekTarget(project, project.cues, state.playhead) : "0s";
+  const skimTarget =
+    skimming && hoverX !== null && !state.playing && !dragging.current && !viewerOnly ? timelinePoint(hoverX) : null;
+  const previewAt = skimTarget?.to ?? at;
   const top = project?.tracks.find(
     (track) =>
       (track.kind === "video" || (viewerOnly && track.kind === "audio")) &&
@@ -591,7 +596,7 @@ export function TimelinePreview({
       track.clips.some((clip) => clip.enabled),
   );
   const clip = top?.clips.find(
-    (item) => item.enabled && (viewerOnly || contains(item.timeline_in.t, item.timeline_out.t, at)),
+    (item) => item.enabled && (viewerOnly || contains(item.timeline_in.t, item.timeline_out.t, previewAt)),
   );
   const points = useMemo(() => (project ? editPoints(project) : []), [project]);
   const boundaries = useMemo(() => {
@@ -602,8 +607,8 @@ export function TimelinePreview({
     ].map((time) => ceil(mul(parseRational(time, true), parseRational(project.edit_rate))));
   }, [project, top]);
   const media = project?.media.find((item) => item.id === clip?.media_id);
-  const speed = clip ? sourceSpeed(clip, at) : 0;
-  const source = clip ? sourceAt(clip, at) : rational(0n);
+  const speed = clip ? sourceSpeed(clip, previewAt) : 0;
+  const source = clip ? sourceAt(clip, previewAt) : rational(0n);
   const src = config && clip ? mediaUrl(config, "media", clip.media_id) : undefined;
   const {
     video: streamVideo,
@@ -968,7 +973,7 @@ export function TimelinePreview({
       pauseOriginal();
       return;
     }
-    if (at !== playbackAt.current) discardPreroll();
+    if (previewAt !== playbackAt.current) discardPreroll();
     // Publishing the held boundary must not load or restart the next clip on the paused top.
     if (state.playing && preroll.current?.heldAt != null) return;
     const element = videos.current[visibleVideo];
@@ -986,7 +991,7 @@ export function TimelinePreview({
       const seconds = numberOf(source);
       if (
         lastClip.current !== clip.id ||
-        ((at !== playbackAt.current || clip.speed === "map" || direction < 0n) &&
+        ((!state.playing || previewAt !== playbackAt.current || clip.speed === "map" || direction < 0n) &&
           Math.abs(element.currentTime - seconds) > 0.001)
       ) {
         element.currentTime = seconds;
@@ -1017,7 +1022,7 @@ export function TimelinePreview({
     state.playing,
     direction,
     hideViewer,
-    at,
+    previewAt,
     src,
     visibleVideo,
     discardPreroll,
@@ -1059,7 +1064,12 @@ export function TimelinePreview({
   };
   const editAction = (action: string) => {
     if (!project) return;
-    const edit = timelineEdit(action, project, state, at, magnetic);
+    const target = ["split_at_playhead", "trim_start_to_playhead", "trim_end_to_playhead", "extend_edit"].includes(
+      action,
+    )
+      ? previewAt
+      : at;
+    const edit = timelineEdit(action, project, state, target, magnetic);
     if (edit?.ops.length)
       void write("edit", edit.label, edit.ops).then((ok) => {
         const op = edit.ops[0];
@@ -1070,10 +1080,10 @@ export function TimelinePreview({
   };
   const marker = () =>
     project &&
-    void write("edit", `在 ${timecode(at, project)} 加标记`, [
+    void write("edit", `在 ${timecode(previewAt, project)} 加标记`, [
       {
         op: "add_marker",
-        at: frameTime(frameAt(at, project.edit_rate), project.edit_rate),
+        at: frameTime(frameAt(previewAt, project.edit_rate), project.edit_rate),
         duration: "0s",
         kind: "review",
         text: "标记",
@@ -1103,6 +1113,7 @@ export function TimelinePreview({
           "toggle_history",
           "toggle_snap",
           "toggle_magnetic",
+          "toggle_skimming",
           "track_taller",
           "track_shorter",
         ].includes(action)
@@ -1137,6 +1148,10 @@ export function TimelinePreview({
       }
       if (action === "toggle_magnetic") {
         void setUi({ magnetic: !magnetic });
+        return;
+      }
+      if (action === "toggle_skimming") {
+        void setUi({ skimming: !skimming });
         return;
       }
       if (action === "track_taller" || action === "track_shorter") {
@@ -1262,16 +1277,19 @@ export function TimelinePreview({
       window.removeEventListener("blur", blur);
     };
   });
-  const bladePoint = (x: number) => {
+  function timelinePoint(x: number, snapping = snap) {
     const scroller = gestures.scroller.current;
     const ruler = scroller?.querySelector<HTMLElement>(".zc-ruler");
     if (!project || !scroller || !ruler) return null;
     const left = scroller.getBoundingClientRect().left;
     const label = ruler.getBoundingClientRect().left - left + scroller.scrollLeft;
     const cut = pointerFrameTime(x - left + scroller.scrollLeft - label, scale, project.edit_rate);
-    return snapEdges(project, [], ["0s"], rational(0n), parseRational(cut, true), scale, snap, at);
-  };
-  const bladeTarget = tool === "blade" && bladeHover && !dragging.current ? bladePoint(bladeHover.x) : null;
+    const target = snapEdges(project, [], ["0s"], rational(0n), parseRational(cut, true), scale, snapping, at);
+    return compare(parseRational(target.to, true), parseRational(project.duration.t, true)) > 0
+      ? { ...target, to: project.duration.t }
+      : target;
+  }
+  const bladeTarget = tool === "blade" && bladeHover && !dragging.current ? timelinePoint(bladeHover.x) : null;
   const bladeClip = project?.tracks.flatMap((track) => track.clips).find((clip) => clip.id === bladeHover?.id);
   const bladeTracks =
     project?.tracks.filter(
@@ -1333,7 +1351,9 @@ export function TimelinePreview({
       .filter((id): id is string => Boolean(id)) ?? []),
   ]);
   const visibleCues =
-    project?.cues.filter((cue) => contains(cue.start, cue.end, at) && !organizing.has(cue.transcript_id ?? "")) ?? [];
+    project?.cues.filter(
+      (cue) => contains(cue.start, cue.end, previewAt) && !organizing.has(cue.transcript_id ?? ""),
+    ) ?? [];
   const captionKey = visibleCues.map((cue) => `${cue.cue_id}:${cue.piece}:${cue.text}:${cue.style_id}`).join("\0");
   // Keep the canvas unchanged between caption boundaries.
   // biome-ignore lint/correctness/useExhaustiveDependencies: captionKey includes every rendered cue field.
@@ -1411,7 +1431,7 @@ export function TimelinePreview({
               data-preview-mode="preroll"
               playsInline
               preload="auto"
-              muted={index !== visibleVideo || streamVisible || streamPreparing}
+              muted={!!skimTarget || index !== visibleVideo || streamVisible || streamPreparing}
               data-preroll={streamVisible || index !== visibleVideo ? "" : undefined}
               data-preroll-lead={index === visibleVideo ? prerollLead : undefined}
               data-preroll-state="idle"
@@ -1457,7 +1477,7 @@ export function TimelinePreview({
         )}
         <SubtitleCanvas
           cues={captions}
-          at={at}
+          at={previewAt}
           playback={subtitleAt}
           playing={state.playing}
           styles={project?.styles ?? []}
@@ -1509,7 +1529,7 @@ export function TimelinePreview({
       <div className="zc-player">
         <IconButton icon="inOut" label="设入点 I" />
         <output ref={clock} aria-label="播放时码">
-          {project ? timecode(at, project) : "00:00:00:00"}
+          {project ? timecode(previewAt, project) : "00:00:00:00"}
         </output>
         <span className="zc-meta">/ {project ? timecode(project.duration.t, project) : "00:00:00:00"}</span>
         <span className="zc-grow" />
@@ -1635,6 +1655,13 @@ export function TimelinePreview({
               onClick={() => void setUi({ magnetic: !magnetic })}
             />
             <IconButton
+              icon="eye"
+              label="浏览条"
+              title={`浏览条 ${keymap.toggle_skimming ?? ""}`.trim()}
+              pressed={skimming}
+              onClick={() => void setUi({ skimming: !skimming })}
+            />
+            <IconButton
               icon="roll"
               label={`滚动编辑 ${keymap.tool_roll ?? ""}`}
               pressed={tool === "roll"}
@@ -1679,6 +1706,10 @@ export function TimelinePreview({
             onPointerMove={(event) => {
               gestures.handlers.onPointerMove(event);
               setMetaKey(event.metaKey);
+              const overTimeline = (event.target as Element).closest(".zc-track-lane,.zc-ruler");
+              setHoverX(!dragging.current && overTimeline ? event.clientX : null);
+              if (skimming && overTimeline && !dragging.current && !state.playing && state.preview === "media")
+                update({ ...state, preview: "timeline" });
               const clip = (event.target as Element).closest<HTMLElement>(".zc-clip-video,.zc-clip-audio");
               setBladeHover(
                 tool === "blade" && clip && !dragging.current
@@ -1686,8 +1717,12 @@ export function TimelinePreview({
                   : null,
               );
             }}
-            onPointerLeave={() => setBladeHover(null)}
+            onPointerLeave={() => {
+              setBladeHover(null);
+              setHoverX(null);
+            }}
             onPointerDownCapture={(event) => {
+              setHoverX(null);
               if (temporaryTool.current) temporaryTool.current.used = true;
               setBladeHover(null);
               if (
@@ -2051,7 +2086,7 @@ export function TimelinePreview({
                                 return;
                               }
                               if (busy || readOnly || track.kind === "subtitle") return;
-                              const target = bladePoint(event.clientX);
+                              const target = timelinePoint(event.clientX);
                               if (
                                 !target ||
                                 !contains(item.timeline_in.t, item.timeline_out.t, target.to) ||
@@ -2205,6 +2240,13 @@ export function TimelinePreview({
                     </div>
                   </div>
                 ))}
+                {skimTarget && tool !== "blade" && (
+                  <div
+                    aria-hidden="true"
+                    className="zc-skimmer"
+                    style={{ left: `calc(var(--track-label-w) + ${pixelAt(skimTarget.to, scale)}px)` }}
+                  />
+                )}
                 {gestures.box && <div aria-hidden="true" className="zc-selection-box" style={gestures.box} />}
                 <div
                   ref={playhead}

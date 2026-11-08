@@ -16,9 +16,10 @@ let state = initialState();
 let project: ProjectView;
 let preset: keyof typeof presets;
 let overrides: Partial<Record<Action, string | null>>;
-let ui: { snap: boolean; magnetic: boolean; track_height: "s" | "m" | "l" };
+let ui: { snap: boolean; magnetic: boolean; skimming: boolean; track_height: "s" | "m" | "l" };
 let readOnly = false;
 let sourceViewer = false;
+let showViewer = false;
 const dragging = { current: false };
 const settings = vi.fn();
 const reply = () => ({ prefs: { ui, keymap: { preset } }, ...mergeKeymap(preset, overrides) });
@@ -43,7 +44,7 @@ const render = () =>
       config={undefined}
       error={null}
       dragging={dragging}
-      hideViewer={!sourceViewer}
+      hideViewer={!sourceViewer && !showViewer}
       viewerOnly={sourceViewer}
       readOnly={readOnly}
       onOpenSettings={settings}
@@ -97,9 +98,10 @@ beforeEach(async () => {
   state = { ...initialState(), project: "/test.zcut.json", playhead: { at: "2s" } };
   preset = "fcp";
   overrides = {};
-  ui = { snap: false, magnetic: true, track_height: "m" };
+  ui = { snap: false, magnetic: true, skimming: false, track_height: "m" };
   readOnly = false;
   sourceViewer = false;
+  showViewer = false;
   dragging.current = false;
   call.mockClear();
   settings.mockClear();
@@ -729,5 +731,226 @@ describe("blade tool", () => {
     expect(pressed("选择")).toBe("true");
     await release("B");
     expect(pressed("选择")).toBe("true");
+  });
+});
+
+describe("skimmer", () => {
+  const clip = () => get('[data-selection-id="c00"]');
+  const line = () => get(".zc-skimmer");
+  const leave = () => pointer(get(".zc-timeline"), "pointerout", 49, 40, { relatedTarget: document.body });
+
+  it.each(["fcp", "premiere"] as const)("toggles %s skimming with prefs_set and the toolbar", async (value) => {
+    preset = value;
+    await refresh();
+    await action("toggle_skimming");
+    expect(call).toHaveBeenCalledWith("prefs_set", { patch: { ui: { skimming: true } } });
+    const button = get(`[title="浏览条 ${reply().keymap.toggle_skimming}"]`);
+    expect(button.getAttribute("aria-pressed")).toBe("true");
+    await click(button);
+    expect(call).toHaveBeenLastCalledWith("prefs_set", { patch: { ui: { skimming: false } } });
+    expect(writes()).toHaveLength(0);
+  });
+
+  it("floors the hover frame on clips, blank lanes and ruler, with viewport and scroll offsets", async () => {
+    await pointer(clip(), "pointermove", 49);
+    expect(line()).toBeNull();
+    await action("toggle_skimming");
+    expect(line().style.left).toBe("calc(var(--track-label-w) + 48px)");
+    const before = structuredClone(state);
+    const scroller = get(".zc-timeline");
+    scroller.scrollLeft = 120;
+    vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue({ left: 30 } as DOMRect);
+    vi.spyOn(get(".zc-ruler"), "getBoundingClientRect").mockReturnValue({ left: -10 } as DOMRect);
+    await pointer(get(".zc-track-lane"), "pointermove", 38.9);
+    expect(line().style.left).toBe("calc(var(--track-label-w) + 48px)");
+    await pointer(get(".zc-ruler"), "pointermove", 39.9);
+    expect(line().style.left).toBe("calc(var(--track-label-w) + 48px)");
+    await leave();
+    expect(line()).toBeNull();
+    expect(state).toEqual(before);
+    expect(writes()).toHaveLength(0);
+  });
+
+  it("keeps NTSC hover and marker times on the exact frame grid", async () => {
+    project.edit_rate = "30000/1001";
+    await act(async () => render());
+    await action("toggle_skimming");
+    await pointer(clip(), "pointermove", 1.6015);
+    expect(line().style.left).toBe("calc(var(--track-label-w) + 0px)");
+    await pointer(clip(), "pointermove", 1.6016);
+    expect(line().style.left).toBe("calc(var(--track-label-w) + 1.6016px)");
+    await action("add_marker");
+    expect(lastOps()).toMatchObject([{ at: "1001/30000s" }]);
+  });
+
+  it("shows the timeline frame when hovering from a paused source preview without moving the playhead", async () => {
+    state = { ...state, preview: "media" };
+    await act(async () => render());
+    await action("toggle_skimming");
+    await pointer(clip(), "pointermove", 49);
+    expect(state.preview).toBe("timeline");
+    expect(state.playhead).toEqual({ at: "2s" });
+  });
+
+  it("snaps to the playhead, edits and markers and clamps to the timeline", async () => {
+    ui.snap = true;
+    await refresh();
+    await action("toggle_skimming");
+    for (const [x, pixels] of [
+      [98, 96],
+      [194, 192],
+      [290, 288],
+      [999, 384],
+    ]) {
+      await pointer(get(".zc-ruler"), "pointermove", x as number);
+      expect(line().style.left).toBe(`calc(var(--track-label-w) + ${pixels}px)`);
+    }
+  });
+
+  it("seeks paused video silently, restores the playhead frame on leave, and hides while playing or dragging", async () => {
+    showViewer = true;
+    vi.spyOn(HTMLMediaElement.prototype, "readyState", "get").mockReturnValue(1);
+    await act(async () => render());
+    const video = get('video[aria-label="时间线预览"]') as HTMLVideoElement;
+    expect(video.currentTime).toBe(4);
+    await action("toggle_skimming");
+    const before = structuredClone(state);
+    await pointer(clip(), "pointermove", 49);
+    expect(video.currentTime).toBe(3);
+    expect(video.muted).toBe(true);
+    expect(state).toEqual(before);
+    expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
+    await leave();
+    expect(video.currentTime).toBe(4);
+    await pointer(clip(), "pointermove", 49);
+    await action("play_pause");
+    expect(line()).toBeNull();
+    expect(video.currentTime).toBe(4);
+    await action("shuttle_stop");
+    await pointer(clip(), "pointerdown", 49);
+    expect(line()).toBeNull();
+    await pointer(clip(), "pointermove", 60);
+    expect(line()).toBeNull();
+    await pointer(clip(), "pointercancel", 60);
+  });
+
+  it("uses only blade landing lines while the preview follows the same frame", async () => {
+    showViewer = true;
+    await act(async () => render());
+    await action("toggle_skimming");
+    await key("B");
+    await pointer(clip(), "pointermove", 49);
+    expect(line()).toBeNull();
+    expect(get(".zc-blade-line").style.left).toBe("48px");
+    expect(get('[aria-label="播放时码"]').textContent).toBe("00:00:01:00");
+    expect(state.playhead).toEqual({ at: "2s" });
+  });
+
+  it.each([
+    ["split_at_playhead", "at"],
+    ["trim_start_to_playhead", "to"],
+    ["trim_end_to_playhead", "to"],
+    ["extend_edit", "to"],
+    ["add_marker", "at"],
+  ] as const)("uses the skimmer for %s and falls back after leaving or disabling", async (name, field) => {
+    state = { ...state, selected: ["c00"], edit_point: { track_id: "t0", at: "4s" } };
+    await act(async () => render());
+    await action("toggle_skimming");
+    await pointer(clip(), "pointermove", 49);
+    await action(name);
+    expect(lastOps()).toMatchObject([{ [field]: "1s" }]);
+    expect(state.playhead).toEqual({ at: "2s" });
+    await leave();
+    state = { ...state, edit_point: { track_id: "t0", at: "4s" } };
+    await act(async () => render());
+    await action(name);
+    expect(lastOps()).toMatchObject([{ [field]: "2s" }]);
+    await pointer(clip(), "pointermove", 49);
+    await action("toggle_skimming");
+    state = { ...state, edit_point: { track_id: "t0", at: "4s" } };
+    await act(async () => render());
+    await action(name);
+    expect(lastOps()).toMatchObject([{ [field]: "2s" }]);
+  });
+
+  it("keeps all-track split at the playhead and does not skim during playback", async () => {
+    await action("toggle_skimming");
+    await pointer(clip(), "pointermove", 49);
+    await action("split_all_at_playhead");
+    expect(lastOps()).toEqual(
+      [0, 1, 2].map((track) => ({ op: "split", clip_id: `c${track}0`, at: "2s", linked: false })),
+    );
+    await action("play_pause");
+    await action("add_marker");
+    expect(lastOps()).toMatchObject([{ at: "2s" }]);
+  });
+});
+
+describe.each(["fcp", "premiere"] as const)("%s timeline clicks", (value) => {
+  beforeEach(async () => {
+    preset = value;
+    await refresh();
+  });
+  it.each([false, true])("selects a clip and moves only the fcp playhead (skimming %s)", async (enabled) => {
+    ui.skimming = enabled;
+    await refresh();
+    const clip = get('[data-selection-id="c00"]');
+    await pointer(clip, "pointermove", 49);
+    await pointer(clip, "pointerdown", 49);
+    await pointer(clip, "pointerup", 49);
+    await pointer(clip, "click", 49, 40, { detail: 1 });
+    expect(state.selected).toEqual(["c00"]);
+    expect(state.playhead).toEqual({ at: value === "fcp" ? "1s" : "2s" });
+    const lane = get(".zc-track-lane");
+    await pointer(lane, "pointerdown", 145);
+    await pointer(lane, "pointerup", 145);
+    await pointer(lane, "click", 145, 40, { detail: 1 });
+    expect(state.selected).toEqual([]);
+    expect(state.playhead).toEqual({ at: value === "fcp" ? "3s" : "2s" });
+  });
+  it("uses the snapped skimmer frame for a clip click", async () => {
+    ui.snap = true;
+    ui.skimming = true;
+    await refresh();
+    const clip = get('[data-selection-id="c00"]');
+    await pointer(clip, "pointermove", 98);
+    expect(get(".zc-skimmer").style.left).toBe("calc(var(--track-label-w) + 96px)");
+    await pointer(clip, "pointerdown", 98);
+    await pointer(clip, "pointerup", 98);
+    await pointer(clip, "click", 98, 40, { detail: 1 });
+    expect(state.playhead).toEqual({ at: "2s" });
+    expect(state.selected).toEqual(["c00"]);
+  });
+  it("keeps the playhead after dragging and when selecting an edit point", async () => {
+    const clip = get('[data-selection-id="c00"]');
+    await pointer(clip, "pointerdown", 49);
+    await pointer(clip, "pointermove", 98);
+    await pointer(clip, "pointerup", 98);
+    await pointer(clip, "click", 98, 40, { detail: 1 });
+    expect(state.playhead).toEqual({ at: "2s" });
+    const seam = get(".zc-seam");
+    await pointer(seam, "pointerdown", 192);
+    await pointer(seam, "pointerup", 192);
+    await pointer(seam, "click", 192, 40, { detail: 1 });
+    expect(state.edit_point).toEqual({ track_id: "t0", at: "4s" });
+    expect(state.playhead).toEqual({ at: "2s" });
+  });
+  it("preserves keyboard clip selection and suppresses the release click after a marquee drag", async () => {
+    const clip = get('[data-selection-id="c00"]');
+    await click(clip);
+    expect(state.selected).toEqual(["c00"]);
+    expect(state.playhead).toEqual({ at: "2s" });
+    const lane = get(".zc-track-lane");
+    await pointer(lane, "pointerdown", 100);
+    await pointer(lane, "pointermove", 150);
+    await pointer(lane, "pointerup", 150);
+    await pointer(lane, "click", 150, 40, { detail: 1 });
+    expect(state.playhead).toEqual({ at: "2s" });
+  });
+  it("moves the playhead on ruler clicks in both presets", async () => {
+    const ruler = get(".zc-ruler");
+    await pointer(ruler, "pointerdown", 48);
+    await pointer(ruler, "pointerup", 48);
+    expect(state.playhead).toEqual({ at: "1s" });
   });
 });

@@ -260,7 +260,7 @@ interface TimelinePreferences {
   keymap: Record<string, string | null>;
   prefs: {
     keymap?: { preset: "fcp" | "premiere" };
-    ui: { snap: boolean; magnetic: boolean; track_height: "s" | "m" | "l"; layout?: Layout };
+    ui: { snap: boolean; magnetic: boolean; skimming?: boolean; track_height: "s" | "m" | "l"; layout?: Layout };
   };
 }
 export function useTimelinePreferences(
@@ -321,6 +321,7 @@ export function useTimelinePreferences(
     preset: preferences?.prefs.keymap?.preset ?? "fcp",
     snap: state.snap ?? true,
     magnetic: preferences?.prefs.ui.magnetic ?? true,
+    skimming: preferences?.prefs.ui.skimming ?? false,
     trackHeight: preferences?.prefs.ui.track_height ?? "m",
     layout: preferences?.prefs.ui.layout,
     setUi,

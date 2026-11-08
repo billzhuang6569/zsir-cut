@@ -62,7 +62,9 @@ async function send(socket: WebSocket, verb: string, request: unknown = {}) {
   return response.envelope;
 }
 it("defines every action exactly once in both presets using canonical notation", () => {
-  expect(actions).toHaveLength(35);
+  expect(actions).toHaveLength(36);
+  expect(presets.fcp.toggle_skimming).toBe("S");
+  expect(presets.premiere.toggle_skimming).toBe("⇧S");
   expect(keyNotation.test("A\n")).toBe(false);
   for (const preset of Object.values(presets)) {
     expect(Object.keys(preset).sort()).toEqual([...actions].sort());
@@ -467,3 +469,24 @@ it.each([true, false])(
     expect(await readFile(file, "utf8")).toBe(content);
   },
 );
+
+it("loads preferences missing skimming without warnings or a version bump and persists the toggle", async () => {
+  const stored = structuredClone(defaultPreferences);
+  Reflect.deleteProperty(stored.ui, "skimming");
+  stored.ui.snap = false;
+  const file = join(home, "desktop.json");
+  const before = JSON.stringify(stored);
+  await writeFile(file, before);
+  const store = new DesktopPreferences(home);
+  await store.load();
+  expect(store.warning).toBeUndefined();
+  expect(store.get().prefs).toEqual({ ...stored, ui: { ...stored.ui, skimming: false } });
+  expect(await readFile(file, "utf8")).toBe(before);
+  await store.set({ ui: { skimming: true } });
+  const restarted = new DesktopPreferences(home);
+  await restarted.load();
+  expect(restarted.get().prefs).toEqual({ ...stored, ui: { ...stored.ui, skimming: true } });
+  const saved = await readFile(file, "utf8");
+  await expect(restarted.set({ ui: { skimming: "yes" } })).rejects.toThrow();
+  expect(await readFile(file, "utf8")).toBe(saved);
+});
