@@ -16,10 +16,12 @@ let project: ProjectView;
 let readOnly = false;
 const dragging = { current: false };
 const call = vi.fn(async (_verb: string, _request: Record<string, unknown>) => ({}));
+let preset: "fcp" | "premiere" = "fcp";
 let prefsUi = { snap: true, magnetic: false, track_height: "m" };
 const hostCall = async (verb: string, request: Record<string, unknown>) => {
   if (verb === "prefs_set") prefsUi = { ...prefsUi, ...(request.patch as { ui: Partial<typeof prefsUi> }).ui };
-  if (verb === "prefs_get" || verb === "prefs_set") return { prefs: { ui: prefsUi }, ...mergeKeymap("fcp", {}) };
+  if (verb === "prefs_get" || verb === "prefs_set")
+    return { prefs: { ui: prefsUi, keymap: { preset } }, ...mergeKeymap(preset, {}) };
   return call(verb, request);
 };
 async function magneticOn() {
@@ -79,6 +81,7 @@ async function slider(value: number) {
   });
 }
 beforeEach(async () => {
+  preset = "fcp";
   prefsUi = { snap: true, magnetic: false, track_height: "m" };
   state = initialState();
   readOnly = false;
@@ -525,7 +528,8 @@ it("shows nearest edge snap distance/line and obeys the toggle during a drag", a
   const clip = get('[data-selection-id="c1"]');
   await pointer(clip, "pointerdown", 192, 85);
   await pointer(clip, "pointermove", 286, 85); // out edge ~5.96s; 6s wins over later 6.08s.
-  expect(get('[aria-label="吸附距离"]').textContent).toBe("1.9px");
+  expect(get('[aria-label="吸附距离"]')).toBeNull();
+  expect(get(".zc-snap-line").textContent).toBe("");
   expect(get(".zc-snap-line").style.left).toContain("288px");
   expect(clip.style.left).toBe("192px");
   await click(get('[aria-label="吸附"]'), { detail: 0 });
@@ -1077,3 +1081,248 @@ it("keeps text editors and secondary clicks available inside the timeline", asyn
   expect(document.activeElement).toBe(input);
   expect(dragging.current).toBe(false);
 });
+
+async function prepareRoll() {
+  const clip = await prepareTrim();
+  const right = project.tracks[0]?.clips[1];
+  if (!right) throw new Error("roll fixture");
+  right.timeline_in.t = "4s";
+  right.timeline_out.t = "8s";
+  right.source_in.t = "1s";
+  right.source_out.t = "5s";
+  prefsUi.snap = false;
+  project = { ...project };
+  await act(async () => window.dispatchEvent(new Event("desktop-prefs-changed")));
+  await act(render);
+  return clip;
+}
+const feedbackOutput = () => document.querySelector('[aria-label="拖动反馈"]');
+const modifier = (type: string, metaKey: boolean) =>
+  act(async () => {
+    window.dispatchEvent(new KeyboardEvent(type, { key: "Meta", metaKey, bubbles: true }));
+  });
+
+it("marks plain, ripple and roll hover cursors with inline SVG and keeps roll interiors as arrows", async () => {
+  const clip = await prepareRoll();
+  expect(handle("in").dataset.editCursor).toBe("trim");
+  expect(handle("out").dataset.editCursor).toBe("trim");
+  expect(handle("in").style.cursor).toContain("data:image/svg+xml,");
+  expect(handle("in").style.cursor).toContain("ew-resize");
+  expect(get(".zc-seam").dataset.editCursor).toBeUndefined();
+  expect(get(".zc-seam").style.cursor).toBe("default");
+  await magneticOn();
+  expect(handle("in").dataset.editCursor).toBe("ripple");
+  await click(get('[aria-label^="滚动编辑 "]'));
+  expect(get(".zc-seam").dataset.editCursor).toBe("roll");
+  expect(handle("out").dataset.editCursor).toBe("roll");
+  expect(get('[data-selection-id="c2"] [data-trim-edge="in"]').dataset.editCursor).toBe("roll");
+  expect(handle("in").dataset.editCursor).toBe("ripple");
+  expect(clip.style.cursor).toBe("default");
+});
+
+it.each([
+  ["fcp", true, false, "select", true],
+  ["premiere", false, false, "select", false],
+  ["premiere", false, true, "select", true],
+  ["fcp", true, false, "roll", true],
+  ["premiere", false, false, "roll", false],
+  ["premiere", false, true, "roll", true],
+] as const)(
+  "drags an adjoining out-handle in %s magnetic=%s cmd=%s tool=%s",
+  async (habit, magnetic, meta, tool, ripple) => {
+    const clip = await prepareRoll();
+    preset = habit;
+    prefsUi.magnetic = magnetic;
+    await act(async () => window.dispatchEvent(new Event("desktop-prefs-changed")));
+    if (tool === "roll") await click(get('[aria-label^="滚动编辑 "]'));
+    await modifier(meta ? "keydown" : "keyup", meta);
+    const cursor = tool === "roll" ? "roll" : ripple ? "ripple" : "trim";
+    expect(handle("out").dataset.editCursor).toBe(cursor);
+    const x = clip.getBoundingClientRect().right - 3.5;
+    await pointer(handle("out"), "pointerdown", x, 85, { metaKey: meta });
+    await pointer(clip, "pointermove", x - 14, 85, { metaKey: meta });
+    expect(document.querySelector("body > style")?.textContent).toContain(handle("out").style.cursor);
+    await pointer(clip, "pointerup", x - 14, 85, { metaKey: meta });
+    expect(call).toHaveBeenCalledExactlyOnceWith(
+      "edit",
+      expect.objectContaining({
+        ops: [
+          {
+            op: tool === "roll" ? "roll" : "trim",
+            clip_id: "c1",
+            edge: "out",
+            to: "93/25s",
+            ...(tool === "select" ? { ripple, linked: true } : {}),
+          },
+        ],
+      }),
+    );
+  },
+);
+
+it.each(["fcp", "premiere"] as const)("only selects a seam when dragged with the %s select tool", async (habit) => {
+  await prepareRoll();
+  preset = habit;
+  await act(async () => window.dispatchEvent(new Event("desktop-prefs-changed")));
+  const seam = get(".zc-seam");
+  await pointer(seam, "pointerdown", 272, 85);
+  await pointer(seam, "pointermove", 258, 85);
+  await pointer(seam, "pointerup", 258, 85);
+  expect(state.edit_point).toEqual({ track_id: "v", at: "4s" });
+  expect(call).not.toHaveBeenCalled();
+  expect(feedbackOutput()).toBeNull();
+  expect(seam.style.left).toBe("192px");
+});
+
+it.each(["left", "right", "seam"])("rolls from the %s in roll mode and previews both durations", async (side) => {
+  const clip = await prepareRoll();
+  await click(get('[aria-label^="滚动编辑 "]'));
+  const target =
+    side === "left"
+      ? handle("out")
+      : side === "right"
+        ? get('[data-selection-id="c2"] [data-trim-edge="in"]')
+        : get(".zc-seam");
+  await pointer(target, "pointerdown", 272, 85);
+  await pointer(clip, "pointermove", 320, 85);
+  expect(clip.style.width).toBe("144px");
+  expect(get('[data-selection-id="c2"]').style.left).toBe("240px");
+  expect(get('[data-selection-id="c2"]').style.width).toBe("144px");
+  expect(feedbackOutput()?.textContent).toBe("+00:00:01:00时长 00:00:03:00 / 00:00:03:00");
+  expect(call).not.toHaveBeenCalled();
+  await pointer(clip, "pointerup", 320, 85);
+  expect(call).toHaveBeenCalledExactlyOnceWith(
+    "edit",
+    expect.objectContaining({ ops: [{ op: "roll", clip_id: "c1", edge: "out", to: "5s" }] }),
+  );
+  expect(feedbackOutput()).toBeNull();
+});
+
+it("prevents moving a clip with the roll tool and trims a gap edge normally", async () => {
+  const clip = await prepareRoll();
+  await click(get('[aria-label^="滚动编辑 "]'));
+  await pointer(clip, "pointerdown", 200, 85);
+  await pointer(clip, "pointermove", 248, 85);
+  await pointer(clip, "pointerup", 248, 85);
+  expect(call).not.toHaveBeenCalled();
+  expect(feedbackOutput()).toBeNull();
+  await pointer(handle("in"), "pointerdown", 176, 85);
+  await pointer(clip, "pointerup", 200, 85);
+  expect(call).toHaveBeenCalledExactlyOnceWith(
+    "edit",
+    expect.objectContaining({
+      ops: [{ op: "trim", clip_id: "c1", edge: "in", to: "63/25s", ripple: false, linked: true }],
+    }),
+  );
+});
+
+it.each([false, true])("bounds rolling at the %s source limit and colors only the cut edges", async (out) => {
+  await prepareRoll();
+  await click(get('[aria-label^="滚动编辑 "]'));
+  if (out && project.media[0]) project.media[0].duration = "4s";
+  await act(render);
+  const seam = get(".zc-seam");
+  await pointer(seam, "pointerdown", 272, 85);
+  await pointer(seam, "pointermove", out ? 416 : 128, 85);
+  expect(get(".zc-seam").classList.contains("is-blocked")).toBe(true);
+  expect(handle("out").classList.contains("is-blocked")).toBe(true);
+  expect(handle("in").classList.contains("is-blocked")).toBe(false);
+  expect(get('[data-selection-id="c2"] [data-trim-edge="in"]').classList.contains("is-blocked")).toBe(true);
+  await pointer(seam, "pointerup", out ? 416 : 128, 85);
+  expect(call).not.toHaveBeenCalled();
+  expect(feedbackOutput()).toBeNull();
+});
+
+it.each([
+  ["premiere", false, false, false],
+  ["premiere", false, true, true],
+  ["premiere", true, true, false],
+  ["fcp", false, true, false],
+  ["fcp", true, true, true],
+] as const)("uses %s magnetic=%s cmd=%s for trim ripple=%s", async (habit, magnetic, meta, ripple) => {
+  const clip = await prepareTrim();
+  preset = habit;
+  prefsUi.magnetic = magnetic;
+  prefsUi.snap = false;
+  await act(async () => window.dispatchEvent(new Event("desktop-prefs-changed")));
+  await pointer(handle("out"), "pointerdown", 272, 85, { metaKey: meta });
+  await pointer(clip, "pointerup", 296, 85, { metaKey: meta });
+  expect(call).toHaveBeenCalledExactlyOnceWith(
+    "edit",
+    expect.objectContaining({ ops: [{ op: "trim", clip_id: "c1", edge: "out", to: "113/25s", ripple, linked: true }] }),
+  );
+  expect(prefsUi.magnetic).toBe(magnetic);
+});
+
+it("immediately updates Premiere hover and trim preview when Cmd changes without a pointer move", async () => {
+  const clip = await prepareRoll();
+  preset = "premiere";
+  await act(async () => window.dispatchEvent(new Event("desktop-prefs-changed")));
+  await modifier("keydown", true);
+  expect(handle("out").dataset.editCursor).toBe("ripple");
+  await modifier("keyup", false);
+  expect(handle("out").dataset.editCursor).toBe("trim");
+  await pointer(handle("out"), "pointerdown", 272, 85);
+  await pointer(clip, "pointermove", 296, 85);
+  expect(handle("out").classList.contains("is-blocked")).toBe(true);
+  const plainCursor = document.querySelector("body > style")?.textContent;
+  await modifier("keydown", true);
+  expect(Number.parseFloat(clip.style.width)).toBeCloseTo(120.96);
+  expect(handle("out").classList.contains("is-blocked")).toBe(false);
+  expect(document.querySelector("body > style")?.textContent).not.toBe(plainCursor);
+  await modifier("keyup", false);
+  expect(clip.style.width).toBe("96px");
+  await modifier("keydown", true);
+  await pointer(clip, "pointerup", 296, 85, { metaKey: true });
+  expect(call).toHaveBeenCalledExactlyOnceWith(
+    "edit",
+    expect.objectContaining({
+      ops: [{ op: "trim", clip_id: "c1", edge: "out", to: "113/25s", ripple: true, linked: true }],
+    }),
+  );
+  expect(document.querySelector("body > style")).toBeNull();
+});
+
+it.each(["fcp", "premiere"] as const)("updates %s move mode and preview on Cmd key transitions", async (habit) => {
+  const clip = await prepareTrim();
+  preset = habit;
+  prefsUi.snap = false;
+  await act(async () => window.dispatchEvent(new Event("desktop-prefs-changed")));
+  await pointer(clip, "pointerdown", 200, 85);
+  await pointer(clip, "pointermove", 488, 85);
+  expect(get(".zc-insert-line")).toBeNull();
+  await modifier("keydown", true);
+  expect(!!get(".zc-insert-line")).toBe(habit === "premiere");
+  expect(feedbackOutput()?.textContent).toContain("时长 00:00:02:00");
+  await modifier("keyup", false);
+  expect(get(".zc-insert-line")).toBeNull();
+  await modifier("keydown", true);
+  await pointer(clip, "pointerup", 488, 85, { metaKey: true });
+  expect(call).toHaveBeenCalledExactlyOnceWith(
+    "edit",
+    expect.objectContaining({
+      ops: [expect.objectContaining({ op: "move", mode: habit === "premiere" ? "insert" : "place" })],
+    }),
+  );
+});
+
+it.each([
+  [23, "+00:00:00:12", "00:00:02:12"],
+  [54, "+00:00:01:03", "00:00:03:03"],
+  [-54, "−00:00:01:03", "00:00:00:22"],
+])(
+  "shows a signed rational delta and duration for %spx independent of the start timecode",
+  async (pixels, delta, duration) => {
+    const clip = await prepareTrim();
+    project.start_timecode = "01:00:00:00";
+    prefsUi.snap = false;
+    await act(async () => window.dispatchEvent(new Event("desktop-prefs-changed")));
+    await act(render);
+    await pointer(handle("out"), "pointerdown", 272, 85);
+    await pointer(clip, "pointermove", 272 + Number(pixels), 85);
+    expect(feedbackOutput()?.textContent).toBe(`${delta}时长 ${duration}`);
+    await pointer(clip, "pointercancel", 272 + Number(pixels), 85);
+    expect(feedbackOutput()).toBeNull();
+    expect(call).not.toHaveBeenCalled();
+  },
+);

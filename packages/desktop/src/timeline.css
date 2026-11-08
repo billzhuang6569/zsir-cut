@@ -351,10 +351,19 @@
   pointer-events: none;
   z-index: 5;
 }
-.zc-snap-line output {
-  color: var(--attention);
-  background: var(--bg-timeline);
+.zc-drag-feedback {
+  position: fixed;
+  z-index: 100;
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  background: var(--panel);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  pointer-events: none;
 }
 
 .zc-trim-handle {
@@ -497,12 +506,7 @@
   border: 0;
   background: var(--bg);
   z-index: 5;
-  cursor: ew-resize;
-}
-.zc-seam::after {
-  content: "";
-  position: absolute;
-  inset: 0 -4px;
+  cursor: default;
 }
 .zc-seam.is-selected {
   width: 4px;
@@ -615,4 +619,12 @@
   font-family: var(--font-mono);
   font-size: var(--mono-sm-size);
   white-space: nowrap;
+}
+
+.zc-seam:hover,
+.zc-seam.is-selected:hover {
+  background: var(--selection);
+}
+.zc-seam.is-blocked {
+  background: var(--attention);
 }

@@ -298,12 +298,16 @@ it("searches Chinese action labels, records one chord, reports unbinding, and re
   await h.input("搜索快捷键", "");
   await h.click("Premiere使用这套习惯");
   expect(h.call).toHaveBeenCalledWith("prefs_set", {
-    patch: { keymap: { preset: "premiere", overrides: {} } },
+    patch: { keymap: { preset: "premiere", overrides: {} }, ui: { magnetic: false } },
   });
+  expect(h.prefs.get().prefs.ui.magnetic).toBe(false);
   expect(h.prefs.get().keymap).toEqual(presets.premiere);
   expect(h.prefs.get().prefs.keymap.overrides).toEqual({});
   await h.click("Final Cut Pro使用这套习惯");
-  expect(h.call).toHaveBeenCalledWith("prefs_set", { patch: { keymap: { preset: "fcp", overrides: {} } } });
+  expect(h.call).toHaveBeenCalledWith("prefs_set", {
+    patch: { keymap: { preset: "fcp", overrides: {} }, ui: { magnetic: true } },
+  });
+  expect(h.prefs.get().prefs.ui.magnetic).toBe(true);
   expect(Object.keys(h.prefs.get().keymap)).toEqual(actions);
 });
 it("cancels recording without writes and keeps saved preferences after failed writes", async () => {

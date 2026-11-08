@@ -21,7 +21,7 @@ let readOnly = false;
 let sourceViewer = false;
 const dragging = { current: false };
 const settings = vi.fn();
-const reply = () => ({ prefs: { ui }, ...mergeKeymap(preset, overrides) });
+const reply = () => ({ prefs: { ui, keymap: { preset } }, ...mergeKeymap(preset, overrides) });
 const call = vi.fn(async (verb: string, request: Record<string, unknown>) => {
   if (verb === "prefs_get") return reply();
   if (verb === "prefs_set") {
@@ -354,6 +354,7 @@ it("selects a seam, exposes it in ui_state, rolls one exact NTSC frame and prese
 });
 
 it("drags a seam with roll, and cancels without writing", async () => {
+  await action("tool_roll");
   const seam = get(".zc-seam");
   await pointer(seam, "pointerdown", 192);
   await pointer(seam, "pointermove", 240);

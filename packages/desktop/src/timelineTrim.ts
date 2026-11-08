@@ -137,6 +137,52 @@ export function trimTarget(
   };
 }
 
+// Intersect both sides' existing trim limits; the core still validates the final roll.
+export function rollTarget(
+  project: ProjectView,
+  left: ClipView,
+  pixels: number,
+  scale: number,
+  snap: boolean,
+  playhead: string,
+) {
+  const track = project.tracks.find((track) => track.clips.some((clip) => clip.id === left.id));
+  const right = track?.clips.find(
+    (clip) =>
+      clip.id !== left.id &&
+      compare(parseRational(clip.timeline_in.t, true), parseRational(left.timeline_out.t, true)) === 0,
+  );
+  const before = trimTarget(project, left, "out", true, pixels, scale, snap, playhead, true);
+  if (!right) return { ...before, to: left.timeline_out.t, blocked: true, reason: "滚动需要相接的片段", following: [] };
+  const after = trimTarget(project, right, "in", true, pixels, scale, snap, playhead, true);
+  const origin = parseRational(left.timeline_out.t, true);
+  const distance = (to: string) => {
+    const delta = sub(parseRational(to, true), origin);
+    return delta.numerator < 0n ? mul(delta, rational(-1n)) : delta;
+  };
+  const limited = compare(distance(before.to), distance(after.to)) <= 0 ? before : after;
+  const paired =
+    before.clips.every((clip) => {
+      const owner = project.tracks.find((track) => track.clips.some((item) => item.id === clip.id));
+      return after.clips.some((item) => owner?.clips.includes(item));
+    }) &&
+    after.clips.every((clip) => {
+      const owner = project.tracks.find((track) => track.clips.some((item) => item.id === clip.id));
+      return before.clips.some((item) => owner?.clips.includes(item));
+    });
+  const blocked = before.blocked || after.blocked || !paired;
+  return {
+    ...limited,
+    clips: before.clips,
+    following: [right, ...after.clips.filter((clip) => clip.id !== right.id)],
+    to: paired ? limited.to : left.timeline_out.t,
+    blocked,
+    reason: !paired ? "联动滚动需要相接的片段" : before.blocked ? before.reason : after.reason,
+    line: blocked ? null : limited.line,
+    distance: blocked ? null : limited.distance,
+  };
+}
+
 // Manual timing is source-anchored, even when one cue is projected into several clips.
 export function cueTrimTarget(
   project: ProjectView,
