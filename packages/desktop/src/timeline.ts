@@ -140,6 +140,18 @@ export const pixelAt = (at: string, scale: number) => numberOf(mul(parseRational
 export const frameTime = (frame: bigint, rate: string) =>
   printRational(div(rational(frame < 0n ? 0n : frame), parseRational(rate)), true);
 export const frameAt = (at: string, rate: string) => floor(mul(parseRational(at, true), parseRational(rate)));
+export function pointerFrameTime(pixels: number, scale: number, rate: string): string {
+  // Preserve fractional browser pixels without rounding across a frame boundary.
+  const [decimal = "0", exponent = "0"] = Math.max(0, pixels).toString().split("e");
+  const [whole = "0", fraction = ""] = decimal.split(".");
+  const power = Number(exponent) - fraction.length;
+  const position = rational(
+    BigInt(whole + fraction) * 10n ** BigInt(Math.max(0, power)),
+    10n ** BigInt(Math.max(0, -power)),
+  );
+  const time = div(position, rational(BigInt(scale)));
+  return frameTime(floor(mul(time, parseRational(rate))), rate);
+}
 export function pointerTime(pixels: number, scale: number, rate: string): string {
   const time = div(rational(BigInt(Math.max(0, Math.round(pixels * 1000)))), rational(BigInt(scale * 1000)));
   return frameTime(floor(add(mul(time, parseRational(rate)), rational(1n, 2n))), rate);

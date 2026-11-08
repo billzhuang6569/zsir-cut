@@ -1,7 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { type ClipView, frameAt, frameTime, pointerTime, printRational, sourceAt } from "../src/timeline.js";
+import {
+  type ClipView,
+  frameAt,
+  frameTime,
+  pointerFrameTime,
+  pointerTime,
+  printRational,
+  sourceAt,
+} from "../src/timeline.js";
 
 describe("rational playhead and source mapping", () => {
+  it("floors blade pixels to the beginning of the frame, including fractional pixels and NTSC", () => {
+    expect(pointerFrameTime(49, 48, "25")).toBe("1s");
+    expect(pointerFrameTime(47.999, 48, "25")).toBe("24/25s");
+    expect(pointerFrameTime(47.999999999, 48, "25")).toBe("24/25s");
+    expect(pointerFrameTime(-10, 48, "25")).toBe("0s");
+    expect(pointerFrameTime(0, 48, "25")).toBe("0s");
+    expect(pointerFrameTime(1.6016, 48, "30000/1001")).toBe("1001/30000s");
+    expect(pointerFrameTime(1.6015, 48, "30000/1001")).toBe("0s");
+    expect(pointerFrameTime(1e-7, 48, "25")).toBe("0s");
+    expect(pointerFrameTime(4.8e21, 48, "25")).toBe("100000000000000000000s");
+    expect(pointerFrameTime(1601600, 48, "30000/1001")).toBe("100100/3s");
+  });
   it("round trips NTSC frames exactly, including long positions", () => {
     for (const frame of [0n, 1n, 1800n, 999999999n])
       expect(frameAt(frameTime(frame, "30000/1001"), "30000/1001")).toBe(frame);
