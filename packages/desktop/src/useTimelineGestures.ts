@@ -46,6 +46,7 @@ export function useTimelineGestures({
   scale,
   setScale,
   clipDrag,
+  clickPlayhead,
 }: {
   project: ProjectView | null;
   state: UiState;
@@ -53,6 +54,7 @@ export function useTimelineGestures({
   dragging: MutableRefObject<boolean>;
   scale: number;
   setScale: (scale: number) => void;
+  clickPlayhead?: (x: number) => string | undefined;
   clipDrag?: (
     event: PointerEvent<HTMLElement>,
     element: HTMLElement,
@@ -152,10 +154,12 @@ export function useTimelineGestures({
       height: Math.abs(end.y - origin.y),
     };
   };
-  const select = (ids: string[], keys: Modifiers) => {
+  const select = (ids: string[], keys: Modifiers & { clientX?: number; detail?: number }) => {
     const { state, update } = latest.current;
+    const at = keys.clientX === undefined || keys.detail === 0 ? undefined : clickPlayhead?.(keys.clientX);
     update({
       ...state,
+      ...(at !== undefined ? { playhead: { at } } : {}),
       preview: "timeline",
       playing: false,
       edit_point: null,

@@ -31,6 +31,7 @@ export const actionLabels: Record<Action, string> = {
   lift_delete: "删除留空隙",
   toggle_snap: "吸附开关",
   toggle_magnetic: "磁性开关",
+  toggle_skimming: "浏览条开关",
   add_marker: "加标记",
   undo: "撤销",
   redo: "重做",

@@ -20,6 +20,7 @@ export type Layout = z.infer<typeof layout>;
 const ui = z.strictObject({
   snap: z.boolean(),
   magnetic: z.boolean(),
+  skimming: z.boolean(),
   timeline_zoom: z.number().positive().nullable(),
   track_height: z.enum(["s", "m", "l"]),
   chapters,
@@ -66,6 +67,7 @@ export const defaultPreferences: Preferences = {
   ui: {
     snap: true,
     magnetic: true,
+    skimming: false,
     timeline_zoom: null,
     track_height: "m",
     chapters: { view: "outline", zoom: 1, folded: [] },

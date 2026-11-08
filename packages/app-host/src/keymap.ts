@@ -29,6 +29,7 @@ export const premiere = {
   lift_delete: "Delete",
   toggle_snap: "S",
   toggle_magnetic: "⇧M",
+  toggle_skimming: "⇧S",
   add_marker: "M",
   undo: "⌘Z",
   redo: "⇧⌘Z",
@@ -57,6 +58,7 @@ export const fcp: Record<Action, string> = {
   lift_delete: "⇧Delete",
   toggle_snap: "N",
   toggle_magnetic: "P",
+  toggle_skimming: "S",
 };
 export const presets = { premiere, fcp };
 export const actions = Object.keys(premiere) as Action[];

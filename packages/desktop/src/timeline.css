@@ -628,3 +628,13 @@
 .zc-seam.is-blocked {
   background: var(--attention);
 }
+
+.zc-skimmer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--accent);
+  pointer-events: none;
+  z-index: 6;
+}
