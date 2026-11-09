@@ -182,6 +182,59 @@ async function mount(
     },
   };
 }
+it("dismisses a chapter menu on outside pointerdown and keeps inside presses open", async () => {
+  const ui = await mount();
+  const menu = ui.container.querySelector<HTMLDetailsElement>(".zc-chapter-menu");
+  if (!menu) throw new Error("Missing chapter menu");
+  await act(async () => menu.querySelector("summary")?.click());
+  expect(menu.open).toBe(true);
+  for (const target of [menu, menu.querySelector("button")]) {
+    await act(() => target?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true })));
+    expect(menu.open).toBe(true);
+  }
+  await act(() => document.body.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true })));
+  expect(menu.open).toBe(false);
+});
+
+it("toggles chapter summaries and returns focus to the summary on Escape", async () => {
+  const ui = await mount();
+  const menu = ui.container.querySelector<HTMLDetailsElement>(".zc-chapter-menu");
+  const summary = menu?.querySelector("summary");
+  if (!menu || !summary) throw new Error("Missing chapter menu");
+  for (const open of [true, false, true]) {
+    await act(() => summary.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true })));
+    await act(async () => summary.click());
+    expect(menu.open).toBe(open);
+  }
+  const item = menu.querySelector("button");
+  await act(() => {
+    item?.focus();
+    item?.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
+  });
+  expect(menu.open).toBe(true);
+  await act(() => item?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+  expect(menu.open).toBe(false);
+  expect(document.activeElement).toBe(summary);
+});
+
+it.each([true, false])("keeps only one chapter menu open (pointer activation: %s)", async (pointer) => {
+  const ui = await mount();
+  const menus = [...ui.container.querySelectorAll<HTMLDetailsElement>(".zc-chapter-menu")].slice(0, 2);
+  expect(menus).toHaveLength(2);
+  for (const menu of [...menus, ...menus.toReversed()]) {
+    const wasOpen = menu.open;
+    const summary = menu.querySelector("summary");
+    if (!summary) throw new Error("Missing chapter summary");
+    if (pointer) await act(() => summary.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true })));
+    await act(async () => {
+      summary.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(menu.open).toBe(!wasOpen);
+    expect([...ui.container.querySelectorAll(".zc-chapter-menu[open]")]).toEqual(wasOpen ? [] : [menu]);
+  }
+});
+
 it("renders sequence timecodes, highlights the current section, seeks and exposes settings through ui_state", async () => {
   const ui = await mount();
   expect(ui.container.querySelector('[aria-current="location"]')?.textContent).toBe("第一章");
@@ -224,6 +277,8 @@ it("sends rename, level, deletion and frame-aligned insertion ops with human lab
     }),
   );
   const menu = ui.container.querySelectorAll(".zc-chapter-menu")[0];
+  await act(async () => menu?.querySelector("summary")?.click());
+  await act(() => menu?.querySelector("button")?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true })));
   await act(async () => menu?.querySelector<HTMLButtonElement>("button")?.click());
   expect(ui.call).toHaveBeenLastCalledWith(
     "edit",

@@ -36,6 +36,23 @@ export function useChapterPanel({
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
   const [hiddenDescriptions, setHiddenDescriptions] = useState<string[]>([]);
+  const outlineRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const dismiss = (event: PointerEvent | KeyboardEvent) => {
+      const keyboard = event instanceof KeyboardEvent;
+      if (keyboard && event.key !== "Escape") return;
+      const menu = outlineRef.current?.querySelector<HTMLDetailsElement>(".zc-chapter-menu[open]");
+      if (!menu || (!keyboard && event.target instanceof Node && menu.contains(event.target))) return;
+      menu.open = false;
+      if (keyboard) menu.querySelector("summary")?.focus();
+    };
+    window.addEventListener("pointerdown", dismiss);
+    window.addEventListener("keydown", dismiss);
+    return () => {
+      window.removeEventListener("pointerdown", dismiss);
+      window.removeEventListener("keydown", dismiss);
+    };
+  }, []);
   useEffect(() => {
     if (!copied) return;
     const timer = setTimeout(() => setCopied(false), 1500);
@@ -224,7 +241,7 @@ export function useChapterPanel({
   );
   const all = groups.flatMap((g) => [...(g.id ? [g] : []), ...g.sections]);
   const outline = (
-    <div className="zc-chapter-outline">
+    <div className="zc-chapter-outline" ref={outlineRef}>
       <header className="zc-chapter-header">
         <h2>{view === "outline" ? "章节大纲" : "章节时间轴"}</h2>
         <span className="zc-meta">
@@ -348,7 +365,17 @@ export function useChapterPanel({
                       {m.title}
                     </button>
                   )}
-                  <details className="zc-chapter-menu">
+                  <details
+                    className="zc-chapter-menu"
+                    onToggle={(event) => {
+                      if (!event.currentTarget.open) return;
+                      for (const menu of outlineRef.current?.querySelectorAll<HTMLDetailsElement>(
+                        ".zc-chapter-menu[open]",
+                      ) ?? []) {
+                        if (menu !== event.currentTarget) menu.open = false;
+                      }
+                    }}
+                  >
                     <summary aria-label={`章节菜单：${m.title}`}>
                       <Icon name="down" />
                     </summary>
