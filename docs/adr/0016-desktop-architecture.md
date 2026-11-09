@@ -23,7 +23,7 @@ ADR-0003 定了桌面壳用 Tauri + TS，内核、CLI、MCP 都是 TypeScript，
 - 界面动词（`ui_*`）由宿主进程的 MCP 收下，转给界面执行，界面把结果回给宿主进程。界面没连上时返回 `E_APP_NOT_RUNNING`。
 - 颜色、字号、间距从 `design/tokens.json` 生成 CSS 变量，名字和设计系统一致。`design/` 由 Claude 维护，从 Claude Design 的设计系统同步过来。
 - 剪辑软件图标：Premiere、Resolve 用仓库里的 MIT 图标（`design/assets/apps/`）；Final Cut Pro 的图标不进仓库，运行时从本机安装的 FCP 应用里读，没装就显示字母色块。
-- 一期在开发环境用本机的 Node 启动宿主进程。打包成独立应用时怎么带上 Node，到发布前再定，另写 ADR。
+- 一期在开发环境用本机的 Node 启动宿主进程。打包成独立应用时怎么带上 Node，见 ADR-0025。
 
 ## 后果
 
