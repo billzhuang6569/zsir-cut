@@ -69,7 +69,7 @@
 
 视频或音频主故事情节片段写成 `<asset-clip>`：`ref` 指向素材，引用有视频的素材时加 `format`，取该素材的格式 ID（FCP 自己导出时也这样写，片段本地时间按这个格式的帧网格计），`offset` 是 `tcStart + timeline_start`，`start` 是 `asset.start + source_start`，`duration` 是片段时长。静帧图片的 `asset.duration` 是 `0s`，必须用 `<video ref offset start="0s" duration>` 引用，不得用 `<asset-clip>`；为保存片段 ID 元数据，外层用 `<clip offset duration format>` 包住 `<video>`，并把 `<metadata>` 放在外层末尾。静帧的时间线时长由 `<video>` 和外层 `<clip>` 的 `duration` 表达。
 
-**音视频配对**：同一个 `occurrence_id` 在第一条音频轨上有且只有一个音频片段，并且两者的时间映射相同时，把它们写成同一个 `<asset-clip>`，`srcEnable="all"`。音频的入出点和视频不同时，就是 J/L cut，用 `audioStart` 和 `audioDuration` 表示：`audioStart` 是 `asset.start + 音频片段的 source_start`，`audioDuration` 是音频片段时长。不满足配对条件时，主故事情节片段写 `srcEnable="video"`，音频作为连接片段另写。
+**音视频配对**：逐个视频片段判断。这个 `occurrence_id` 在第一条音频轨上只有一个音频片段，或者有多段（切开过）但其中恰好一段的序列入点和时长都和这个视频片段相同，就是它的配对候选。候选和视频片段的时间映射相同时，把它们写成同一个 `<asset-clip>`，`srcEnable="all"`。音频的入出点和视频不同时，就是 J/L cut，用 `audioStart` 和 `audioDuration` 表示：`audioStart` 是 `asset.start + 音频片段的 source_start`，`audioDuration` 是音频片段时长。不满足配对条件时，主故事情节片段写 `srcEnable="video"`，音频作为连接片段另写。
 
 ## 6. 连接片段
 

@@ -5,7 +5,7 @@ import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/p
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
-import { repository, run, runtime } from "./package-release.mjs";
+import { checkMacRuntime, repository, run, runtime } from "./package-release.mjs";
 
 const source = resolve(process.argv[2] ?? runtime);
 const temporary = await realpath(await mkdtemp(join(tmpdir(), "zcut-release-smoke-")));
@@ -15,6 +15,10 @@ let socket;
 try {
   // Relocate outside the repository so missing dependencies cannot resolve from the development node_modules.
   await cp(source, root, { recursive: true, verbatimSymlinks: true });
+  if (process.platform === "darwin") {
+    await checkMacRuntime(root);
+    console.log("All bundled Mach-O deployment targets are at most macOS 14.0");
+  }
   run(
     join(root, process.platform === "win32" ? "node.exe" : "node"),
     [

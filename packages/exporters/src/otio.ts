@@ -190,6 +190,17 @@ export const otioExporter: Exporter & { validationNotes?: string } = {
                     enabled: true,
                     time_scalar: rateNumber(speed),
                   };
+          const sourceStart = add(
+            rational(BigInt(sourceOrigin(media, mediaRate))),
+            mul(compare(first.source, last.source) < 0 ? first.source : last.source, mediaRate),
+          );
+          const sourceDuration = mul(sub(last.at, first.at), mediaRate);
+          // Keep existing on-frame encoding; subframe starts need a common integer tick for both fields.
+          const multiplier =
+            media.kind === "audio" || sourceStart.denominator === 1n
+              ? 1n
+              : sourceStart.denominator * rational(sourceStart.denominator, sourceDuration.denominator).denominator;
+          const preciseRate = rateNumber(mul(mediaRate, rational(multiplier)));
           const forward = {
             OTIO_SCHEMA: "Clip.2",
             metadata: {
@@ -207,12 +218,11 @@ export const otioExporter: Exporter & { validationNotes?: string } = {
             name: clip.label ?? media.name ?? media.id,
             source_range: {
               OTIO_SCHEMA: "TimeRange.1",
-              start_time: rt(
-                sourceOrigin(media, mediaRate) +
-                  count(mul(compare(first.source, last.source) < 0 ? first.source : last.source, mediaRate)),
-                nativeRate,
-              ),
-              duration: rt(end - start, editRate),
+              start_time: rt(count(mul(sourceStart, rational(multiplier))), preciseRate),
+              duration:
+                multiplier === 1n
+                  ? rt(end - start, editRate)
+                  : rt(count(mul(sourceDuration, rational(multiplier))), preciseRate),
             },
             effects: [...(effect ? [effect] : []), ...(clip.transform ? resolveEffects(clip.transform) : [])],
             markers: [],
@@ -392,8 +402,9 @@ export const otioExporter: Exporter & { validationNotes?: string } = {
             (innerTrack.effects?.length ?? 0) !== 0 ||
             innerTrack.children?.length !== 1 ||
             innerClip?.OTIO_SCHEMA !== "Clip.2" ||
-            innerClip.source_range?.duration.value !== source.duration.value ||
-            innerClip.source_range.duration.rate !== source.duration.rate
+            !innerClip.source_range ||
+            innerClip.source_range.duration.value / innerClip.source_range.duration.rate !==
+              source.duration.value / source.duration.rate
           )
             throw new Error("Invalid OTIO reverse compound");
           clip = innerClip;
@@ -408,7 +419,11 @@ export const otioExporter: Exporter & { validationNotes?: string } = {
         const mediaRef = (
           clip as OtioChild & {
             media_references: {
-              DEFAULT_MEDIA: { target_url: string; metadata: { zsir: { source_origin: number } } };
+              DEFAULT_MEDIA: {
+                target_url: string;
+                metadata: { zsir: { source_origin: number } };
+                available_range: OtioRange;
+              };
             };
           }
         ).media_references.DEFAULT_MEDIA;
@@ -420,10 +435,10 @@ export const otioExporter: Exporter & { validationNotes?: string } = {
         if (forwardSpeed < 0 || (reverse && forwardSpeed === 0))
           throw new Error("OTIO reverse compound requires a forward clip");
         const speed = reverse ? -forwardSpeed : forwardSpeed;
-        const delta = Math.round(
-          (clipSource.duration.value * clipSource.start_time.rate * speed) / clipSource.duration.rate,
-        );
-        const first = clipSource.start_time.value - origin - Math.min(0, delta);
+        const nativeRate = mediaRef.available_range.start_time.rate;
+        const delta = (clipSource.duration.value * nativeRate * speed) / clipSource.duration.rate;
+        const first =
+          (clipSource.start_time.value * nativeRate) / clipSource.start_time.rate - origin - Math.min(0, delta);
         const last = first + delta;
         rows.push({
           track_type: kind,
@@ -432,8 +447,8 @@ export const otioExporter: Exporter & { validationNotes?: string } = {
           media_id: String(zsir.media_id),
           timeline_in: cursor,
           timeline_out: cursor + length,
-          source_in: first,
-          source_out: last,
+          source_in: Math.round(first),
+          source_out: Math.round(last),
           speed:
             zsir.segment === undefined
               ? printRational(rational(BigInt(Math.round(speed * 1000000)), 1000000n))

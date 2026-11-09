@@ -383,21 +383,27 @@ function parentFor<T extends { start: Rational; end: Rational; item: Node }>(ite
   return items.find((entry) => compare(entry.start, at) <= 0 && compare(at, entry.end) < 0) ?? items.at(-1);
 }
 function pairedAudio(clip: Clip, audio: MediaTrack[]): Clip | undefined {
-  return audio[0]?.clips.find(
-    (candidate) =>
-      candidate.occurrence_id === clip.occurrence_id &&
-      candidate.media_id === clip.media_id &&
-      (candidate.enabled !== false) === (clip.enabled !== false) &&
-      JSON.stringify(candidate.time_map?.map((point) => [sec(point.at), sec(point.source), point.interp])) ===
-        JSON.stringify(clip.time_map?.map((point) => [sec(point.at), sec(point.source), point.interp])) &&
-      (candidate.time_map
-        ? compare(candidate.timeline_start, clip.timeline_start) === 0 &&
-          compare(candidate.duration, clip.duration) === 0
-        : compare(
-            sub(candidate.timeline_start, clip.timeline_start),
-            sub(candidate.source_start, clip.source_start),
-          ) === 0),
-  );
+  const occurrence = audio[0]?.clips.filter((candidate) => candidate.occurrence_id === clip.occurrence_id);
+  const matches =
+    occurrence?.length === 1
+      ? occurrence
+      : occurrence?.filter(
+          (candidate) =>
+            compare(candidate.timeline_start, clip.timeline_start) === 0 &&
+            compare(candidate.duration, clip.duration) === 0,
+        );
+  const candidate = matches?.length === 1 ? matches[0] : undefined;
+  return candidate &&
+    candidate.media_id === clip.media_id &&
+    (candidate.enabled !== false) === (clip.enabled !== false) &&
+    JSON.stringify(candidate.time_map?.map((point) => [sec(point.at), sec(point.source), point.interp])) ===
+      JSON.stringify(clip.time_map?.map((point) => [sec(point.at), sec(point.source), point.interp])) &&
+    (candidate.time_map
+      ? compare(candidate.timeline_start, clip.timeline_start) === 0 && compare(candidate.duration, clip.duration) === 0
+      : compare(sub(candidate.timeline_start, clip.timeline_start), sub(candidate.source_start, clip.source_start)) ===
+        0)
+    ? candidate
+    : undefined;
 }
 function gridRounded(project: Project, timeline: Timeline) {
   const video = timeline.tracks.filter((track): track is MediaTrack => track.kind === "video");
