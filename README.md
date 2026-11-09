@@ -6,7 +6,7 @@
 
 ## 现状
 
-第一批预发布版 0.1.0。还没有代码签名，Windows 版也没有在真机上用过，请先用不重要的工程试。
+第一批预发布版 0.1.0。还没有代码签名，请先用不重要的工程试。
 
 ## 安装
 
@@ -22,15 +22,14 @@
 - macOS：把应用拖进「应用程序」。提示无法验证开发者时，到「系统设置 → 隐私与安全性」点「仍要打开」。
 - Windows：SmartScreen 提示时，点「更多信息 → 仍要运行」。
 
-**需要自己装的**
+**用得上的话要另外准备的**
 
-- ffmpeg（预览、波形、导出都要用）。macOS：`brew install ffmpeg`；Windows：`winget install Gyan.FFmpeg`。
 - 想用 AI 面板：Claude Code 或 Codex。
+- 想识别字幕（只有 Mac 版）：在「设置 → 字幕识别」下载本地模型，或填火山引擎豆包语音的 API Key。
 
 **已知限制**
 
-- 本地语音识别只支持 macOS Apple Silicon，要单独安装，见 [workers/asr/README.md](workers/asr/README.md)，环境放在 `~/.zsir-cut/asr/.venv`。
-- Windows 版没有本地语音识别，也不能保存配音密钥。
+- Windows 版这个版本不能识别字幕，也不能保存配音密钥。
 
 ## 许可证
 

@@ -9,7 +9,7 @@
 - Python 3.13，依赖用 `workers/asr/pyproject.toml` 声明，精确版本锁在 `workers/asr/requirements.lock`，许可证按 ADR-0002 筛选。虚拟环境放在 `workers/asr/.venv`，不进仓库。
 - MLX 推理用 `mlx-audio`（MIT）0.5.8，模型权重用 `mlx-community/Qwen3-ASR-1.7B-8bit` 和 `mlx-community/Qwen3-ForcedAligner-0.6B-8bit`，存放在 `~/.zsir-cut/models/<模型名>/`。
 - 本地引擎：Qwen3-ASR（1.7B，内存 16 GB 及以下的机器用 0.6B）识别，Qwen3-ForcedAligner 对齐，在 Apple Silicon 上走 MLX。中文对齐结果按 jieba 分词聚成词。有热词文件时，聚词前把其中的每个中文词加入 jieba 词典，保证词表里的词（例如「飞书」「豆包工作」）聚成一个字词，不被拆开。
-- 云端引擎：火山引擎语音识别。凭据从环境变量 `ZSIR_VOLC_APP_ID`、`ZSIR_VOLC_ACCESS_TOKEN` 读取，不写进任何文件，不进仓库。
+- 云端引擎：火山引擎豆包语音识别极速版（ADR-0026）。Key 从环境变量 `ZSIR_VOLC_API_KEY` 读取，由内核从钥匙串取出后传给 worker，不写进任何文件和日志。
 - 模型权重放在用户目录 `~/.zsir-cut/models/`，首次使用时下载，下载前核对许可证。
 
 ## 2. 命令
@@ -51,9 +51,13 @@ Qwen3-ForcedAligner 一次只能可靠对齐几分钟的音频。2026-10-28 用�
 | `cloud` | 只用云端，没配置凭据就报错 |
 | `auto` | 先用本地。本地报 `E_ASR_OOM` 或 `E_ASR_MODEL_UNAVAILABLE` 时，**只有用户在本地配置里开启了云端兜底**，才改用云端；否则报错并建议开启 |
 
+内核按应用设置 `asr.mode` 决定传什么：`api` 时 `auto` 传 `cloud`，`local` 时不变。
+
 用户配置在 `~/.zsir-cut/config.json` 的 `asr.cloud_fallback`，默认 `false`。内核的 `transcribe` 动词默认传 `auto`。这一条解决了 ADR-0005 里「资源不足时自动提示还是手动切换」的开放问题：默认提示，用户明确开启后才自动切换。
 
-云端结果一律再跑本地 `align`，保证词级时间来源一致。本地对齐也不可用时，保留云端自带的时间，并在结果里给出警告 `W_ASR_CLOUD_TIMING`。
+云端结果直接用接口返回的逐字时间，不跑本地 `align`，也不加 `W_ASR_CLOUD_TIMING`（ADR-0026）。
+
+云端调用：用 ffmpeg 转成 16 kHz 单声道 64 kbps 的 mp3，base64 放进 `audio.data`。单次不超过 2 小时、100 MB；更长的素材每 90 分钟切一段，时间加上偏移后合并。状态码：`20000000` 成功；`20000003` 静音，返回空结果；`45000010` 和 `45000030` 报 `E_ASR_CLOUD_AUTH`；其他 `45xxxxxx` 报 `E_ASR_INTERNAL`，错误信息带 `X-Tt-Logid`；`55xxxxxx` 和网络失败报 `E_ASR_CLOUD_NETWORK`。
 
 ## 4. 输出
 

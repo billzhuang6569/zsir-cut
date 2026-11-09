@@ -82,6 +82,8 @@
 | `ui.snap` | 吸附开关，时间线和章节时间轴共用 |
 | `ui.magnetic` | 磁性开关，见第 3.2 节。在设置里切换 `keymap.preset` 时，界面在同一次 `prefs_set` 里把它设成该习惯的默认：`fcp` 开，`premiere` 关（2026-11-08 补）；之后照常手动开关 |
 | `ui.skimming` | 浏览条开关，默认 false，见第 3.3 节（2026-11-08 加）。文件里没有这一项时用默认值，不升 `version` |
+| `asr.mode` | 字幕识别模式，`local` 或 `api`，默认 `local`，见第 9 节。缺项用默认，不升版本 |
+| `asr.model` | 本地模型，`1.7b` 或 `0.6b`。缺项时内存大于 16 GB 用 `1.7b`，否则 `0.6b` |
 | `ui.timeline_zoom` | 每秒多少像素，null 表示缩放到整条 |
 | `ui.track_height` | `s`、`m`、`l` |
 | `ui.chapters.view` | `outline` 或 `timeline` |
@@ -218,7 +220,7 @@ Agent 通过宿主的 MCP 调用会碰到工程外面的动词时，宿主先停
 | `export`（不带 `dry_run`） | 往工程目录以外写文件 |
 | `record_handoff_check` | 写交接包 |
 | `voice_generate`、`voice_clone` | 花钱 |
-| `transcribe`（会用到云端识别时：请求指定云端引擎，或用 `auto` 且本机设置开了云端兜底） | 把声音传到外面 |
+| `transcribe`（会用到云端识别时：请求指定云端引擎，或用 `auto` 且 `asr.mode` 是 `api`，或用 `auto` 且本机设置开了云端兜底） | 把声音传到外面 |
 | `terms_edit`、`voice_edit` | 改全局库，影响别的工程 |
 
 以后新增的会写工程目录以外文件、联网或花钱的动词，先加进这张表。读动词、`edit`、会话动词、界面动词都不问。
@@ -346,3 +348,48 @@ Agent 通过宿主的 MCP 调用会碰到工程外面的动词时，宿主先停
 - 两家 CLI 都按这个规则；流式输出时宿主先扣住可能是这一行的尾巴，回复结束再决定。
 
 界面把它放进输入框当灰字：Tab 填入，回车发送，用户打字时消失，新的一轮开始时清掉。
+
+## 9. 字幕识别设置
+
+界面按设计画布「设置 · 字幕识别」五张画板做。决策见 ADR-0026。
+
+### 9.1 模型
+
+| `asr.model` | 名字 | 下载内容 | 约 |
+|---|---|---|---|
+| `1.7b` | 高精度 | `mlx-community/Qwen3-ASR-1.7B-8bit` 和 `mlx-community/Qwen3-ForcedAligner-0.6B-8bit` | 3.8 GB |
+| `0.6b` | 省内存 | `mlx-community/Qwen3-ASR-0.6B-8bit` 和 `mlx-community/Qwen3-ForcedAligner-0.6B-8bit` | 2.3 GB |
+
+放在 `~/.zsir-cut/models/<仓库名>/`，和 worker 现有的路径一样。内存大于 16 GB 时「高精度」带「这台电脑推荐」，否则「省内存」带。
+
+**下载。** 用 Hugging Face 的 `api/models/<仓库>/tree/main` 列文件，从 `huggingface.co` 下载，连不上或出错时换 `hf-mirror.com`。文件先写 `<仓库名>.partial/`，能续传，每个文件校验大小，LFS 文件再校验 sha256，全部通过后改名。取消时保留已下的部分。环境变量里有 `HTTPS_PROXY` 时走代理。同时只下一个模型，另一个排队。对齐模型已经有了就不再下，进度只算要下的部分。
+
+**删除。** 删这个模型的识别权重。对齐模型只有在另一个模型也没下时才删。
+
+### 9.2 动词与推送
+
+| 动词 | 请求 | 结果 |
+|---|---|---|
+| `asr_status` | 无 | `{supported, memory_bytes, recommended, models: [{id, bytes_total, bytes_done, state, error}], api_key_set}`。`state` 是 `missing`、`queued`、`downloading`、`ready`。`supported` 只有 macOS Apple Silicon 是 true。不返回 Key |
+| `asr_key_set` | `{key}`，`null` 表示清除 | 无 |
+| `asr_model_download`、`asr_model_cancel`、`asr_model_delete` | `{model}` | 无 |
+| `asr_test` | `{mode}` | `{ok: true, audio_seconds, used_seconds, text}` 或 `{ok: false, code, reason}` |
+
+`asr.mode` 和 `asr.model` 走现有的 `prefs_set`。下载进度推 `{type: "asr_model_progress", id, state, bytes_done, bytes_total, error}`，一秒最多一次。这些动词和 `prefs_set` 一样，只有界面客户端能调。
+
+**Key。** macOS 存钥匙串，服务名 `zsir-cut.volc-asr`，账号 `default`。任何日志、结果信封、推送、错误信息里都不能出现 Key。
+
+**测试。** `asr_test` 用 macOS 的 `say -v Tingting` 现生成一段语音（「今天我们来试一下字幕识别，看看能不能听清楚这句话。」），走和正式识别一样的路径。识别出非空文字算通过。`say` 用不了时返回不通过和原因。测试不写工程，也不进缓存。
+
+`reason` 的文字：
+
+| 情况 | 文字 |
+|---|---|
+| `45000010` | API Key 不对。检查后再测一次。 |
+| `45000030` | 这个账号没有开通豆包语音识别极速版。开通后再测一次。 |
+| 网络失败 | 连不上火山引擎。检查网络后再测一次。 |
+| 模型读取失败或内存不够 | 模型没能运行。可以换「省内存」或 API 识别。 |
+
+### 9.3 Windows
+
+`supported` 为 false。设置页这一节只显示「这个版本的 Windows 版不能识别字幕」。字幕面板里开始识别的入口不可用，点不了。`transcribe` 动词返回 `E_ASR_MODEL_UNAVAILABLE`，原因写同一句话。
