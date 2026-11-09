@@ -45,3 +45,6 @@ fixtures/.media/
 
 # Local progress page and scratch
 .tmp/
+
+# Assembled release resources
+apps/desktop-tauri/src-tauri/runtime/

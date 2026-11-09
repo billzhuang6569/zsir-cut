@@ -84,6 +84,7 @@ const path = require('node:path');
 const args = process.argv.slice(2);
 const arg = (name) => args.includes(name) ? args[args.indexOf(name) + 1] : undefined;
 fs.writeFileSync(path.join(process.cwd(), 'worker-args.json'), JSON.stringify(args));
+fs.writeFileSync(path.join(process.cwd(), 'worker-bytecode.txt'), process.env.PYTHONDONTWRITEBYTECODE ?? '');
 if (arg('--hotwords')) fs.writeFileSync(path.join(process.cwd(), 'worker-hotwords.txt'), fs.readFileSync(arg('--hotwords')));
 const scenario = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'scenario.json'), 'utf8'));
 const input = fs.readFileSync(arg('--input'));
@@ -118,6 +119,7 @@ it("creates all transcript layers, segments cues, and undoes the single revision
   expect(validateCommand("transcribe", request()).valid).toBe(true);
   const job = await run();
   expect(job.state, JSON.stringify(job.envelope)).toBe("succeeded");
+  expect(await readFile(join(directory, "worker-bytecode.txt"), "utf8")).toBe("1");
   expect(validateEnvelope(job.envelope).valid).toBe(true);
   expect(job.envelope?.result?.hotwords).toEqual([]);
   const next = await project();

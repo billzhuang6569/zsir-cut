@@ -2,7 +2,7 @@
 
 use std::{
     io::{BufRead, BufReader},
-    path::Path,
+    path::PathBuf,
     process::{Child, Command, Stdio},
     sync::Mutex,
 };
@@ -23,12 +23,33 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::Builder::new().build())
         .setup(|app| {
-            let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
-            let mut command = Command::new("node");
-            command.current_dir(&root)
+            let root = if cfg!(debug_assertions) {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")
+            } else {
+                app.path().resource_dir()?.join("runtime")
+            };
+            let node = if cfg!(debug_assertions) {
+                PathBuf::from("node")
+            } else {
+                root.join(if cfg!(windows) { "node.exe" } else { "node" })
+            };
+            let mut command = Command::new(node);
+            if !cfg!(debug_assertions) {
+                command.env("ZCUT_PACKAGED", "1");
+            }
+            command.env("PYTHONDONTWRITEBYTECODE", "1");
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+            }
+            command
+                .current_dir(&root)
                 .arg(root.join("packages/app-host/dist/index.js"))
                 .arg("--desktop");
-            if let Some(project) = std::env::var_os("ZCUT_PROJECT").filter(|value| !value.is_empty()) {
+            if let Some(project) =
+                std::env::var_os("ZCUT_PROJECT").filter(|value| !value.is_empty())
+            {
                 command.arg("--project").arg(project);
             }
             let child = command

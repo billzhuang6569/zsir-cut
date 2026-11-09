@@ -1,0 +1,78 @@
+name: Release packages
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+            artifact: macos-arm64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: windows-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: pnpm install --frozen-lockfile
+      - name: Check release tag
+        shell: bash
+        run: |
+          node --input-type=module -e 'import fs from "node:fs"; const v = JSON.parse(fs.readFileSync("package.json")).version; if (process.env.GITHUB_REF_TYPE === "tag" && process.env.GITHUB_REF_NAME !== `v${v}`) throw Error("Tag/version mismatch");'
+      - run: pnpm --filter @zsir-cut/desktop-tauri build --target ${{ matrix.target }}
+      - name: Test platform runtime branches
+        run: pnpm exec vitest run packages/app-host/test/release-runtime.test.ts packages/core/test/release-runtime.test.ts scripts/test/release.test.ts
+      - name: Smoke macOS bundled resources
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          node scripts/smoke-release.mjs "apps/desktop-tauri/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/庄Sir剪辑助手.app/Contents/Resources/runtime"
+      - name: Smoke Windows install and app launch
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./scripts/smoke-windows.ps1
+      - name: Name release artifacts
+        shell: bash
+        run: node scripts/name-release.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: apps/desktop-tauri/src-tauri/target/release-artifacts/*
+          if-no-files-found: error
+
+  draft:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Upload to prerelease draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft --prerelease --title "$GITHUB_REF_NAME" --notes '预发布安装包。未签名；请参阅 README 安装说明与已知限制。Windows 仅通过 CI 冒烟，尚未经真机验收。'
+          gh release upload "$GITHUB_REF_NAME" artifacts/* --repo "$GITHUB_REPOSITORY"

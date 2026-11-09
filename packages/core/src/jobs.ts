@@ -72,7 +72,11 @@ export async function startExportJob(
   const worker = fileURLToPath(
     new URL(import.meta.url.endsWith(".ts") ? "./export-worker.ts" : "./export-worker.js", import.meta.url),
   );
-  const child = spawn(process.execPath, [worker, path, exporterModule], { stdio: "ignore", detached: true });
+  const child = spawn(process.execPath, [worker, path, exporterModule], {
+    stdio: "ignore",
+    detached: true,
+    windowsHide: true,
+  });
   child.unref();
   if (!child.pid) throw new Error("Failed to start export worker");
   job.pid = child.pid;
@@ -106,7 +110,7 @@ export async function startPreviewJob(
   const worker = fileURLToPath(
     new URL(import.meta.url.endsWith(".ts") ? "./preview-worker.ts" : "./preview-worker.js", import.meta.url),
   );
-  const child = spawn(process.execPath, [worker, path], { stdio: "ignore", detached: true });
+  const child = spawn(process.execPath, [worker, path], { stdio: "ignore", detached: true, windowsHide: true });
   child.unref();
   if (!child.pid) throw new Error("Failed to start preview worker");
   job.pid = child.pid;
@@ -139,7 +143,11 @@ export async function startTranscribeJob(
   const runner = fileURLToPath(
     new URL(import.meta.url.endsWith(".ts") ? "./transcribe-worker.ts" : "./transcribe-worker.js", import.meta.url),
   );
-  const child = spawn(process.execPath, [runner, path, python, workerDirectory], { stdio: "ignore", detached: true });
+  const child = spawn(process.execPath, [runner, path, python, workerDirectory], {
+    stdio: "ignore",
+    detached: true,
+    windowsHide: true,
+  });
   child.unref();
   if (!child.pid) throw new Error("Failed to start transcribe worker");
   job.pid = child.pid;

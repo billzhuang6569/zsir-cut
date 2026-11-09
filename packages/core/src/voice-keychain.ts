@@ -19,6 +19,13 @@ const runSecurity: SecurityRunner = (args, input) =>
     child.stdin.end(input);
   });
 export function createVoiceKeychain(run: SecurityRunner = runSecurity): VoiceKeychain {
+  if (process.platform === "win32" && run === runSecurity)
+    return {
+      read: async () => null,
+      write: async () => {
+        throw new Error("Windows 暂不支持保存配音密钥，请通过 ZSIR_FISH_API_KEY 环境变量提供密钥。");
+      },
+    };
   return {
     async read() {
       const result = await run(["find-generic-password", "-s", "zsir-cut.fish-audio", "-a", "default", "-w"]);

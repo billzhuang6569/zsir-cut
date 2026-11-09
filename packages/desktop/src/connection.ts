@@ -70,6 +70,7 @@ export function connectHost(
     projectChanged?: (event: ProjectChanged) => void;
     permission?: (request: PermissionRequest) => void;
     icon: (value: string | null) => void;
+    mediaTools?: (value: { missing: string[]; install: string }) => void;
     error: (message: string, detail?: string) => void;
   },
 ): (() => void) & { call: (verb: string, request: Record<string, unknown>) => Promise<unknown>; subscribe: Subscribe } {
@@ -153,6 +154,7 @@ export function connectHost(
       project = message.project;
       window.dispatchEvent(new Event("desktop-host-ready"));
       handlers.icon(message.fcpIcon);
+      handlers.mediaTools?.(message.mediaTools ?? { missing: [], install: "" });
       handlers.project(project, null);
       void call("preview_cache_status", {}).catch(() => {});
       void refresh().catch((error: Error) =>

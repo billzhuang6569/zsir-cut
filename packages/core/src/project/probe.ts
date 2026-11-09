@@ -54,7 +54,7 @@ export type Probe = (path: string) => Promise<ProbeData>;
 type Runner = (args: string[], onLine: (line: string) => void) => Promise<void>;
 
 const runFfprobe: Runner = async (args, onLine) => {
-  const child = spawn("ffprobe", args, { stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn("ffprobe", args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
   let stderr = "";
   child.stderr.setEncoding("utf8");
   child.stderr.on("data", (chunk: string) => {

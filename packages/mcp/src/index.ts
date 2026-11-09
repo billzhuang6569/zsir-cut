@@ -12,7 +12,7 @@ const { commandSchemaForVerb, flattenMcpSchema, dispatch, VERBS }: typeof import
   );
 
 export function createServer(options: DispatchOptions = {}): Server {
-  const server = new Server({ name: "zsir-cut", version: "0.0.0" }, { capabilities: { tools: {} } });
+  const server = new Server({ name: "zsir-cut", version: "0.1.0" }, { capabilities: { tools: {} } });
   server.setRequestHandler(ListToolsRequestSchema, () => ({
     tools: VERBS.map((verb) => ({
       name: `zcut_${verb}`,

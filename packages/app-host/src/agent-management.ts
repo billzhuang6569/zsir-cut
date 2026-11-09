@@ -1,15 +1,18 @@
-import { execFile, spawn } from "node:child_process";
+import type { spawn as nodeSpawn } from "node:child_process";
 import { constants } from "node:fs";
 import { access, stat } from "node:fs/promises";
 import * as http from "node:http";
 import * as https from "node:https";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
-import { promisify } from "node:util";
 import { z } from "zod";
 import type { AgentKind } from "./agent-events.js";
 import type { DesktopPreferences } from "./preferences.js";
+import { commonProgramDirectories } from "./runtime.js";
+
+export const spawnProgram: typeof nodeSpawn = createRequire(import.meta.url)("cross-spawn");
 
 const { newId }: typeof import("../../core/dist/index.js") = await import(
   new URL(import.meta.url.endsWith(".ts") ? "../../core/src/index.ts" : "../../core/dist/index.js", import.meta.url)
@@ -23,28 +26,45 @@ const programs = {
 export function agentDirectories() {
   return [
     ...(process.env.PATH ?? "").split(delimiter),
-    "/opt/homebrew/bin",
-    "/usr/local/bin",
+    ...commonProgramDirectories(),
     ...[".local/bin", ".npm-global/bin", ".claude/local"].map((path) => join(homedir(), path)),
   ];
 }
-export async function findProgram(name: string, directories = agentDirectories()) {
+export async function findProgram(name: string, directories = agentDirectories(), platform = process.platform) {
   for (const directory of directories) {
-    const path = resolve(directory, name);
-    try {
-      await access(path, constants.X_OK);
-      if ((await stat(path)).isFile()) return path;
-    } catch {}
+    for (const suffix of platform === "win32" ? [".exe", ".cmd", ""] : [""]) {
+      const path = resolve(directory, `${name}${suffix}`);
+      try {
+        await access(path, constants.X_OK);
+        if ((await stat(path)).isFile()) return path;
+      } catch {}
+    }
   }
   return null;
 }
 export async function programVersion(path: string | null) {
   if (!path) return null;
   try {
-    const { stdout } = await promisify(execFile)(path, ["--version"], {
-      timeout: 3000,
-      killSignal: "SIGKILL",
-      maxBuffer: 65536,
+    const stdout = await new Promise<string>((resolve, reject) => {
+      const child = spawnProgram(path, ["--version"], { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+      let output = "";
+      const timer = setTimeout(() => {
+        child.kill("SIGKILL");
+        reject(new Error("Version check timed out"));
+      }, 3000);
+      child.stdout?.on("data", (chunk: Buffer) => {
+        output += chunk.toString();
+        if (Buffer.byteLength(output) > 65536) {
+          child.kill("SIGKILL");
+          reject(new Error("Version output too large"));
+        }
+      });
+      child.once("error", reject);
+      child.once("close", (code) => {
+        clearTimeout(timer);
+        if (code === 0) resolve(output);
+        else reject(new Error("Version check failed"));
+      });
     });
     return stdout.trim() || null;
   } catch {
@@ -184,7 +204,10 @@ export class AgentManagement {
                 manual: `请安装 Node.js（含 npm），然后在终端运行 npm install -g ${programs[id].package}`,
               });
             const job_id = newId("job_");
-            const child = spawn(npm, ["install", "-g", programs[id].package], { stdio: ["ignore", "pipe", "pipe"] });
+            const child = spawnProgram(npm, ["install", "-g", programs[id].package], {
+              windowsHide: true,
+              stdio: ["ignore", "pipe", "pipe"],
+            });
             for (const stream of ["stdout", "stderr"] as const) {
               createInterface({ input: child[stream] }).on("line", (line) =>
                 this.emit({ type: "agents_output", job_id, line, stream }),

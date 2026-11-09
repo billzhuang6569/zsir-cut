@@ -84,6 +84,8 @@ export function App({ config }: { config?: { port: number; token: string } }) {
     permissions,
     permissionAnswered: (id) => setPermissions((old) => old.filter((item) => item.id !== id)),
   });
+  const [mediaTools, setMediaTools] = useState({ missing: [] as string[], install: "" });
+  const [copiedInstall, setCopiedInstall] = useState(false);
   const [fcpIcon, setFcpIcon] = useState<string | null>(null);
   const dragging = useRef(false);
   const [errorDetail, setErrorDetail] = useState<string | undefined>();
@@ -149,6 +151,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
         if (event.target === "session" && event.session_id === reviewSessionRef.current) setProjectChange(event);
       },
       icon: setFcpIcon,
+      mediaTools: setMediaTools,
       error: (message, detail) => {
         setError(message);
         setErrorDetail(detail);
@@ -296,252 +299,274 @@ export function App({ config }: { config?: { port: number; token: string } }) {
     [update],
   );
   return (
-    <main
-      className="zc zc-shell"
-      style={
-        {
-          "--layout-left-request": layout.left_width == null ? "var(--panel-w)" : `${layout.left_width}px`,
-          "--layout-right-request": layout.right_width == null ? "var(--inspector-w)" : `${layout.right_width}px`,
-          "--layout-timeline": layout.timeline_height ?? 0.43,
-        } as CSSProperties
-      }
-    >
-      <section aria-label="菜单栏" className="zc-menubar">
-        <svg className="zc-logo" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
-          <rect width="24" height="24" rx="7" fill="var(--cream)" />
-          <path d="M5 8h9M5 12h14M8 16h7" stroke="var(--on-primary)" strokeWidth="3" strokeLinecap="round" />
-        </svg>
-        <strong>庄Sir剪辑助手</strong>
-        <span className="zc-topbar-separator" />
-        <ProjectEntry
-          aiBusy={ai.generating}
-          connectionEpoch={connectionEpoch}
-          config={config}
-          project={project}
-          call={rawCall}
-          error={error}
-          changed={(media) => {
-            if (media) update({ ...current.current, panel: "media" });
-          }}
-        />
-        {ai.draftStatus}
-        {history.banner}
-        <span className="zc-grow" />
-        {project && (
-          <span className="zc-meta zc-save-status">
-            <span className="zc-dot is-approved" />
-            已保存 · r{project.revision.seq}
-          </span>
-        )}
-        <span className="zc-revision-controls" ref={setRevisionControls}>
-          {!project && (
-            <>
-              <IconButton icon="undo" label="撤销" disabled />
-              <IconButton icon="redo" label="重做" disabled />
-            </>
-          )}
-        </span>
-        {!project && <IconButton icon="settings" label="设置" onClick={() => setSettingsOpen("通用")} />}
-        <IconButton icon="search" label="命令面板 ⌘K" />
-        <div className="zc-history-anchor" ref={history.anchor}>
-          <IconButton
-            icon="history"
-            label="历史 ⌥⌘H"
-            aria-haspopup="dialog"
-            aria-expanded={state.history?.open === true}
-            disabled={!project}
-            pressed={state.history?.open === true}
-            onClick={history.toggle}
-          />
-          {history.panel}
+    <div className="zc zc-app">
+      {mediaTools.missing.length > 0 && (
+        <div className="zc-media-warning zc-selectable" role="alert">
+          <span>未找到 {mediaTools.missing.join("、")}，请安装后重启应用：</span>
+          <code>{mediaTools.install}</code>
+          <button
+            type="button"
+            className="zc-btn"
+            onClick={() => {
+              void navigator.clipboard
+                .writeText(mediaTools.install)
+                .then(() => setCopiedInstall(true))
+                .catch(() => {
+                  setError("复制失败，请选中安装命令手动复制");
+                });
+            }}
+          >
+            {copiedInstall ? "已复制" : "复制命令"}
+          </button>
         </div>
-        <button
-          type="button"
-          className="zc-btn zc-btn-primary is-primary"
-          disabled={!project || history.viewing || Boolean(reviewSession)}
-          onClick={() => update(applyUi(current.current, "ui_show_panel", { panel: "export" }))}
-        >
-          <Icon name="export" />
-          导出
-        </button>
-      </section>
-      {project && (
-        <>
-          <nav className="zc-rail" aria-label="图标栏">
-            <div role="tablist" aria-label="功能" aria-orientation="vertical">
-              {PANELS.map((panel) => (
-                <button
-                  key={panel}
-                  id={`${uniqueId}-tab-${panel}`}
-                  type="button"
-                  role="tab"
-                  aria-selected={state.panel === panel}
-                  aria-controls={`${uniqueId}-function-panel`}
-                  className={`zc-rail-item${state.panel === panel ? " is-active" : ""}`}
-                  title={labels[panel]}
-                  onClick={() => update(applyUi(current.current, "ui_show_panel", { panel }))}
-                >
-                  <span className="tile">
-                    <Icon name={panel} size={20} />
-                  </span>
-                  <span>{labels[panel]}</span>
-                </button>
-              ))}
-            </div>
-            <span className="zc-grow" />
-            <button
-              type="button"
-              className="zc-rail-item"
-              onClick={() => setSettingsOpen("通用")}
-              title="设置"
-              aria-label="设置"
-            >
-              <span className="tile">
-                <Icon name="settings" size={20} />
-              </span>
-              <span>设置</span>
-            </button>
-          </nav>
-          <section aria-label="功能区" className="zc-functions zc-panel">
-            {history.viewing && <div className="zc-pad zc-history-report">{history.report}</div>}
-            <div
-              hidden={history.viewing}
-              id={`${uniqueId}-function-panel`}
-              role="tabpanel"
-              aria-labelledby={`${uniqueId}-tab-${state.panel}`}
-              className="zc-pad zc-function-panel"
-              ref={(node) => {
-                node?.toggleAttribute("inert", history.viewing);
-              }}
-            >
-              {state.panel === "ai" ? (
-                ai.header
-              ) : (
-                <div className="zc-panel-head">
-                  <h2>{labels[state.panel]}</h2>
-                  {state.panel === "media" && media.header}
-                </div>
-              )}
-              <div className="zc-voice-slot" hidden={state.panel !== "voice"}>
-                {voice.controls}
-              </div>
-              {state.panel === "media" && media.library}
-              {state.panel === "chapters" && chapters.controls}
-              {state.panel === "subtitles" && subtitles.controls}
-              <div className="zc-ai-body" hidden={state.panel !== "ai"}>
-                {ai.chat}
-              </div>
-            </div>
-          </section>
-          {divider("left_width", "功能区与预览分界")}
-          <section className="zc-editor" aria-label="剪辑区">
-            <div className="zc-upper-row">
-              <div className="zc-preview-slot" ref={setViewerTarget}>
-                {source && state.media && (
-                  <TimelinePreview
-                    preferences={preferences}
-                    onOpenSettings={(page) => setSettingsOpen(page ?? "通用")}
-                    viewerOnly
-                    project={source}
-                    state={{ ...state, playhead: { at: state.media.at }, range: null, loop: false }}
-                    update={updateSource}
-                    config={config}
-                    error={null}
-                    dragging={dragging}
-                    call={call}
-                  />
-                )}
-              </div>
-              {divider("right_width", "预览与参数区分界")}
-              <section
-                ref={setReviewTarget}
-                aria-label="参数区"
-                className="zc-parameters zc-panel zc-pad"
-                data-panel={history.viewing ? "history" : state.panel}
-              >
-                {reviewSession ? null : history.viewing ? (
-                  history.decisions
-                ) : (
-                  <>
-                    {state.panel === "ai" ? (
-                      <div className="zc-decision-heading">
-                        <h2>决定</h2>
-                        {ai.decisionStatus}
-                      </div>
-                    ) : (
-                      state.panel !== "chapters" && state.panel !== "subtitles" && <h2>{parameters[state.panel]}</h2>
-                    )}
-                    {state.panel === "ai" && ai.parameters}
-                    {state.panel === "media" && media.parameters}
-                    {state.panel === "chapters" && chapters.outline}
-                    {state.panel === "subtitles" && subtitles.parameters}
-                    {state.panel === "voice" && voice.parameters}
-                  </>
-                )}
-              </section>
-            </div>
-            {reviewSession ? (
-              <ReviewView
-                key={`${state.project}-${reviewSession}`}
-                preferences={preferences}
-                sessionId={reviewSession}
-                revision={aiRevision}
-                project={project}
-                state={state}
-                update={update}
-                call={call}
-                change={projectChange}
-                actions={ai.reviewActions}
-                parametersTarget={reviewTarget}
-                viewerTarget={viewerTarget}
-                config={config}
-                dragging={dragging}
-                close={() => setReviewSession(null)}
-                committed={setProject}
-              />
-            ) : (
-              <TimelinePreview
-                preferences={preferences}
-                onOpenSettings={(page) => setSettingsOpen(page ?? "通用")}
-                viewerTarget={viewerTarget}
-                revisionControlsTarget={revisionControls}
-                hideViewer={Boolean(source)}
-                onMediaDrop={(id, at, track) => {
-                  const item = project?.media.find((m) => m.id === id);
-                  if (item && !history.viewing) media.place(item, at, track);
-                }}
-                project={history.view}
-                onEditSubtitle={subtitles.editCue}
-                readOnly={history.viewing}
-                state={state}
-                update={update}
-                subtitlePreview={subtitles.stylePreview}
-                onSubtitleStyle={subtitles.previewStyle}
-                config={config}
-                error={error}
-                errorDetail={errorDetail}
-                dragging={dragging}
-                call={call}
-              />
+      )}
+      <main
+        className="zc zc-shell"
+        style={
+          {
+            "--layout-left-request": layout.left_width == null ? "var(--panel-w)" : `${layout.left_width}px`,
+            "--layout-right-request": layout.right_width == null ? "var(--inspector-w)" : `${layout.right_width}px`,
+            "--layout-timeline": layout.timeline_height ?? 0.43,
+          } as CSSProperties
+        }
+      >
+        <section aria-label="菜单栏" className="zc-menubar">
+          <svg className="zc-logo" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
+            <rect width="24" height="24" rx="7" fill="var(--cream)" />
+            <path d="M5 8h9M5 12h14M8 16h7" stroke="var(--on-primary)" strokeWidth="3" strokeLinecap="round" />
+          </svg>
+          <strong>庄Sir剪辑助手</strong>
+          <span className="zc-topbar-separator" />
+          <ProjectEntry
+            aiBusy={ai.generating}
+            connectionEpoch={connectionEpoch}
+            config={config}
+            project={project}
+            call={rawCall}
+            error={error}
+            changed={(media) => {
+              if (media) update({ ...current.current, panel: "media" });
+            }}
+          />
+          {ai.draftStatus}
+          {history.banner}
+          <span className="zc-grow" />
+          {project && (
+            <span className="zc-meta zc-save-status">
+              <span className="zc-dot is-approved" />
+              已保存 · r{project.revision.seq}
+            </span>
+          )}
+          <span className="zc-revision-controls" ref={setRevisionControls}>
+            {!project && (
+              <>
+                <IconButton icon="undo" label="撤销" disabled />
+                <IconButton icon="redo" label="重做" disabled />
+              </>
             )}
-            {divider("timeline_height", "预览与时间线分界")}
-          </section>
-        </>
-      )}
-      {settingsOpen && (
-        <SettingsPage
-          initialPage={settingsOpen}
-          call={rawCall}
-          subscribe={subscribe}
-          onPrefs={preferences.acceptPrefs}
-          projectPath={state.project}
-          close={() => setSettingsOpen(false)}
-          openRecognition={() => update(applyUi(current.current, "ui_show_panel", { panel: "subtitles" }))}
-        />
-      )}
-      {project && (
-        <ExportPanel project={project} state={state} update={update} call={call} config={config} fcpIcon={fcpIcon} />
-      )}
-    </main>
+          </span>
+          {!project && <IconButton icon="settings" label="设置" onClick={() => setSettingsOpen("通用")} />}
+          <IconButton icon="search" label="命令面板 ⌘K" />
+          <div className="zc-history-anchor" ref={history.anchor}>
+            <IconButton
+              icon="history"
+              label="历史 ⌥⌘H"
+              aria-haspopup="dialog"
+              aria-expanded={state.history?.open === true}
+              disabled={!project}
+              pressed={state.history?.open === true}
+              onClick={history.toggle}
+            />
+            {history.panel}
+          </div>
+          <button
+            type="button"
+            className="zc-btn zc-btn-primary is-primary"
+            disabled={!project || history.viewing || Boolean(reviewSession)}
+            onClick={() => update(applyUi(current.current, "ui_show_panel", { panel: "export" }))}
+          >
+            <Icon name="export" />
+            导出
+          </button>
+        </section>
+        {project && (
+          <>
+            <nav className="zc-rail" aria-label="图标栏">
+              <div role="tablist" aria-label="功能" aria-orientation="vertical">
+                {PANELS.map((panel) => (
+                  <button
+                    key={panel}
+                    id={`${uniqueId}-tab-${panel}`}
+                    type="button"
+                    role="tab"
+                    aria-selected={state.panel === panel}
+                    aria-controls={`${uniqueId}-function-panel`}
+                    className={`zc-rail-item${state.panel === panel ? " is-active" : ""}`}
+                    title={labels[panel]}
+                    onClick={() => update(applyUi(current.current, "ui_show_panel", { panel }))}
+                  >
+                    <span className="tile">
+                      <Icon name={panel} size={20} />
+                    </span>
+                    <span>{labels[panel]}</span>
+                  </button>
+                ))}
+              </div>
+              <span className="zc-grow" />
+              <button
+                type="button"
+                className="zc-rail-item"
+                onClick={() => setSettingsOpen("通用")}
+                title="设置"
+                aria-label="设置"
+              >
+                <span className="tile">
+                  <Icon name="settings" size={20} />
+                </span>
+                <span>设置</span>
+              </button>
+            </nav>
+            <section aria-label="功能区" className="zc-functions zc-panel">
+              {history.viewing && <div className="zc-pad zc-history-report">{history.report}</div>}
+              <div
+                hidden={history.viewing}
+                id={`${uniqueId}-function-panel`}
+                role="tabpanel"
+                aria-labelledby={`${uniqueId}-tab-${state.panel}`}
+                className="zc-pad zc-function-panel"
+                ref={(node) => {
+                  node?.toggleAttribute("inert", history.viewing);
+                }}
+              >
+                {state.panel === "ai" ? (
+                  ai.header
+                ) : (
+                  <div className="zc-panel-head">
+                    <h2>{labels[state.panel]}</h2>
+                    {state.panel === "media" && media.header}
+                  </div>
+                )}
+                <div className="zc-voice-slot" hidden={state.panel !== "voice"}>
+                  {voice.controls}
+                </div>
+                {state.panel === "media" && media.library}
+                {state.panel === "chapters" && chapters.controls}
+                {state.panel === "subtitles" && subtitles.controls}
+                <div className="zc-ai-body" hidden={state.panel !== "ai"}>
+                  {ai.chat}
+                </div>
+              </div>
+            </section>
+            {divider("left_width", "功能区与预览分界")}
+            <section className="zc-editor" aria-label="剪辑区">
+              <div className="zc-upper-row">
+                <div className="zc-preview-slot" ref={setViewerTarget}>
+                  {source && state.media && (
+                    <TimelinePreview
+                      preferences={preferences}
+                      onOpenSettings={(page) => setSettingsOpen(page ?? "通用")}
+                      viewerOnly
+                      project={source}
+                      state={{ ...state, playhead: { at: state.media.at }, range: null, loop: false }}
+                      update={updateSource}
+                      config={config}
+                      error={null}
+                      dragging={dragging}
+                      call={call}
+                    />
+                  )}
+                </div>
+                {divider("right_width", "预览与参数区分界")}
+                <section
+                  ref={setReviewTarget}
+                  aria-label="参数区"
+                  className="zc-parameters zc-panel zc-pad"
+                  data-panel={history.viewing ? "history" : state.panel}
+                >
+                  {reviewSession ? null : history.viewing ? (
+                    history.decisions
+                  ) : (
+                    <>
+                      {state.panel === "ai" ? (
+                        <div className="zc-decision-heading">
+                          <h2>决定</h2>
+                          {ai.decisionStatus}
+                        </div>
+                      ) : (
+                        state.panel !== "chapters" && state.panel !== "subtitles" && <h2>{parameters[state.panel]}</h2>
+                      )}
+                      {state.panel === "ai" && ai.parameters}
+                      {state.panel === "media" && media.parameters}
+                      {state.panel === "chapters" && chapters.outline}
+                      {state.panel === "subtitles" && subtitles.parameters}
+                      {state.panel === "voice" && voice.parameters}
+                    </>
+                  )}
+                </section>
+              </div>
+              {reviewSession ? (
+                <ReviewView
+                  key={`${state.project}-${reviewSession}`}
+                  preferences={preferences}
+                  sessionId={reviewSession}
+                  revision={aiRevision}
+                  project={project}
+                  state={state}
+                  update={update}
+                  call={call}
+                  change={projectChange}
+                  actions={ai.reviewActions}
+                  parametersTarget={reviewTarget}
+                  viewerTarget={viewerTarget}
+                  config={config}
+                  dragging={dragging}
+                  close={() => setReviewSession(null)}
+                  committed={setProject}
+                />
+              ) : (
+                <TimelinePreview
+                  preferences={preferences}
+                  onOpenSettings={(page) => setSettingsOpen(page ?? "通用")}
+                  viewerTarget={viewerTarget}
+                  revisionControlsTarget={revisionControls}
+                  hideViewer={Boolean(source)}
+                  onMediaDrop={(id, at, track) => {
+                    const item = project?.media.find((m) => m.id === id);
+                    if (item && !history.viewing) media.place(item, at, track);
+                  }}
+                  project={history.view}
+                  onEditSubtitle={subtitles.editCue}
+                  readOnly={history.viewing}
+                  state={state}
+                  update={update}
+                  subtitlePreview={subtitles.stylePreview}
+                  onSubtitleStyle={subtitles.previewStyle}
+                  config={config}
+                  error={error}
+                  errorDetail={errorDetail}
+                  dragging={dragging}
+                  call={call}
+                />
+              )}
+              {divider("timeline_height", "预览与时间线分界")}
+            </section>
+          </>
+        )}
+        {settingsOpen && (
+          <SettingsPage
+            initialPage={settingsOpen}
+            call={rawCall}
+            subscribe={subscribe}
+            onPrefs={preferences.acceptPrefs}
+            projectPath={state.project}
+            close={() => setSettingsOpen(false)}
+            openRecognition={() => update(applyUi(current.current, "ui_show_panel", { panel: "subtitles" }))}
+          />
+        )}
+        {project && (
+          <ExportPanel project={project} state={state} update={update} call={call} config={config} fcpIcon={fcpIcon} />
+        )}
+      </main>
+    </div>
   );
 }

@@ -126,7 +126,7 @@ export function safeVoiceError(error: unknown, key: string): VoiceError {
 }
 const runFfmpeg = (args: string[]) =>
   new Promise<void>((resolve, reject) => {
-    const child = spawn("ffmpeg", args, { stdio: "ignore" });
+    const child = spawn("ffmpeg", args, { stdio: "ignore", windowsHide: true });
     child.once("error", () => reject(new Error("Cannot start voice sample conversion")));
     child.once("close", (code) => (code === 0 ? resolve() : reject(new Error("Voice sample conversion failed"))));
   });

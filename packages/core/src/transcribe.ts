@@ -1,6 +1,7 @@
 // biome-ignore-all lint/style/noNonNullAssertion: Project schema validates cue IDs and segmented token bounds before writeback.
 import { execFile } from "node:child_process";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { access, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { promisify } from "node:util";
 import { newId, transcriptIds } from "./project/id.ts";
@@ -87,6 +88,21 @@ export async function invokeAsr(
   python: string,
   workerDirectory: string,
 ): Promise<WorkerResult> {
+  if (process.platform === "win32")
+    throw new AsrError(
+      "E_UNSUPPORTED",
+      "Windows 暂不支持本地语音识别，请在 macOS Apple Silicon 上识别后打开工程。",
+      false,
+    );
+  try {
+    await access(python, constants.X_OK);
+  } catch {
+    throw new AsrError(
+      "E_ASR_MODEL_UNAVAILABLE",
+      `没有找到本地识别环境（${python}）。请先安装 Python 3.13，然后运行：python3.13 -m venv ~/.zsir-cut/asr/.venv；~/.zsir-cut/asr/.venv/bin/python -m pip install -r "${resolve(workerDirectory, "requirements.lock")}"。模型安装说明见 workers/asr/README.md。`,
+      false,
+    );
+  }
   const media = project.media.find((item) => item.id === request.media_id);
   if (!media) throw new AsrError("E_NOT_FOUND", "Media not found", false);
   const channels = request.source_channels ?? [0];
@@ -129,7 +145,12 @@ export async function invokeAsr(
   }
   let failed = false;
   try {
-    await execute(python, args, { cwd: workerDirectory, maxBuffer: 1024 * 1024 });
+    await execute(python, args, {
+      cwd: workerDirectory,
+      maxBuffer: 1024 * 1024,
+      env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" },
+      windowsHide: true,
+    });
   } catch {
     failed = true;
   } finally {

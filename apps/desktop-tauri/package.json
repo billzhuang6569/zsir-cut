@@ -1,11 +1,11 @@
 {
   "name": "@zsir-cut/desktop-tauri",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "tauri dev",
-    "build": "tauri build"
+    "build": "tauri build --config src-tauri/tauri.release.conf.json"
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.12.2"

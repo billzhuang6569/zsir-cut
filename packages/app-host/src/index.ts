@@ -5,7 +5,7 @@ import { once } from "node:events";
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, promisify } from "node:util";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -15,7 +15,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import { WebSocket, WebSocketServer } from "ws";
 import { z } from "zod";
 import type { DispatchOptions, Envelope, SubtitleStyle, Verb } from "../../core/dist/index.js";
-import { AgentManagement, type AgentManagementOptions } from "./agent-management.js";
+import { AgentManagement, type AgentManagementOptions, findProgram } from "./agent-management.js";
 import { Agents } from "./agents.js";
 import { exportPreferences } from "./export-preferences.js";
 import { mediaChannel, runFfmpeg } from "./media.js";
@@ -24,6 +24,7 @@ import { DesktopPreferences } from "./preferences.js";
 import { PreviewCache } from "./preview-cache.js";
 import { RecentProjects } from "./recent.js";
 import { projectChanged } from "./revision-events.js";
+import { checkMediaPrograms, hostPath } from "./runtime.js";
 import { SubtitlePass, type SubtitlePassParams } from "./subtitle-pass.js";
 import { DESKTOP_VERBS, type DesktopVerb, PANELS, SUBTITLE_VERBS, type SubtitleVerb, type UiEnvelope } from "./ui.js";
 
@@ -194,7 +195,7 @@ export function createMcpServer(
     uiEnvelope(verb, "E_APP_NOT_RUNNING", "桌面界面未连接", true),
   kernel: (verb: Verb, input: unknown) => Promise<HostEnvelope> = (verb, input) => dispatch(verb, input),
 ): Server {
-  const mcp = new Server({ name: "zsir-cut-desktop", version: "0.0.0" }, { capabilities: { tools: {} } });
+  const mcp = new Server({ name: "zsir-cut-desktop", version: "0.1.0" }, { capabilities: { tools: {} } });
   mcp.setRequestHandler(ListToolsRequestSchema, () => ({
     tools: [
       ...VERBS.map((verb) => ({
@@ -323,6 +324,7 @@ export async function startHost(
 ) {
   const token = options.token ?? randomBytes(32).toString("hex");
   if (!token) throw new Error("Token must not be empty");
+  const mediaTools = await checkMediaPrograms((name) => findProgram(name, hostPath().split(delimiter)));
   const recent = new RecentProjects(options.appDataDir);
   const prefs = new DesktopPreferences(options.appDataDir);
   await prefs.load();
@@ -573,7 +575,7 @@ export async function startHost(
           }
           if (client.readyState !== WebSocket.OPEN) return;
           // Publish the UI only after bootstrap so background notifications cannot overtake it.
-          client.send(JSON.stringify({ type: "bootstrap", project: options.project ?? null, fcpIcon }));
+          client.send(JSON.stringify({ type: "bootstrap", project: options.project ?? null, fcpIcon, mediaTools }));
           ui = client;
           permissions.replay();
           if (prefs.warning) {
@@ -990,7 +992,14 @@ export async function startHost(
       void subtitlePass.open().catch(() => {});
     }
     if (ui?.readyState === WebSocket.OPEN)
-      ui.send(JSON.stringify({ type: "bootstrap", project: options.project ?? null, fcpIcon: await readFcpIcon() }));
+      ui.send(
+        JSON.stringify({
+          type: "bootstrap",
+          project: options.project ?? null,
+          fcpIcon: await readFcpIcon(),
+          mediaTools,
+        }),
+      );
   };
   if (options.project && initialProject) await bind(options.project);
   const mcp = createMcpServer(callUi, agentKernel);
@@ -1024,6 +1033,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
       },
       allowPositionals: true,
     });
+    process.env.PATH = hostPath();
     const project = args.values.project ?? args.positionals[0];
     const host = await startHost({
       ...(project ? { project } : {}),

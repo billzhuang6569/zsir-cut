@@ -26,6 +26,7 @@ export async function runFfmpeg(args: string[], signal?: AbortSignal): Promise<B
   signal?.throwIfAborted();
   return new Promise((done, reject) => {
     const child = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error", "-nostdin", ...args], {
+      windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
     });
     const abort = () => child.kill();

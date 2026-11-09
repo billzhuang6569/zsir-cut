@@ -1,6 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { asrPythonPath } from "./asr-environment.ts";
 import {
   checkDirectFiles,
   DirectExportExists,
@@ -682,7 +683,7 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
       if (!options.worker) {
         const directory =
           options.asrWorkerDirectory ?? fileURLToPath(new URL("../../../workers/asr/", import.meta.url));
-        const python = options.asrPython ?? resolve(directory, ".venv/bin/python");
+        const python = options.asrPython ?? asrPythonPath(directory);
         const jobId = await startTranscribeJob(
           request.project as string,
           parsed.project.id,
