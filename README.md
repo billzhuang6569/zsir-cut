@@ -6,7 +6,31 @@
 
 ## 现状
 
-项目处于第 0 步：先立技术合同（时间线 schema、命令协议、交接 profile）和标准测试工程，再写功能代码。工作计划见 [docs/plan.md](docs/plan.md)。
+第一批预发布版 0.1.0。还没有代码签名，Windows 版也没有在真机上用过，请先用不重要的工程试。
+
+## 安装
+
+到 [Releases](https://github.com/billzhuang6569/zsir-cut/releases) 下载：
+
+| 系统 | 文件 |
+|---|---|
+| macOS（Apple Silicon） | `zsir-cut_<版本>_aarch64.dmg` |
+| Windows（x64） | `zsir-cut_<版本>_x64-setup.exe` |
+
+**第一次打开**
+
+- macOS：把应用拖进「应用程序」。提示无法验证开发者时，到「系统设置 → 隐私与安全性」点「仍要打开」。
+- Windows：SmartScreen 提示时，点「更多信息 → 仍要运行」。
+
+**需要自己装的**
+
+- ffmpeg（预览、波形、导出都要用）。macOS：`brew install ffmpeg`；Windows：`winget install Gyan.FFmpeg`。
+- 想用 AI 面板：Claude Code 或 Codex。
+
+**已知限制**
+
+- 本地语音识别只支持 macOS Apple Silicon，要单独安装，见 [workers/asr/README.md](workers/asr/README.md)，环境放在 `~/.zsir-cut/asr/.venv`。
+- Windows 版没有本地语音识别，也不能保存配音密钥。
 
 ## 许可证
 

@@ -28,6 +28,7 @@
 | [0022](0022-subtitle-experience-capcut.md) | 字幕体验对标剪映 | 已采纳 |
 | [0023](0023-preview-cache.md) | 预览缓存：按片段生成代理段，播放时接成一条流 | 已采纳 |
 | [0024](0024-media-cache.md) | 素材缓存：波形和缩略图按素材一次生成，存进缓存目录 | 已采纳 |
+| [0025](0025-first-release-packaging.md) | 第一批发布：应用自带 Node，不带 ffmpeg，未签名的预发布版 | 已采纳 |
 
 模板：
 

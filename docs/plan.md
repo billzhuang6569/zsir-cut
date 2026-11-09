@@ -89,6 +89,8 @@
 
 ## 第 4 步：稳定化
 
+第一批预发布版 0.1.0 见 [ADR-0025](adr/0025-first-release-packaging.md) 和 [docs/tasks/release-0.1.md](tasks/release-0.1.md)。
+
 把验收矩阵做成 CI 门禁：逐切点 0 帧、移盘后重链接、音频脉冲同步、字幕不随剪辑漂移、重复导入幂等。每个里程碑打 tag，`CHANGELOG` 记录三家 NLE 版本的兼容状态。
 
 ## 一期不做
