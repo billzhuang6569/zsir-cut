@@ -1,3 +1,6 @@
+export { asrPythonPath } from "./asr-environment.ts";
+export * from "./asr-keychain.ts";
+export * from "./asr-settings.ts";
 export * from "./dispatch.ts";
 export * from "./export-framework.ts";
 export * from "./fingerprint.ts";
@@ -26,6 +29,7 @@ export {
 } from "./schema.ts";
 export * from "./term-library.ts";
 export * from "./timecode.ts";
+export { AsrError, runAsrWorker } from "./transcribe.ts";
 export * from "./voice.ts";
 export * from "./voice-generate.ts";
 export * from "./voice-keychain.ts";

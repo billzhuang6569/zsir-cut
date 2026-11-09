@@ -4,7 +4,14 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { dispatch, editTermLibrary, parseProject, validateCommand, validateEnvelope } from "../src/index.js";
+import {
+  dispatch,
+  editTermLibrary,
+  parseProject,
+  projectSubtitles,
+  validateCommand,
+  validateEnvelope,
+} from "../src/index.js";
 
 import { jobPath, readJob } from "../src/jobs.ts";
 
@@ -165,6 +172,58 @@ it("creates all transcript layers, segments cues, and undoes the single revision
   });
   expect(undone.status, JSON.stringify(undone)).toBe("applied");
   expect((await project()).transcripts).toHaveLength(0);
+});
+
+it("accepts cloud word spaces through transcription, cue generation and subtitle projection", async () => {
+  const fixture = JSON.parse(
+    await readFile(new URL("../../../fixtures/regressions/asr-cloud-spaces.zcut.json", import.meta.url), "utf8"),
+  );
+  const original = JSON.parse(await readFile(path, "utf8"));
+  fixture.media = original.media;
+  fixture.subtitle_styles = original.subtitle_styles;
+  fixture.timelines[0].tracks.push(original.timelines[0].tracks.at(-1));
+  await writeFile(path, JSON.stringify(fixture));
+  // Shared with pytest, which verifies these tokens against the real provider response.
+  const tokens = JSON.parse(
+    await readFile(
+      new URL("../../../workers/asr/tests/fixtures/volc-flash-english.tokens.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  await writeFile(join(directory, "scenario.json"), JSON.stringify({ tokens }));
+  const job = await run();
+  expect(job.state, JSON.stringify(job.envelope)).toBe("succeeded");
+  const next = await project();
+  const transcript = next.transcripts[0]!;
+  expect(transcript.tokens.map((token) => token.text)).toEqual(tokens.map((token: { text: string }) => token.text));
+  expect(transcript.raw_runs[0]!.tokens.map((token) => token.text).join("")).toBe("然后交给 Final Cut Pro 收尾");
+  expect(transcript.cues).toHaveLength(1);
+  const cues = projectSubtitles(next, "tl_main").cues;
+  expect(cues.map((cue) => cue.text)).toEqual(["然后交给 Final Cut Pro 收尾"]);
+  expect(cues[0]).toMatchObject({
+    start: { numerator: 31n, denominator: 50n },
+    end: { numerator: 157n, denominator: 50n },
+  });
+});
+
+it("hides cloud fillers with separator whitespace while preserving the remaining English spaces", async () => {
+  await writeFile(
+    join(directory, "scenario.json"),
+    JSON.stringify({
+      tokens: ["嗯 ", "Final ", "Cut ", "Pro"].map((text, i) => ({
+        text,
+        start_ms: 5000 + i * 100,
+        end_ms: 5100 + i * 100,
+        conf: 0,
+      })),
+    }),
+  );
+  const job = await run();
+  expect(job.state, JSON.stringify(job.envelope)).toBe("succeeded");
+  const next = await project();
+  expect(next.transcripts[0]!.tokens[0]).toMatchObject({ text: "", heard: "嗯 " });
+  expect(job.envelope?.result?.warnings).toContainEqual({ code: "W_FILLERS_HIDDEN", count: 1 });
+  expect(projectSubtitles(next, "tl_main").cues.map((cue) => cue.text)).toEqual(["Final Cut Pro"]);
 });
 
 it("preserves edited and approved words and locked cues on a second run", async () => {

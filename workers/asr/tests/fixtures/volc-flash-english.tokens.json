@@ -1,0 +1,56 @@
+[
+  {
+    "text": "然",
+    "start_ms": 20620,
+    "end_ms": 20820,
+    "conf": 0
+  },
+  {
+    "text": "后",
+    "start_ms": 20820,
+    "end_ms": 21020,
+    "conf": 0
+  },
+  {
+    "text": "交",
+    "start_ms": 21060,
+    "end_ms": 21300,
+    "conf": 0
+  },
+  {
+    "text": "给 ",
+    "start_ms": 21300,
+    "end_ms": 21500,
+    "conf": 0
+  },
+  {
+    "text": "Final ",
+    "start_ms": 21700,
+    "end_ms": 21860,
+    "conf": 0
+  },
+  {
+    "text": "Cut ",
+    "start_ms": 21860,
+    "end_ms": 22380,
+    "conf": 0
+  },
+  {
+    "text": "Pro ",
+    "start_ms": 22460,
+    "end_ms": 22660,
+    "conf": 0
+  },
+  {
+    "text": "收",
+    "start_ms": 22700,
+    "end_ms": 22900,
+    "conf": 0
+  },
+  {
+    "text": "尾",
+    "start_ms": 22900,
+    "end_ms": 23140,
+    "conf": 0
+  }
+]

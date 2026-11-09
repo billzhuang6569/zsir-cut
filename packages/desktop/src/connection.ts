@@ -143,7 +143,16 @@ export function connectHost(
   let uiQueue = Promise.resolve();
   socket.onmessage = (event) => {
     const message = JSON.parse(event.data);
-    if (["agents_changed", "agents_output", "preview_cache", "project_changed", "ai_changed"].includes(message.type)) {
+    if (
+      [
+        "agents_changed",
+        "agents_output",
+        "preview_cache",
+        "asr_model_progress",
+        "project_changed",
+        "ai_changed",
+      ].includes(message.type)
+    ) {
       for (const listener of listeners) listener(message);
     }
     if (message.type === "bootstrap") {
@@ -205,6 +214,7 @@ export function connectHost(
       } else {
         const sensitive =
           item?.verb.startsWith("voice_") ||
+          item?.verb.startsWith("asr_") ||
           item?.verb.startsWith("settings_") ||
           envelope.error?.code?.startsWith("E_VOICE_");
         const detail = sensitive

@@ -18,7 +18,7 @@ cd workers/asr
 ./.venv/bin/python -m pytest
 ```
 
-模型权重需按 Apache-2.0 许可预先下载至以下目录，worker 不会自动下载：
+在应用的「设置 › 字幕识别」中下载本地模型。权重采用 Apache-2.0 许可，存放在以下目录；worker 本身不下载：
 
 - `~/.zsir-cut/models/Qwen3-ASR-1.7B-8bit/`：默认识别模型，来自 `mlx-community/Qwen3-ASR-1.7B-8bit`。
 - `~/.zsir-cut/models/Qwen3-ASR-0.6B-8bit/`：内存 16 GB 及以下建议用 `--model 0.6b`。
@@ -26,7 +26,7 @@ cd workers/asr
 
 每个目录保存模型仓库完整文件（配置、分词器和 `.safetensors` 权重）。
 识别结果缓存默认在 `~/.zsir-cut/cache/asr/`，可用 `ZSIR_CACHE_DIR` 覆盖。
-`transcribe` 和 `align` 按 40–60 秒窗口内最低能量的 10 毫秒帧分段处理，末段不足 60 秒时保留整段；对齐零宽比例超过 5% 时输出 `W_ASR_ALIGN_DEGRADED`。
+本地 `transcribe` 和 `align` 按 40–60 秒窗口内最低能量的 10 毫秒帧分段处理，末段不足 60 秒时保留整段；对齐零宽比例超过 5% 时输出 `W_ASR_ALIGN_DEGRADED`。
 
 模型准备好后，从仓库根目录执行冒烟测试：
 
@@ -44,5 +44,5 @@ sh workers/asr/scripts/smoke.sh
 ```
 
 默认关闭。`--engine auto` 仅在本地报内存不足或模型不可用、且开关已开启时尝试云端。
-火山凭据仅从环境变量 `ZSIR_VOLC_APP_ID` 和 `ZSIR_VOLC_ACCESS_TOKEN` 读取，不写入配置。
-目前火山 API 客户端仍是占位实现：缺凭据报 `E_ASR_CLOUD_AUTH`，有凭据报 `E_ASR_INTERNAL`，配置开关不代表云端识别已经可用。
+应用的 `asr.mode` 选择 API 时，内核把 `auto` 改为 `cloud`。API Key 由应用保存在系统钥匙串 `zsir-cut.volc-asr` 中，内核读取后通过 `ZSIR_VOLC_API_KEY` 环境变量传给 worker，不写入配置、日志或识别结果。
+云端使用豆包录音文件识别极速版，将音频转为 16 kHz 单声道 64 kbps MP3 后上传，直接使用云端逐字时间，不加载本地模型或对齐器。超过两小时的音频每 90 分钟分段，合并时补回源时间偏移。应用中的测试会跳过识别缓存。

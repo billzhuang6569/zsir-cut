@@ -112,12 +112,15 @@ describe("subtitle rules", () => {
     const within = make(["甲", "乙"], [30n, 30n]);
     expect(ranges(within, [{ first: 0, last: 1 }])[0]!.warnings).not.toContain("W_SUB_TOO_WIDE");
   });
-  it.each(["的", "是", "和", "「是」，"])("avoids a width split after the whole token %s", (word) => {
-    const tokens = make(["甲甲甲甲", "乙", "丙", "丁", word, "戊戊"]);
-    const rules = { ...zh, cpl: 7 + Number(textWidth([tokens[4]!], zh).numerator) };
-    expect(segmentTokens(tokens, rules)[0]!.at(-1)!.text).not.toBe(word);
-  });
-  it.each(["了", "吗", "呢", "「了」，"])("avoids a width split before the whole token %s", (word) => {
+  it.each(["的", "是", "和", "「是」，", "的 ", "是 ", "和 "])(
+    "avoids a width split after the whole token %s",
+    (word) => {
+      const tokens = make(["甲甲甲甲", "乙", "丙", "丁", word, "戊戊"]);
+      const rules = { ...zh, cpl: 7 + Number(textWidth([tokens[4]!], zh).numerator) };
+      expect(segmentTokens(tokens, rules)[0]!.at(-1)!.text).not.toBe(word);
+    },
+  );
+  it.each(["了", "吗", "呢", "「了」，", " 了"])("avoids a width split before the whole token %s", (word) => {
     expect(segmentTokens(make(["甲", "乙", "丙", "丁", word, "戊"]), { ...zh, cpl: 4 })[0]!.at(-1)!.text).toBe("丙");
   });
   it("matches whole tokens only and limits bad boundaries to zh-talk", () => {
@@ -213,6 +216,16 @@ describe("subtitle rules", () => {
     expect(cueText(words, en)).toEqual(["every cut, works"]);
     expect(printRational(textWidth(words, en))).toBe("16");
     expect(cueText(make(["Agent", "先把"]), zh)).toEqual(["Agent先把"]);
+  });
+
+  it.each([
+    ["Final ", "Cut ", "Pro"],
+    ["Final", " Cut", " Pro"],
+  ])("preserves existing word spaces without adding duplicates (%s)", (...texts) => {
+    const tokens = make(texts);
+    const en = subtitleRules("en");
+    expect(cueText(tokens, en)).toEqual(["Final Cut Pro"]);
+    expect(printRational(textWidth(tokens, en))).toBe("13");
   });
   it("splits sentences on final punctuation and hard pause, keeping standalone punctuation with the previous token", () => {
     const tokens = make(

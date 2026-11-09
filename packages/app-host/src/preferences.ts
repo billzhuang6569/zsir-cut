@@ -5,6 +5,14 @@ import { dirname, isAbsolute, join } from "node:path";
 import { z } from "zod";
 import { actions, keyNotation, mergeKeymap } from "./keymap.js";
 
+const { recommendedAsrModel, desktopPreferencesDirectory }: typeof import("../../core/dist/asr-settings.js") =
+  await import(
+    new URL(
+      import.meta.url.endsWith(".ts") ? "../../core/src/asr-settings.ts" : "../../core/dist/asr-settings.js",
+      import.meta.url,
+    ).href
+  );
+
 const chapters = z.strictObject({
   view: z.enum(["outline", "timeline"]),
   zoom: z.number().min(0.5).max(4),
@@ -37,9 +45,11 @@ const previewCache = z.strictObject({
   auto: z.boolean(),
   pause_on_battery: z.boolean(),
 });
+const asr = z.strictObject({ mode: z.enum(["local", "api"]), model: z.enum(["1.7b", "0.6b"]) });
 const preferences = z.strictObject({
   schema: z.literal("zsir-cut/desktop"),
   version: z.number().int().min(2),
+  asr,
   default_agent: z.enum(["claude", "codex"]).nullable(),
   keymap,
   preview_cache: previewCache,
@@ -47,6 +57,7 @@ const preferences = z.strictObject({
 });
 const patchSchema = preferences.partial().extend({
   version: z.literal(2).optional(),
+  asr: asr.partial().optional(),
   keymap: keymap.partial().optional(),
   preview_cache: previewCache.partial().optional(),
   ui: ui.partial().extend({ chapters: chapters.partial().optional(), layout: layout.partial().optional() }).optional(),
@@ -56,6 +67,7 @@ export const defaultPreferences: Preferences = {
   schema: "zsir-cut/desktop",
   version: 2,
   default_agent: null,
+  asr: { mode: "local", model: recommendedAsrModel() },
   keymap: { preset: "fcp", overrides: {} },
   preview_cache: {
     directory: "~/Movies/庄Sir剪辑助手/预览缓存",
@@ -135,11 +147,7 @@ export class DesktopPreferences {
   private extras: Record<string, unknown> = {};
   private writes = Promise.resolve();
   warning: { type: "warning"; code: "W_PREFS_RESET"; message: string } | undefined;
-  constructor(
-    directory = process.platform === "darwin"
-      ? join(homedir(), "Library/Application Support/zsir-cut")
-      : join(process.env.XDG_DATA_HOME || join(homedir(), ".local/share"), "zsir-cut"),
-  ) {
+  constructor(directory = desktopPreferencesDirectory()) {
     this.file = join(directory, "desktop.json");
   }
   async load() {

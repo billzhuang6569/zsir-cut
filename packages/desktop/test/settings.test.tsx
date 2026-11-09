@@ -89,7 +89,7 @@ async function mount(
   const dir = await mkdtemp(join(tmpdir(), "u312-settings-"));
   const prefs = new DesktopPreferences(dir);
   await prefs.load();
-  await prefs.set({ preview_cache: { directory: "/cache" } });
+  await prefs.set({ preview_cache: { directory: "/cache" }, asr: { mode: "local", model: "1.7b" } });
   const agents = agentList();
   if (options.npm === false) agents.npm = null;
   let cache = cacheStatus();
@@ -131,6 +131,7 @@ async function mount(
       cache = { ...cache, used_bytes: 0, projects: [] };
       return {};
     }
+    if (verb === "asr_status") return { supported: true, recommended: "1.7b", api_key_set: false, models: [] };
     if (verb === "settings_get")
       return { settings: { voice: { model: "s2.1-pro" }, network: { proxy: null } }, voice_key_set: false };
     return {};
@@ -398,7 +399,7 @@ it("retains the current location on move failure", async () => {
   expect(h.prefs.get().prefs.preview_cache.directory).toBe("/cache");
   expect(h.container.querySelector('[role="alert"]')?.textContent).toContain("未能完成");
 });
-it("embeds existing voice settings and links to project recognition without nesting dialogs", async () => {
+it("embeds voice settings and application recognition modes without nesting dialogs", async () => {
   const h = await mount();
   await h.click("语音");
   expect(h.container.querySelectorAll("dialog")).toHaveLength(1);
@@ -406,9 +407,10 @@ it("embeds existing voice settings and links to project recognition without nest
   await h.click("保存");
   expect(h.call).toHaveBeenCalledWith("settings_set", expect.objectContaining({ voice_key: "example-key" }));
   await h.click("字幕识别");
-  await h.click("打开字幕识别");
-  expect(h.close).toHaveBeenCalledOnce();
-  expect(h.openRecognition).toHaveBeenCalledOnce();
+  expect(h.container.textContent).toContain("本地模型");
+  await h.click("API 识别");
+  expect(h.prefs.get().prefs.asr.mode).toBe("api");
+  expect(h.container.textContent).toContain("火山引擎 · 豆包语音识别");
 });
 it.each([
   [{ key: "å", code: "KeyA", altKey: true }, "⌥A"],
@@ -559,7 +561,7 @@ it("uses settings saves and external prefs_set refreshes as one live keymap, ign
   await press(".", true);
   expect(h.container.querySelector("dialog")).not.toBeNull();
 });
-it("forwards the three settings pushes, unsubscribes, and preserves manual installation instructions", async () => {
+it("forwards settings pushes including ASR model progress, unsubscribes, and preserves manual installation instructions", async () => {
   let socket: FakeSocket | undefined;
   class FakeSocket {
     readyState = 1;
@@ -596,16 +598,17 @@ it("forwards the three settings pushes, unsubscribes, and preserves manual insta
   socket?.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ type: "bootstrap", project: null }) }));
   const listener = vi.fn();
   const stop = host.subscribe(listener);
-  for (const type of ["agents_changed", "agents_output", "preview_cache"])
+  for (const type of ["agents_changed", "agents_output", "preview_cache", "asr_model_progress"])
     socket?.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ type }) }));
   expect(listener.mock.calls.map(([event]) => event.type)).toEqual([
     "agents_changed",
     "agents_output",
     "preview_cache",
+    "asr_model_progress",
   ]);
   stop();
   socket?.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ type: "agents_output" }) }));
-  expect(listener).toHaveBeenCalledTimes(3);
+  expect(listener).toHaveBeenCalledTimes(4);
   await expect(host.call("agents_install", { id: "codex" })).rejects.toMatchObject({ manual: "手动安装说明" });
   host();
 });

@@ -302,6 +302,128 @@
 .zc-settings-tables > table:first-child {
   grid-row: span 2;
 }
+
+.zc-asr-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.zc-asr-settings .is-block button {
+  flex: 1;
+}
+.zc-asr-model {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  min-height: 64px;
+  flex-wrap: wrap;
+}
+.zc-asr-model + .zc-asr-model {
+  border-top: 1px solid var(--line);
+}
+.zc-asr-choice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 220px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.zc-asr-choice strong {
+  margin-right: 8px;
+}
+.zc-asr-choice .zc-meta,
+.zc-asr-test .zc-meta {
+  display: block;
+}
+.zc-asr-radio {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border: 1.5px solid var(--text-4);
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+.zc-asr-choice[aria-pressed="true"] .zc-asr-radio {
+  border: 5px solid var(--accent);
+}
+.zc-asr-download {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 236px;
+  flex: none;
+}
+.zc-asr-download > span {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.zc-asr-download-labels {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-2);
+}
+.zc-asr-download progress {
+  appearance: none;
+  -webkit-appearance: none;
+  display: block;
+  width: 100%;
+  height: 4px;
+  border: 0;
+  border-radius: 9999px;
+  overflow: hidden;
+  background: var(--raised-2);
+}
+.zc-asr-download progress::-webkit-progress-bar {
+  background: var(--raised-2);
+  border-radius: 9999px;
+}
+.zc-asr-download progress::-webkit-progress-value {
+  background: var(--accent);
+  border-radius: 9999px;
+}
+.zc-asr-download progress::-moz-progress-bar {
+  background: var(--accent);
+  border-radius: 9999px;
+}
+.zc-asr-test {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.zc-asr-result {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  font-size: 12px;
+  line-height: 18px;
+}
+.zc-asr-result .zc-dot {
+  display: inline-block;
+  margin-right: 8px;
+}
+.zc-asr-service {
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+}
+
 .zc-settings-presets .is-active .zc-meta {
   color: inherit;
 }
