@@ -89,7 +89,7 @@ async function mount(
   const dir = await mkdtemp(join(tmpdir(), "u312-settings-"));
   const prefs = new DesktopPreferences(dir);
   await prefs.load();
-  await prefs.set({ preview_cache: { directory: "/cache" } });
+  await prefs.set({ preview_cache: { directory: "/cache" }, asr: { mode: "local", model: "1.7b" } });
   const agents = agentList();
   if (options.npm === false) agents.npm = null;
   let cache = cacheStatus();

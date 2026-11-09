@@ -207,6 +207,7 @@ it("returns only key presence, sanitizes key failures, tests via the selected mo
 it("requests cloud permission for API auto, while explicit local and local auto need none", async () => {
   const directory = await folder();
   vi.stubEnv("HOME", directory);
+  vi.stubEnv("USERPROFILE", directory);
   vi.stubEnv("XDG_DATA_HOME", join(directory, "data"));
   const { desktopPreferencesDirectory } = await import("../../core/src/asr-settings.ts");
   const { parseProject } = await import("../../core/src/project/io.ts");

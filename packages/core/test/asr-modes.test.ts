@@ -8,6 +8,7 @@ import { parseProject } from "../src/project/io.ts";
 import { invokeAsr, runAsrWorker } from "../src/transcribe.ts";
 
 vi.mock("../src/asr-keychain.ts", () => ({ readAsrKey: vi.fn(async () => "unit-secret-key") }));
+const platform = Object.getOwnPropertyDescriptor(process, "platform");
 let directory: string;
 const capture: { args?: string[]; env?: NodeJS.ProcessEnv; options?: { cwd?: string } } = {};
 vi.mock("node:child_process", async (importOriginal) => {
@@ -32,7 +33,9 @@ let workerResult: Record<string, unknown>;
 beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), "asr-mode-"));
   vi.stubEnv("HOME", directory);
+  vi.stubEnv("USERPROFILE", directory);
   vi.stubEnv("XDG_DATA_HOME", join(directory, "data"));
+  vi.stubEnv("ZCUT_PACKAGED", "0");
   vi.mocked(readAsrKey).mockReset().mockResolvedValue("unit-secret-key");
   workerResult = {
     schema: "zsir-cut/asr-result",
@@ -46,10 +49,12 @@ beforeEach(async () => {
   };
 });
 afterEach(async () => {
+  if (platform) Object.defineProperty(process, "platform", platform);
   vi.unstubAllEnvs();
   await rm(directory, { recursive: true, force: true });
 });
 it("routes auto by persisted mode/model, keeps explicit local local, and passes a key only through worker env", async () => {
+  Object.defineProperty(process, "platform", { value: "darwin" });
   const parsed = parseProject(
     await readFile(new URL("../../../examples/interview.zcut.json", import.meta.url), "utf8"),
   );

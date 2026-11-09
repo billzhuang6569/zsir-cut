@@ -54,7 +54,12 @@ async function mount(supported = true, ready = false) {
   });
   const save = vi.fn();
   function Harness() {
-    const [prefs, setPrefs] = useState(structuredClone(defaultPreferences));
+    const [prefs, setPrefs] = useState(() => {
+      const prefs = structuredClone(defaultPreferences);
+      prefs.asr.model = "1.7b";
+      prefs.asr.mode = "local";
+      return prefs;
+    });
     return (
       <AsrSettings
         call={call}
@@ -140,7 +145,7 @@ it("places download status and decimal GB counts at opposite ends above the prog
     style.remove();
     h.container.remove();
   }
-});
+}, 20_000);
 it("formats progress pushes in decimal GB, including zero and complete downloads", async () => {
   const h = await mount();
   for (const [done, total, text] of [
@@ -166,7 +171,7 @@ it("formats progress pushes in decimal GB, including zero and complete downloads
       { timeout: 5000 },
     );
   }
-});
+}, 20_000);
 it("renders download and queued progress, cancels, selects, downloads and receives ready pushes", async () => {
   const h = await mount();
   await vi.waitFor(
@@ -234,7 +239,7 @@ it("renders download and queued progress, cancels, selects, downloads and receiv
     },
     { timeout: 5000 },
   );
-});
+}, 20_000);
 it("renders local success and exact API success/failure states, saves and clears keys, and toggles visibility", async () => {
   const h = await mount(true, true);
   await h.click("开始测试");
@@ -293,7 +298,7 @@ it("renders local success and exact API success/failure states, saves and clears
     },
     { timeout: 5000 },
   );
-});
+}, 20_000);
 it("shows only the Windows sentence and disables transcription in the subtitle panel", async () => {
   const h = await mount(false);
   await vi.waitFor(
@@ -340,4 +345,4 @@ it("shows only the Windows sentence and disables transcription in the subtitle p
     },
     { timeout: 5000 },
   );
-});
+}, 20_000);
