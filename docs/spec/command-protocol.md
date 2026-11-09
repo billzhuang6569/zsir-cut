@@ -117,7 +117,7 @@
 4. 核对 `base_revision`，不等则释放锁并返回 `conflict`。
 5. 在内存里应用全部操作，做 L1 校验。有错误就释放锁并返回 `rejected`，错误码 `E_VALIDATION`。
 6. 生成新修订：`seq` 加一，`id` 用新的 `rev_` ID，`parent` 是旧修订 ID，`created_at` 是当前时间，`author` 取自请求。
-7. 按规范序列化写到同目录的临时文件，fsync 文件，原子替换工程文件，fsync 目录。
+7. 按规范序列化写到同目录的临时文件，fsync 文件，原子替换工程文件，fsync 目录。Windows 不支持 fsync 目录，这一步在 Windows 上跳过，其他 fsync 不变。
 8. 追加日志条目，fsync 日志。追加幂等记录。
 9. 释放锁，返回 `applied`。
 

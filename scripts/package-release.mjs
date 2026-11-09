@@ -154,7 +154,7 @@ function unzip(file, destination) {
       "-NoProfile",
       "-NonInteractive",
       "-Command",
-      `Expand-Archive -LiteralPath '${file.replaceAll("'", "''")}' -DestinationPath '${destination.replaceAll("'", "''")}'`,
+      `$ProgressPreference='SilentlyContinue'; $ErrorActionPreference='Stop'; Expand-Archive -LiteralPath '${file.replaceAll("'", "''")}' -DestinationPath '${destination.replaceAll("'", "''")}'`,
     ]);
   } else run("unzip", ["-q", file, "-d", destination]);
 }
@@ -359,7 +359,7 @@ async function copyNode(destination) {
         "-NoProfile",
         "-NonInteractive",
         "-Command",
-        `Expand-Archive -LiteralPath '${file.replaceAll("'", "''")}' -DestinationPath '${temporary.replaceAll("'", "''")}'`,
+        `$ProgressPreference='SilentlyContinue'; $ErrorActionPreference='Stop'; Expand-Archive -LiteralPath '${file.replaceAll("'", "''")}' -DestinationPath '${temporary.replaceAll("'", "''")}'`,
       ]);
     } else run("tar", ["-xzf", file, "-C", temporary, `${folder}/bin/node`, `${folder}/LICENSE`]);
     await cp(join(temporary, folder, process.platform === "win32" ? binary : "bin/node"), join(destination, binary));
