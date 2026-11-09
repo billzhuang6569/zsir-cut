@@ -117,15 +117,25 @@ it("places download status and decimal GB counts at opposite ends above the prog
   document.body.append(h.container);
   try {
     const progress = h.container.querySelector("progress");
-    expect(progress?.getAttribute("aria-label")).toBe("高精度下载进度");
-    expect(progress?.value).toBe(1_700_000_000);
-    expect(progress?.max).toBe(3_800_000_000);
+    await vi.waitFor(
+      () => {
+        expect(progress?.getAttribute("aria-label")).toBe("高精度下载进度");
+        expect(progress?.value).toBe(1_700_000_000);
+        expect(progress?.max).toBe(3_800_000_000);
+      },
+      { timeout: 5000 },
+    );
     const row = progress?.previousElementSibling;
-    expect(Array.from(row?.children ?? [], (node) => node.textContent)).toEqual(["下载中 44%", "1.7 GB / 3.8 GB"]);
-    expect(getComputedStyle(row as Element).display).toBe("flex");
-    expect(getComputedStyle(row as Element).justifyContent).toBe("space-between");
-    expect(getComputedStyle(progress?.parentElement as Element).flexDirection).toBe("column");
-    expect(getComputedStyle(progress as Element).height).toBe("4px");
+    await vi.waitFor(
+      () => {
+        expect(Array.from(row?.children ?? [], (node) => node.textContent)).toEqual(["下载中 44%", "1.7 GB / 3.8 GB"]);
+        expect(getComputedStyle(row as Element).display).toBe("flex");
+        expect(getComputedStyle(row as Element).justifyContent).toBe("space-between");
+        expect(getComputedStyle(progress?.parentElement as Element).flexDirection).toBe("column");
+        expect(getComputedStyle(progress as Element).height).toBe("4px");
+      },
+      { timeout: 5000 },
+    );
   } finally {
     style.remove();
     h.container.remove();
@@ -147,22 +157,47 @@ it("formats progress pushes in decimal GB, including zero and complete downloads
       error: null,
     });
     const model = h.button("使用省内存").parentElement;
-    expect(model?.textContent).toContain(text);
-    expect(model?.querySelector("progress")?.value).toBe(done);
-    expect(model?.querySelector("progress")?.max).toBe(total || 1);
+    await vi.waitFor(
+      () => {
+        expect(model?.textContent).toContain(text);
+        expect(model?.querySelector("progress")?.value).toBe(done);
+        expect(model?.querySelector("progress")?.max).toBe(total || 1);
+      },
+      { timeout: 5000 },
+    );
   }
 });
 it("renders download and queued progress, cancels, selects, downloads and receives ready pushes", async () => {
   const h = await mount();
-  expect(h.container.textContent).toContain("下载中 44%");
-  expect(h.button("开始测试").disabled).toBe(true);
-  expect(h.container.textContent).toContain("模型下载好后可以测试。");
+  await vi.waitFor(
+    () => {
+      expect(h.container.textContent).toContain("下载中 44%");
+      expect(h.button("开始测试").disabled).toBe(true);
+      expect(h.container.textContent).toContain("模型下载好后可以测试。");
+    },
+    { timeout: 5000 },
+  );
   await h.click("取消");
-  expect(h.call).toHaveBeenCalledWith("asr_model_cancel", { model: "1.7b" });
+  await vi.waitFor(
+    () => {
+      expect(h.call).toHaveBeenCalledWith("asr_model_cancel", { model: "1.7b" });
+    },
+    { timeout: 5000 },
+  );
   await h.click("使用省内存");
-  expect(h.save).toHaveBeenCalledWith({ asr: { model: "0.6b" } });
+  await vi.waitFor(
+    () => {
+      expect(h.save).toHaveBeenCalledWith({ asr: { model: "0.6b" } });
+    },
+    { timeout: 5000 },
+  );
   await h.click("下载");
-  expect(h.call).toHaveBeenCalledWith("asr_model_download", { model: "0.6b" });
+  await vi.waitFor(
+    () => {
+      expect(h.call).toHaveBeenCalledWith("asr_model_download", { model: "0.6b" });
+    },
+    { timeout: 5000 },
+  );
   await h.push({
     type: "asr_model_progress",
     id: "0.6b",
@@ -171,7 +206,12 @@ it("renders download and queued progress, cancels, selects, downloads and receiv
     bytes_total: 20,
     error: null,
   });
-  expect(h.container.textContent).toContain("排队中");
+  await vi.waitFor(
+    () => {
+      expect(h.container.textContent).toContain("排队中");
+    },
+    { timeout: 5000 },
+  );
   await h.push({
     type: "asr_model_progress",
     id: "0.6b",
@@ -180,39 +220,89 @@ it("renders download and queued progress, cancels, selects, downloads and receiv
     bytes_total: 20,
     error: null,
   });
-  expect(h.container.textContent).toContain("已下载");
-  expect(h.button("开始测试").disabled).toBe(false);
+  await vi.waitFor(
+    () => {
+      expect(h.container.textContent).toContain("已下载");
+      expect(h.button("开始测试").disabled).toBe(false);
+    },
+    { timeout: 5000 },
+  );
   await h.click("删除省内存");
-  expect(h.call).toHaveBeenCalledWith("asr_model_delete", { model: "0.6b" });
+  await vi.waitFor(
+    () => {
+      expect(h.call).toHaveBeenCalledWith("asr_model_delete", { model: "0.6b" });
+    },
+    { timeout: 5000 },
+  );
 });
 it("renders local success and exact API success/failure states, saves and clears keys, and toggles visibility", async () => {
   const h = await mount(true, true);
   await h.click("开始测试");
-  expect(h.container.textContent).toContain("通过 · 5 秒语音，用 1.2 秒识别完");
+  await vi.waitFor(
+    () => {
+      expect(h.container.textContent).toContain("通过 · 5 秒语音，用 1.2 秒识别完");
+    },
+    { timeout: 5000 },
+  );
   await h.click("API 识别");
-  expect(h.save).toHaveBeenCalledWith({ asr: { mode: "api" } });
-  expect(h.container.textContent).toContain("声音会上传到火山引擎识别，不占这台电脑的内存，按用量计费。");
+  await vi.waitFor(
+    () => {
+      expect(h.save).toHaveBeenCalledWith({ asr: { mode: "api" } });
+      expect(h.container.textContent).toContain("声音会上传到火山引擎识别，不占这台电脑的内存，按用量计费。");
+    },
+    { timeout: 5000 },
+  );
   const input = await h.input("session-key");
-  expect(input.type).toBe("password");
+  await vi.waitFor(
+    () => {
+      expect(input.type).toBe("password");
+    },
+    { timeout: 5000 },
+  );
   await h.click("显示 API Key");
-  expect(input.type).toBe("text");
+  await vi.waitFor(
+    () => {
+      expect(input.type).toBe("text");
+    },
+    { timeout: 5000 },
+  );
   await h.click("开始测试");
-  expect(h.call).toHaveBeenCalledWith("asr_key_set", { key: "session-key" });
-  expect(h.call).toHaveBeenCalledWith("asr_test", { mode: "api" });
-  expect(h.container.textContent).toContain("通过 · 5 秒语音，用 2.1 秒识别完");
-  expect(h.container.textContent).toContain("识别结果：今天我们来试一下字幕识别。");
+  await vi.waitFor(
+    () => {
+      expect(h.call).toHaveBeenCalledWith("asr_key_set", { key: "session-key" });
+      expect(h.call).toHaveBeenCalledWith("asr_test", { mode: "api" });
+      expect(h.container.textContent).toContain("通过 · 5 秒语音，用 2.1 秒识别完");
+      expect(h.container.textContent).toContain("识别结果：今天我们来试一下字幕识别。");
+    },
+    { timeout: 5000 },
+  );
   h.call.mockResolvedValueOnce({ ok: false, code: "E_ASR_CLOUD_AUTH", reason: "API Key 不对。检查后再测一次。" });
   await h.click("再测一次");
-  expect(h.container.textContent).toContain("没有通过");
-  expect(h.container.textContent).toContain("API Key 不对。检查后再测一次。");
+  await vi.waitFor(
+    () => {
+      expect(h.container.textContent).toContain("没有通过");
+      expect(h.container.textContent).toContain("API Key 不对。检查后再测一次。");
+    },
+    { timeout: 5000 },
+  );
   await h.input("");
   await act(async () => input.dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
-  expect(h.call).toHaveBeenCalledWith("asr_key_set", { key: null });
+  await vi.waitFor(
+    () => {
+      expect(h.call).toHaveBeenCalledWith("asr_key_set", { key: null });
+    },
+    { timeout: 5000 },
+  );
 });
 it("shows only the Windows sentence and disables transcription in the subtitle panel", async () => {
   const h = await mount(false);
-  expect(h.container.textContent).toBe("这个版本的 Windows 版不能识别字幕");
-  expect(h.container.querySelector("button")).toBeNull();
+  await vi.waitFor(
+    () => {
+      expect(h.container.textContent).toBe("这个版本的 Windows 版不能识别字幕");
+      expect(h.container.querySelector("button")).toBeNull();
+    },
+    { timeout: 5000 },
+  );
   const container = document.createElement("div");
   const root = createRoot(container);
   function Panel() {
@@ -243,6 +333,11 @@ it("shows only the Windows sentence and disables transcription in the subtitle p
     await act(async () => root.unmount());
   });
   const recognize = container.querySelector<HTMLButtonElement>(".zc-sub-recognize");
-  expect(recognize).not.toBeNull();
-  expect(recognize?.disabled).toBe(true);
+  await vi.waitFor(
+    () => {
+      expect(recognize).not.toBeNull();
+      expect(recognize?.disabled).toBe(true);
+    },
+    { timeout: 5000 },
+  );
 });
