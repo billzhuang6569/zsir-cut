@@ -23,12 +23,16 @@ it("prepends common directories, uses platform delimiters and preserves inherite
   expect(dirs).toEqual([win32.join(env.LOCALAPPDATA, "Microsoft/WinGet/Links"), "C:\\ProgramData\\chocolatey\\bin"]);
   expect(hostPath(env, "win32")).toBe(`${dirs.join(";")};${env.PATH}`);
   expect(hostPath({ PATH: "" }, "darwin")).not.toContain("::");
-  expect(hostPath({ PATH: "/app/runtime/bin:/bin", ZCUT_PACKAGED: "1" }, "darwin")).toBe(
-    "/app/runtime/bin:/bin:/opt/homebrew/bin:/usr/local/bin",
+  expect(hostPath({ PATH: "/app/runtime/bin:/bin", ZCUT_PACKAGED: "1" }, "darwin", "/app/runtime/node")).toBe(
+    "/app/runtime/bin:/app/runtime:/opt/homebrew/bin:/usr/local/bin:/bin",
   );
-  expect(hostPath({ ...env, PATH: `D:\\App\\runtime\\bin;${env.PATH}`, ZCUT_PACKAGED: "1" }, "win32")).toBe(
-    `D:\\App\\runtime\\bin;${env.PATH};${dirs.join(";")}`,
-  );
+  expect(
+    hostPath(
+      { ...env, PATH: `D:\\App\\runtime\\bin;${env.PATH}`, ZCUT_PACKAGED: "1" },
+      "win32",
+      "D:\\App\\runtime\\node.exe",
+    ),
+  ).toBe(`D:\\App\\runtime\\bin;D:\\App\\runtime;${dirs.join(";")};${env.PATH}`);
 });
 it("finds Windows exe and cmd, respects directory order and ignores directories", async () => {
   directory = await mkdtemp(join(tmpdir(), "zcut-program-"));

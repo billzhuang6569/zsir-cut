@@ -1,7 +1,7 @@
 import * as childProcess from "node:child_process";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { access, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readdir, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import type { ClientRequest, IncomingMessage } from "node:http";
 import * as https from "node:https";
 import { tmpdir } from "node:os";
@@ -23,6 +23,7 @@ const {
   cachedNodeArchive,
   checkMacRuntime,
   copyProductionDependencies,
+  copyNodeDistribution,
   download,
   isMachO,
   installPythonRequirements,
@@ -46,6 +47,50 @@ function respond(response: PassThrough, statusCode = 200, headers = {}) {
     return request as ClientRequest;
   });
 }
+it.each(["darwin", "win32"])(
+  "copies Node and npm from the %s official distribution with runtime dependencies and licenses",
+  async (platform) => {
+    temporary = await mkdtemp(join(tmpdir(), "zcut-node-"));
+    const source = join(temporary, "official-node");
+    const output = join(temporary, "runtime");
+    const npm = platform === "win32" ? "node_modules/npm" : "lib/node_modules/npm";
+    const binary = platform === "win32" ? "node.exe" : "bin/node";
+    const files = [
+      binary,
+      "LICENSE",
+      `${npm}/LICENSE`,
+      `${npm}/package.json`,
+      `${npm}/bin/npm-cli.js`,
+      `${npm}/node_modules/dep/index.js`,
+      `${npm}/node_modules/dep/LICENSE`,
+    ];
+    const omitted = [`${npm}/docs/index.md`, `${npm}/man/npm.1`, `${npm}/node_modules/dep/tests/test.js`];
+    for (const path of [...files, ...omitted]) {
+      await mkdir(join(source, path, ".."), { recursive: true });
+      await writeFile(join(source, path), path);
+    }
+    if (process.platform !== "win32") {
+      await mkdir(join(source, npm, "node_modules/.bin"));
+      await symlink("../dep/index.js", join(source, npm, "node_modules/.bin/dep"));
+    }
+    await mkdir(output);
+    await copyNodeDistribution(source, output, platform);
+    expect(await readFile(join(output, platform === "win32" ? "node.exe" : "node"), "utf8")).toBe(binary);
+    expect(await readFile(join(output, "NODE-LICENSE.txt"), "utf8")).toBe("LICENSE");
+    expect(await readFile(join(output, "NPM-LICENSE.txt"), "utf8")).toBe(`${npm}/LICENSE`);
+    for (const path of files.filter((path) => path.startsWith(`${npm}/`)))
+      expect(await readFile(join(output, "npm", path.slice(npm.length + 1)), "utf8")).toBe(path);
+    for (const path of ["npm/docs", "npm/man", "npm/node_modules/dep/tests"])
+      await expect(access(join(output, path))).rejects.toThrow();
+    await rm(source, { recursive: true });
+    if (process.platform !== "win32") {
+      expect(await readlink(join(output, "npm/node_modules/.bin/dep"))).toBe("../dep/index.js");
+      expect(await readFile(join(output, "npm/node_modules/.bin/dep"), "utf8")).toBe(
+        `${npm}/node_modules/dep/index.js`,
+      );
+    }
+  },
+);
 it("disables progress and stops on errors in both Windows extraction commands", async () => {
   const source = await readFile(new URL("../package-release.mjs", import.meta.url), "utf8");
   const commands = source.match(/run\("powershell\.exe", \[[\s\S]*?\]\);/g) ?? [];

@@ -184,12 +184,19 @@ dependency imported.
 
 Repository: https://github.com/nodejs/node
 
-The release includes only the platform's Node.js 24 executable, with its complete
+The release includes the platform's Node.js 24 executable, with its complete
 upstream `LICENSE` copied to `runtime/NODE-LICENSE.txt`. This file contains the
 Node.js MIT license and the notices/licenses for components embedded in Node.
-Local downloads are checked against the matching official `SHASUMS256.txt`; CI
-uses the Node 24 installation provided by `actions/setup-node`. npm, corepack and
-headers are not distributed. No new Node package is added for this runtime.
+All builds use the official Node distribution, checked against the matching
+official `SHASUMS256.txt`. Corepack and headers are not distributed.
+No new Node package is added for this runtime.
+
+The npm version shipped in that same official Node distribution is included in
+`runtime/npm/` for Agent installation with the bundled Node executable. npm uses
+Artistic-2.0; its complete upstream license is retained in `runtime/npm/LICENSE`
+and copied to `runtime/NPM-LICENSE.txt`. Its bundled dependencies and their
+upstream license notices remain under `runtime/npm/node_modules/`. Documentation,
+manual pages and test directories are omitted. npm is permitted by ADR-0025.
 
 Node.js is licensed for use as follows:
 

@@ -3,6 +3,7 @@
 use std::{
     collections::VecDeque,
     error::Error,
+    ffi::{OsStr, OsString},
     io::{BufRead, BufReader, Read},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
@@ -13,6 +14,36 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
 fn node_path(path: &Path) -> PathBuf {
     dunce::simplified(path).to_path_buf()
+}
+
+fn packaged_path(root: &Path, inherited: &OsStr) -> Result<OsString, std::env::JoinPathsError> {
+    let mut paths = vec![root.join("bin"), root.to_path_buf()];
+    #[cfg(windows)]
+    {
+        let local = std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("USERPROFILE")
+                    .map(|home| PathBuf::from(home).join("AppData/Local"))
+            });
+        if let Some(local) = local {
+            paths.push(local.join("Microsoft/WinGet/Links"));
+        }
+        paths.push(PathBuf::from(r"C:\ProgramData\chocolatey\bin"));
+    }
+    #[cfg(not(windows))]
+    paths.extend([
+        PathBuf::from("/opt/homebrew/bin"),
+        PathBuf::from("/usr/local/bin"),
+    ]);
+    paths.extend(std::env::split_paths(inherited).filter(|path| !path.as_os_str().is_empty()));
+    let mut unique = Vec::new();
+    for path in paths {
+        if !unique.contains(&path) {
+            unique.push(path);
+        }
+    }
+    std::env::join_paths(unique)
 }
 
 fn stderr_tail(mut input: impl Read) -> String {
@@ -108,11 +139,10 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
     let mut command = Command::new(node);
     if !cfg!(debug_assertions) {
         command.env("ZCUT_PACKAGED", "1");
-        let mut paths = vec![root.join("bin")];
-        paths.extend(std::env::split_paths(
-            &std::env::var_os("PATH").unwrap_or_default(),
-        ));
-        command.env("PATH", std::env::join_paths(paths)?);
+        command.env(
+            "PATH",
+            packaged_path(&root, &std::env::var_os("PATH").unwrap_or_default())?,
+        );
     }
     command.env("PYTHONDONTWRITEBYTECODE", "1");
     #[cfg(windows)]
@@ -172,6 +202,45 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn packaged_path_prepends_runtime_and_common_directories() {
+        let root = Path::new(if cfg!(windows) {
+            r"D:\庄Sir App\runtime"
+        } else {
+            "/Applications/庄Sir App/runtime"
+        });
+        let inherited =
+            std::env::join_paths([root.join("bin"), PathBuf::from("inherited")]).unwrap();
+        let path = packaged_path(root, &inherited).unwrap();
+        let paths: Vec<_> = std::env::split_paths(&path).collect();
+        assert_eq!(&paths[..2], &[root.join("bin"), root.to_path_buf()]);
+        assert_eq!(paths.last().unwrap(), &PathBuf::from("inherited"));
+        assert_eq!(
+            paths
+                .iter()
+                .filter(|path| **path == root.join("bin"))
+                .count(),
+            1
+        );
+        #[cfg(not(windows))]
+        assert_eq!(
+            &paths[2..4],
+            &[
+                PathBuf::from("/opt/homebrew/bin"),
+                PathBuf::from("/usr/local/bin")
+            ]
+        );
+        #[cfg(windows)]
+        assert_eq!(
+            paths[paths.len() - 2],
+            PathBuf::from(r"C:\ProgramData\chocolatey\bin")
+        );
+        assert!(
+            !std::env::split_paths(&packaged_path(root, OsStr::new("")).unwrap())
+                .any(|path| path.as_os_str().is_empty())
+        );
+    }
 
     #[test]
     fn ordinary_paths_are_unchanged() {

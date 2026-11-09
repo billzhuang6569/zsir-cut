@@ -188,7 +188,7 @@
 
 ### 4.1 找程序和版本
 
-依次在 `PATH`、`/opt/homebrew/bin`、`/usr/local/bin`、`~/.local/bin`、`~/.npm-global/bin`、`~/.claude/local` 里找 `claude` 和 `codex`，第一个可执行的就是它。用 `--version` 取版本，3 秒超时。启动 Agent 时用找到的绝对路径，不再靠 `PATH`。
+依次在 `PATH`、`/opt/homebrew/bin`、`/usr/local/bin`、`~/.local/bin`、`~/.npm-global/bin`、`~/.claude/local`、一键安装目录（`~/.zsir-cut/agents/bin`，Windows 是 `~/.zsir-cut/agents`）里找 `claude` 和 `codex`，第一个可执行的就是它。用 `--version` 取版本，3 秒超时。启动 Agent 时用找到的绝对路径，不再靠 `PATH`。
 
 不查也不显示登录状态（Bill 2026-11-06）。没登录时 Agent 的第一次回复会说明，界面照常显示。
 
@@ -201,11 +201,13 @@
 | 动词 | 参数 | 结果 |
 |---|---|---|
 | `agents_list` | `refresh`（可选，true 时重新探测并重查新版） | `result.agents`：每项 `id`（`claude`、`codex`）、`name`（「Claude Code」「Codex」）、`found`、`path`、`version`、`latest`（查不到为 null）、`update_available`、`default`（布尔）；`result.npm`：找到的 npm 路径或 null |
-| `agents_install` | `id` | 用 `npm install -g <包名>` 安装，立即返回 `accepted` 和 `result.job_id`；没有 npm 时返回 `rejected`、`E_UNSUPPORTED`，`details.manual` 是一段手动安装说明 |
+| `agents_install` | `id` | 发布版用应用自带的 Node 和 npm 运行 `npm install -g --prefix ~/.zsir-cut/agents <包名>`，不要求用户装 Node，也不要求管理员权限。开发版没有自带 npm，用 `PATH` 里的 npm，没有时返回 `rejected`、`E_UNSUPPORTED`，`details.manual` 是一段手动安装说明。立即返回 `accepted` 和 `result.job_id`。默认 registry 失败时，自动换 `https://registry.npmmirror.com` 再试一次 |
 | `agents_update` | `id` | 同上，命令相同 |
 | `agents_set_default` | `id` | 写 `desktop.json` 的 `default_agent`，返回 `applied`；对话面板之后默认用它 |
 
 安装和更新期间每一行输出推 `{type: "agents_output", job_id, line, stream: "stdout" | "stderr"}`；结束推 `{type: "agents_output", job_id, done: true, ok}`，再推一次 `agents_changed`（内容同 `agents_list` 的结果）。同一时刻只跑一个安装任务，第二个返回 `failed`、`E_IO`、`retryable: true`。
+
+**启动环境。** 发布版的宿主 `PATH` 依次是：应用的 `bin`（ffmpeg）、应用自带 Node 所在目录、`/opt/homebrew/bin`、`/usr/local/bin`（Windows 是对应的常用目录）、继承的 `PATH`。从 Finder 打开的应用继承不到终端的 `PATH`，这样 `npm`、`claude`、`codex` 这些靠 `#!/usr/bin/env node` 启动的程序才能跑。
 
 测试不联网：npm、`claude`、`codex` 都用假命令，registry 用假地址。
 

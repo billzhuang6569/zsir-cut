@@ -340,14 +340,19 @@ export async function cachedNodeArchive(base, filename, cache, fetch = download)
   const sha256 = nodeArchiveChecksum(await readFile(sums, "utf8"), filename);
   return cachedDownload({ url: `${base}${filename}`, sha256 }, cache, fetch);
 }
+export async function copyNodeDistribution(source, destination, platform = process.platform) {
+  const windows = platform === "win32";
+  await cp(join(source, windows ? "node.exe" : "bin/node"), join(destination, windows ? "node.exe" : "node"));
+  await cp(join(source, "LICENSE"), join(destination, "NODE-LICENSE.txt"));
+  const npm = join(source, windows ? "node_modules/npm" : "lib/node_modules/npm");
+  await cp(npm, join(destination, "npm"), {
+    recursive: true,
+    verbatimSymlinks: true,
+    filter: (path) => !["docs", "man", "test", "tests", "__tests__"].includes(basename(path)),
+  });
+  await cp(join(npm, "LICENSE"), join(destination, "NPM-LICENSE.txt"));
+}
 async function copyNode(destination) {
-  const binary = process.platform === "win32" ? "node.exe" : "node";
-  if (process.env.CI) {
-    const license = join(dirname(process.execPath), process.platform === "win32" ? "LICENSE" : "../LICENSE");
-    await cp(process.execPath, join(destination, binary));
-    await cp(license, join(destination, "NODE-LICENSE.txt"));
-    return;
-  }
   const folder = `node-${process.version}-${process.platform === "darwin" ? "darwin-arm64" : "win-x64"}`;
   const filename = `${folder}.${process.platform === "win32" ? "zip" : "tar.gz"}`;
   const base = `https://nodejs.org/dist/${process.version}/`;
@@ -361,9 +366,17 @@ async function copyNode(destination) {
         "-Command",
         `$ProgressPreference='SilentlyContinue'; $ErrorActionPreference='Stop'; Expand-Archive -LiteralPath '${file.replaceAll("'", "''")}' -DestinationPath '${temporary.replaceAll("'", "''")}'`,
       ]);
-    } else run("tar", ["-xzf", file, "-C", temporary, `${folder}/bin/node`, `${folder}/LICENSE`]);
-    await cp(join(temporary, folder, process.platform === "win32" ? binary : "bin/node"), join(destination, binary));
-    await cp(join(temporary, folder, "LICENSE"), join(destination, "NODE-LICENSE.txt"));
+    } else
+      run("tar", [
+        "-xzf",
+        file,
+        "-C",
+        temporary,
+        `${folder}/bin/node`,
+        `${folder}/LICENSE`,
+        `${folder}/lib/node_modules/npm`,
+      ]);
+    await copyNodeDistribution(join(temporary, folder), destination);
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }
