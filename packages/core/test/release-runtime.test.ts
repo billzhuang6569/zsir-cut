@@ -70,10 +70,11 @@ it("rejects Windows transcription with the ASR reason without queuing a worker",
     author: { kind: "agent", name: "test" },
   });
   expect(result.status).toBe("failed");
-  expect(result.error).toMatchObject({
+  expect(result.error).toEqual({
     code: "E_INTERNAL",
     details: { code: "E_ASR_MODEL_UNAVAILABLE" },
     message: "这个版本的 Windows 版不能识别字幕",
+    retryable: false,
   });
   expect(result.result).toBeNull();
   expect(validateEnvelope(result).valid).toBe(true);

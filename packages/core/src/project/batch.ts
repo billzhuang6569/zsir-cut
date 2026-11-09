@@ -37,11 +37,13 @@ export async function saveBatchFile(path: string, value: unknown): Promise<void>
       await handle.close();
     }
     await rename(temporary, path);
-    const directory = await open(dirname(path), "r");
-    try {
-      await directory.sync();
-    } finally {
-      await directory.close();
+    if (process.platform !== "win32") {
+      const directory = await open(dirname(path), "r");
+      try {
+        await directory.sync();
+      } finally {
+        await directory.close();
+      }
     }
   } finally {
     await rm(temporary, { force: true });

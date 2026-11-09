@@ -392,4 +392,4 @@ Agent 通过宿主的 MCP 调用会碰到工程外面的动词时，宿主先停
 
 ### 9.3 Windows
 
-`supported` 为 false。设置页这一节只显示「这个版本的 Windows 版不能识别字幕」。字幕面板里开始识别的入口不可用，点不了。`transcribe` 动词返回 `E_ASR_MODEL_UNAVAILABLE`，原因写同一句话。
+`supported` 为 false。设置页这一节只显示「这个版本的 Windows 版不能识别字幕」。字幕面板里开始识别的入口不可用，点不了。`transcribe` 动词返回 `E_INTERNAL`，`details.code` 是 `E_ASR_MODEL_UNAVAILABLE`（和其他识别错误的写法一样），`message` 写同一句话。

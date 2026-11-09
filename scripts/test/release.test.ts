@@ -7,6 +7,7 @@ import * as https from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
+import { runInNewContext } from "node:vm";
 import { afterEach, expect, it, vi } from "vitest";
 
 vi.mock("node:child_process", async (importOriginal) => ({
@@ -45,6 +46,18 @@ function respond(response: PassThrough, statusCode = 200, headers = {}) {
     return request as ClientRequest;
   });
 }
+it("disables progress and stops on errors in both Windows extraction commands", async () => {
+  const source = await readFile(new URL("../package-release.mjs", import.meta.url), "utf8");
+  const commands = source.match(/run\("powershell\.exe", \[[\s\S]*?\]\);/g) ?? [];
+  expect(commands).toHaveLength(2);
+  const run = vi.fn();
+  for (const command of commands) {
+    runInNewContext(command, { run, file: "archive.zip", destination: "output", temporary: "temporary" });
+  }
+  for (const [, args] of run.mock.calls) {
+    expect(args[3]).toContain("$ProgressPreference='SilentlyContinue'; $ErrorActionPreference='Stop'; Expand-Archive");
+  }
+});
 it("streams a download lasting over two minutes while data keeps arriving within 60 seconds", async () => {
   temporary = await mkdtemp(join(tmpdir(), "zcut-download-"));
   vi.useFakeTimers();

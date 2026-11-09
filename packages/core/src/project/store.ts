@@ -76,6 +76,7 @@ type ErrorCode =
   | "E_SESSION_STATE"
   | "E_IO"
   | "E_INTERNAL"
+  | "E_ASR_MODEL_UNAVAILABLE"
   | "E_VOICE_AUTH"
   | "E_VOICE_PAYMENT"
   | "E_VOICE_UPSTREAM";
@@ -744,11 +745,13 @@ export function openProject(options: OpenProjectOptions) {
         if (create) await link(temp, projectPath);
         else await rename(temp, projectPath);
         committedRevision = candidate.revision.id;
-        const dirHandle = await open(dirname(projectPath), "r");
-        try {
-          await dirHandle.sync();
-        } finally {
-          await dirHandle.close();
+        if (process.platform !== "win32") {
+          const dirHandle = await open(dirname(projectPath), "r");
+          try {
+            await dirHandle.sync();
+          } finally {
+            await dirHandle.close();
+          }
         }
       } finally {
         await rm(temp, { force: true });
@@ -816,11 +819,13 @@ export function openProject(options: OpenProjectOptions) {
             await handle.close();
           }
           await rename(tempRecords, idempotencyPath);
-          const dirHandle = await open(directory, "r");
-          try {
-            await dirHandle.sync();
-          } finally {
-            await dirHandle.close();
+          if (process.platform !== "win32") {
+            const dirHandle = await open(directory, "r");
+            try {
+              await dirHandle.sync();
+            } finally {
+              await dirHandle.close();
+            }
           }
         } finally {
           await rm(tempRecords, { force: true });

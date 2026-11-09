@@ -9,6 +9,7 @@ publish = false
 tauri-build = { version = "=2.7.2", features = [] }
 
 [dependencies]
+dunce = "=1.0.5"
 tauri = { version = "=2.12.3", features = [] }
 tauri-plugin-dialog = "=2.8.3"
 tauri-plugin-opener = "=2.7.2"
