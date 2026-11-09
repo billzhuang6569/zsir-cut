@@ -97,7 +97,7 @@ function groupLosses(items: Loss[]) {
   return [...groups.values()].sort((a, b) => Number(b.severity === "error") - Number(a.severity === "error"));
 }
 type Call = (verb: string, request: Record<string, unknown>) => Promise<unknown>;
-type Result = { path: string; done: boolean; progress: number; error?: string; files?: string[] };
+type Result = { path: string; done: boolean; progress: number; error?: string; details?: string; files?: string[] };
 const logos = {
   resolve: new URL("../../../design/assets/apps/davinciresolve.svg", import.meta.url).href,
   premiere: new URL("../../../design/assets/apps/adobepremierepro.svg", import.meta.url).href,
@@ -191,7 +191,7 @@ export function ExportPanel({
           ...((
             dialog.current?.querySelector<HTMLElement>(".zc-export-confirm") ?? dialog.current
           )?.querySelectorAll<HTMLElement>(
-            'button:not(:disabled),input:not(:disabled),select:not(:disabled),[tabindex="0"]',
+            'button:not(:disabled),input:not(:disabled),select:not(:disabled),summary,[tabindex="0"]',
           ) ?? []),
         ];
         const first = nodes[0],
@@ -275,6 +275,7 @@ export function ExportPanel({
     busy.current = true;
     change({ active: key, sub: overlay ? "overlays" : key });
     setError("");
+    let details = "";
     let path = overlay?.output_path ?? paths[key] ?? "";
     try {
       if (!overlay && !path) path = (await choose(key)) ?? "";
@@ -323,16 +324,20 @@ export function ExportPanel({
             ...old,
             [key]: { path, done: false, progress: (index + job.progress) / profiles.length },
           }));
-          if (job.state === "failed" || (job.state === "succeeded" && !job.envelope?.ok))
+          if (job.state === "failed" || (job.state === "succeeded" && !job.envelope?.ok)) {
+            details = job.envelope?.error?.message ?? "";
             throw new Error(
-              job.envelope?.error?.code === "E_CONFLICT"
-                ? "工程已改变，请刷新后重新导出"
-                : job.envelope?.error?.code === "E_IO"
-                  ? "无法读写文件，请检查素材是否在线及保存位置是否可写"
-                  : job.envelope?.error?.code === "E_VALIDATION"
-                    ? "导出校验失败，请检查工程或输出文件是否已存在"
-                    : "导出失败，请检查素材、输出位置与工程状态后重试",
+              details.startsWith("Exchange validation failed")
+                ? "导出未通过剪辑点校验，文件未生成。请保留工程并反馈此问题。"
+                : job.envelope?.error?.code === "E_CONFLICT"
+                  ? "工程已改变，请刷新后重新导出"
+                  : job.envelope?.error?.code === "E_IO"
+                    ? "无法读写文件，请检查素材是否在线及保存位置是否可写"
+                    : job.envelope?.error?.code === "E_VALIDATION"
+                      ? "导出校验失败，请检查工程或输出文件是否已存在"
+                      : "导出失败，请检查素材、输出位置与工程状态后重试",
             );
+          }
           if (job.state === "succeeded") {
             if (job.envelope?.result.package) files.push(job.envelope.result.package);
             else
@@ -350,7 +355,13 @@ export function ExportPanel({
     } catch (cause) {
       setResults((old) => ({
         ...old,
-        [key]: { path, done: false, progress: 0, error: cause instanceof Error ? cause.message : "导出失败" },
+        [key]: {
+          path,
+          done: false,
+          progress: 0,
+          error: details && cause instanceof Error ? cause.message : "导出失败，请检查素材、保存位置与工程状态后重试",
+          details: details || (cause instanceof Error ? cause.message : String(cause)),
+        },
       }));
     } finally {
       busy.current = false;
@@ -386,7 +397,15 @@ export function ExportPanel({
     return (
       <div className="zc-export-status" aria-live="polite">
         {result.error ? (
-          <p role="alert">{result.error}</p>
+          <>
+            <p role="alert">{result.error}</p>
+            {result.details && (
+              <details>
+                <summary>错误详情</summary>
+                <pre>{result.details}</pre>
+              </details>
+            )}
+          </>
         ) : result.done ? (
           <>
             <span className="zc-dest-ok">
@@ -474,7 +493,6 @@ export function ExportPanel({
           </div>
           <IconButton icon="close" label="关闭导出" onClick={() => change({ open: false })} />
         </header>
-        {error && <p role="alert">{error}</p>}
         <fieldset className="zc-export-body" disabled={Boolean(editing || confirm)} aria-label="导出去处与预览">
           <div className="zc-export-left">
             <h3>
@@ -644,32 +662,29 @@ export function ExportPanel({
               </div>
             </div>
             {selectedKey === "direct" ? (
-              <>
-                <div className="zc-files">
-                  {(["srt", "wav"] as const).map((ext) => (
-                    <button
-                      type="button"
-                      key={ext}
-                      className={`zc-file-toggle ${settings[ext] ? "is-on" : ""}`}
-                      aria-label={`导出 ${ext.toUpperCase()}`}
-                      aria-pressed={settings[ext]}
-                      disabled={Boolean(settings.active) || (settings[ext] && !settings[ext === "srt" ? "wav" : "srt"])}
-                      onClick={() => change({ [ext]: !settings[ext], sub: "direct" })}
-                    >
-                      <FileIcon ext={ext} />
-                      {settings[ext] && (
-                        <span className="zc-file-check">
-                          <Icon name="check" size={10} />
-                        </span>
-                      )}
-                    </button>
-                  ))}
-                  <span className="zc-export-later">
-                    <FileIcon ext="mp4">二期</FileIcon>
-                  </span>
-                </div>
-                {status("direct")}
-              </>
+              <div className="zc-files">
+                {(["srt", "wav"] as const).map((ext) => (
+                  <button
+                    type="button"
+                    key={ext}
+                    className={`zc-file-toggle ${settings[ext] ? "is-on" : ""}`}
+                    aria-label={`导出 ${ext.toUpperCase()}`}
+                    aria-pressed={settings[ext]}
+                    disabled={Boolean(settings.active) || (settings[ext] && !settings[ext === "srt" ? "wav" : "srt"])}
+                    onClick={() => change({ [ext]: !settings[ext], sub: "direct" })}
+                  >
+                    <FileIcon ext={ext} />
+                    {settings[ext] && (
+                      <span className="zc-file-check">
+                        <Icon name="check" size={10} />
+                      </span>
+                    )}
+                  </button>
+                ))}
+                <span className="zc-export-later">
+                  <FileIcon ext="mp4">二期</FileIcon>
+                </span>
+              </div>
             ) : selectedKey === "overlays" ? (
               <div className="zc-overlay-content">
                 <p>剪辑线定稿后再出；改字幕后点这里覆盖同一个文件</p>
@@ -722,45 +737,42 @@ export function ExportPanel({
                 </Button>
               </div>
             ) : (
-              <>
-                <section className="zc-export-losses" aria-label="带过去的情况">
-                  <h4 className="zc-overline">带过去的情况</h4>
-                  {!report ? (
-                    <p className="zc-hint">{checks[destination.key] ?? "正在检查交接损失…"}</p>
-                  ) : report.items.length ? (
-                    groupLosses(report.items).map((loss) => (
-                      <div className="zc-row" key={`${loss.feature}-${loss.status}`}>
-                        <span
-                          className={`zc-dot ${loss.status === "unsupported" || loss.severity === "error" ? "is-danger" : "is-attention"}`}
-                        />
-                        <span className="text">
-                          {featureLabel(loss.feature, loss.count)}
-                          <small>{[...loss.consequences].join("；")}</small>
-                        </span>
-                        <span className="zc-meta">
-                          {loss.status === "unsupported" ? "带不过去" : "近似"}
-                          {loss.status === "baked" ? " · 已烘焙" : ""}
-                        </span>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="zc-row">
-                      <span className="zc-dot is-approved" />
-                      <span>保留 · 检查完成，未发现交接损失</span>
+              <section className="zc-export-losses" aria-label="带过去的情况">
+                <h4 className="zc-overline">带过去的情况</h4>
+                {!report ? (
+                  <p className="zc-hint">{checks[destination.key] ?? "正在检查交接损失…"}</p>
+                ) : report.items.length ? (
+                  groupLosses(report.items).map((loss) => (
+                    <div className="zc-row" key={`${loss.feature}-${loss.status}`}>
+                      <span
+                        className={`zc-dot ${loss.status === "unsupported" || loss.severity === "error" ? "is-danger" : "is-attention"}`}
+                      />
+                      <span className="text">
+                        {featureLabel(loss.feature, loss.count)}
+                        <small>{[...loss.consequences].join("；")}</small>
+                      </span>
+                      <span className="zc-meta">
+                        {loss.status === "unsupported" ? "带不过去" : "近似"}
+                        {loss.status === "baked" ? " · 已烘焙" : ""}
+                      </span>
                     </div>
-                  )}
-                  {Object.entries(report?.summary?.preserved_by_feature ?? {})
-                    .filter(([, count]) => count > 0)
-                    .map(([feature, count]) => (
-                      <div className="zc-row" key={feature}>
-                        <span className="zc-dot is-approved" />
-                        <span className="text">{featureLabel(feature, count)}</span>
-                        <span className="zc-meta">原样</span>
-                      </div>
-                    ))}
-                </section>
-                {status(destination.key)}
-              </>
+                  ))
+                ) : (
+                  <div className="zc-row">
+                    <span className="zc-dot is-approved" />
+                    <span>保留 · 检查完成，未发现交接损失</span>
+                  </div>
+                )}
+                {Object.entries(report?.summary?.preserved_by_feature ?? {})
+                  .filter(([, count]) => count > 0)
+                  .map(([feature, count]) => (
+                    <div className="zc-row" key={feature}>
+                      <span className="zc-dot is-approved" />
+                      <span className="text">{featureLabel(feature, count)}</span>
+                      <span className="zc-meta">原样</span>
+                    </div>
+                  ))}
+              </section>
             )}
             <section className="zc-export-import">
               <h4 className="zc-overline">导入方法</h4>
@@ -779,6 +791,10 @@ export function ExportPanel({
           </div>
         </fieldset>
         <footer className="zc-export-footer">
+          <div className="zc-export-feedback">
+            {error && <p role="alert">{error}</p>}
+            {selectedKey !== "overlays" && status(selectedKey)}
+          </div>
           <h3>
             <span className="zc-export-step">3</span>存到
           </h3>

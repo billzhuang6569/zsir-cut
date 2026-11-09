@@ -236,10 +236,27 @@
 }
 .zc-export-footer {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-3);
   padding: 14px 24px;
   flex-shrink: 0;
+}
+.zc-export-feedback {
+  flex-basis: 100%;
+  min-width: 0;
+  max-height: 160px;
+  overflow: auto;
+}
+.zc-export-feedback:empty {
+  display: none;
+}
+.zc-export-status details {
+  width: 100%;
+}
+.zc-export-status pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .zc-export-location {
   flex: 1;

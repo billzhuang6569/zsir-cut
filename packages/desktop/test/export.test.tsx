@@ -58,6 +58,8 @@ async function mount(
     losses?: string;
     polling?: boolean;
     fail?: boolean;
+    jobError?: { code: string; message: string };
+    rejection?: string;
     project?: ProjectView;
     config?: { port: number; token: string };
     report?: unknown;
@@ -68,7 +70,8 @@ async function mount(
   const call = vi.fn(async (verb: string, request: Record<string, unknown>): Promise<unknown> => {
     if (verb === "export_preferences")
       return request.value ?? { fcp: "/tmp/交接", resolve: "/tmp/交接", premiere: "/tmp/交接", direct: "/tmp/直接" };
-    if (verb === "export")
+    if (verb === "export") {
+      if (!request.dry_run && options.rejection) throw new Error(options.rejection);
       return request.dry_run
         ? (options.report ?? {
             items: options.losses
@@ -83,7 +86,9 @@ async function mount(
               : [],
           })
         : { job_id: "job_one" };
+    }
     if (verb === "job_status") {
+      if (options.jobError) return { state: "failed", progress: 1, envelope: { ok: false, error: options.jobError } };
       if (options.fail) return { state: "failed", progress: 1, envelope: { ok: false, error: { message: "失败" } } };
       if (options.polling && poll++ === 0) return { state: "running", progress: 0.4, envelope: null };
       return done;
@@ -485,4 +490,42 @@ it("groups by feature and status, puts errors first and reads preserved counts w
   ]);
   expect(h.container.querySelector(".zc-export-losses .zc-row .is-danger")).not.toBeNull();
   expect(h.container.textContent).not.toMatch(/clip_cut|subtitle_text_timing|subtitle_style|future_feature/);
+});
+
+for (const destination of ["Final Cut Pro", "DaVinci Resolve", "Premiere Pro"]) {
+  it(`keeps ${destination} validation failures by the save location outside the scrolling losses`, async () => {
+    const message = 'Exchange validation failed: cutting list: [{"row":17,"clip_id":"clp_bad"}]';
+    const ui = await mount({
+      jobError: { code: "E_IO", message },
+      report: {
+        items: Array.from({ length: 100 }, (_, i) => ({
+          feature: `extra_${i}`,
+          status: "approximated",
+          severity: "warning",
+          consequence: "检查说明",
+        })),
+      },
+    });
+    await ui.click(`导出到 ${destination}`);
+    const footer = ui.container.querySelector(".zc-export-footer");
+    expect(footer?.textContent).toContain("存到");
+    expect(footer?.querySelector('[role="alert"]')?.textContent).toBe(
+      "导出未通过剪辑点校验，文件未生成。请保留工程并反馈此问题。",
+    );
+    expect(footer?.querySelector('[role="alert"]')?.textContent).not.toContain("row");
+    expect(ui.container.querySelector('.zc-export-right [role="alert"]')).toBeNull();
+    const details = footer?.querySelector("details");
+    expect(details?.open).toBe(false);
+    expect(details?.querySelector("pre")?.textContent).toBe(message);
+    expect(ui.state().export?.active).toBeNull();
+    expect(ui.container.textContent).not.toContain("导出完成");
+  });
+}
+it("summarizes rejected export calls and preserves their full error only in collapsed details", async () => {
+  const ui = await mount({ rejection: 'E_IO: {"private":"diagnostic"}' });
+  await ui.click("直接导出");
+  const footer = ui.container.querySelector(".zc-export-footer");
+  expect(footer?.querySelector('[role="alert"]')?.textContent).toBe("导出失败，请检查素材、保存位置与工程状态后重试");
+  expect(footer?.querySelector("details")?.open).toBe(false);
+  expect(footer?.querySelector("pre")?.textContent).toBe('E_IO: {"private":"diagnostic"}');
 });

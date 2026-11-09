@@ -47,7 +47,7 @@ Timeline.1
 | zsir-cut | OTIO |
 |---|---|
 | 片段 | `Clip.2`，`name` 取 `label`，没有就取素材名 |
-| 源区间 | `source_range`：`start_time` 是源起始时码换成的帧数加 `source_start` 的帧数，按素材帧率；`duration` 是片段时长。倒放段见下方「倒放」 |
+| 源区间 | `source_range`：`start_time` 是源起始时码换成的帧数加 `source_start` 的帧数，按素材帧率；`duration` 是片段时长。时间线和素材帧率不同时，切点可能落在素材帧中间（例如 25 帧的时间线切 60 帧的素材），这时不取整：`rate` 用素材帧率乘以能让 `start_time` 和 `duration` 都成为整数的最小整数，保留精确的源时间（2026-11-09 定，Resolve 的读法待实测，见第 3 节）。倒放段见下方「倒放」 |
 | 素材 | `media_references.DEFAULT_MEDIA` 是 `ExternalReference.1`，`target_url` 是**不编码的本地绝对路径**，不加 `file://`，空格、中文、`%` 原样保留，与 Resolve 21 原生导出一致。百分号编码的 `file://` 地址会让 Resolve 21.1 找不到全部素材。`available_range` 是素材全长；`active_media_reference_key` 为 `DEFAULT_MEDIA` |
 | 恒定变速 | `effects` 里一个 `LinearTimeWarp.1`，`time_scalar` 是速度 |
 | 定格 | `FreezeFrame.1` |

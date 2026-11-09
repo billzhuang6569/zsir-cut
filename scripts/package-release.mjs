@@ -192,6 +192,40 @@ export async function prunePython(directory) {
     } else if (entry.isDirectory()) await prunePython(path);
   }
 }
+export async function installPythonRequirements(python, directory, env) {
+  const lock = join(repository, "workers/asr/requirements.lock");
+  const jieba = (await readFile(lock, "utf8")).split(/\r?\n/).find((line) => line.startsWith("jieba=="));
+  assert.ok(jieba, "Missing pinned jieba requirement");
+  const wheels = join(directory, "wheels");
+  // jieba ships only source; build its pure-Python wheel before enforcing the macOS 14 binary floor.
+  run(python, ["-m", "pip", "wheel", "--no-cache-dir", "--no-deps", "--wheel-dir", wheels, jieba], directory, env);
+  run(
+    python,
+    [
+      "-m",
+      "pip",
+      "download",
+      "--no-cache-dir",
+      "--platform",
+      "macosx_14_0_arm64",
+      "--only-binary=:all:",
+      "--find-links",
+      wheels,
+      "--dest",
+      wheels,
+      "-r",
+      lock,
+    ],
+    directory,
+    env,
+  );
+  run(
+    python,
+    ["-m", "pip", "install", "--no-index", "--find-links", wheels, "--only-binary=:all:", "--no-compile", "-r", lock],
+    directory,
+    env,
+  );
+}
 async function copyPython(destination) {
   const temporary = await mkdtemp(join(tmpdir(), "zcut-python-"));
   try {
@@ -200,20 +234,7 @@ async function copyPython(destination) {
     await cp(join(temporary, "python"), output, { recursive: true, filter: releaseFilter, verbatimSymlinks: true });
     const python = join(output, "bin/python3");
     const env = { ...process.env, PYTHONDONTWRITEBYTECODE: "1", PIP_DISABLE_PIP_VERSION_CHECK: "1" };
-    run(
-      python,
-      [
-        "-m",
-        "pip",
-        "install",
-        "--no-cache-dir",
-        "--no-compile",
-        "-r",
-        join(repository, "workers/asr/requirements.lock"),
-      ],
-      temporary,
-      env,
-    );
+    await installPythonRequirements(python, temporary, env);
     // Keep installed distribution metadata and upstream license files when removing development payloads.
     run(
       python,
@@ -243,6 +264,49 @@ export function isMachO(header) {
       header.subarray(0, 4).toString("hex"),
     )
   );
+}
+export async function checkMacRuntime(
+  directory,
+  inspect = (path) => spawnSync("otool", ["-l", path], { encoding: "utf8" }),
+) {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) await checkMacRuntime(path, inspect);
+    else if (entry.isFile()) {
+      const file = await open(path, "r");
+      const header = Buffer.alloc(4);
+      try {
+        await file.read(header, 0, 4, 0);
+      } finally {
+        await file.close();
+      }
+      if (!isMachO(header)) continue;
+      const result = inspect(path);
+      if (result.error) throw result.error;
+      assert.equal(result.status, 0, `otool failed for ${path}: ${result.stderr}`);
+      let command;
+      const versions = [];
+      for (const line of result.stdout.split(/\r?\n/)) {
+        const cmd = line.match(/^\s*cmd (LC_\w+)/);
+        if (cmd) command = cmd[1];
+        const version =
+          command === "LC_BUILD_VERSION"
+            ? line.match(/^\s*minos (\d+(?:\.\d+){0,2})\s*$/)
+            : command === "LC_VERSION_MIN_MACOSX"
+              ? line.match(/^\s*version (\d+(?:\.\d+){0,2})\s*$/)
+              : null;
+        if (version) versions.push(version[1]);
+      }
+      assert.ok(versions.length, `Missing macOS deployment target: ${path}`);
+      for (const version of versions) {
+        const [major, ...rest] = version.split(".").map(Number);
+        assert.ok(
+          major < 14 || (major === 14 && rest.every((part) => part === 0)),
+          `${path} requires macOS ${version}, above 14.0`,
+        );
+      }
+    }
+  }
 }
 export async function signMacRuntime(directory) {
   for (const entry of await readdir(directory, { withFileTypes: true })) {

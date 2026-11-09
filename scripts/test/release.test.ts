@@ -1,3 +1,4 @@
+import * as childProcess from "node:child_process";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { access, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -8,6 +9,10 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, expect, it, vi } from "vitest";
 
+vi.mock("node:child_process", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:child_process")>()),
+  spawnSync: vi.fn(),
+}));
 vi.mock("node:https", async (importOriginal) => ({
   ...(await importOriginal<typeof import("node:https")>()),
   get: vi.fn(),
@@ -15,9 +20,11 @@ vi.mock("node:https", async (importOriginal) => ({
 const {
   cachedDownload,
   cachedNodeArchive,
+  checkMacRuntime,
   copyProductionDependencies,
   download,
   isMachO,
+  installPythonRequirements,
   nodeArchiveChecksum,
   prunePython,
   releaseFilter,
@@ -262,4 +269,68 @@ it("recognizes Mach-O executables, extensions and universal libraries without tr
   expect(isMachO(Buffer.from("#!/bin/sh"))).toBe(false);
   expect(isMachO(Buffer.from("7f454c46", "hex"))).toBe(false);
   expect(isMachO(Buffer.from("cf", "hex"))).toBe(false);
+});
+
+it("selects macOS 14 wheels and builds only the pinned source-only jieba separately", async () => {
+  temporary = await mkdtemp(join(tmpdir(), "zcut-wheels-"));
+  vi.mocked(childProcess.spawnSync).mockReturnValue({ status: 0 } as childProcess.SpawnSyncReturns<Buffer>);
+  await installPythonRequirements("bundled-python", temporary, { PYTHONDONTWRITEBYTECODE: "1" });
+  const calls = vi.mocked(childProcess.spawnSync).mock.calls;
+  expect(calls).toHaveLength(3);
+  expect(calls[0]?.[1]).toEqual([
+    "-m",
+    "pip",
+    "wheel",
+    "--no-cache-dir",
+    "--no-deps",
+    "--wheel-dir",
+    join(temporary, "wheels"),
+    "jieba==0.42.1",
+  ]);
+  expect(calls[1]?.[1]).toEqual(
+    expect.arrayContaining([
+      "download",
+      "--platform",
+      "macosx_14_0_arm64",
+      "--only-binary=:all:",
+      "--find-links",
+      "--dest",
+      "-r",
+    ]),
+  );
+  expect(calls[2]?.[1]).toEqual(
+    expect.arrayContaining(["install", "--no-index", "--only-binary=:all:", "--no-compile"]),
+  );
+  vi.mocked(childProcess.spawnSync).mockReturnValue({ status: 1 } as childProcess.SpawnSyncReturns<Buffer>);
+  await expect(installPythonRequirements("bundled-python", temporary, {})).rejects.toThrow("failed (1)");
+});
+
+it("checks every Mach-O slice recursively and rejects a deployment target above macOS 14.0", async () => {
+  temporary = await mkdtemp(join(tmpdir(), "zcut-macho-"));
+  await mkdir(join(temporary, "lib"));
+  for (const path of ["node", "lib/core.so", "lib/libmlx.dylib"])
+    await writeFile(join(temporary, path), Buffer.from("cffaedfe", "hex"));
+  await writeFile(join(temporary, "script"), "#!/bin/sh");
+  const build = (version: string) =>
+    `Load command 0\n      cmd LC_BUILD_VERSION\n platform 1\n    minos ${version}\n      sdk 26.2\n ntools 1\n tool 3\n version 1267.0\n`;
+  const inspect = vi.fn(() => ({ status: 0, stdout: build("14.0"), stderr: "" }));
+  await expect(checkMacRuntime(temporary, inspect)).resolves.toBeUndefined();
+  expect(inspect.mock.calls).toHaveLength(3);
+  inspect.mockReturnValue({ status: 0, stdout: "cmd LC_VERSION_MIN_MACOSX\n version 13.0\n sdk 26.2\n", stderr: "" });
+  await expect(checkMacRuntime(temporary, inspect)).resolves.toBeUndefined();
+  for (const version of ["14.0.1", "14.1", "26.0", "26.2"]) {
+    inspect.mockReturnValue({ status: 0, stdout: build("13.0") + build(version), stderr: "" });
+    await expect(checkMacRuntime(temporary, inspect)).rejects.toThrow(`requires macOS ${version}, above 14.0`);
+  }
+  inspect.mockReturnValue({ status: 0, stdout: "cmd LC_SOURCE_VERSION\n version 1.0\n", stderr: "" });
+  await expect(checkMacRuntime(temporary, inspect)).rejects.toThrow("Missing macOS deployment target");
+  inspect.mockReturnValue({ status: 1, stdout: "", stderr: "unreadable" });
+  await expect(checkMacRuntime(temporary, inspect)).rejects.toThrow("otool failed");
+});
+
+it("declares macOS 14.0 as the deployment floor", async () => {
+  const config = JSON.parse(
+    await readFile(new URL("../../apps/desktop-tauri/src-tauri/tauri.macos.conf.json", import.meta.url), "utf8"),
+  );
+  expect(config.bundle.macOS.minimumSystemVersion).toBe("14.0");
 });

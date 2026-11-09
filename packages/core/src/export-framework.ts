@@ -265,6 +265,11 @@ export function compareCuttingLists(
     if (
       !a ||
       !b ||
+      a.track_type !== b.track_type ||
+      a.track_number !== b.track_number ||
+      a.clip_id !== b.clip_id ||
+      a.media_id !== b.media_id ||
+      a.speed !== b.speed ||
       (grid ? !within(b.timeline_in_exact, grid.start) : a.timeline_in !== b.timeline_in) ||
       (grid ? !within(b.timeline_out_exact, grid.end) : a.timeline_out !== b.timeline_out) ||
       a.source_in !== b.source_in ||
