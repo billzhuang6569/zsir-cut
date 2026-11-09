@@ -5,12 +5,12 @@ import * as http from "node:http";
 import * as https from "node:https";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { delimiter, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { z } from "zod";
 import type { AgentKind } from "./agent-events.js";
 import type { DesktopPreferences } from "./preferences.js";
-import { commonProgramDirectories } from "./runtime.js";
+import { commonProgramDirectories, hostPath } from "./runtime.js";
 
 export const spawnProgram: typeof nodeSpawn = createRequire(import.meta.url)("cross-spawn");
 
@@ -28,6 +28,7 @@ export function agentDirectories() {
     ...(process.env.PATH ?? "").split(delimiter),
     ...commonProgramDirectories(),
     ...[".local/bin", ".npm-global/bin", ".claude/local"].map((path) => join(homedir(), path)),
+    join(homedir(), ".zsir-cut/agents", ...(process.platform === "win32" ? [] : ["bin"])),
   ];
 }
 export async function findProgram(name: string, directories = agentDirectories(), platform = process.platform) {
@@ -46,7 +47,11 @@ export async function programVersion(path: string | null) {
   if (!path) return null;
   try {
     const stdout = await new Promise<string>((resolve, reject) => {
-      const child = spawnProgram(path, ["--version"], { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+      const child = spawnProgram(path, ["--version"], {
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "ignore"],
+        env: { ...process.env, PATH: hostPath() },
+      });
       let output = "";
       const timer = setTimeout(() => {
         child.kill("SIGKILL");
@@ -85,6 +90,12 @@ function newer(latest: string | null, version: string | null) {
 export interface AgentManagementOptions {
   registryUrl?: string;
   directories?: string[];
+}
+async function npmProgram(directories?: string[]) {
+  if (process.env.ZCUT_PACKAGED !== "1") return findProgram("npm", directories);
+  const path = join(dirname(process.execPath), "npm/bin/npm-cli.js");
+  await access(path, constants.R_OK);
+  return path;
 }
 export class AgentManagement {
   private cached:
@@ -172,7 +183,7 @@ export class AgentManagement {
               };
             }),
           ),
-          findProgram("npm", this.options.directories),
+          npmProgram(this.options.directories),
         ]);
         return { agents, npm };
       })();
@@ -198,29 +209,57 @@ export class AgentManagement {
           this.installing = true;
           let started = false;
           try {
-            const npm = await findProgram("npm", this.options.directories);
+            const npm = await npmProgram(this.options.directories);
             if (!npm)
               return this.failure(base, "rejected", "E_UNSUPPORTED", "没有找到 npm", false, {
                 manual: `请安装 Node.js（含 npm），然后在终端运行 npm install -g ${programs[id].package}`,
               });
             const job_id = newId("job_");
-            const child = spawnProgram(npm, ["install", "-g", programs[id].package], {
-              windowsHide: true,
-              stdio: ["ignore", "pipe", "pipe"],
-            });
-            for (const stream of ["stdout", "stderr"] as const) {
-              createInterface({ input: child[stream] }).on("line", (line) =>
-                this.emit({ type: "agents_output", job_id, line, stream }),
+            const packaged = process.env.ZCUT_PACKAGED === "1";
+            const args = [
+              ...(packaged ? [npm] : []),
+              "install",
+              "-g",
+              ...(packaged ? ["--prefix", join(homedir(), ".zsir-cut/agents")] : []),
+              programs[id].package,
+            ];
+            const install = (mirror = false) => {
+              const child = spawnProgram(
+                packaged ? process.execPath : npm,
+                [...args, ...(mirror ? ["--registry", "https://registry.npmmirror.com"] : [])],
+                {
+                  windowsHide: true,
+                  stdio: ["ignore", "pipe", "pipe"],
+                  env: { ...process.env, PATH: hostPath() },
+                },
               );
-            }
-            child.once("error", (error) =>
-              this.emit({ type: "agents_output", job_id, line: error.message, stream: "stderr" }),
-            );
-            child.once("close", (code) => {
-              this.installing = false;
-              this.emit({ type: "agents_output", job_id, done: true, ok: code === 0 });
-              void this.list(true).then((result) => this.emit({ type: "agents_changed", ...result }));
-            });
+              for (const stream of ["stdout", "stderr"] as const) {
+                createInterface({ input: child[stream] }).on("line", (line) =>
+                  this.emit({ type: "agents_output", job_id, line, stream }),
+                );
+              }
+              let spawnFailed = false;
+              child.once("error", (error) => {
+                spawnFailed = true;
+                this.emit({ type: "agents_output", job_id, line: error.message, stream: "stderr" });
+              });
+              child.once("close", (code) => {
+                if (packaged && !mirror && !spawnFailed && code !== null && code !== 0) {
+                  this.emit({
+                    type: "agents_output",
+                    job_id,
+                    stream: "stderr",
+                    line: "默认 registry 安装失败，正在使用 https://registry.npmmirror.com 重试一次",
+                  });
+                  install(true);
+                  return;
+                }
+                this.installing = false;
+                this.emit({ type: "agents_output", job_id, done: true, ok: code === 0 && !spawnFailed });
+                void this.list(true).then((result) => this.emit({ type: "agents_changed", ...result }));
+              });
+            };
+            install();
             started = true;
             reply = { status: "accepted", result: { job_id } };
           } finally {

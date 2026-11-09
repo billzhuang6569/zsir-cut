@@ -7,6 +7,7 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { type AgentKind, agentParser, type ChatEvent } from "./agent-events.js";
 import { findProgram, programVersion, spawnProgram } from "./agent-management.js";
+import { hostPath } from "./runtime.js";
 
 export interface Chat {
   id: string;
@@ -175,7 +176,7 @@ export class Agents {
         windowsHide: true,
         cwd: dirname(this.options.project),
         stdio: ["pipe", "pipe", "pipe"],
-        env: { ...process.env, ZCUT_MCP_TOKEN: this.options.token },
+        env: { ...process.env, PATH: hostPath(), ZCUT_MCP_TOKEN: this.options.token },
       });
       const parse = agentParser(agent, (event) => {
         if (event.type !== "end") emit(event);
@@ -283,6 +284,7 @@ export class Agents {
           cwd: directory,
           stdio: ["pipe", "pipe", "pipe"],
           detached: process.platform !== "win32",
+          env: { ...process.env, PATH: hostPath() },
         });
         // CLI launchers can spawn another process; kill the whole group on timeout.
         const kill = () => {

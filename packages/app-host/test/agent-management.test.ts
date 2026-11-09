@@ -99,6 +99,7 @@ it("discovers PATH before fallback directories and caches versions/latest for 24
     join(directory, ".local/bin"),
     join(directory, ".npm-global/bin"),
     join(directory, ".claude/local"),
+    join(directory, ".zsir-cut/agents/bin"),
   ]);
   expect(await findProgram("claude")).toBe(claude);
   const fallback = join(directory, "fallback");

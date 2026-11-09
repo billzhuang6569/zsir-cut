@@ -15,6 +15,13 @@ let socket;
 try {
   // Relocate outside the repository so missing dependencies cannot resolve from the development node_modules.
   await cp(source, root, { recursive: true, verbatimSymlinks: true });
+  run(
+    join(root, process.platform === "win32" ? "node.exe" : "node"),
+    [join(root, "npm/bin/npm-cli.js"), "--version"],
+    root,
+    { ...process.env, PATH: "" },
+  );
+  console.log("Bundled Node and npm version smoke passed without system Node on PATH");
   if (process.platform === "darwin") {
     await checkMacRuntime(root);
     console.log("All bundled Mach-O deployment targets are at most macOS 14.0");
@@ -39,7 +46,7 @@ try {
     USERPROFILE: temporary,
     APPDATA: join(temporary, "AppData/Roaming"),
     LOCALAPPDATA: join(temporary, "AppData/Local"),
-    PATH: [join(root, "bin"), process.env.PATH].filter(Boolean).join(delimiter),
+    PATH: [join(root, "bin"), root, process.env.PATH].filter(Boolean).join(delimiter),
     ZCUT_PACKAGED: "1",
     PYTHONDONTWRITEBYTECODE: "1",
     PYTHONPATH: join(root, "workers/asr"),
