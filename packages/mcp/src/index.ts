@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { realpath } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -12,7 +13,7 @@ const { commandSchemaForVerb, flattenMcpSchema, dispatch, VERBS }: typeof import
   );
 
 export function createServer(options: DispatchOptions = {}): Server {
-  const server = new Server({ name: "zsir-cut", version: "0.0.0" }, { capabilities: { tools: {} } });
+  const server = new Server({ name: "zsir-cut", version: "0.1.0" }, { capabilities: { tools: {} } });
   server.setRequestHandler(ListToolsRequestSchema, () => ({
     tools: VERBS.map((verb) => ({
       name: `zcut_${verb}`,
@@ -28,7 +29,7 @@ export function createServer(options: DispatchOptions = {}): Server {
   return server;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (process.argv[1] && (await realpath(fileURLToPath(import.meta.url))) === (await realpath(process.argv[1]))) {
   createServer()
     .connect(new StdioServerTransport())
     .catch((error: unknown) => {

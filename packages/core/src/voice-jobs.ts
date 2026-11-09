@@ -31,7 +31,7 @@ export async function startVoiceJob(
     const worker = fileURLToPath(
       new URL(import.meta.url.endsWith(".ts") ? "./voice-worker.ts" : "./voice-worker.js", import.meta.url),
     );
-    const child = spawn(process.execPath, [worker, path], { stdio: "ignore", detached: true });
+    const child = spawn(process.execPath, [worker, path], { stdio: "ignore", detached: true, windowsHide: true });
     child.unref();
     if (!child.pid) throw new Error("Cannot start voice worker");
     job.pid = child.pid;

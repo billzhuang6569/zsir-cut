@@ -2,7 +2,7 @@
 import { execFile } from "node:child_process";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { once } from "node:events";
-import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, realpath, rm } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -24,6 +24,7 @@ import { DesktopPreferences } from "./preferences.js";
 import { PreviewCache } from "./preview-cache.js";
 import { RecentProjects } from "./recent.js";
 import { projectChanged } from "./revision-events.js";
+import { hostPath } from "./runtime.js";
 import { SubtitlePass, type SubtitlePassParams } from "./subtitle-pass.js";
 import { DESKTOP_VERBS, type DesktopVerb, PANELS, SUBTITLE_VERBS, type SubtitleVerb, type UiEnvelope } from "./ui.js";
 
@@ -194,7 +195,7 @@ export function createMcpServer(
     uiEnvelope(verb, "E_APP_NOT_RUNNING", "桌面界面未连接", true),
   kernel: (verb: Verb, input: unknown) => Promise<HostEnvelope> = (verb, input) => dispatch(verb, input),
 ): Server {
-  const mcp = new Server({ name: "zsir-cut-desktop", version: "0.0.0" }, { capabilities: { tools: {} } });
+  const mcp = new Server({ name: "zsir-cut-desktop", version: "0.1.0" }, { capabilities: { tools: {} } });
   mcp.setRequestHandler(ListToolsRequestSchema, () => ({
     tools: [
       ...VERBS.map((verb) => ({
@@ -990,7 +991,13 @@ export async function startHost(
       void subtitlePass.open().catch(() => {});
     }
     if (ui?.readyState === WebSocket.OPEN)
-      ui.send(JSON.stringify({ type: "bootstrap", project: options.project ?? null, fcpIcon: await readFcpIcon() }));
+      ui.send(
+        JSON.stringify({
+          type: "bootstrap",
+          project: options.project ?? null,
+          fcpIcon: await readFcpIcon(),
+        }),
+      );
   };
   if (options.project && initialProject) await bind(options.project);
   const mcp = createMcpServer(callUi, agentKernel);
@@ -1013,7 +1020,7 @@ export async function startHost(
   };
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (process.argv[1] && (await realpath(fileURLToPath(import.meta.url))) === (await realpath(process.argv[1]))) {
   try {
     const args = parseArgs({
       options: {
@@ -1024,6 +1031,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
       },
       allowPositionals: true,
     });
+    process.env.PATH = hostPath();
     const project = args.values.project ?? args.positionals[0];
     const host = await startHost({
       ...(project ? { project } : {}),

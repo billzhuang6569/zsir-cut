@@ -26,7 +26,7 @@ Bill 2026-11-09 要求出第一批 release：Windows 版和 Mac（M 芯片）版
 7. **本机出包，脚本可重复。** Mac 包由 Claude 在 Bill 的 Mac 上打。Windows 包由 Claude 在 Bill 提供的 Windows 机器上打。两边都跑 `scripts/package-release.mjs` 和同一套冒烟检查。工作流保留，能手动触发，不是发布的唯一路径。
 8. **Windows 上暂时不能用的功能要好好说明，不能崩：** 语音识别、配音密钥存储（依赖 macOS `security`）和读取 Final Cut Pro 图标（依赖 `sips`）。
 
-**硬规则 6 的放宽：** 应用的代码依赖仍然只用 MIT、Apache-2.0、BSD、ISC。ffmpeg 可以作为独立的子进程程序打包，并附上许可证和源码。其他 GPL、AGPL 工具仍然不能打包。
+**硬规则 6 的放宽：** 应用的代码依赖仍然只用 MIT、Apache-2.0、BSD、ISC。ffmpeg 可以作为独立的子进程程序打包，并附上许可证和源码。其他 GPL、AGPL 工具仍然不能打包。 Python 运行时和 `typing_extensions` 是 PSF-2.0，也是宽松许可，随识别环境打包，许可证一并带上。
 
 ## 后果
 

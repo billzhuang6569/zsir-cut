@@ -462,7 +462,7 @@ describe("CLI and MCP", () => {
     ["src", "stale"],
     ["dist", "missing"],
     ["dist", "stale"],
-  ] as const)("runs the %s MCP entry when the other core runtime is %s", async (runtime, state) => {
+  ] as const)("runs the %s MCP entry through a symlink when the other core runtime is %s", async (runtime, state) => {
     await copyFile(join(root, "package.json"), join(directory, "package.json"));
     await cp(join(root, "schema"), join(directory, "schema"), { recursive: true });
     await symlink(join(root, "node_modules"), join(directory, "node_modules"), "junction");
@@ -485,9 +485,11 @@ describe("CLI and MCP", () => {
       const filename = runtime === "src" ? "index.js" : "index.ts";
       await writeFile(join(directory, "packages/core", excluded, filename), 'throw new Error("WRONG CORE RUNTIME");');
     }
+    const entry = join(directory, "linked-entry");
+    await symlink(join(directory, "packages/mcp", runtime), entry, "junction");
     const transport = new StdioClientTransport({
       command: process.execPath,
-      args: [join(directory, "packages/mcp", runtime, `index.${extension}`)],
+      args: [join(entry, `index.${extension}`)],
       cwd: directory,
     });
     const client = new Client({ name: "source-runtime-test", version: "1" });

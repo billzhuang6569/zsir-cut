@@ -522,3 +522,13 @@ output {
 .zc-function-panel {
   overflow: auto;
 }
+
+.zc-app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.zc-app > .zc-shell {
+  position: relative;
+  flex: 1;
+}

@@ -1,0 +1,53 @@
+name: Release packages
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+            artifact: macos-arm64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: windows-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @zsir-cut/desktop-tauri build --target ${{ matrix.target }}
+      - name: Test platform runtime branches
+        run: pnpm exec vitest run packages/app-host/test/release-runtime.test.ts packages/core/test/release-runtime.test.ts scripts/test/release.test.ts
+      - name: Smoke macOS bundled resources
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          node scripts/smoke-release.mjs "apps/desktop-tauri/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/庄Sir剪辑助手.app/Contents/Resources/runtime"
+      - name: Smoke Windows install and app launch
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./scripts/smoke-windows.ps1
+      - name: Name release artifacts
+        shell: bash
+        run: node scripts/name-release.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: apps/desktop-tauri/src-tauri/target/release-artifacts/*
+          if-no-files-found: error

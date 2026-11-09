@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { type AgentKind, agentParser, type ChatEvent } from "./agent-events.js";
-import { findProgram, programVersion } from "./agent-management.js";
+import { findProgram, programVersion, spawnProgram } from "./agent-management.js";
 
 export interface Chat {
   id: string;
@@ -171,7 +171,8 @@ export class Agents {
             ];
       const command = await this.command(agent);
       if (this.cancelRequested) throw new Error("已停止");
-      const child = spawn(command, args, {
+      const child = spawnProgram(command, args, {
+        windowsHide: true,
         cwd: dirname(this.options.project),
         stdio: ["pipe", "pipe", "pipe"],
         env: { ...process.env, ZCUT_MCP_TOKEN: this.options.token },
@@ -277,7 +278,8 @@ export class Agents {
             ];
       const command = await this.command(agent);
       const output = await new Promise<string>((resolve, reject) => {
-        const child = spawn(command, args, {
+        const child = spawnProgram(command, args, {
+          windowsHide: true,
           cwd: directory,
           stdio: ["pipe", "pipe", "pipe"],
           detached: process.platform !== "win32",

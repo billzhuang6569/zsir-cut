@@ -20,6 +20,7 @@ const fileHash = (data: Buffer) => createHash("sha256").update(data).digest("hex
 
 async function ffmpeg(args: string[], input?: AsyncIterable<Buffer>): Promise<void> {
   const child = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error", "-nostdin", ...args], {
+    windowsHide: true,
     stdio: [input ? "pipe" : "ignore", "ignore", "pipe"],
   });
   let errors = "";

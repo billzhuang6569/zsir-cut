@@ -1,7 +1,8 @@
 // biome-ignore-all lint/style/noNonNullAssertion: Project schema validates cue IDs and segmented token bounds before writeback.
 import { execFile } from "node:child_process";
-import { readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { constants } from "node:fs";
+import { access, readFile, rm, writeFile } from "node:fs/promises";
+import { delimiter, dirname, resolve } from "node:path";
 import { promisify } from "node:util";
 import { newId, transcriptIds } from "./project/id.ts";
 import { cueBreaks, segmentTokens, transcriptRules } from "./project/subtitle-rules.ts";
@@ -87,6 +88,13 @@ export async function invokeAsr(
   python: string,
   workerDirectory: string,
 ): Promise<WorkerResult> {
+  if (process.platform === "win32")
+    throw new AsrError("E_ASR_MODEL_UNAVAILABLE", "这个版本的 Windows 版不能识别字幕", false);
+  try {
+    await access(python, constants.X_OK);
+  } catch {
+    throw new AsrError("E_ASR_MODEL_UNAVAILABLE", `没有找到本地识别环境（${python}）。`, false);
+  }
   const media = project.media.find((item) => item.id === request.media_id);
   if (!media) throw new AsrError("E_NOT_FOUND", "Media not found", false);
   const channels = request.source_channels ?? [0];
@@ -128,8 +136,18 @@ export async function invokeAsr(
     args.push("--hotwords", hotwordsPath);
   }
   let failed = false;
+  const packaged = process.env.ZCUT_PACKAGED === "1";
   try {
-    await execute(python, args, { cwd: workerDirectory, maxBuffer: 1024 * 1024 });
+    await execute(python, args, {
+      cwd: packaged ? dirname(out) : workerDirectory,
+      maxBuffer: 1024 * 1024,
+      env: {
+        ...process.env,
+        PYTHONDONTWRITEBYTECODE: "1",
+        ...(packaged ? { PYTHONPATH: [workerDirectory, process.env.PYTHONPATH].filter(Boolean).join(delimiter) } : {}),
+      },
+      windowsHide: true,
+    });
   } catch {
     failed = true;
   } finally {

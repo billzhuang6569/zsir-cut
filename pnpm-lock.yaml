@@ -187,6 +187,9 @@ importers:
 
   packages/app-host:
     dependencies:
+      cross-spawn:
+        specifier: 7.0.6
+        version: 7.0.6
       '@modelcontextprotocol/sdk':
         specifier: 1.32.1
         version: 1.32.1(zod@4.6.6)

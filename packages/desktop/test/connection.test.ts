@@ -69,7 +69,10 @@ it("exposes revision events to subscribers while refreshing the project and subt
     };
     socket?.receive(status);
     expect(previewCache.mock.calls[0]?.[0].detail).toEqual(status);
-    socket?.receive({ type: "bootstrap", project: "/project.zcut.json" });
+    socket?.receive({
+      type: "bootstrap",
+      project: "/project.zcut.json",
+    });
     await vi.waitFor(() => expect(project).toHaveBeenCalledTimes(2));
     project.mockClear();
     requests.length = 0;
