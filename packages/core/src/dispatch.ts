@@ -618,6 +618,11 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
     if (verb === "transcribe") {
       const parsed = parseProject(await readFile(request.project as string, "utf8"));
       if (!parsed.ok) return errorEnvelope(verb, requestId, "rejected", "E_VALIDATION", "Project file is invalid");
+      if (process.platform === "win32") {
+        const output = errorEnvelope(verb, requestId, "failed", "E_INTERNAL", "这个版本的 Windows 版不能识别字幕");
+        if (output.error) output.error.details = { code: "E_ASR_MODEL_UNAVAILABLE" };
+        return output;
+      }
       if (!options.worker) {
         const replay = await findIdempotentWrite(
           request.project as string,

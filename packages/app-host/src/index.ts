@@ -2,10 +2,10 @@
 import { execFile } from "node:child_process";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { once } from "node:events";
-import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, realpath, rm } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, promisify } from "node:util";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -15,7 +15,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import { WebSocket, WebSocketServer } from "ws";
 import { z } from "zod";
 import type { DispatchOptions, Envelope, SubtitleStyle, Verb } from "../../core/dist/index.js";
-import { AgentManagement, type AgentManagementOptions, findProgram } from "./agent-management.js";
+import { AgentManagement, type AgentManagementOptions } from "./agent-management.js";
 import { Agents } from "./agents.js";
 import { exportPreferences } from "./export-preferences.js";
 import { mediaChannel, runFfmpeg } from "./media.js";
@@ -24,7 +24,7 @@ import { DesktopPreferences } from "./preferences.js";
 import { PreviewCache } from "./preview-cache.js";
 import { RecentProjects } from "./recent.js";
 import { projectChanged } from "./revision-events.js";
-import { checkMediaPrograms, hostPath } from "./runtime.js";
+import { hostPath } from "./runtime.js";
 import { SubtitlePass, type SubtitlePassParams } from "./subtitle-pass.js";
 import { DESKTOP_VERBS, type DesktopVerb, PANELS, SUBTITLE_VERBS, type SubtitleVerb, type UiEnvelope } from "./ui.js";
 
@@ -324,7 +324,6 @@ export async function startHost(
 ) {
   const token = options.token ?? randomBytes(32).toString("hex");
   if (!token) throw new Error("Token must not be empty");
-  const mediaTools = await checkMediaPrograms((name) => findProgram(name, hostPath().split(delimiter)));
   const recent = new RecentProjects(options.appDataDir);
   const prefs = new DesktopPreferences(options.appDataDir);
   await prefs.load();
@@ -575,7 +574,7 @@ export async function startHost(
           }
           if (client.readyState !== WebSocket.OPEN) return;
           // Publish the UI only after bootstrap so background notifications cannot overtake it.
-          client.send(JSON.stringify({ type: "bootstrap", project: options.project ?? null, fcpIcon, mediaTools }));
+          client.send(JSON.stringify({ type: "bootstrap", project: options.project ?? null, fcpIcon }));
           ui = client;
           permissions.replay();
           if (prefs.warning) {
@@ -997,7 +996,6 @@ export async function startHost(
           type: "bootstrap",
           project: options.project ?? null,
           fcpIcon: await readFcpIcon(),
-          mediaTools,
         }),
       );
   };
@@ -1022,7 +1020,7 @@ export async function startHost(
   };
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (process.argv[1] && (await realpath(fileURLToPath(import.meta.url))) === (await realpath(process.argv[1]))) {
   try {
     const args = parseArgs({
       options: {

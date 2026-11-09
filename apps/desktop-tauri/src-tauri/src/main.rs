@@ -36,6 +36,11 @@ fn main() {
             let mut command = Command::new(node);
             if !cfg!(debug_assertions) {
                 command.env("ZCUT_PACKAGED", "1");
+                let mut paths = vec![root.join("bin")];
+                paths.extend(std::env::split_paths(
+                    &std::env::var_os("PATH").unwrap_or_default(),
+                ));
+                command.env("PATH", std::env::join_paths(paths)?);
             }
             command.env("PYTHONDONTWRITEBYTECODE", "1");
             #[cfg(windows)]

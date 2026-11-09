@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { realpath } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -28,7 +29,7 @@ export function createServer(options: DispatchOptions = {}): Server {
   return server;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (process.argv[1] && (await realpath(fileURLToPath(import.meta.url))) === (await realpath(process.argv[1]))) {
   createServer()
     .connect(new StdioServerTransport())
     .catch((error: unknown) => {

@@ -84,8 +84,6 @@ export function App({ config }: { config?: { port: number; token: string } }) {
     permissions,
     permissionAnswered: (id) => setPermissions((old) => old.filter((item) => item.id !== id)),
   });
-  const [mediaTools, setMediaTools] = useState({ missing: [] as string[], install: "" });
-  const [copiedInstall, setCopiedInstall] = useState(false);
   const [fcpIcon, setFcpIcon] = useState<string | null>(null);
   const dragging = useRef(false);
   const [errorDetail, setErrorDetail] = useState<string | undefined>();
@@ -151,7 +149,6 @@ export function App({ config }: { config?: { port: number; token: string } }) {
         if (event.target === "session" && event.session_id === reviewSessionRef.current) setProjectChange(event);
       },
       icon: setFcpIcon,
-      mediaTools: setMediaTools,
       error: (message, detail) => {
         setError(message);
         setErrorDetail(detail);
@@ -300,26 +297,6 @@ export function App({ config }: { config?: { port: number; token: string } }) {
   );
   return (
     <div className="zc zc-app">
-      {mediaTools.missing.length > 0 && (
-        <div className="zc-media-warning zc-selectable" role="alert">
-          <span>未找到 {mediaTools.missing.join("、")}，请安装后重启应用：</span>
-          <code>{mediaTools.install}</code>
-          <button
-            type="button"
-            className="zc-btn"
-            onClick={() => {
-              void navigator.clipboard
-                .writeText(mediaTools.install)
-                .then(() => setCopiedInstall(true))
-                .catch(() => {
-                  setError("复制失败，请选中安装命令手动复制");
-                });
-            }}
-          >
-            {copiedInstall ? "已复制" : "复制命令"}
-          </button>
-        </div>
-      )}
       <main
         className="zc zc-shell"
         style={

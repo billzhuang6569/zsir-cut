@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { cp, mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { repository, run, runtime } from "./package-release.mjs";
 
@@ -12,10 +12,9 @@ const temporary = await realpath(await mkdtemp(join(tmpdir(), "zcut-release-smok
 const root = join(temporary, "relocated-runtime");
 let child;
 let socket;
-const signal = AbortSignal.timeout(30000);
 try {
   // Relocate outside the repository so missing dependencies cannot resolve from the development node_modules.
-  await cp(source, root, { recursive: true });
+  await cp(source, root, { recursive: true, verbatimSymlinks: true });
   run(
     join(root, process.platform === "win32" ? "node.exe" : "node"),
     [
@@ -30,20 +29,70 @@ try {
   await cp(join(repository, "examples/minimal.zcut.json"), project);
   const cwd = join(temporary, "unrelated working directory");
   await mkdir(cwd);
+  const env = {
+    ...process.env,
+    HOME: temporary,
+    USERPROFILE: temporary,
+    APPDATA: join(temporary, "AppData/Roaming"),
+    LOCALAPPDATA: join(temporary, "AppData/Local"),
+    PATH: [join(root, "bin"), process.env.PATH].filter(Boolean).join(delimiter),
+    ZCUT_PACKAGED: "1",
+    PYTHONDONTWRITEBYTECODE: "1",
+    PYTHONPATH: join(root, "workers/asr"),
+  };
+  // Generate PCM without any system media tools, then convert and probe with the bundled executables.
+  const pcm = join(temporary, "tone.s16le");
+  const samples = Buffer.alloc(4800 * 2);
+  for (let i = 0; i < 4800; i++) samples.writeInt16LE(i % 48 < 24 ? 1000 : -1000, i * 2);
+  await writeFile(pcm, samples);
+  const wav = join(temporary, "tone.wav");
+  run(
+    join(root, "bin", process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg"),
+    [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-nostdin",
+      "-f",
+      "s16le",
+      "-ar",
+      "48000",
+      "-ac",
+      "1",
+      "-i",
+      pcm,
+      "-ar",
+      "16000",
+      wav,
+    ],
+    cwd,
+    env,
+  );
+  const audio = await readFile(wav);
+  assert.equal(audio.toString("ascii", 0, 4), "RIFF");
+  assert.ok(audio.length > 3200);
+  run(
+    join(root, "bin", process.platform === "win32" ? "ffprobe.exe" : "ffprobe"),
+    ["-v", "error", "-show_streams", wav],
+    cwd,
+    env,
+  );
+  console.log("Bundled ffmpeg audio conversion smoke passed");
+  if (process.platform === "darwin") {
+    const python = join(root, "python/bin/python3");
+    run(python, ["-c", "import mlx, mlx_audio"], cwd, env);
+    const probe = join(temporary, "asr-probe.json");
+    run(python, ["-m", "zsir_asr", "probe", "--out", probe], cwd, env);
+    assert.equal(JSON.parse(await readFile(probe, "utf8")).mlx_available, true);
+    console.log("Bundled Python MLX imports and ASR probe smoke passed");
+  }
+  const signal = AbortSignal.timeout(30000);
   child = spawn(
     join(root, process.platform === "win32" ? "node.exe" : "node"),
     [join(root, "packages/app-host/dist/index.js"), "--desktop", "--project", project],
     {
       cwd,
-      env: {
-        ...process.env,
-        HOME: temporary,
-        USERPROFILE: temporary,
-        APPDATA: join(temporary, "AppData/Roaming"),
-        LOCALAPPDATA: join(temporary, "AppData/Local"),
-        ZCUT_PACKAGED: "1",
-        PYTHONDONTWRITEBYTECODE: "1",
-      },
+      env,
       stdio: ["pipe", "pipe", "inherit"],
       windowsHide: true,
     },
@@ -90,7 +139,7 @@ try {
   const bootstrap = waitMessage((message) => message.type === "bootstrap");
   socket.send(JSON.stringify({ type: "ui_ready" }));
   assert.equal((await bootstrap).type, "bootstrap");
-  const result = waitMessage((message) => message.type === "result" && message.id === "smoke");
+  const result = waitMessage((message) => message.id === "smoke");
   socket.send(JSON.stringify({ id: "smoke", verb: "inspect", request: { project, view: "brief" } }));
   const { envelope } = await result;
   assert.equal(envelope.ok, true, JSON.stringify(envelope.error));

@@ -1,18 +1,51 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmod, cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { createReadStream, createWriteStream } from "node:fs";
+import {
+  access,
+  chmod,
+  cp,
+  mkdir,
+  mkdtemp,
+  open,
+  readdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import * as https from "node:https";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { pipeline } from "node:stream/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const repository = fileURLToPath(new URL("../", import.meta.url));
 export const runtime = join(repository, "apps/desktop-tauri/src-tauri/runtime");
 const packages = ["core", "exporters", "cli", "mcp", "app-host"];
-export function run(command, args, cwd = repository) {
-  const result = spawnSync(command, args, { cwd, stdio: "inherit", windowsHide: true });
+export const releaseAssets = {
+  ffmpeg: {
+    url: "https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2/ffmpeg.zip",
+    sha256: "c8ed4c4e6978a03c485edbfe4e0a5dc2380f8a30bba5150531b31b094492d924",
+  },
+  ffprobe: {
+    url: "https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2/ffprobe.zip",
+    sha256: "fcbe839537485eaee7a7a8bc5cbc0f90d53617e80943e8a5b2e31cb851197ea6",
+  },
+  windowsFfmpeg: {
+    url: "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-08-12-35/ffmpeg-n9.0.2-48-gd4070a14ce-win64-gpl-9.0.zip",
+    sha256: "40608cfdd40b0e7929704059daee4af369f7a9984ea7aa8ee416d78cce2e8aae",
+  },
+  python: {
+    url: "https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.13.18%2B20261026-aarch64-apple-darwin-install_only_stripped.tar.gz",
+    sha256: "8392b6ea51d94391befb2c31ebe75463f045d0b69dfcf5e1bb3234e1f5fa3405",
+  },
+};
+export function run(command, args, cwd = repository, env = process.env) {
+  const result = spawnSync(command, args, { cwd, env, stdio: "inherit", windowsHide: true });
   if (result.error) throw result.error;
   assert.equal(result.status, 0, `${command} failed (${result.status})`);
 }
@@ -58,30 +91,190 @@ export async function copyProductionDependencies(consumers, destination) {
   }
   for (const consumer of consumers) await dependencies(consumer, dirname(destination));
 }
-function download(url) {
+export async function download(url, file, redirects = 0) {
   const agent = new https.Agent({ proxyEnv: { HTTPS_PROXY: process.env.HTTPS_PROXY } });
-  return new Promise((resolve, reject) => {
-    const request = https.get(url, { agent, signal: AbortSignal.timeout(120000) }, (response) => {
-      if (response.statusCode !== 200) {
-        response.resume();
-        reject(new Error(`Download failed: ${url} (${response.statusCode})`));
-        return;
-      }
-      const chunks = [];
-      response.on("data", (chunk) => chunks.push(chunk));
-      response.on("end", () => resolve(Buffer.concat(chunks)));
-      response.on("error", reject);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(new Error(`Download stalled for 60 seconds: ${url}`)), 60_000);
+  try {
+    const response = await new Promise((resolve, reject) => {
+      const request = https.get(url, { agent, signal: controller.signal }, resolve);
+      request.on("error", reject);
     });
-    request.on("error", reject);
-  }).finally(() => agent.destroy());
+    if ([301, 302, 303, 307, 308].includes(response.statusCode) && response.headers.location && redirects < 5) {
+      clearTimeout(timeout);
+      response.resume();
+      return await download(new URL(response.headers.location, url).href, file, redirects + 1);
+    }
+    if (response.statusCode !== 200) {
+      response.resume();
+      throw new Error(`Download failed: ${url} (${response.statusCode})`);
+    }
+    response.on("data", () => timeout.refresh());
+    await pipeline(response, createWriteStream(file), { signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+    agent.destroy();
+  }
 }
-export function verifyNodeArchive(bytes, checksums, filename) {
+export async function verifyArchive(file, expected) {
+  assert.match(expected, /^[a-f0-9]{64}$/);
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(file)) hash.update(chunk);
+  assert.equal(hash.digest("hex"), expected, "Archive checksum mismatch");
+}
+export async function cachedDownload(asset, cache = join(repository, ".tmp/release-cache"), fetch = download) {
+  await mkdir(cache, { recursive: true });
+  const key = asset.sha256 ?? createHash("sha256").update(asset.url).digest("hex");
+  const file = join(cache, `${key}-${basename(new URL(asset.url).pathname)}`);
+  try {
+    if (asset.sha256) await verifyArchive(file, asset.sha256);
+    else await access(file);
+    return file;
+  } catch (error) {
+    if (error.code !== "ENOENT" && error.code !== "ERR_ASSERTION") throw error;
+  }
+  await rm(file, { force: true });
+  const temporary = `${file}.partial`;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await fetch(asset.url, temporary);
+      if (asset.sha256) await verifyArchive(temporary, asset.sha256);
+      await rename(temporary, file);
+      return file;
+    } catch (error) {
+      if (attempt === 1) throw error;
+    } finally {
+      await rm(temporary, { force: true });
+    }
+  }
+}
+function unzip(file, destination) {
+  if (process.platform === "win32") {
+    run("powershell.exe", [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      `Expand-Archive -LiteralPath '${file.replaceAll("'", "''")}' -DestinationPath '${destination.replaceAll("'", "''")}'`,
+    ]);
+  } else run("unzip", ["-q", file, "-d", destination]);
+}
+export async function copyFfmpeg(destination) {
+  const bin = join(destination, "bin");
+  await mkdir(bin, { recursive: true });
+  const temporary = await mkdtemp(join(tmpdir(), "zcut-ffmpeg-"));
+  try {
+    const windows = process.platform === "win32";
+    for (const name of windows ? ["windowsFfmpeg"] : ["ffmpeg", "ffprobe"]) {
+      const extracted = join(temporary, name);
+      unzip(await cachedDownload(releaseAssets[name]), extracted);
+      const files = await readdir(extracted, { recursive: true, withFileTypes: true });
+      for (const binary of windows ? ["ffmpeg.exe", "ffprobe.exe", "LICENSE.txt"] : [name]) {
+        const matches = files.filter((entry) => entry.isFile() && entry.name === binary);
+        assert.equal(matches.length, 1, `Expected one ${binary} in ${name}`);
+        const target = join(
+          binary === "LICENSE.txt" ? destination : bin,
+          binary === "LICENSE.txt" ? "FFMPEG-UPSTREAM-LICENSE.txt" : binary,
+        );
+        await cp(join(matches[0].parentPath, binary), target);
+        if (!windows) await chmod(target, 0o755);
+      }
+    }
+    await cp(join(repository, "scripts/licenses/GPL-3.0.txt"), join(destination, "FFMPEG-GPL-3.0.txt"));
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
+}
+export async function prunePython(directory) {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (!releaseFilter(path) || /^(?:pip(?:[\d.]*)?|pip-.*\.dist-info|ensurepip)$/.test(entry.name)) {
+      await rm(path, { recursive: true, force: true });
+    } else if (entry.isDirectory()) await prunePython(path);
+  }
+}
+async function copyPython(destination) {
+  const temporary = await mkdtemp(join(tmpdir(), "zcut-python-"));
+  try {
+    run("tar", ["-xzf", await cachedDownload(releaseAssets.python), "-C", temporary]);
+    const output = join(destination, "python");
+    await cp(join(temporary, "python"), output, { recursive: true, filter: releaseFilter, verbatimSymlinks: true });
+    const python = join(output, "bin/python3");
+    const env = { ...process.env, PYTHONDONTWRITEBYTECODE: "1", PIP_DISABLE_PIP_VERSION_CHECK: "1" };
+    run(
+      python,
+      [
+        "-m",
+        "pip",
+        "install",
+        "--no-cache-dir",
+        "--no-compile",
+        "-r",
+        join(repository, "workers/asr/requirements.lock"),
+      ],
+      temporary,
+      env,
+    );
+    // Keep installed distribution metadata and upstream license files when removing development payloads.
+    run(
+      python,
+      [
+        "-c",
+        `import importlib.metadata as m, json, pathlib, sys
+pathlib.Path(sys.argv[1]).write_text(json.dumps([
+  {"name": d.metadata["Name"], "version": d.version,
+   "license": d.metadata.get("License-Expression") or d.metadata.get("License"),
+   "classifiers": d.metadata.get_all("Classifier", [])}
+  for d in sorted(m.distributions(), key=lambda d: d.metadata["Name"].lower())
+  if d.metadata["Name"].lower() != "pip"], indent=2) + "\\n")`,
+        join(destination, "PYTHON-PACKAGES.json"),
+      ],
+      temporary,
+      env,
+    );
+    await prunePython(output);
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
+}
+export function isMachO(header) {
+  return (
+    header.length >= 4 &&
+    ["feedface", "cefaedfe", "feedfacf", "cffaedfe", "cafebabe", "bebafeca", "cafebabf", "bfbafeca"].includes(
+      header.subarray(0, 4).toString("hex"),
+    )
+  );
+}
+export async function signMacRuntime(directory) {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) await signMacRuntime(path);
+    else if (entry.isFile()) {
+      const file = await open(path, "r");
+      const header = Buffer.alloc(4);
+      try {
+        await file.read(header, 0, 4, 0);
+      } finally {
+        await file.close();
+      }
+      if (isMachO(header)) {
+        run("codesign", ["--force", "--sign", "-", path]);
+        run("codesign", ["--verify", "--strict", path]);
+      }
+    }
+  }
+}
+export function nodeArchiveChecksum(checksums, filename) {
   const expected = checksums
     .split(/\r?\n/)
     .find((line) => line.endsWith(`  ${filename}`))
     ?.split(/\s+/)[0];
   assert.match(expected ?? "", /^[a-f0-9]{64}$/, `Missing official checksum for ${filename}`);
-  assert.equal(createHash("sha256").update(bytes).digest("hex"), expected, "Node checksum mismatch");
+  return expected;
+}
+export async function cachedNodeArchive(base, filename, cache, fetch = download) {
+  const sums = await cachedDownload({ url: `${base}SHASUMS256.txt` }, cache, fetch);
+  const sha256 = nodeArchiveChecksum(await readFile(sums, "utf8"), filename);
+  return cachedDownload({ url: `${base}${filename}`, sha256 }, cache, fetch);
 }
 async function copyNode(destination) {
   const binary = process.platform === "win32" ? "node.exe" : "node";
@@ -94,12 +287,9 @@ async function copyNode(destination) {
   const folder = `node-${process.version}-${process.platform === "darwin" ? "darwin-arm64" : "win-x64"}`;
   const filename = `${folder}.${process.platform === "win32" ? "zip" : "tar.gz"}`;
   const base = `https://nodejs.org/dist/${process.version}/`;
-  const [archive, sums] = await Promise.all([download(`${base}${filename}`), download(`${base}SHASUMS256.txt`)]);
-  verifyNodeArchive(archive, sums.toString("utf8"), filename);
+  const file = await cachedNodeArchive(base, filename);
   const temporary = await mkdtemp(join(tmpdir(), "zcut-node-"));
   try {
-    const file = join(temporary, filename);
-    await writeFile(file, archive);
     if (process.platform === "win32") {
       run("powershell.exe", [
         "-NoProfile",
@@ -137,7 +327,7 @@ export async function packageRelease() {
   }
   for (const path of ["schema", "skills"])
     await cp(join(repository, path), join(runtime, path), { recursive: true, filter: releaseFilter });
-  for (const path of ["zsir_asr", "requirements.lock", "pyproject.toml", "README.md"])
+  for (const path of ["zsir_asr", "requirements.lock", "pyproject.toml"])
     await cp(join(repository, "workers/asr", path), join(runtime, "workers/asr", path), {
       recursive: true,
       filter: releaseFilter,
@@ -152,6 +342,11 @@ export async function packageRelease() {
     join(runtime, "node_modules"),
   );
   await copyNode(runtime);
+  await copyFfmpeg(runtime);
+  if (process.platform === "darwin") {
+    await copyPython(runtime);
+    await signMacRuntime(runtime);
+  }
   const node = join(runtime, process.platform === "win32" ? "node.exe" : "node");
   if (process.platform !== "win32") await chmod(node, 0o755);
   run(

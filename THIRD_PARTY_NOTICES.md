@@ -254,3 +254,66 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+
+## FFmpeg and ffprobe 9.0.2 (GPL)
+
+FFmpeg and ffprobe are independent executable programs, invoked as subprocesses;
+they are not linked into zsir-cut. The release bundles them in `runtime/bin/`.
+The complete GPL v3 text is included as `runtime/FFMPEG-GPL-3.0.txt` (from
+`scripts/licenses/GPL-3.0.txt`); Windows also retains the archive's `LICENSE.txt`
+as `runtime/FFMPEG-UPSTREAM-LICENSE.txt`.
+
+Fixed binary sources (each archive is checked against its pinned SHA-256 in
+`scripts/package-release.mjs` before extraction):
+
+- macOS arm64, martin-riedl.de:
+  https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2/ffmpeg.zip
+  and https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2/ffprobe.zip
+- Windows x64, BtbN FFmpeg-Builds, `n9.0.2-48-gd4070a14ce`, GPL build:
+  https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-08-12-35/ffmpeg-n9.0.2-48-gd4070a14ce-win64-gpl-9.0.zip
+
+ffmpeg 是独立程序，源码随 GitHub Release 提供，也可从
+https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz 获取。
+Publishing a GitHub Release must include the corresponding source and licenses,
+including build-specific changes and bundled components; an installer build alone
+does not publish those source artifacts.
+
+## Python 3.13.18 and ASR environment (macOS only)
+
+Runtime source: python-build-standalone, release `20261026`:
+https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.13.18%2B20261026-aarch64-apple-darwin-install_only_stripped.tar.gz
+
+CPython uses the Python Software Foundation License (PSF-2.0) and bundled
+third-party licenses. Upstream license files remain in `runtime/python/`.
+Dependencies are installed from `workers/asr/requirements.lock`; their upstream
+license files and distribution metadata are retained. Each build also writes
+`runtime/PYTHON-PACKAGES.json` containing installed names, versions and license
+metadata. Models are not bundled. pip, ensurepip, test directories and bytecode
+caches are removed after installation.
+
+Main locked dependencies:
+
+| Package | Version | Upstream license metadata |
+| --- | --- | --- |
+| mlx / mlx-metal | 0.32.4 | MIT |
+| mlx-audio | 0.5.8 | MIT |
+| jieba | 0.42.1 | MIT |
+| numpy | 2.5.4 | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 |
+| scipy | 1.18.1 | BSD-3-Clause; wheel notices also list OpenBLAS/LAPACK, GCC runtime and libquadmath |
+| transformers | 5.21.0 | Apache-2.0 |
+| huggingface_hub | 2.3.0 | Apache-2.0 |
+| tokenizers | 0.23.3 | Apache-2.0 |
+| safetensors | 0.8.0 | Apache-2.0 |
+| miniaudio | 1.71 | MIT |
+| sounddevice | 0.5.6 | MIT (bundled PortAudio notices retained) |
+| cffi | 2.1.1 | MIT-0 |
+| regex | 2026.9.29 | Apache-2.0 AND CNRI-Python |
+| tqdm | 4.70.1 | MPL-2.0 AND MIT |
+| typing_extensions | 4.16.0 | PSF-2.0 |
+
+License metadata was checked against the locally installed versions matching the
+lockfile. PSF-2.0, MIT-0, Zlib, CC0-1.0, CNRI-Python and MPL-2.0 are outside the
+repository's literal MIT/Apache-2.0/BSD/ISC allowlist. SciPy's wheel notices also
+mention GPL-3.0-or-later WITH GCC-exception-3.1 and LGPL-2.1-or-later; actual bundled
+libraries depend on the platform wheel. These require a spec/license decision
+before distribution. The lockfile is unchanged; no dependency was substituted.

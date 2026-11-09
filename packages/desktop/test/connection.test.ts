@@ -49,7 +49,6 @@ it("exposes revision events to subscribers while refreshing the project and subt
   const projectChanged = vi.fn();
   const aiChanged = vi.fn();
   const error = vi.fn();
-  const mediaTools = vi.fn();
   const disconnect = connectHost(
     { port: 1, token: "test" },
     {
@@ -59,7 +58,6 @@ it("exposes revision events to subscribers while refreshing the project and subt
       aiChanged,
       icon: vi.fn(),
       error,
-      mediaTools,
     },
   );
   try {
@@ -74,9 +72,7 @@ it("exposes revision events to subscribers while refreshing the project and subt
     socket?.receive({
       type: "bootstrap",
       project: "/project.zcut.json",
-      mediaTools: { missing: ["ffprobe"], install: "brew install ffmpeg" },
     });
-    expect(mediaTools).toHaveBeenCalledWith({ missing: ["ffprobe"], install: "brew install ffmpeg" });
     await vi.waitFor(() => expect(project).toHaveBeenCalledTimes(2));
     project.mockClear();
     requests.length = 0;
