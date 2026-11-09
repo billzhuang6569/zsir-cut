@@ -59,6 +59,80 @@ async function setup(fail = false, empty = false, createFailure = false) {
     },
   };
 }
+it("dismisses the project menu on outside pointerdown but keeps inside presses open", async () => {
+  const view = await setup();
+  try {
+    await view.click("未打开工程");
+    const menu = view.node.querySelector('[aria-label="工程菜单"]');
+    if (!menu) throw new Error("Missing project menu");
+    for (const target of [menu, menu.querySelector("button")]) {
+      await act(() => target?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true })));
+      expect(view.node.querySelector('[aria-label="工程菜单"]')).toBe(menu);
+    }
+    await act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "a" })));
+    expect(view.node.querySelector('[aria-label="工程菜单"]')).toBe(menu);
+    await act(() => document.body.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true })));
+    expect(view.node.querySelector('[aria-label="工程菜单"]')).toBeNull();
+    await view.click("未打开工程");
+    await view.click("关闭");
+    expect(view.node.querySelector('[aria-label="工程菜单"]')).toBeNull();
+  } finally {
+    await view.close();
+  }
+});
+
+it("toggles the project menu with its button and restores button focus on Escape", async () => {
+  const view = await setup();
+  try {
+    const button = view.node.querySelector<HTMLButtonElement>("button");
+    if (!button) throw new Error("Missing project button");
+    for (const open of [true, false, true]) {
+      await act(() => button.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true })));
+      await act(() => button.click());
+      expect(button.getAttribute("aria-expanded")).toBe(String(open));
+      expect(Boolean(view.node.querySelector('[aria-label="工程菜单"]'))).toBe(open);
+    }
+    const item = view.node.querySelector<HTMLButtonElement>(".zc-entry-menu button");
+    await act(() => {
+      item?.focus();
+      item?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect(view.node.querySelector('[aria-label="工程菜单"]')).toBeNull();
+    expect(document.activeElement).toBe(button);
+  } finally {
+    await view.close();
+  }
+});
+
+it.each(["pointerdown", "Escape"])("keeps a project switch running after menu dismissal by %s", async (event) => {
+  const view = await setup();
+  let finish = () => {};
+  const opening = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  try {
+    await view.click("未打开工程");
+    view.call.mockImplementationOnce(async () => {
+      await opening;
+      return [];
+    });
+    await view.click("回到开始页");
+    expect(view.changed).not.toHaveBeenCalled();
+    await act(() =>
+      window.dispatchEvent(
+        event === "Escape" ? new KeyboardEvent("keydown", { key: "Escape" }) : new MouseEvent("pointerdown"),
+      ),
+    );
+    expect(view.node.querySelector('[aria-label="工程菜单"]')).toBeNull();
+    await act(async () => finish());
+    expect(view.call).toHaveBeenCalledWith("project_open", { path: null });
+    expect(view.changed).toHaveBeenCalledExactlyOnceWith(false);
+  } finally {
+    finish();
+    await view.close();
+  }
+});
+
 it("creates a matched project, imports every dropped path and selects media", async () => {
   const view = await setup();
   try {
@@ -100,9 +174,11 @@ it("creates a matched project, imports every dropped path and selects media", as
 it("shows an open failure on the start page", async () => {
   const view = await setup(true);
   try {
+    await view.click("未打开工程");
     await view.click("打开工程");
     const path = view.node.querySelector<HTMLInputElement>("form input");
     if (!path) throw new Error("Missing path");
+    await act(() => path.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true })));
     await view.input(path, "/损坏.zcut.json");
     await view.click("打开");
     expect(view.node.querySelector('[role="alert"]')?.textContent).toContain("工程版本不兼容");
@@ -114,9 +190,11 @@ it("shows an open failure on the start page", async () => {
 it("allows manual picture settings without a subtitle track", async () => {
   const view = await setup();
   try {
+    await view.click("未打开工程");
     await view.click("新建工程");
     const path = view.node.querySelectorAll<HTMLInputElement>("form input")[1];
     if (!path) throw new Error("Missing path");
+    await act(() => path.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true })));
     await view.input(path, "/新工程.zcut.json");
     const language = Array.from(view.node.querySelectorAll("select")).at(-1);
     if (!language) throw new Error("Missing language");

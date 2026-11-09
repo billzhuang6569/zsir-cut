@@ -48,6 +48,29 @@ export function ProjectEntry({
   const [search, setSearch] = useState("");
   const [recent, setRecent] = useState<Recent[]>([]);
   const [menu, setMenu] = useState(false);
+  const menuRef = useRef<HTMLElement>(null);
+  const menuButton = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (!menu) return;
+    const dismiss = (event: PointerEvent | KeyboardEvent) => {
+      const keyboard = event instanceof KeyboardEvent;
+      if (keyboard && event.key !== "Escape") return;
+      if (
+        !keyboard &&
+        event.target instanceof Node &&
+        (menuRef.current?.contains(event.target) || menuButton.current?.contains(event.target))
+      )
+        return;
+      setMenu(false);
+      if (keyboard) menuButton.current?.focus();
+    };
+    window.addEventListener("pointerdown", dismiss);
+    window.addEventListener("keydown", dismiss);
+    return () => {
+      window.removeEventListener("pointerdown", dismiss);
+      window.removeEventListener("keydown", dismiss);
+    };
+  }, [menu]);
   const [form, setForm] = useState<"new" | "open" | null>(null);
   const [pathInput, setPathInput] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -219,12 +242,18 @@ export function ProjectEntry({
   );
   return (
     <>
-      <Button onClick={() => setMenu(!menu)} aria-expanded={menu}>
+      <Button
+        onClick={(event) => {
+          menuButton.current = event.currentTarget;
+          setMenu(!menu);
+        }}
+        aria-expanded={menu}
+      >
         {project?.name ?? "未打开工程"}
         <Icon name="down" />
       </Button>
       {menu && (
-        <section className="zc-entry-menu zc-pad" aria-label="工程菜单">
+        <section className="zc-entry-menu zc-pad" aria-label="工程菜单" ref={menuRef}>
           {actions}
           {rows}
           <Button disabled={busy} onClick={() => void run(() => switchTo(null))}>
