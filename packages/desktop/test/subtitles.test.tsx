@@ -112,6 +112,8 @@ async function mount(
     if (verb === "chat_list") return [];
     return { sessions: [], batches: [] };
   });
+  const panelCall = (verb: string, request: Record<string, unknown>) =>
+    verb === "asr_status" ? Promise.resolve({ supported: true }) : call(verb, request);
   const promptAi = vi.fn();
   const editCue = vi.fn();
   const container = document.createElement("div");
@@ -138,7 +140,7 @@ async function mount(
       project: current,
       state: ui,
       update,
-      call,
+      call: panelCall,
       promptAi: (text) => {
         promptAi(text);
         update((previous) => applyUi(previous, "ui_show_panel", { panel: "ai" }));

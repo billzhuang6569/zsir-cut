@@ -488,6 +488,19 @@ export function useSubtitlePanel({
   config?: { port: number; token: string } | undefined;
   promptAi: (text: string) => void;
 }) {
+  const [asrSupported, setAsrSupported] = useState(true);
+  useEffect(() => {
+    let disposed = false;
+    void call("asr_status", {})
+      .then((value) => {
+        if (!disposed && typeof (value as { supported?: unknown })?.supported === "boolean")
+          setAsrSupported((value as { supported: boolean }).supported);
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+    };
+  }, [call]);
   const [busy, setBusy] = useState(false),
     [progress, setProgress] = useState<number | null>(null);
   const locked = useRef(false),
@@ -612,7 +625,7 @@ export function useSubtitlePanel({
   const setRecognition = (patch: Partial<Recognition>) =>
     void write([{ op: "set_recognition", ...patch }], "修改字幕识别设置");
   const transcribe = async () => {
-    if (!project || locked.current) return;
+    if (!project || locked.current || !asrSupported) return;
     locked.current = true;
     setBusy(true);
     setProgress(0);
@@ -1071,7 +1084,7 @@ export function useSubtitlePanel({
           <button
             type="button"
             className="zc-btn zc-btn-primary zc-sub-recognize"
-            disabled={!project?.media.some((m) => m.audio) || busy}
+            disabled={!asrSupported || !project?.media.some((m) => m.audio) || busy}
             onClick={() => void transcribe()}
           >
             <Icon name="refresh" />

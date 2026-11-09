@@ -58,10 +58,12 @@ const noBreakAfter = new Set(
 const noBreakBefore = new Set(
   "的、地、得、了、着、过、吗、呢、吧、啊、呀、嘛、啦、们、上、下、里、中、后、前、时、似的、一样".split("、"),
 );
-const stripPunctuation = (text: string) => text.replace(/^\p{P}+|\p{P}+$/gu, "");
+const stripPunctuation = (text: string) => text.trim().replace(/^\p{P}+|\p{P}+$/gu, "");
 const ascii = /[A-Za-z0-9]/;
 const visible = (tokens: Token[]) => tokens.filter((token) => token.text !== "");
 const joinSpace = (a: string, b: string) =>
+  !/\s$/u.test(a) &&
+  !/^\s/u.test(b) &&
   !punctOnly.test(b) &&
   ((/^[\x20-\x7E]+$/u.test(a) && /^[\x20-\x7E]+$/u.test(b)) || (ascii.test(a.at(-1) ?? "") && ascii.test(b[0] ?? "")))
     ? " "

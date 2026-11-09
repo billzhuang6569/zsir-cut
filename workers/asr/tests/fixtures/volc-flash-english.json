@@ -1,0 +1,92 @@
+{
+  "result": {
+    "text": "然后交给 Final Cut Pro 收尾。",
+    "utterances": [
+      {
+        "end_time": 23140,
+        "start_time": 20620,
+        "text": "然后交给 Final Cut Pro 收尾。",
+        "words": [
+          {
+            "confidence": 0,
+            "end_time": 20820,
+            "start_time": 20620,
+            "text": "然"
+          },
+          {
+            "confidence": 0,
+            "end_time": 21020,
+            "start_time": 20820,
+            "text": "后"
+          },
+          {
+            "confidence": 0,
+            "end_time": 21300,
+            "start_time": 21060,
+            "text": "交"
+          },
+          {
+            "confidence": 0,
+            "end_time": 21500,
+            "start_time": 21300,
+            "text": "给"
+          },
+          {
+            "confidence": 0,
+            "end_time": -1,
+            "start_time": -1,
+            "text": " "
+          },
+          {
+            "confidence": 0,
+            "end_time": 21860,
+            "start_time": 21700,
+            "text": "Final"
+          },
+          {
+            "confidence": 0,
+            "end_time": -1,
+            "start_time": -1,
+            "text": " "
+          },
+          {
+            "confidence": 0,
+            "end_time": 22380,
+            "start_time": 21860,
+            "text": "Cut"
+          },
+          {
+            "confidence": 0,
+            "end_time": -1,
+            "start_time": -1,
+            "text": " "
+          },
+          {
+            "confidence": 0,
+            "end_time": 22660,
+            "start_time": 22460,
+            "text": "Pro"
+          },
+          {
+            "confidence": 0,
+            "end_time": -1,
+            "start_time": -1,
+            "text": " "
+          },
+          {
+            "confidence": 0,
+            "end_time": 22900,
+            "start_time": 22700,
+            "text": "收"
+          },
+          {
+            "confidence": 0,
+            "end_time": 23140,
+            "start_time": 22900,
+            "text": "尾"
+          }
+        ]
+      }
+    ]
+  }
+}

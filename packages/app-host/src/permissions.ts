@@ -5,7 +5,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { z } from "zod";
 import type { Envelope, Project, Verb } from "../../core/dist/index.js";
 
-const { newId }: typeof import("../../core/dist/index.js") = await import(
+const { newId, readAsrSettings }: typeof import("../../core/dist/index.js") = await import(
   new URL(import.meta.url.endsWith(".ts") ? "../../core/src/index.ts" : "../../core/dist/index.js", import.meta.url)
     .href
 );
@@ -60,8 +60,8 @@ async function readPermissions(file: string) {
 }
 async function needsPermission(verb: Verb, command: Record<string, unknown>) {
   if (verb !== "transcribe") return true;
-  // recognition has no engine field; the kernel uses the request and the worker's fallback config.
-  if (command.engine === "cloud") return true;
+  if (command.engine === "local") return false;
+  if (command.engine === "cloud" || (await readAsrSettings()).mode === "api") return true;
   try {
     const config = JSON.parse(await readFile(join(homedir(), ".zsir-cut/config.json"), "utf8"));
     return config?.asr?.cloud_fallback === true;

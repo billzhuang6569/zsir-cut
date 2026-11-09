@@ -86,10 +86,9 @@ def test_engine_selection_only_falls_back_for_opted_in_model_errors():
 
 
 def test_cloud_missing_credentials(monkeypatch):
-    monkeypatch.delenv("ZSIR_VOLC_APP_ID", raising=False)
-    monkeypatch.delenv("ZSIR_VOLC_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("ZSIR_VOLC_API_KEY", raising=False)
     with pytest.raises(worker.WorkerError) as error:
-        worker.CloudEngine().transcribe(None, "zh", "1.7b", None)
+        worker.CloudEngine().transcribe(None, 0, 0, 1000, "zh")
     assert error.value.code == "E_ASR_CLOUD_AUTH"
 
 
@@ -129,8 +128,7 @@ def test_probe_has_no_secret(monkeypatch):
     fake_mlx = SimpleNamespace(metal=SimpleNamespace(is_available=lambda: False))
     monkeypatch.setitem(sys.modules, "mlx", SimpleNamespace(core=fake_mlx))
     monkeypatch.setitem(sys.modules, "mlx.core", fake_mlx)
-    monkeypatch.setenv("ZSIR_VOLC_APP_ID", "private-app")
-    monkeypatch.setenv("ZSIR_VOLC_ACCESS_TOKEN", "private-token")
+    monkeypatch.setenv("ZSIR_VOLC_API_KEY", "private-token")
     assert "private-token" not in json.dumps(worker.probe())
 
 

@@ -4,11 +4,12 @@ import { constants } from "node:fs";
 import { access, readFile, rm, writeFile } from "node:fs/promises";
 import { delimiter, dirname, resolve } from "node:path";
 import { promisify } from "node:util";
+import { readAsrKey } from "./asr-keychain.ts";
+import { cloudFallbackEnabled, readAsrSettings } from "./asr-settings.ts";
 import { newId, transcriptIds } from "./project/id.ts";
 import { cueBreaks, segmentTokens, transcriptRules } from "./project/subtitle-rules.ts";
 import type { Cue, Engine, Project, RawToken, Token, TranscriptSubtitleRules } from "./project/types.ts";
 import { compare, parseRational, rational, sub } from "./rational.ts";
-
 import { mergeHotwords, readTermLibrary } from "./term-library.ts";
 
 const execute = promisify(execFile);
@@ -21,6 +22,7 @@ type WorkerResult = {
   language: string;
   asr: { name: string; model: string; version: string | null; weights_digest?: string | null };
   align: { name: string; model: string; version: string | null; weights_digest?: string | null };
+  runtime: { seconds: number; peak_memory_mb: number; engine_used: string };
   tokens: WorkerToken[];
   warnings: (string | { code: string; count: number } | { code: "W_ASR_ALIGN_DEGRADED"; ratio: number })[];
 };
@@ -81,6 +83,59 @@ const rulesFromRequest = (language: string, value: Record<string, unknown>): Tra
   return stored;
 };
 
+export async function runAsrWorker(
+  args: string[],
+  out: string,
+  python: string,
+  workerDirectory: string,
+  noCache = false,
+): Promise<WorkerResult> {
+  let key: string | null = null;
+  const requestedEngine = args[args.indexOf("--engine") + 1];
+  if (requestedEngine === "cloud" || (requestedEngine === "auto" && (await cloudFallbackEnabled()))) {
+    try {
+      key = await readAsrKey();
+    } catch {
+      if (requestedEngine === "cloud") throw new AsrError("E_ASR_CLOUD_AUTH", "无法读取 API Key", false);
+    }
+  }
+  let failed = false;
+  const packaged = process.env.ZCUT_PACKAGED === "1";
+  try {
+    await execute(python, args, {
+      cwd: packaged ? dirname(out) : workerDirectory,
+      maxBuffer: 1024 * 1024,
+      env: {
+        ...process.env,
+        ZSIR_VOLC_API_KEY: key ?? "",
+        ...(noCache ? { ZSIR_ASR_NO_CACHE: "1" } : {}),
+        PYTHONDONTWRITEBYTECODE: "1",
+        ...(packaged ? { PYTHONPATH: [workerDirectory, process.env.PYTHONPATH].filter(Boolean).join(delimiter) } : {}),
+      },
+      windowsHide: true,
+    });
+  } catch {
+    failed = true;
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(await readFile(out, "utf8"));
+  } catch {
+    throw new AsrError("E_ASR_INTERNAL", "ASR worker did not write valid JSON", false);
+  }
+  if (!value || typeof value !== "object") throw new AsrError("E_ASR_INTERNAL", "Invalid ASR result", false);
+  const result = value as Record<string, unknown>;
+  if (result.schema === "zsir-cut/asr-error")
+    throw new AsrError(
+      String(result.code),
+      String(result.message).replaceAll(key || "\0", "[redacted]"),
+      result.retryable === true,
+    );
+  if (failed || result.schema !== "zsir-cut/asr-result" || result.schema_version !== "0.1")
+    throw new AsrError("E_ASR_INTERNAL", "Invalid ASR result", false);
+  return value as WorkerResult;
+}
+
 export async function invokeAsr(
   project: Project,
   request: TranscribeRequest,
@@ -104,6 +159,7 @@ export async function invokeAsr(
   const language = request.language ?? project.recognition?.language;
   if (language && language !== "auto" && !/^(zh|en)(-|$)/u.test(language))
     throw new AsrError("E_UNSUPPORTED", "ASR worker supports Chinese and English", false);
+  const settings = await readAsrSettings();
   const args = [
     "-m",
     "zsir_asr",
@@ -115,7 +171,9 @@ export async function invokeAsr(
     "--language",
     language?.startsWith("zh") ? "zh" : language?.startsWith("en") ? "en" : "auto",
     "--engine",
-    request.engine ?? "auto",
+    (request.engine ?? "auto") === "auto" && settings.mode === "api" ? "cloud" : (request.engine ?? "auto"),
+    "--model",
+    settings.model,
     "--out",
     out,
   ];
@@ -135,37 +193,12 @@ export async function invokeAsr(
     await writeFile(hotwordsPath, hotwords.join("\n"));
     args.push("--hotwords", hotwordsPath);
   }
-  let failed = false;
-  const packaged = process.env.ZCUT_PACKAGED === "1";
+  let output: WorkerResult;
   try {
-    await execute(python, args, {
-      cwd: packaged ? dirname(out) : workerDirectory,
-      maxBuffer: 1024 * 1024,
-      env: {
-        ...process.env,
-        PYTHONDONTWRITEBYTECODE: "1",
-        ...(packaged ? { PYTHONPATH: [workerDirectory, process.env.PYTHONPATH].filter(Boolean).join(delimiter) } : {}),
-      },
-      windowsHide: true,
-    });
-  } catch {
-    failed = true;
+    output = await runAsrWorker(args, out, python, workerDirectory);
   } finally {
     await rm(hotwordsPath, { force: true });
   }
-  let value: unknown;
-  try {
-    value = JSON.parse(await readFile(out, "utf8"));
-  } catch {
-    throw new AsrError("E_ASR_INTERNAL", "ASR worker did not write valid JSON", false);
-  }
-  if (!value || typeof value !== "object") throw new AsrError("E_ASR_INTERNAL", "Invalid ASR result", false);
-  const result = value as Record<string, unknown>;
-  if (result.schema === "zsir-cut/asr-error")
-    throw new AsrError(String(result.code), String(result.message), result.retryable === true);
-  if (failed || result.schema !== "zsir-cut/asr-result" || result.schema_version !== "0.1")
-    throw new AsrError("E_ASR_INTERNAL", "Invalid ASR result", false);
-  const output = value as WorkerResult;
   if (
     !output.input ||
     output.input.size_bytes !== media.size_bytes ||
@@ -305,7 +338,7 @@ export function applyTranscription(project: Project, request: TranscribeRequest,
     const fillers = new Set(project.recognition?.filler_words ?? ["嗯", "啊", "呃", "额", "哦", "唉", "哎", "诶"]);
     let count = 0;
     for (const token of additions) {
-      if (!fillers.has(token.text.replace(/^\p{P}+|\p{P}+$/gu, ""))) continue;
+      if (!fillers.has(token.text.trim().replace(/^\p{P}+|\p{P}+$/gu, ""))) continue;
       token.heard = token.text;
       token.text = "";
       count++;

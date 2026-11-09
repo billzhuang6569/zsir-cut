@@ -1,7 +1,13 @@
 """CLI boundary for local speech recognition and alignment."""
 
 import argparse
+import base64
+import tempfile
+import urllib.request
+import urllib.error
+import uuid
 import hashlib
+import http.client
 import json
 import os
 import platform
@@ -283,11 +289,79 @@ class LocalEngine:
 
 
 class CloudEngine:
-    def transcribe(self, audio, language, model, hotwords):
-        if not os.getenv("ZSIR_VOLC_APP_ID") or not os.getenv("ZSIR_VOLC_ACCESS_TOKEN"):
+    def transcribe(self, path, channel, start_ms, duration_ms, language, hotwords=None):
+        key = os.getenv("ZSIR_VOLC_API_KEY")
+        if not key:
             raise WorkerError("E_ASR_CLOUD_AUTH", "Volcengine credentials are missing")
-        # TODO: Call the Volcengine ASR API and normalize its text and timing.
-        raise WorkerError("E_ASR_INTERNAL", "Volcengine API client is not implemented")
+        tokens = []
+        # 64 kbps for 90 minutes stays below the 100 MB request limit.
+        chunk_ms = 90 * 60 * 1000 if duration_ms > 2 * 60 * 60 * 1000 else duration_ms
+        for offset in range(0, duration_ms, chunk_ms):
+            length = min(chunk_ms, duration_ms - offset)
+            with tempfile.TemporaryDirectory(prefix="zsir-asr-") as directory:
+                output = Path(directory) / "audio.mp3"
+                try:
+                    subprocess.run(["ffmpeg", "-v", "error", "-ss", str(Decimal(start_ms + offset) / 1000), "-i", str(path),
+                                    "-t", str(Decimal(length) / 1000), "-map", "0:a:0", "-af", f"pan=mono|c0=c{channel}",
+                                    "-ar", "16000", "-ac", "1", "-b:a", "64k", "-f", "mp3", str(output)], capture_output=True, check=True)
+                    data = output.read_bytes()
+                except (OSError, subprocess.CalledProcessError) as exc:
+                    raise WorkerError("E_ASR_INPUT", "Audio transcode failed") from exc
+            if len(data) > 100 * 1000 * 1000:
+                raise WorkerError("E_ASR_INPUT", "Encoded audio exceeds 100 MB")
+            options = {"model_name": "bigmodel", "enable_itn": True, "enable_punc": True, "show_utterances": True}
+            if hotwords:
+                options["corpus"] = {"context": json.dumps({"hotwords": [{"word": word} for word in hotwords]}, ensure_ascii=False)}
+            audio = {"format": "mp3", "data": base64.b64encode(data).decode()}
+            if language != "auto":
+                audio["language"] = {"zh": "zh-CN", "en": "en-US"}[language]
+            request = urllib.request.Request("https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash",
+                data=json.dumps({"user": {"uid": "zsir-cut"}, "audio": audio, "request": options}).encode(),
+                headers={"X-Api-Key": key, "X-Api-Resource-Id": "volc.bigasr.auc_turbo", "X-Api-Request-Id": str(uuid.uuid4()), "X-Api-Sequence": "-1", "Content-Type": "application/json"})
+            try:
+                try:
+                    response = urllib.request.urlopen(request, timeout=600)
+                except urllib.error.HTTPError as exc:
+                    response = exc
+                with response:
+                    status = response.headers.get("X-Api-Status-Code", "")
+                    logid = response.headers.get("X-Tt-Logid", "").replace(key, "[redacted]")
+                    if status == "20000003":
+                        continue
+                    if status in ("45000010", "45000030"):
+                        raise WorkerError("E_ASR_CLOUD_AUTH", status)
+                    if status.startswith("55"):
+                        raise WorkerError("E_ASR_CLOUD_NETWORK", "Volcengine service unavailable", True)
+                    if status != "20000000":
+                        if status.startswith("45"):
+                            raise WorkerError("E_ASR_INTERNAL", f"Volcengine request failed; X-Tt-Logid: {logid}")
+                        raise WorkerError("E_ASR_CLOUD_NETWORK", "Volcengine request failed", True)
+                    payload = json.load(response)
+                utterances = payload["result"].get("utterances", [])
+                if payload["result"].get("text", "").strip() and not utterances:
+                    raise WorkerError("E_ASR_INTERNAL", "Volcengine result has no word timing")
+                for utterance in utterances:
+                    if utterance.get("text", "").strip() and not utterance.get("words"):
+                        raise WorkerError("E_ASR_INTERNAL", "Volcengine result has no word timing")
+                    for word in utterance.get("words", []):
+                        text = word["text"]
+                        if not text.strip():
+                            if tokens:
+                                # Separators have no timing; retain them on the preceding word.
+                                tokens[-1]["text"] += text
+                            continue
+                        a, b = word["start_time"], word["end_time"]
+                        conf = word.get("confidence")
+                        if not isinstance(a, int) or isinstance(a, bool) or not isinstance(b, int) or isinstance(b, bool) or not 0 <= a <= b <= length:
+                            raise WorkerError("E_ASR_INTERNAL", "Invalid Volcengine word timing")
+                        if conf is not None and (isinstance(conf, bool) or not isinstance(conf, (int, float)) or not 0 <= conf <= 1):
+                            raise WorkerError("E_ASR_INTERNAL", "Invalid Volcengine word confidence")
+                        tokens.append({"text": text, "start_ms": start_ms + offset + a, "end_ms": start_ms + offset + b, "conf": conf})
+            except (urllib.error.URLError, http.client.HTTPException, OSError, TimeoutError) as exc:
+                raise WorkerError("E_ASR_CLOUD_NETWORK", "Cannot connect to Volcengine", True) from exc
+            except (ValueError, KeyError, TypeError, AttributeError) as exc:
+                raise WorkerError("E_ASR_INTERNAL", "Invalid Volcengine response") from exc
+        return tokens, language if language != "auto" else ("zh" if any("\u4e00" <= c <= "\u9fff" for t in tokens for c in t["text"]) else "en")
 
 
 def cloud_fallback_enabled():
@@ -310,7 +384,7 @@ def choose_engine(requested, local_call, cloud_call, fallback_enabled):
         raise
 
 
-def result(args, local=None, cloud=None):
+def local_result(args, local=None):
     started = time.monotonic()
     path = Path(args.input)
     channels, total_ms = media_info(path)
@@ -322,10 +396,7 @@ def result(args, local=None, cloud=None):
     if start_ms >= total_ms or duration_ms <= 0 or start_ms + duration_ms > total_ms:
         raise WorkerError("E_ASR_INPUT", "Audio range is out of bounds")
     local = local or LocalEngine()
-    cloud = cloud or CloudEngine()
     is_transcribe = args.command == "transcribe"
-    if is_transcribe and args.engine == "cloud" and (not os.getenv("ZSIR_VOLC_APP_ID") or not os.getenv("ZSIR_VOLC_ACCESS_TOKEN")):
-        raise WorkerError("E_ASR_CLOUD_AUTH", "Volcengine credentials are missing")
     model = getattr(args, "model", "1.7b")
     asr_name = ASR_NAMES[model]
     requested_engine = getattr(args, "engine", "local")
@@ -357,7 +428,7 @@ def result(args, local=None, cloud=None):
     input_digest = fingerprint(path)
     key = cache_key(input_digest, [args.channels], start_ms, duration_ms, args.language, requested_engine, asr_digest, align_digest, hotword_digest, text_digest)
     cache = Path(os.getenv("ZSIR_CACHE_DIR", str(HOME / "cache" / "asr"))) / f"{key}.json"
-    if cache.exists():
+    if os.getenv("ZSIR_ASR_NO_CACHE") != "1" and cache.exists():
         cached = json.loads(cache.read_text())
         cached["warnings"].extend(finalize_tokens(cached["tokens"], start_ms, start_ms + duration_ms))
         return cached
@@ -383,35 +454,67 @@ def result(args, local=None, cloud=None):
     for index, (a, b) in enumerate(ranges):
         chunk = audio[a:b]
         if is_transcribe:
-            (chunk_text, chunk_language), engine_used = choose_engine(requested_engine, lambda: local.transcribe(chunk, args.language, model, hotwords), lambda: cloud.transcribe(chunk, args.language, model, hotwords), cloud_fallback_enabled())
+            chunk_text, chunk_language = local.transcribe(chunk, args.language, model, hotwords)
             if index == 0:
                 language = chunk_language
         else:
             chunk_text, chunk_language = parts[index], language
-        try:
-            items = local.align(chunk, chunk_text, chunk_language) if chunk_text.strip() else []
-            offset = start_ms + a // SAMPLES_PER_MS
-            chunk_tokens = normalize_items(items, offset)
-            chunk_end = start_ms + min(duration_ms, (b + SAMPLES_PER_MS - 1) // SAMPLES_PER_MS)
-            for token in chunk_tokens:
-                token["start_ms"] = min(chunk_end, max(offset, token["start_ms"]))
-                token["end_ms"] = min(chunk_end, max(token["start_ms"], token["end_ms"]))
-            warnings.extend(remove_repetitions(chunk_tokens))
-            # Check characters before jieba grouping and words after it, including auto-detected English.
-            chunk_tokens = group_chinese(chunk_tokens, tokenizer)
-            warnings.extend(remove_repetitions(chunk_tokens))
-            tokens.extend(chunk_tokens)
-        except WorkerError:
-            if engine_used != "cloud":
-                raise
-            if "W_ASR_CLOUD_TIMING" not in warnings:
-                warnings.append("W_ASR_CLOUD_TIMING")
-            # TODO: Normalize cloud token times once the Volcengine client exists.
-            alignment = {"name": "cloud", "model": "volcengine", "version": None, "weights_digest": None}
+        items = local.align(chunk, chunk_text, chunk_language) if chunk_text.strip() else []
+        offset = start_ms + a // SAMPLES_PER_MS
+        chunk_tokens = normalize_items(items, offset)
+        chunk_end = start_ms + min(duration_ms, (b + SAMPLES_PER_MS - 1) // SAMPLES_PER_MS)
+        for token in chunk_tokens:
+            token["start_ms"] = min(chunk_end, max(offset, token["start_ms"]))
+            token["end_ms"] = min(chunk_end, max(token["start_ms"], token["end_ms"]))
+        warnings.extend(remove_repetitions(chunk_tokens))
+        chunk_tokens = group_chinese(chunk_tokens, tokenizer)
+        warnings.extend(remove_repetitions(chunk_tokens))
+        tokens.extend(chunk_tokens)
     warnings.extend(finalize_tokens(tokens, start_ms, start_ms + duration_ms))
     payload = {"schema": "zsir-cut/asr-result", "schema_version": "0.1", "input": {"path": str(path), "size_bytes": path.stat().st_size, "fingerprint": input_digest, "channels": [args.channels], "start_ms": start_ms, "duration_ms": duration_ms}, "language": language, "asr": {"name": "qwen3-asr" if engine_used == "local" else "volcengine", "model": asr_name if engine_used == "local" else "volcengine", "version": "0.5.8" if engine_used == "local" else None, "weights_digest": asr_digest if engine_used == "local" else None}, "align": alignment, "tokens": tokens, "runtime": {"seconds": round(time.monotonic() - started, 3), "peak_memory_mb": peak_memory_mb(), "engine_used": engine_used}, "warnings": warnings}
-    cache.parent.mkdir(parents=True, exist_ok=True)
-    cache.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+    if os.getenv("ZSIR_ASR_NO_CACHE") != "1":
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+    return payload
+
+
+def cloud_result(args, cloud):
+    started = time.monotonic()
+    if not os.getenv("ZSIR_VOLC_API_KEY"):
+        raise WorkerError("E_ASR_CLOUD_AUTH", "Volcengine credentials are missing")
+    path = Path(args.input)
+    channels, total_ms = media_info(path)
+    start_ms = milliseconds(args.start or "0")
+    duration_ms = milliseconds(args.duration) if args.duration is not None else total_ms - start_ms
+    if not 0 <= args.channels < channels or start_ms < 0 or duration_ms <= 0 or start_ms + duration_ms > total_ms:
+        raise WorkerError("E_ASR_INPUT", "Audio range is out of bounds")
+    try:
+        hotwords = Path(args.hotwords).read_text().splitlines() if args.hotwords else None
+        hotword_digest = file_sha(args.hotwords) if args.hotwords else None
+    except OSError as exc:
+        raise WorkerError("E_ASR_INPUT", "Cannot read hotwords") from exc
+    input_digest = fingerprint(path)
+    key = cache_key(input_digest, [args.channels], start_ms, duration_ms, args.language, "cloud", None, None, hotword_digest)
+    cache = Path(os.getenv("ZSIR_CACHE_DIR", str(HOME / "cache" / "asr"))) / f"{key}.json"
+    if os.getenv("ZSIR_ASR_NO_CACHE") != "1" and cache.exists():
+        return json.loads(cache.read_text())
+    tokens, language = cloud.transcribe(path, args.channels, start_ms, duration_ms, args.language, hotwords)
+    warnings = finalize_tokens(tokens, start_ms, start_ms + duration_ms)
+    engine = {"name": "volcengine", "model": "bigmodel", "version": None, "weights_digest": None}
+    payload = {"schema": "zsir-cut/asr-result", "schema_version": "0.1", "input": {"path": str(path), "size_bytes": path.stat().st_size,
+        "fingerprint": input_digest, "channels": [args.channels], "start_ms": start_ms, "duration_ms": duration_ms},
+        "language": language, "asr": engine, "align": dict(engine), "tokens": tokens,
+        "runtime": {"seconds": round(time.monotonic() - started, 3), "peak_memory_mb": peak_memory_mb(), "engine_used": "cloud"}, "warnings": warnings}
+    if os.getenv("ZSIR_ASR_NO_CACHE") != "1":
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+    return payload
+
+
+def result(args, local=None, cloud=None):
+    if args.command != "transcribe":
+        return local_result(args, local)
+    payload, _ = choose_engine(args.engine, lambda: local_result(args, local), lambda: cloud_result(args, cloud or CloudEngine()), cloud_fallback_enabled())
     return payload
 
 
@@ -427,7 +530,7 @@ def probe():
     except (ImportError, RuntimeError):
         mlx_available = False
     memory = subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True).stdout.strip() if sys.platform == "darwin" else ""
-    return {"chip": platform.machine(), "memory_bytes": int(memory) if memory.isdigit() else None, "mlx_available": mlx_available, "models": [name for name in (*ASR_NAMES.values(), ALIGN_NAME) if (MODELS / name / "model.safetensors").exists()], "cloud_credentials_configured": bool(os.getenv("ZSIR_VOLC_APP_ID") and os.getenv("ZSIR_VOLC_ACCESS_TOKEN"))}
+    return {"chip": platform.machine(), "memory_bytes": int(memory) if memory.isdigit() else None, "mlx_available": mlx_available, "models": [name for name in (*ASR_NAMES.values(), ALIGN_NAME) if (MODELS / name / "model.safetensors").exists()], "cloud_credentials_configured": bool(os.getenv("ZSIR_VOLC_API_KEY"))}
 
 
 def parser():
@@ -474,6 +577,9 @@ def main(argv=None):
     except Exception as exc:
         code = "E_ASR_OOM" if isinstance(exc, MemoryError) else "E_ASR_INTERNAL"
         payload = {"schema": "zsir-cut/asr-error", "schema_version": "0.1", "code": code, "message": str(exc), "retryable": isinstance(exc, MemoryError)}
+    secret = os.getenv("ZSIR_VOLC_API_KEY")
+    if secret:
+        payload["message"] = payload["message"].replace(secret, "[redacted]")
     if args.command == "eval":
         destination = Path(args.out) / "error.json"
         destination.parent.mkdir(parents=True, exist_ok=True)

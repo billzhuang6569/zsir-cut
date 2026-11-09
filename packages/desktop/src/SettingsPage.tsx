@@ -4,6 +4,7 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type Action, actions, presets } from "../../app-host/src/keymap.js";
 import type { Preferences } from "../../app-host/src/preferences.js";
+import { AsrSettings } from "./AsrSettings.js";
 import { Icon, IconButton } from "./components.js";
 import type { HostPush, Subscribe } from "./connection.js";
 import { actionLabels, displayKey, recordedKey } from "./settings-keymap.js";
@@ -61,7 +62,6 @@ export function SettingsPage({
   subscribe,
   close,
   onPrefs,
-  openRecognition,
   projectPath,
   initialPage = "通用",
 }: {
@@ -652,21 +652,8 @@ export function SettingsPage({
             </>
           )}
           {page === "语音" && <VoiceSettings embedded call={call} close={close} />}
-          {page === "字幕识别" && (
-            <>
-              <p className="zc-muted">识别语言、参考文本和专有名词在工程的字幕面板中设置。</p>
-              <button
-                type="button"
-                className="zc-btn"
-                disabled={!projectPath}
-                onClick={() => {
-                  close();
-                  openRecognition();
-                }}
-              >
-                打开字幕识别
-              </button>
-            </>
+          {page === "字幕识别" && prefs && (
+            <AsrSettings call={call} subscribe={subscribe} prefs={prefs.prefs} save={save} />
           )}
           {page === "通用" && (
             <p className="zc-muted">剪辑习惯可在「快捷键」中设置，预览选项可在「预览与缓存」中设置。</p>

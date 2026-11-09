@@ -17,6 +17,8 @@ import { z } from "zod";
 import type { DispatchOptions, Envelope, SubtitleStyle, Verb } from "../../core/dist/index.js";
 import { AgentManagement, type AgentManagementOptions } from "./agent-management.js";
 import { Agents } from "./agents.js";
+import { ASR_VERBS, AsrSettings } from "./asr.js";
+import { AsrModels } from "./asr-models.js";
 import { exportPreferences } from "./export-preferences.js";
 import { mediaChannel, runFfmpeg } from "./media.js";
 import { type HostEnvelope, Permissions, permissionDenied } from "./permissions.js";
@@ -414,6 +416,10 @@ export async function startHost(
     },
     options.agentOptions,
   );
+  const asrModels = new AsrModels((event) => {
+    if (ui?.readyState === WebSocket.OPEN) ui.send(JSON.stringify(event));
+  });
+  const asr = new AsrSettings(prefs, asrModels);
   const permissions = new Permissions(() =>
     ui?.readyState === WebSocket.OPEN ? (request) => ui?.send(JSON.stringify(request)) : undefined,
   );
@@ -598,6 +604,7 @@ export async function startHost(
         if (
           typeof message.id === "string" &&
           [
+            ...ASR_VERBS,
             "prefs_get",
             "prefs_set",
             "permission_answer",
@@ -617,7 +624,12 @@ export async function startHost(
           };
           try {
             let reply: { status: string; result: unknown };
-            if (message.verb.startsWith("preview_cache_")) {
+            if (ASR_VERBS.includes(message.verb)) {
+              reply = {
+                status: message.verb === "asr_status" || message.verb === "asr_test" ? "no_op" : "applied",
+                result: await asr.handle(message.verb, message.request ?? {}),
+              };
+            } else if (message.verb.startsWith("preview_cache_")) {
               const request = message.request ?? {};
               if (message.verb === "preview_cache_clear") {
                 const parsed = z
@@ -669,7 +681,11 @@ export async function startHost(
               status: code === "E_VALIDATION" ? "rejected" : "failed",
               result: null,
               verification: { level: "none", passed: false, issues: [] },
-              error: { code, message: String(error), retryable: false },
+              error: {
+                code,
+                message: ASR_VERBS.includes(message.verb) ? "字幕识别设置未能完成，请重试" : String(error),
+                retryable: false,
+              },
             };
           }
           client.send(JSON.stringify({ type: "result", id: message.id, envelope }));
@@ -1007,6 +1023,7 @@ export async function startHost(
     mcp,
     close: async () => {
       permissions.clear();
+      await asrModels.close();
       await cache.close();
       await subtitlePass?.stop();
       await agents?.stop();
