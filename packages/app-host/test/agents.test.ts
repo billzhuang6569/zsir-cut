@@ -2,19 +2,25 @@ import { readFileSync } from "node:fs";
 import { mkdtemp, readFile, realpath, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type AgentKind, agentParser, type ChatEvent } from "../src/agent-events.js";
 import { Agents } from "../src/agents.js";
 
 const directories: string[] = [];
 const managers: Agents[] = [];
+beforeEach(() => {
+  for (const key of Object.keys(process.env)) {
+    if (/^(https_proxy|http_proxy|all_proxy|no_proxy)$/i.test(key)) vi.stubEnv(key, undefined);
+  }
+});
 afterEach(async () => {
   await Promise.all(managers.splice(0).map((manager) => manager.stop()));
   await Promise.all(
     directories.splice(0).map((path) => rm(path, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })),
   );
+  vi.unstubAllEnvs();
 });
-async function fixture(agent: AgentKind, mode = "normal") {
+async function fixture(agent: AgentKind, mode = "normal", stderrLines: string[] = []) {
   const directory = await mkdtemp(join(tmpdir(), "zcut37-test-"));
   directories.push(directory);
   const script = join(directory, agent);
@@ -26,7 +32,7 @@ import {readFileSync,writeFileSync,statSync} from 'node:fs';
 const args=process.argv.slice(2);
 if(args.includes('--version')) { console.log('${agent} test-version'); process.exit(0); }
 const config=args[args.indexOf('--mcp-config')+1];
-writeFileSync(${JSON.stringify(capture)},JSON.stringify({args,cwd:process.cwd(),config:${agent === "claude" ? "config,mode:statSync(config).mode&0o777,body:JSON.parse(readFileSync(config,'utf8'))" : "null"}}));
+writeFileSync(${JSON.stringify(capture)},JSON.stringify({args,cwd:process.cwd(),env:process.env,config:${agent === "claude" ? "config,mode:statSync(config).mode&0o777,body:JSON.parse(readFileSync(config,'utf8'))" : "null"}}));
 let input='';process.stdin.on('data',chunk=>input+=chunk);
 process.stdin.resume();
 process.stdin.on('end',()=> {
@@ -72,6 +78,7 @@ const events=${JSON.stringify(
             { type: "turn.completed" },
           ],
     )};
+process.stderr.write(${JSON.stringify(stderrLines.length ? `${stderrLines.join("\n")}\n` : "")});
 if (${JSON.stringify(mode)} === 'error') { process.stderr.write('not logged in\\n'); process.exitCode=1; return; }
 if (${JSON.stringify(mode)} === 'suggestion') {
 const text='\\n【下一步】 继续剪辑';
@@ -90,6 +97,7 @@ if (${JSON.stringify(mode)} === 'stop') setInterval(()=>{},1000);
     url: "http://127.0.0.1:12345/mcp",
     token: "test-token",
     commands: { claude: script, codex: script },
+    proxy: () => "http://localhost:7890",
     emit: (chat, event) => {
       if (event.type === "end")
         expect(
@@ -133,6 +141,8 @@ describe("local agent conversations with fake executables", () => {
       });
       expect(await reopened.list()).toEqual([{ id: chat.id, agent, title: "做粗剪", updated_at: expect.any(String) }]);
       const details = JSON.parse(await readFile(capture, "utf8"));
+      expect(details.env).toMatchObject({ HTTPS_PROXY: "http://localhost:7890", http_proxy: "http://localhost:7890" });
+      expect(details.env.NO_PROXY).toContain("127.0.0.1");
       expect(details.input).toContain("所有输出都必须使用用户使用的语言");
       expect(details.input).toContain("包括调用工具前后的说明、过渡句、进度说明和最终回复");
       expect(details.input).toContain("用户用中文时全部用中文");
@@ -163,6 +173,45 @@ describe("local agent conversations with fake executables", () => {
         expect(resumed.args.indexOf("--skip-git-repo-check")).toBeLessThan(resumed.args.indexOf("resume"));
       }
     }, 35000);
+
+  it.each(["claude", "codex"] as const)(
+    "%s: treats stderr as redacted logs on successful exit",
+    async (agent) => {
+      const stderr = ["ERROR model refresh failed: test-token", "diagnostic test-token test-token", "", " \t "];
+      const { manager, events } = await fixture(agent, "normal", stderr);
+      const chat = await manager.send(agent, "hi");
+      await vi.waitFor(() => expect(events.at(-1)?.type).toBe("end"), { timeout: 15000, interval: 10 });
+      for (const line of stderr)
+        expect(events).toContainEqual({ type: "log", text: line.replaceAll("test-token", "[redacted]") });
+      expect(events.filter((event) => event.type === "error")).toEqual([]);
+      expect((await manager.history(chat.id)).events).toEqual(events);
+      expect(JSON.stringify(events)).not.toContain("test-token");
+    },
+    20000,
+  );
+
+  it.each(["claude", "codex"] as const)(
+    "%s: reports only the last five nonempty stderr lines on failure",
+    async (agent) => {
+      const stderr = [
+        ...Array.from({ length: 25 }, (_, index) => `diagnostic ${index}`),
+        "",
+        " \t ",
+        "test-token test-token",
+        "",
+      ];
+      const { manager, events } = await fixture(agent, "error", stderr);
+      const chat = await manager.send(agent, "hi");
+      await vi.waitFor(() => expect(events.at(-1)?.type).toBe("end"), { timeout: 15000, interval: 10 });
+      expect(events.filter((event) => event.type === "error")).toEqual([
+        { type: "error", text: "diagnostic 22\ndiagnostic 23\ndiagnostic 24\n[redacted] [redacted]\nnot logged in" },
+        { type: "error", text: "Agent 退出（1），请检查 CLI 输出和版本" },
+      ]);
+      expect((await manager.history(chat.id)).events).toEqual(events);
+      expect(JSON.stringify(events)).not.toContain("test-token");
+    },
+    20000,
+  );
 
   it("stops a running agent, deletes configuration, and prevents overlapping sends", async () => {
     const { manager, events, capture } = await fixture("claude", "stop");
@@ -277,7 +326,7 @@ const {writeFileSync}=require('node:fs');
 const args=process.argv.slice(2); let input='';
 process.stdin.on('data',chunk=>input+=chunk);
 process.stdin.on('end',()=>{
-writeFileSync(${JSON.stringify(capture)},JSON.stringify({args,input,cwd:process.cwd()}));
+writeFileSync(${JSON.stringify(capture)},JSON.stringify({args,input,cwd:process.cwd(),env:process.env}));
 const result='{"lines":["字幕"]}';
 if(args.includes('--output-last-message')) writeFileSync(args[args.indexOf('--output-last-message')+1],result);
 else process.stdout.write(JSON.stringify({result,is_error:false}));
@@ -291,10 +340,13 @@ else process.stdout.write(JSON.stringify({result,is_error:false}));
     token: "unused",
     emit: () => {},
     commands: { claude: script, codex: script },
+    proxy: () => "http://localhost:7890",
   });
   const result = await manager.subtitlePass(agent, "只输出 JSON", new AbortController().signal);
   expect(JSON.parse(result)).toEqual({ lines: ["字幕"] });
   const captured = JSON.parse(await readFile(capture, "utf8"));
+  expect(captured.env).toMatchObject({ HTTPS_PROXY: "http://localhost:7890", http_proxy: "http://localhost:7890" });
+  expect(captured.env.NO_PROXY).toContain("localhost");
   expect(captured.input).toBe("只输出 JSON");
   expect(captured.cwd).not.toBe(directory);
   await expect(stat(captured.cwd)).rejects.toMatchObject({ code: "ENOENT" });

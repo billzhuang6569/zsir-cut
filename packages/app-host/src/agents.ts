@@ -7,6 +7,7 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { type AgentKind, agentParser, type ChatEvent } from "./agent-events.js";
 import { findProgram, programVersion, spawnProgram } from "./agent-management.js";
+import { proxyEnvironment } from "./proxy.js";
 import { hostPath } from "./runtime.js";
 
 export interface Chat {
@@ -33,6 +34,7 @@ export class Agents {
       emit: (chat: string, event: ChatEvent) => void;
       commands?: Record<AgentKind, string>;
       directories?: string[];
+      proxy?: () => string;
     },
   ) {}
   private async command(agent: AgentKind) {
@@ -44,7 +46,7 @@ export class Agents {
     return Promise.all(
       (["claude", "codex"] as const).map(async (agent) => {
         const path = await this.command(agent).catch(() => null);
-        const version = await programVersion(path);
+        const version = await programVersion(path, this.options.proxy?.());
         return { agent, available: version !== null, version };
       }),
     );
@@ -177,7 +179,7 @@ export class Agents {
         windowsHide: true,
         cwd: dirname(this.options.project),
         stdio: ["pipe", "pipe", "pipe"],
-        env: { ...process.env, PATH: hostPath(), ZCUT_MCP_TOKEN: this.options.token },
+        env: { ...proxyEnvironment(this.options.proxy?.()), PATH: hostPath(), ZCUT_MCP_TOKEN: this.options.token },
       });
       const parse = agentParser(agent, (event) => {
         if (event.type !== "end") emit(event);
@@ -185,7 +187,13 @@ export class Agents {
       const output = createInterface({ input: child.stdout });
       output.on("line", parse);
       const stderr = createInterface({ input: child.stderr });
-      stderr.on("line", (line) => emit({ type: "error", text: line.replaceAll(this.options.token, "[redacted]") }));
+      const stderrLines: string[] = [];
+      stderr.on("line", (line) => {
+        const text = line.replaceAll(this.options.token, "[redacted]");
+        stderrLines.push(text);
+        if (stderrLines.length > 20) stderrLines.shift();
+        emit({ type: "log", text });
+      });
       emit({ type: "user", text });
       const temp = directory;
       const done = new Promise<void>((resolve) => {
@@ -194,7 +202,14 @@ export class Agents {
           void (async () => {
             try {
               parse.finish();
-              if (code && !signal) emit({ type: "error", text: `Agent 退出（${code}），请检查 CLI 输出和版本` });
+              if (code && !signal) {
+                const detail = stderrLines
+                  .filter((line) => line.trim())
+                  .slice(-5)
+                  .join("\n");
+                if (detail) emit({ type: "error", text: detail });
+                emit({ type: "error", text: `Agent 退出（${code}），请检查 CLI 输出和版本` });
+              }
               await rm(temp, { recursive: true, force: true });
               await this.writes;
             } catch (error) {
@@ -285,7 +300,7 @@ export class Agents {
           cwd: directory,
           stdio: ["pipe", "pipe", "pipe"],
           detached: process.platform !== "win32",
-          env: { ...process.env, PATH: hostPath() },
+          env: { ...proxyEnvironment(this.options.proxy?.()), PATH: hostPath() },
         });
         // CLI launchers can spawn another process; kill the whole group on timeout.
         const kill = () => {

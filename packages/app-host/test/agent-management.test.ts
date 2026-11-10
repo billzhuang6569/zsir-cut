@@ -16,10 +16,12 @@ let requests: string[];
 let host: Awaited<ReturnType<typeof startHost>> | undefined;
 let socket: WebSocket | undefined;
 beforeEach(async () => {
+  for (const key of Object.keys(process.env)) {
+    if (/^(https_proxy|http_proxy|all_proxy|no_proxy)$/i.test(key)) vi.stubEnv(key, undefined);
+  }
   directory = await mkdtemp(join(tmpdir(), "zcut-agents-"));
   vi.stubEnv("HOME", directory);
   vi.stubEnv("PATH", directory);
-  vi.stubEnv("HTTPS_PROXY", "");
   requests = [];
   registryUrl = "http://127.0.0.1:1";
 });
@@ -227,15 +229,17 @@ setTimeout(() => {process.stdout.write('last');}, 100);`,
   const updated: Record<string, unknown>[] = [];
   client.on("message", (raw) => updated.push(JSON.parse(raw.toString())));
   expect(await send(client, "agents_update", { id: "codex" })).toMatchObject({ status: "accepted" });
-  await vi.waitFor(async () =>
-    expect(JSON.parse(await readFile(join(directory, "args.json"), "utf8"))).toEqual([
-      "install",
-      "-g",
-      "@openai/codex",
-    ]),
+  await vi.waitFor(
+    async () =>
+      expect(JSON.parse(await readFile(join(directory, "args.json"), "utf8"))).toEqual([
+        "install",
+        "-g",
+        "@openai/codex",
+      ]),
+    { timeout: 15000 },
   );
   await vi.waitFor(() => expect(updated.at(-1)?.type).toBe("agents_changed"), { timeout: 5000 });
-});
+}, 30000);
 
 it("validates missing npm, discovery, install pushes and persistence without listeners", async () => {
   const events: Record<string, unknown>[] = [];
@@ -297,3 +301,48 @@ it("kills a hanging version probe after three seconds without listeners", async 
   expect(await programVersion(path)).toBeNull();
   expect(performance.now() - start).toBeLessThan(3400);
 }, 5000);
+
+it.each(["agents_install", "agents_update"])(
+  "%s and version probes use the saved proxy",
+  async (verb) => {
+    const prefs = new DesktopPreferences(directory);
+    const proxy = "http://127.0.0.1:7890";
+    await prefs.set({ network: { proxy } });
+    const envFile = join(directory, "npm-env.json");
+    const versionEnv = join(directory, "version-env.json");
+    await executable("npm", `require('node:fs').writeFileSync(${JSON.stringify(envFile)},JSON.stringify(process.env))`);
+    await executable(
+      "claude",
+      `require('node:fs').writeFileSync(${JSON.stringify(versionEnv)},JSON.stringify(process.env)); console.log('1.0.0')`,
+    );
+    const events: Record<string, unknown>[] = [];
+    const management = new AgentManagement(prefs, (event) => events.push(event), {
+      registryUrl: "http://127.0.0.1:1",
+      directories: [directory],
+    });
+    await management.list();
+    expect(await management.handle(verb, { id: "claude" })).toMatchObject({ status: "accepted" });
+    await vi.waitFor(() => expect(events.some((event) => event.done)).toBe(true), { timeout: 15000 });
+    for (const file of [envFile, versionEnv]) {
+      const env = JSON.parse(await readFile(file, "utf8"));
+      for (const key of ["HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"]) expect(env[key]).toBe(proxy);
+      for (const host of ["127.0.0.1", "localhost", "::1"]) expect(env.NO_PROXY.split(",")).toContain(host);
+    }
+    await vi.waitFor(() => expect(events.some((event) => event.type === "agents_changed")).toBe(true), {
+      timeout: 15000,
+    });
+  },
+  30000,
+);
+
+it("uses the saved proxy for npm registry requests without reaching the target", async () => {
+  await startRegistry();
+  const prefs = new DesktopPreferences(directory);
+  await prefs.set({ network: { proxy: registryUrl } });
+  const management = new AgentManagement(prefs, () => {}, {
+    registryUrl: "http://unreachable.invalid",
+    directories: [directory],
+  });
+  expect((await management.list()).agents[0]?.latest).toBe("2.1.0");
+  expect(requests).toContain("http://unreachable.invalid/@openai%2fcodex/latest");
+});

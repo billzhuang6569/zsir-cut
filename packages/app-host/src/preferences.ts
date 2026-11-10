@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { z } from "zod";
 import { actions, keyNotation, mergeKeymap } from "./keymap.js";
+import { proxyFormatMessage, validProxy } from "./proxy.js";
 
 const { recommendedAsrModel, desktopPreferencesDirectory }: typeof import("../../core/dist/asr-settings.js") =
   await import(
@@ -46,10 +47,12 @@ const previewCache = z.strictObject({
   pause_on_battery: z.boolean(),
 });
 const asr = z.strictObject({ mode: z.enum(["local", "api"]), model: z.enum(["1.7b", "0.6b"]) });
+const network = z.strictObject({ proxy: z.string().trim().refine(validProxy, proxyFormatMessage) });
 const preferences = z.strictObject({
   schema: z.literal("zsir-cut/desktop"),
   version: z.number().int().min(2),
   asr,
+  network,
   default_agent: z.enum(["claude", "codex"]).nullable(),
   keymap,
   preview_cache: previewCache,
@@ -58,6 +61,7 @@ const preferences = z.strictObject({
 const patchSchema = preferences.partial().extend({
   version: z.literal(2).optional(),
   asr: asr.partial().optional(),
+  network: network.partial().optional(),
   keymap: keymap.partial().optional(),
   preview_cache: previewCache.partial().optional(),
   ui: ui.partial().extend({ chapters: chapters.partial().optional(), layout: layout.partial().optional() }).optional(),
@@ -67,6 +71,7 @@ export const defaultPreferences: Preferences = {
   schema: "zsir-cut/desktop",
   version: 2,
   default_agent: null,
+  network: { proxy: "" },
   asr: { mode: "local", model: recommendedAsrModel() },
   keymap: { preset: "fcp", overrides: {} },
   preview_cache: {
