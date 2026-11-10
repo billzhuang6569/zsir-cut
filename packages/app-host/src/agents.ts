@@ -161,6 +161,7 @@ export class Agents {
           : [
               "exec",
               "--json",
+              "--skip-git-repo-check",
               "--sandbox",
               "read-only",
               "-c",
