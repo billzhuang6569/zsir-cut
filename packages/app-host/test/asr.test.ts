@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createAsrKeychain } from "../../core/src/asr-keychain.ts";
 import { AsrSettings, asrTestReason } from "../src/asr.js";
 import {
@@ -17,6 +17,11 @@ import {
 import { DesktopPreferences } from "../src/preferences.js";
 
 const directories: string[] = [];
+beforeEach(() => {
+  for (const key of Object.keys(process.env)) {
+    if (/^(https_proxy|http_proxy|all_proxy|no_proxy)$/i.test(key)) vi.stubEnv(key, undefined);
+  }
+});
 afterEach(async () => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
@@ -82,7 +87,7 @@ it("resumes partial files, verifies SHA-256, reuses the aligner and deletes it o
   try {
     await models.download("1.7b");
     await waitFor(models, "ready");
-    expect(http).toHaveBeenCalledWith(expect.stringContaining("model.safetensors"), expect.any(AbortSignal), 3);
+    expect(http).toHaveBeenCalledWith(expect.stringContaining("model.safetensors"), expect.any(AbortSignal), 3, "");
     expect(await readFile(join(directory, modelNames["1.7b"], "model.safetensors"), "utf8")).toBe("weights");
     vi.mocked(http).mockClear();
     await models.download("0.6b");
@@ -230,4 +235,30 @@ it("requests cloud permission for API auto, while explicit local and local auto 
   await prefs.set({ asr: { mode: "local" } });
   expect(await gate.request("transcribe", {}, project, async () => parsed.project)).toBeNull();
   expect(prompts).toHaveLength(1);
+});
+
+it("snapshots the saved proxy for each download and keeps active requests on that snapshot", async () => {
+  const directory = await folder();
+  const prefs = new DesktopPreferences(directory);
+  await prefs.set({ network: { proxy: "http://localhost:7890" } });
+  const http = modelHttp();
+  const used: string[] = [];
+  const request: ModelRequest = async (url, signal, offset, proxy) => {
+    used.push(proxy ?? "");
+    if (used.length === 1) await prefs.set({ network: { proxy: "http://localhost:7891" } });
+    return http(url, signal, offset);
+  };
+  const models = new AsrModels(vi.fn(), directory, request, () => prefs.get().prefs.network.proxy);
+  try {
+    await models.download("1.7b");
+    await waitFor(models, "ready");
+    expect(used.length).toBeGreaterThan(1);
+    expect(new Set(used)).toEqual(new Set(["http://localhost:7890"]));
+    used.length = 0;
+    await models.download("0.6b");
+    await waitFor(models, "ready", "0.6b");
+    expect(new Set(used)).toEqual(new Set(["http://localhost:7891"]));
+  } finally {
+    await models.close();
+  }
 });

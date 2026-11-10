@@ -10,6 +10,7 @@ import { createInterface } from "node:readline";
 import { z } from "zod";
 import type { AgentKind } from "./agent-events.js";
 import type { DesktopPreferences } from "./preferences.js";
+import { proxyEnvironment } from "./proxy.js";
 import { commonProgramDirectories, hostPath } from "./runtime.js";
 
 export const spawnProgram: typeof nodeSpawn = createRequire(import.meta.url)("cross-spawn");
@@ -43,14 +44,14 @@ export async function findProgram(name: string, directories = agentDirectories()
   }
   return null;
 }
-export async function programVersion(path: string | null) {
+export async function programVersion(path: string | null, proxy = "") {
   if (!path) return null;
   try {
     const stdout = await new Promise<string>((resolve, reject) => {
       const child = spawnProgram(path, ["--version"], {
         windowsHide: true,
         stdio: ["ignore", "pipe", "ignore"],
-        env: { ...process.env, PATH: hostPath() },
+        env: { ...proxyEnvironment(proxy), PATH: hostPath() },
       });
       let output = "";
       const timer = setTimeout(() => {
@@ -127,9 +128,8 @@ export class AgentManagement {
         `${this.options.registryUrl ?? "https://registry.npmjs.org"}/`,
       );
       const transport = url.protocol === "https:" ? https : http;
-      agent = new transport.Agent({
-        proxyEnv: { HTTPS_PROXY: process.env.HTTPS_PROXY, HTTP_PROXY: process.env.HTTPS_PROXY },
-      });
+      const env = proxyEnvironment(this.prefs.get().prefs.network.proxy);
+      agent = new transport.Agent({ proxyEnv: { ...env, HTTP_PROXY: env.HTTP_PROXY || env.HTTPS_PROXY } });
       const value = await new Promise<string | null>((resolve) => {
         const request = transport.get(url, { agent, signal: AbortSignal.timeout(3000) }, (response) => {
           let body = "";
@@ -167,7 +167,7 @@ export class AgentManagement {
               const [local, latest] = await Promise.all([
                 findProgram(id, this.options.directories).then(async (path) => ({
                   path,
-                  version: await programVersion(path),
+                  version: await programVersion(path, this.prefs.get().prefs.network.proxy),
                 })),
                 this.latest(programs[id].package),
               ]);
@@ -230,7 +230,7 @@ export class AgentManagement {
                 {
                   windowsHide: true,
                   stdio: ["ignore", "pipe", "pipe"],
-                  env: { ...process.env, PATH: hostPath() },
+                  env: { ...proxyEnvironment(this.prefs.get().prefs.network.proxy), PATH: hostPath() },
                 },
               );
               for (const stream of ["stdout", "stderr"] as const) {

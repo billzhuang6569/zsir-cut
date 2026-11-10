@@ -25,6 +25,9 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ revealItemInDir: vi.fn() }));
 const cleanup: (() => Promise<void>)[] = [];
 beforeEach(() => {
+  for (const key of Object.keys(process.env)) {
+    if (/^(https_proxy|http_proxy|all_proxy|no_proxy)$/i.test(key)) vi.stubEnv(key, undefined);
+  }
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   vi.mocked(isTauri).mockReturnValue(false);
   Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
@@ -38,6 +41,7 @@ afterEach(async () => {
   for (const close of cleanup.splice(0)) await close();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 const agentList = () => ({
   npm: "/bin/npm" as string | null,
@@ -84,6 +88,7 @@ async function mount(
     earlyOutput?: boolean;
     initialPage?: "通用" | "Agent";
     app?: boolean;
+    networkFail?: boolean;
   } = {},
 ) {
   const dir = await mkdtemp(join(tmpdir(), "u312-settings-"));
@@ -101,6 +106,23 @@ async function mount(
     };
   });
   const respond = async (verb: string, request: Record<string, unknown>): Promise<unknown> => {
+    if (verb === "network_test")
+      return {
+        results: [
+          {
+            id: "claude",
+            ok: !options.networkFail,
+            ms: 400,
+            reason: options.networkFail ? "连不上代理 127.0.0.1:7899。检查代理软件有没有打开，端口对不对。" : null,
+          },
+          {
+            id: "codex",
+            ok: !options.networkFail,
+            ms: 600,
+            reason: options.networkFail ? "8 秒内没有响应。检查代理是否能访问外网。" : null,
+          },
+        ],
+      };
     if (verb === "prefs_get") return prefs.get();
     if (verb === "prefs_set") {
       if (options.failSave) throw new Error("unavailable");
@@ -705,4 +727,56 @@ it.each(["close", "disconnect"])("rejects queued requests on %s before bootstrap
   await expect(pending).rejects.toThrow("宿主连接已断开");
   await expect(host.call("agents_list", {})).rejects.toThrow("宿主连接已断开");
   host();
+});
+
+it.each([false, true])("shows network test success/failure (%s) with the design copy", async (networkFail) => {
+  const style = document.createElement("style");
+  style.textContent = ["shell.css", "settings.css"]
+    .map((file) => readFileSync(new NodeURL(`../src/${file}`, import.meta.url), "utf8"))
+    .join("\n");
+  document.head.append(style);
+  cleanup.push(async () => style.remove());
+  const h = await mount({ initialPage: "通用", networkFail });
+  expect(h.container.textContent).toContain("AI 面板、字幕整理和一键安装 Agent 都通过这个代理联网。留空就直接联网。");
+  await h.input("代理地址", "http://127.0.0.1:7899");
+  await h.click("测试连接");
+  expect(h.call).toHaveBeenCalledWith("network_test", { proxy: "http://127.0.0.1:7899" });
+  expect(h.container.textContent).toContain(
+    networkFail ? "连不上代理 127.0.0.1:7899。检查代理软件有没有打开，端口对不对。" : "能连上，用了 0.4 秒",
+  );
+  expect(h.container.textContent).toContain(
+    networkFail ? "8 秒内没有响应。检查代理是否能访问外网。" : "能连上，用了 0.6 秒",
+  );
+  const dots = h.container.querySelectorAll(".zc-network-result .zc-dot");
+  expect(dots).toHaveLength(2);
+  for (const dot of dots) {
+    expect(dot.classList.contains(networkFail ? "is-danger" : "is-approved")).toBe(true);
+    expect(getComputedStyle(dot).background).toBe(networkFail ? "var(--danger)" : "var(--approved)");
+  }
+  await h.click("再测一次");
+  expect(h.call.mock.calls.filter(([verb]) => verb === "network_test")).toHaveLength(2);
+});
+it("saves the proxy on blur or Enter, trims whitespace and keeps malformed input unsaved", async () => {
+  const h = await mount({ initialPage: "通用" });
+  await h.input("代理地址", "  http://localhost:7890  ");
+  await act(async () => h.find("代理地址").dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
+  await h.settle();
+  expect(h.prefs.get().prefs.network.proxy).toBe("http://localhost:7890");
+  await h.input("代理地址", "socks5://localhost:7890");
+  await act(async () =>
+    h.find("代理地址").dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })),
+  );
+  await h.click("测试连接");
+  expect(h.find("代理地址").getAttribute("aria-invalid")).toBe("true");
+  expect(h.container.textContent).toContain("地址格式不对，例如 http://127.0.0.1:7890");
+  expect(h.prefs.get().prefs.network.proxy).toBe("http://localhost:7890");
+  expect(h.call).not.toHaveBeenCalledWith("network_test", expect.anything());
+  await h.input("代理地址", "  ");
+  await act(async () =>
+    h.find("代理地址").dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })),
+  );
+  await h.settle();
+  expect(h.prefs.get().prefs.network.proxy).toBe("");
+  expect(h.find("代理地址").getAttribute("aria-invalid")).toBe("false");
+  expect(h.container.textContent).toContain("剪辑习惯可在「快捷键」中设置，预览选项可在「预览与缓存」中设置。");
 });

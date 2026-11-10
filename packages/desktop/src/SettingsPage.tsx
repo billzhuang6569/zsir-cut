@@ -1,9 +1,10 @@
 import { isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { type Action, actions, presets } from "../../app-host/src/keymap.js";
 import type { Preferences } from "../../app-host/src/preferences.js";
+import { proxyFormatMessage, validProxy } from "../../app-host/src/proxy.js";
 import { AsrSettings } from "./AsrSettings.js";
 import { Icon, IconButton } from "./components.js";
 import type { HostPush, Subscribe } from "./connection.js";
@@ -73,6 +74,7 @@ export function SettingsPage({
   projectPath: string | null;
   initialPage?: (typeof pages)[number][0];
 }) {
+  const proxyId = useId();
   const dialog = useRef<HTMLDialogElement>(null);
   const [page, setPage] = useState<string>(initialPage);
   const [prefs, setPrefs] = useState<PrefsResult | null>(null);
@@ -80,6 +82,14 @@ export function SettingsPage({
   const [agents, setAgents] = useState<AgentList | null>(null);
   const [cache, setCache] = useState<CacheStatus | null>(null);
   const [directory, setDirectory] = useState("");
+  const [proxy, setProxy] = useState("");
+  const [proxyError, setProxyError] = useState("");
+  const [testing, setTesting] = useState(false);
+  const testingProxy = useRef(false);
+  const savingProxy = useRef<string | null>(null);
+  const [networkResults, setNetworkResults] = useState<
+    { id: "claude" | "codex"; ok: boolean; ms: number; reason: string | null }[] | null
+  >(null);
   const cacheDirectory = useRef<string | null>(null);
   const [search, setSearch] = useState("");
   const [recording, setRecording] = useState<Action | null>(null);
@@ -128,6 +138,7 @@ export function SettingsPage({
         if (disposed) return;
         const result = value as PrefsResult;
         acceptPrefs(result);
+        setProxy(result.prefs.network.proxy);
         setDirectory(result.preview_cache_directory);
       })
       .catch(() => {
@@ -189,6 +200,43 @@ export function SettingsPage({
   };
   const save = async (patch: Record<string, unknown>) => {
     acceptPrefs((await call("prefs_set", { patch })) as PrefsResult);
+  };
+  const checkProxy = () => {
+    const valid = validProxy(proxy);
+    setProxyError(valid ? "" : proxyFormatMessage);
+    return valid;
+  };
+  const saveProxy = async () => {
+    if (!prefs || !checkProxy()) return;
+    const value = proxy.trim();
+    setProxy(value);
+    if ((value === prefs.prefs.network.proxy && savingProxy.current === null) || savingProxy.current === value) return;
+    savingProxy.current = value;
+    try {
+      await save({ network: { proxy: value } });
+    } catch {
+      setError("未能完成，请重试");
+    } finally {
+      if (savingProxy.current === value) savingProxy.current = null;
+    }
+  };
+  const testNetwork = async () => {
+    if (testingProxy.current || !checkProxy()) return;
+    testingProxy.current = true;
+    setTesting(true);
+    setNetworkResults(null);
+    setError("");
+    try {
+      const result = (await call("network_test", { proxy: proxy.trim() })) as {
+        results: NonNullable<typeof networkResults>;
+      };
+      setNetworkResults(result.results);
+    } catch {
+      setError("未能完成，请重试");
+    } finally {
+      testingProxy.current = false;
+      setTesting(false);
+    }
   };
   const install = (agent: Agent) =>
     run(async () => {
@@ -656,7 +704,78 @@ export function SettingsPage({
             <AsrSettings call={call} subscribe={subscribe} prefs={prefs.prefs} save={save} />
           )}
           {page === "通用" && (
-            <p className="zc-muted">剪辑习惯可在「快捷键」中设置，预览选项可在「预览与缓存」中设置。</p>
+            <div className="zc-network-settings">
+              <div className="zc-network-intro">
+                <b>网络代理</b>
+                <p className="zc-hint">AI 面板、字幕整理和一键安装 Agent 都通过这个代理联网。留空就直接联网。</p>
+              </div>
+              <div className="zc-field">
+                <label htmlFor={proxyId}>代理地址</label>
+                <input
+                  id={proxyId}
+                  aria-label="代理地址"
+                  className="zc-input mono"
+                  value={proxy}
+                  placeholder="例如 http://127.0.0.1:7890"
+                  disabled={!prefs || testing}
+                  aria-invalid={!!proxyError}
+                  aria-describedby={`${proxyId}-${proxyError ? "error" : "hint"}`}
+                  onChange={(event) => {
+                    setProxy(event.target.value);
+                    setProxyError("");
+                    setNetworkResults(null);
+                  }}
+                  onBlur={() => void saveProxy()}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                      event.preventDefault();
+                      void saveProxy();
+                    }
+                  }}
+                />
+                <span id={`${proxyId}-hint`} className="zc-hint">
+                  填 http 开头的地址，代理软件里一般叫「HTTP 端口」。
+                </span>
+                {proxyError && (
+                  <span id={`${proxyId}-error`} role="alert" className="zc-network-error">
+                    {proxyError}
+                  </span>
+                )}
+              </div>
+              <div className="zc-network-test">
+                <div className="zc-settings-row">
+                  <span className="zc-grow">
+                    <b>测试连接</b>
+                    <span className="zc-hint">检查能不能连上 Claude Code 和 Codex 的服务。</span>
+                  </span>
+                  <button
+                    type="button"
+                    className="zc-btn"
+                    disabled={!prefs || testing}
+                    onClick={() => void testNetwork()}
+                  >
+                    <Icon name="play" size={14} />
+                    {testing ? "测试中…" : networkResults ? "再测一次" : "测试连接"}
+                  </button>
+                </div>
+                <div aria-live="polite" aria-busy={testing}>
+                  {networkResults && (
+                    <div className="zc-network-results">
+                      {networkResults.map((result) => (
+                        <div className="zc-network-result" key={result.id}>
+                          <span className={`zc-dot ${result.ok ? "is-approved" : "is-danger"}`} aria-hidden="true" />
+                          <span className="zc-network-name">{result.id === "claude" ? "Claude Code" : "Codex"}</span>
+                          <span className="zc-network-reason">
+                            {result.ok ? `能连上，用了 ${(result.ms / 1000).toFixed(1)} 秒` : result.reason}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <p className="zc-muted">剪辑习惯可在「快捷键」中设置，预览选项可在「预览与缓存」中设置。</p>
+            </div>
           )}
           {page === "关于" && (
             <>

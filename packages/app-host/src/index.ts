@@ -21,6 +21,7 @@ import { ASR_VERBS, AsrSettings } from "./asr.js";
 import { AsrModels } from "./asr-models.js";
 import { exportPreferences } from "./export-preferences.js";
 import { mediaChannel, runFfmpeg } from "./media.js";
+import { networkTest } from "./network-test.js";
 import { type HostEnvelope, Permissions, permissionDenied } from "./permissions.js";
 import { DesktopPreferences } from "./preferences.js";
 import { PreviewCache } from "./preview-cache.js";
@@ -416,9 +417,14 @@ export async function startHost(
     },
     options.agentOptions,
   );
-  const asrModels = new AsrModels((event) => {
-    if (ui?.readyState === WebSocket.OPEN) ui.send(JSON.stringify(event));
-  });
+  const asrModels = new AsrModels(
+    (event) => {
+      if (ui?.readyState === WebSocket.OPEN) ui.send(JSON.stringify(event));
+    },
+    undefined,
+    undefined,
+    () => prefs.get().prefs.network.proxy,
+  );
   const asr = new AsrSettings(prefs, asrModels);
   const permissions = new Permissions(() =>
     ui?.readyState === WebSocket.OPEN ? (request) => ui?.send(JSON.stringify(request)) : undefined,
@@ -605,6 +611,7 @@ export async function startHost(
           typeof message.id === "string" &&
           [
             ...ASR_VERBS,
+            "network_test",
             "prefs_get",
             "prefs_set",
             "permission_answer",
@@ -624,7 +631,9 @@ export async function startHost(
           };
           try {
             let reply: { status: string; result: unknown };
-            if (ASR_VERBS.includes(message.verb)) {
+            if (message.verb === "network_test") {
+              reply = { status: "no_op", result: await networkTest(message.request) };
+            } else if (ASR_VERBS.includes(message.verb)) {
               reply = {
                 status: message.verb === "asr_status" || message.verb === "asr_test" ? "no_op" : "applied",
                 result: await asr.handle(message.verb, message.request ?? {}),
@@ -970,6 +979,7 @@ export async function startHost(
       agents = new Agents({
         project: options.project,
         projectId: next.id,
+        proxy: () => prefs.get().prefs.network.proxy,
         url: `http://127.0.0.1:${address.port}/mcp`,
         token,
         emit: (chat, event) => {

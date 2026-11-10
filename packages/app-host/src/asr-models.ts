@@ -5,6 +5,7 @@ import https from "node:https";
 import { homedir, totalmem } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
+import { proxyEnvironment } from "./proxy.js";
 
 export type ModelId = "1.7b" | "0.6b";
 export interface ModelProgress {
@@ -25,14 +26,24 @@ export type ModelResponse = AsyncIterable<Uint8Array> & {
   headers: { location?: string | undefined; link?: string | undefined; "content-range"?: string | undefined };
   destroy(): void;
 };
-export type ModelRequest = (url: string, signal: AbortSignal, offset?: number) => Promise<ModelResponse>;
+export type ModelRequest = (
+  url: string,
+  signal: AbortSignal,
+  offset?: number,
+  proxy?: string,
+) => Promise<ModelResponse>;
 export const modelNames = { "1.7b": "Qwen3-ASR-1.7B-8bit", "0.6b": "Qwen3-ASR-0.6B-8bit" };
 export const alignName = "Qwen3-ForcedAligner-0.6B-8bit";
 export const supportedAsr = (platform = process.platform, arch = process.arch) =>
   platform === "darwin" && arch === "arm64";
 const origins = ["https://huggingface.co", "https://hf-mirror.com"];
-export const requestModel: ModelRequest = async (url, signal, offset = 0) => {
-  const agent = new https.Agent({ proxyEnv: { HTTPS_PROXY: process.env.HTTPS_PROXY } });
+export const requestModel = async (
+  url: string,
+  signal: AbortSignal,
+  offset = 0,
+  proxy = "",
+): Promise<ModelResponse> => {
+  const agent = new https.Agent({ proxyEnv: proxyEnvironment(proxy) });
   try {
     for (let redirects = 0; redirects <= 5; redirects++) {
       const response = await new Promise<import("node:http").IncomingMessage>((resolve, reject) => {
@@ -96,6 +107,7 @@ export class AsrModels {
     private push: (event: ModelProgress & { type: "asr_model_progress" }) => void,
     private directory = join(homedir(), ".zsir-cut/models"),
     private request: ModelRequest = requestModel,
+    private proxy: () => string = () => "",
   ) {}
   private emit(model: ModelProgress) {
     const send = () => {
@@ -162,7 +174,9 @@ export class AsrModels {
     const controller = new AbortController();
     model.state = "downloading";
     this.emit(model);
-    const done = this.perform(model, controller.signal)
+    const proxy = this.proxy();
+    const request: ModelRequest = (url, signal, offset) => this.request(url, signal, offset, proxy);
+    const done = this.perform(model, controller.signal, request)
       .catch(() => {
         model.state = "missing";
         model.error = controller.signal.aborted ? null : "下载未完成，请重试";
@@ -174,11 +188,11 @@ export class AsrModels {
       });
     this.active = { id, controller, done };
   }
-  private async list(origin: string, name: string, signal: AbortSignal) {
+  private async list(origin: string, name: string, signal: AbortSignal, request: ModelRequest) {
     let url: string | undefined = `${origin}/api/models/mlx-community/${name}/tree/main?recursive=true&limit=1000`;
     const files: RemoteFile[] = [];
     while (url) {
-      const response = await this.request(url, signal);
+      const response = await request(url, signal);
       if (response.statusCode !== 200) {
         response.destroy();
         throw new Error("无法读取模型清单");
@@ -208,13 +222,14 @@ export class AsrModels {
       throw new Error("模型清单不完整");
     return files;
   }
-  private async perform(model: ModelProgress, signal: AbortSignal) {
+  private async perform(model: ModelProgress, signal: AbortSignal, request: ModelRequest) {
     for (const origin of origins) {
       signal.throwIfAborted();
       try {
         const pending: { name: string; files: RemoteFile[] }[] = [];
         for (const name of [modelNames[model.id], alignName])
-          if (!(await this.installed(name))) pending.push({ name, files: await this.list(origin, name, signal) });
+          if (!(await this.installed(name)))
+            pending.push({ name, files: await this.list(origin, name, signal, request) });
         model.bytes_total = pending.reduce(
           (sum, entry) => sum + entry.files.reduce((sum, file) => sum + file.size, 0),
           0,
@@ -236,7 +251,7 @@ export class AsrModels {
               await rm(path, { force: true });
               offset = 0;
             }
-            const response = await this.request(
+            const response = await request(
               `${origin}/mlx-community/${name}/resolve/main/${file.path.split("/").map(encodeURIComponent).join("/")}`,
               signal,
               offset,

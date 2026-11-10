@@ -15,6 +15,9 @@ let home: string;
 let host: Awaited<ReturnType<typeof startHost>> | undefined;
 const sockets: WebSocket[] = [];
 beforeEach(async () => {
+  for (const key of Object.keys(process.env)) {
+    if (/^(https_proxy|http_proxy|all_proxy|no_proxy)$/i.test(key)) vi.stubEnv(key, undefined);
+  }
   home = await mkdtemp(join(tmpdir(), "zcut-prefs-"));
   vi.stubEnv("HOME", home);
   vi.stubEnv("XDG_DATA_HOME", join(home, ".local/share"));
@@ -181,6 +184,7 @@ it("never advertises or accepts prefs verbs via MCP", async () => {
     await Promise.all([server.connect(a), client.connect(b)]);
     const names = (await client.listTools()).tools.map((tool) => tool.name);
     for (const verb of [
+      "network_test",
       "prefs_get",
       "prefs_set",
       "agents_list",
@@ -495,4 +499,23 @@ it("loads preferences missing skimming without warnings or a version bump and pe
   const saved = await readFile(file, "utf8");
   await expect(restarted.set({ ui: { skimming: "yes" } })).rejects.toThrow();
   expect(await readFile(file, "utf8")).toBe(saved);
+});
+
+it("exposes network_test only to the UI and rejects bad addresses without writing preferences", async () => {
+  const socket = await connect();
+  expect(await send(socket, "network_test", { proxy: "https://host:80" })).toMatchObject({
+    status: "rejected",
+    error: { code: "E_VALIDATION" },
+  });
+  expect(await send(socket, "network_test", { proxy: "http://127.0.0.1:1" })).toMatchObject({
+    status: "no_op",
+    ok: true,
+    result: {
+      results: [
+        { id: "claude", ok: false },
+        { id: "codex", ok: false },
+      ],
+    },
+  });
+  expect((await send(socket, "prefs_get")).result.prefs.network.proxy).toBe("");
 });

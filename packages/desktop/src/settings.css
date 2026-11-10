@@ -427,3 +427,74 @@
 .zc-settings-presets .is-active .zc-meta {
   color: inherit;
 }
+
+.zc-network-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.zc-network-settings b {
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 600;
+}
+.zc-network-intro,
+.zc-network-settings .zc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.zc-network-settings .zc-hint {
+  display: block;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-3);
+}
+.zc-network-settings .mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.zc-network-test {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+}
+.zc-network-test .zc-settings-row {
+  gap: 12px;
+}
+.zc-network-results {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  font-size: 12px;
+  line-height: 18px;
+}
+.zc-network-result {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.zc-network-result .zc-dot {
+  flex: none;
+}
+.zc-network-result .zc-dot.is-danger {
+  background: var(--danger);
+}
+.zc-network-name {
+  width: 96px;
+  flex: none;
+}
+.zc-network-reason {
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.zc-network-error {
+  color: var(--danger);
+  font-size: 12px;
+}
