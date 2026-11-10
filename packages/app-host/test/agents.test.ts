@@ -147,7 +147,10 @@ describe("local agent conversations with fake executables", () => {
         expect(details.args).toEqual(
           expect.arrayContaining(["--strict-mcp-config", "--tools", "", "--allowedTools", "mcp__zsir-cut__*"]),
         );
-      } else expect(details.args).toEqual(expect.arrayContaining(["--sandbox", "read-only", "-c"]));
+      } else {
+        expect(details.args).toEqual(expect.arrayContaining(["--sandbox", "read-only", "--skip-git-repo-check", "-c"]));
+        expect(details.args).not.toContain("resume");
+      }
       events.length = 0;
       await manager.send(agent, "继续", chat.id);
       await vi.waitFor(() => expect(events.at(-1)?.type).toBe("end"), { timeout: 15000, interval: 10 });
@@ -155,6 +158,10 @@ describe("local agent conversations with fake executables", () => {
       expect(resumed.args).toEqual(
         expect.arrayContaining([agent === "claude" ? "--resume" : "resume", "native-session"]),
       );
+      if (agent === "codex") {
+        expect(resumed.args).toContain("--skip-git-repo-check");
+        expect(resumed.args.indexOf("--skip-git-repo-check")).toBeLessThan(resumed.args.indexOf("resume"));
+      }
     }, 35000);
 
   it("stops a running agent, deletes configuration, and prevents overlapping sends", async () => {
@@ -311,6 +318,7 @@ else process.stdout.write(JSON.stringify({result,is_error:false}));
         "--sandbox",
         "read-only",
         "--ignore-user-config",
+        "--skip-git-repo-check",
         "features.shell_tool=false",
         "features.apps=false",
         "mcp_servers={}",
