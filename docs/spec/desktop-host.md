@@ -242,6 +242,14 @@ AI 面板对话和字幕整理都按本节启动 Agent。参数的其余部分�
 
 `<Agent 名>` 是「Claude Code」或「Codex」。宿主日志照旧记下全部 stderr（同样换掉令牌）。
 
+**Agent 自己报的错。** Codex 也会在 stdout 的 JSON 事件里报错（`error` 事件、类型为 `error` 的 item），Claude Code 会在 `result` 里报错。这些文字按下面处理：
+
+- 以 `Reconnecting...` 开头的（Codex 重连中，例如「Reconnecting... 2/5 (unexpected status 401 ...)」）推 `log`，不推 `error`。
+- 其他的推 `error`；和上一条 `error` 文字相同的不重复推。
+- 这些文字（包括重连的）和 stderr 一起作为上表判断原因的依据。例如没登录的 Codex 只在 JSON 事件里报 `401 Unauthorized`，要判成「没登录」。
+
+实测（Codex 0.167.0，没有 `auth.json`）：重连 5 次，每次一条 401 的 `error` 事件，最后一条不带 `Reconnecting` 的 401，然后退出码 1，stderr 只有一行 `ERROR codex_api::endpoint::responses_websocket: failed to connect`。界面应显示：一条 401 原文，再是「Codex 没有登录或登录过期。……」和 stderr 的最后几行。
+
 **没有输出就停止。** Agent 进程连续 10 分钟 stdout 和 stderr 都没有新内容，宿主先发 SIGTERM，5 秒后还在就发 SIGKILL（Mac 结束整个进程组，Windows 用 `taskkill /T /F`），推 `error`「Agent 10 分钟没有响应，已停止。」再推 `end`。等许可闸（第 5 节）回答的时间不算。
 
 ## 5. 许可闸
