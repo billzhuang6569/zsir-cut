@@ -159,6 +159,9 @@ describe("local agent conversations with fake executables", () => {
         );
       } else {
         expect(details.args).toEqual(expect.arrayContaining(["--sandbox", "read-only", "--skip-git-repo-check", "-c"]));
+        const approval = details.args.indexOf('mcp_servers.zsir-cut.default_tools_approval_mode="approve"');
+        expect(approval).toBeGreaterThan(0);
+        expect(details.args[approval - 1]).toBe("-c");
         expect(details.args).not.toContain("resume");
       }
       events.length = 0;
@@ -171,6 +174,10 @@ describe("local agent conversations with fake executables", () => {
       if (agent === "codex") {
         expect(resumed.args).toContain("--skip-git-repo-check");
         expect(resumed.args.indexOf("--skip-git-repo-check")).toBeLessThan(resumed.args.indexOf("resume"));
+        const approval = resumed.args.indexOf('mcp_servers.zsir-cut.default_tools_approval_mode="approve"');
+        expect(approval).toBeGreaterThan(0);
+        expect(resumed.args[approval - 1]).toBe("-c");
+        expect(approval).toBeLessThan(resumed.args.indexOf("resume"));
       }
     }, 35000);
 
