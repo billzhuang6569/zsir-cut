@@ -31,6 +31,7 @@ export type ModelRequest = (
   signal: AbortSignal,
   offset?: number,
   proxy?: string,
+  env?: NodeJS.ProcessEnv,
 ) => Promise<ModelResponse>;
 export const modelNames = { "1.7b": "Qwen3-ASR-1.7B-8bit", "0.6b": "Qwen3-ASR-0.6B-8bit" };
 export const alignName = "Qwen3-ForcedAligner-0.6B-8bit";
@@ -42,8 +43,9 @@ export const requestModel = async (
   signal: AbortSignal,
   offset = 0,
   proxy = "",
+  env = proxyEnvironment(proxy),
 ): Promise<ModelResponse> => {
-  const agent = new https.Agent({ proxyEnv: proxyEnvironment(proxy) });
+  const agent = new https.Agent({ proxyEnv: env });
   try {
     for (let redirects = 0; redirects <= 5; redirects++) {
       const response = await new Promise<import("node:http").IncomingMessage>((resolve, reject) => {
@@ -175,7 +177,9 @@ export class AsrModels {
     model.state = "downloading";
     this.emit(model);
     const proxy = this.proxy();
-    const request: ModelRequest = (url, signal, offset) => this.request(url, signal, offset, proxy);
+    const { HTTPS_PROXY, HTTP_PROXY, https_proxy, http_proxy, NO_PROXY, no_proxy } = proxyEnvironment(proxy);
+    const env = { HTTPS_PROXY, HTTP_PROXY, https_proxy, http_proxy, NO_PROXY, no_proxy };
+    const request: ModelRequest = (url, signal, offset) => this.request(url, signal, offset, proxy, env);
     const done = this.perform(model, controller.signal, request)
       .catch(() => {
         model.state = "missing";

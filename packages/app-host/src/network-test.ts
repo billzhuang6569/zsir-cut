@@ -1,11 +1,12 @@
 import https from "node:https";
 import { z } from "zod";
-import { proxyEnvironment, proxyFormatMessage, validProxy } from "./proxy.js";
+import { proxyEnvironment, proxyFormatMessage, resolveProxy, validProxy } from "./proxy.js";
 
 const proxyAddress = z.string().trim().refine(validProxy, proxyFormatMessage);
 
-export async function networkTest(input: unknown) {
+export async function networkTest(input: unknown, resolve = resolveProxy) {
   const { proxy } = z.strictObject({ proxy: proxyAddress }).parse(input);
+  const selected = resolve(proxy);
   const results = await Promise.all(
     (
       [
@@ -13,8 +14,7 @@ export async function networkTest(input: unknown) {
         ["codex", "https://api.openai.com"],
       ] as const
     ).map(async ([id, url]) => {
-      // An empty test address always tests direct access, independent of startup variables.
-      const agent = new https.Agent({ proxyEnv: proxyEnvironment(proxy, {}), timeout: 8000 });
+      const agent = new https.Agent({ proxyEnv: proxyEnvironment(proxy, undefined, () => selected), timeout: 8000 });
       const started = performance.now();
       const signal = AbortSignal.timeout(8000);
       try {
@@ -32,8 +32,8 @@ export async function networkTest(input: unknown) {
         const reason =
           signal.aborted || cause.code === "ETIMEDOUT" || cause.proxyTunnelTimeout
             ? "8 秒内没有响应。检查代理是否能访问外网。"
-            : proxy && cause.code === "ECONNREFUSED"
-              ? `连不上代理 ${proxy.slice("http://".length)}。检查代理软件有没有打开，端口对不对。`
+            : selected.proxy && cause.code === "ECONNREFUSED"
+              ? `连不上代理 ${selected.proxy.slice("http://".length)}。检查代理软件有没有打开，端口对不对。`
               : `连不上。错误：${(cause.message ?? String(error)).split(/\r?\n/u)[0]}`;
         return { id, ok: false, ms: Math.round(performance.now() - started), reason };
       } finally {
@@ -41,5 +41,5 @@ export async function networkTest(input: unknown) {
       }
     }),
   );
-  return { results };
+  return { results, ...selected };
 }

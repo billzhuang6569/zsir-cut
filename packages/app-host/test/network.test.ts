@@ -10,7 +10,13 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { requestModel } from "../src/asr-models.js";
 import { networkTest } from "../src/network-test.js";
 import { DesktopPreferences } from "../src/preferences.js";
-import { proxyEnvironment, proxyFormatMessage, validProxy } from "../src/proxy.js";
+import {
+  createProxyResolver,
+  parseSystemProxy,
+  proxyEnvironment,
+  proxyFormatMessage,
+  validProxy,
+} from "../src/proxy.js";
 
 const cleanup: (() => Promise<unknown>)[] = [];
 beforeEach(() => {
@@ -39,29 +45,95 @@ async function proxyServer(connect: (host: string, socket: Duplex) => void) {
   });
   return { server, proxy: `http://127.0.0.1:${(server.address() as { port: number }).port}` };
 }
-it("overrides both proxy cases, merges bypasses without mutating startup and always bypasses loopback", () => {
+it("selects proxies in order and builds an isolated child environment", () => {
   const startup = {
-    HTTPS_PROXY: "old",
-    http_proxy: "lower",
+    HTTPS_PROXY: "http://first:1",
+    https_proxy: "http://second:2",
+    HTTP_PROXY: "http://third:3",
+    http_proxy: "http://fourth:4",
     NO_PROXY: "private.test",
     no_proxy: "other.test",
+    ALL_PROXY: "socks://ignored",
     PATH: "/bin",
   };
-  const env = proxyEnvironment(" http://localhost:7890 ", startup);
-  for (const key of ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"])
-    expect(env[key]).toBe("http://localhost:7890");
-  expect(env.NO_PROXY).toBe("127.0.0.1,localhost,::1");
-  expect(proxyEnvironment("", startup).NO_PROXY).toBe("private.test,other.test,127.0.0.1,localhost,::1");
-  expect(env.no_proxy).toBe(env.NO_PROXY);
-  expect(env.PATH).toBe("/bin");
-  expect(startup.HTTPS_PROXY).toBe("old");
-  expect(proxyEnvironment("", startup)).toMatchObject({ HTTPS_PROXY: "old", http_proxy: "lower", PATH: "/bin" });
-  expect(proxyEnvironment("", {})).toEqual({
-    NO_PROXY: "127.0.0.1,localhost,::1",
-    no_proxy: "127.0.0.1,localhost,::1",
+  const run = vi.fn(
+    () => "HTTPEnable : 1\nHTTPProxy : system\nHTTPPort : 80",
+  ) as unknown as typeof import("node:child_process").execFileSync;
+  const resolve = createProxyResolver(startup, "darwin", run);
+  expect(resolve(" http://saved:9 ")).toEqual({ source: "setting", proxy: "http://saved:9" });
+  expect(resolve()).toEqual({ source: "environment", proxy: "http://first:1" });
+  const env = proxyEnvironment("", startup, resolve);
+  for (const key of ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]) expect(env[key]).toBe("http://first:1");
+  expect(env).toMatchObject({
+    NODE_USE_ENV_PROXY: "1",
+    NO_PROXY: "private.test,other.test,127.0.0.1,localhost,::1",
+    PATH: "/bin",
   });
-  vi.stubEnv("HTTPS_PROXY", "http://startup:8080");
-  expect(proxyEnvironment().HTTPS_PROXY).toBe("http://startup:8080");
+  expect(env.ALL_PROXY).toBeUndefined();
+  expect(proxyEnvironment("http://saved:9", startup, resolve).NO_PROXY).toBe("127.0.0.1,localhost,::1");
+  expect(createProxyResolver({}, "darwin", run)()).toEqual({ source: "system", proxy: "http://system:80" });
+  const direct = createProxyResolver({}, "linux", run);
+  expect(direct()).toEqual({ source: "none", proxy: null });
+  expect(proxyEnvironment("", { PATH: "/bin", ALL_PROXY: "bad" }, direct)).toEqual({ PATH: "/bin" });
+  for (const [key, value] of Object.entries({
+    https_proxy: "http://second:2",
+    HTTP_PROXY: "http://third:3",
+    http_proxy: "http://fourth:4",
+  }))
+    expect(createProxyResolver({ [key]: value }, "linux", run)().proxy).toBe(value);
+});
+it("parses system proxy fixtures and ignores PAC, SOCKS, disabled and invalid settings", async () => {
+  const mac = await readFile(new URL("./fixtures/proxy/scutil.txt", import.meta.url), "utf8");
+  const windows = await readFile(new URL("./fixtures/proxy/reg.txt", import.meta.url), "utf8");
+  expect(parseSystemProxy(mac, "darwin")).toBe("http://secure.example:8443");
+  expect(parseSystemProxy(mac.replace("HTTPSEnable : 1", "HTTPSEnable : 0"), "darwin")).toBe(
+    "http://http.example:8080",
+  );
+  expect(parseSystemProxy(mac.replace("ProxyAutoConfigEnable : 0", "ProxyAutoConfigEnable : 1"), "darwin")).toBeNull();
+  expect(
+    parseSystemProxy(
+      mac.replace("HTTPSEnable : 1", "HTTPSEnable : 0").replace("HTTPEnable : 1", "HTTPEnable : 0"),
+      "darwin",
+    ),
+  ).toBeNull();
+  expect(parseSystemProxy("", "darwin")).toBeNull();
+  expect(parseSystemProxy(mac.replace("HTTPSPort : 8443", "HTTPSPort : 99999"), "darwin")).toBeNull();
+  expect(parseSystemProxy(windows, "win32")).toBe("http://b.example:443");
+  expect(parseSystemProxy(windows.replace("http=a.example:80;https=b.example:443", "a.example:80"), "win32")).toBe(
+    "http://a.example:80",
+  );
+  expect(parseSystemProxy(windows.replace(";https=b.example:443", ""), "win32")).toBe("http://a.example:80");
+  expect(parseSystemProxy(`${windows}    AutoConfigURL    REG_SZ    http://pac.test/pac\n`, "win32")).toBeNull();
+  expect(parseSystemProxy(windows.replace("0x1", "0x0"), "win32")).toBeNull();
+});
+it("caches system results for at most 30 seconds and handles command failure", () => {
+  let time = 1000;
+  const run = vi
+    .fn()
+    .mockReturnValueOnce("HTTPEnable : 1\nHTTPProxy : first\nHTTPPort : 80")
+    .mockImplementationOnce(() => {
+      throw new Error("failed");
+    });
+  const resolve = createProxyResolver(
+    {},
+    "darwin",
+    run as unknown as typeof import("node:child_process").execFileSync,
+    () => time,
+  );
+  expect(resolve().proxy).toBe("http://first:80");
+  time += 29_999;
+  expect(resolve().proxy).toBe("http://first:80");
+  time++;
+  expect(resolve()).toEqual({ source: "none", proxy: null });
+  expect(run).toHaveBeenCalledTimes(2);
+  expect(run).toHaveBeenCalledWith("scutil", ["--proxy"], { encoding: "utf8", timeout: 2000 });
+  const winRun = vi.fn().mockReturnValue("");
+  createProxyResolver({}, "win32", winRun as unknown as typeof import("node:child_process").execFileSync)();
+  expect(winRun).toHaveBeenCalledWith(
+    "reg",
+    ["query", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings"],
+    { encoding: "utf8", timeout: 2000 },
+  );
 });
 it.each(["", "  ", "http://127.0.0.1:7890", " http://proxy.example:65535 ", "http://localhost:1", "http://[::1]:8080"])(
   "accepts proxy %j",
@@ -148,7 +220,6 @@ it("returns the first raw error line for other proxy errors and routes model dow
   expect(hosts).toContain("model.invalid:443");
 });
 it("tests direct access without startup proxies, uses HEAD, accepts any HTTP status and rejects invalid input", async () => {
-  vi.stubEnv("HTTPS_PROXY", "http://startup.invalid:1234");
   const options: unknown[] = [];
   vi.spyOn(https, "request").mockImplementation(((
     _url: unknown,
@@ -161,11 +232,30 @@ it("tests direct access without startup proxies, uses HEAD, accepts any HTTP sta
   }) as unknown as typeof https.request);
   expect((await networkTest({ proxy: "" })).results.every((item) => item.ok && item.reason === null)).toBe(true);
   for (const option of options) expect(option).toMatchObject({ method: "HEAD" });
-  expect(JSON.stringify(options)).not.toContain("startup.invalid");
+  expect(await networkTest({ proxy: "" })).toMatchObject({ source: "none", proxy: null });
   await expect(networkTest({ proxy: "socks5://host:1234" })).rejects.toThrow(proxyFormatMessage);
-  expect(options).toHaveLength(2);
+  expect(options).toHaveLength(4);
 });
 
+it("reports the chosen fallback and uses it for both network probes", async () => {
+  const agents: https.Agent[] = [];
+  vi.spyOn(https, "request").mockImplementation(((
+    _url: unknown,
+    config: { agent: https.Agent },
+    callback: (response: { resume: () => void }) => void,
+  ) => {
+    agents.push(config.agent);
+    return Object.assign(new EventEmitter(), { end: () => callback({ resume: () => {} }) });
+  }) as unknown as typeof https.request);
+  for (const [source, proxy] of [
+    ["environment", "http://env:123"],
+    ["system", "http://system:456"],
+  ] as const) {
+    const resolve = () => ({ source, proxy });
+    expect(await networkTest({ proxy: "" }, resolve)).toMatchObject({ source, proxy });
+    expect(agents.splice(0).map((agent) => agent.options.proxyEnv?.HTTPS_PROXY)).toEqual([proxy, proxy]);
+  }
+});
 it.each([
   ["http://localhost:80", "ECONNREFUSED", "refused", "连不上代理 localhost:80。检查代理软件有没有打开，端口对不对。"],
   ["http://localhost:7890", "ETIMEDOUT", "timed out", "8 秒内没有响应。检查代理是否能访问外网。"],
@@ -194,16 +284,12 @@ it("applies saved or inherited proxy settings to the model HTTP agent and preser
     queueMicrotask(() => callback(response));
     return Object.assign(new EventEmitter(), { setTimeout: () => {}, destroy: () => {} });
   }) as unknown as typeof https.get);
-  vi.stubEnv("HTTPS_PROXY", "http://startup:7891");
   for (const proxy of ["http://saved:7890", ""]) {
     const response = await requestModel("https://model.invalid/weights", new AbortController().signal, 123, proxy);
     response.destroy();
     (response as unknown as EventEmitter).emit("close");
   }
-  expect(agents.map((agent) => agent.options.proxyEnv?.HTTPS_PROXY)).toEqual([
-    "http://saved:7890",
-    "http://startup:7891",
-  ]);
-  for (const agent of agents) expect(agent.options.proxyEnv?.NO_PROXY).toContain("localhost");
+  expect(agents.map((agent) => agent.options.proxyEnv?.HTTPS_PROXY)).toEqual(["http://saved:7890", undefined]);
+  expect(agents[0]?.options.proxyEnv?.NO_PROXY).toContain("localhost");
   expect(headers).toEqual([{ Range: "bytes=123-" }, { Range: "bytes=123-" }]);
 });

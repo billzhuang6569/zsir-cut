@@ -87,7 +87,13 @@ it("resumes partial files, verifies SHA-256, reuses the aligner and deletes it o
   try {
     await models.download("1.7b");
     await waitFor(models, "ready");
-    expect(http).toHaveBeenCalledWith(expect.stringContaining("model.safetensors"), expect.any(AbortSignal), 3, "");
+    expect(http).toHaveBeenCalledWith(
+      expect.stringContaining("model.safetensors"),
+      expect.any(AbortSignal),
+      3,
+      "",
+      expect.any(Object),
+    );
     expect(await readFile(join(directory, modelNames["1.7b"], "model.safetensors"), "utf8")).toBe("weights");
     vi.mocked(http).mockClear();
     await models.download("0.6b");
