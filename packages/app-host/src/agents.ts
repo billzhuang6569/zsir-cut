@@ -6,10 +6,89 @@ import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { type AgentKind, agentParser, type ChatEvent } from "./agent-events.js";
-import { findProgram, programVersion, spawnProgram } from "./agent-management.js";
+import { codexEnvironment, findProgram, programVersion, spawnProgram } from "./agent-management.js";
 import { proxyEnvironment } from "./proxy.js";
 import { hostPath } from "./runtime.js";
 
+const helpCache = new Map<string, Promise<string | null>>();
+function hasOption(help: string, option: string) {
+  return new RegExp(`(?<![\\w-])${option}(?![\\w-])`).test(help);
+}
+async function agentHelp(agent: AgentKind, command: string, proxy: string) {
+  const version = await programVersion(command, proxy);
+  const key = `${agent}:${command}:${version}`;
+  let help = helpCache.get(key);
+  if (!help) {
+    help = new Promise((resolve) => {
+      const child = spawnProgram(command, agent === "claude" ? ["-p", "--help"] : ["exec", "--help"], {
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "ignore"],
+        env: { ...proxyEnvironment(proxy), PATH: hostPath(), ...codexEnvironment(command) },
+      });
+      let output = "";
+      const timer = setTimeout(() => {
+        child.kill("SIGKILL");
+        resolve(null);
+      }, 5000);
+      child.stdout?.on("data", (chunk: Buffer) => {
+        output += chunk.toString();
+        if (output.length > 1024 * 1024) {
+          child.kill("SIGKILL");
+          resolve(null);
+        }
+      });
+      child.once("error", () => {
+        clearTimeout(timer);
+        resolve(null);
+      });
+      child.once("close", (code) => {
+        clearTimeout(timer);
+        resolve(code === 0 ? output : null);
+      });
+    });
+    helpCache.set(key, help);
+  }
+  const value = await help;
+  const required =
+    agent === "claude"
+      ? ["--mcp-config", "--strict-mcp-config", "--allowedTools"]
+      : ["--skip-git-repo-check", "--json", "--sandbox"];
+  if (value !== null && required.some((arg) => !hasOption(value, arg)))
+    throw new Error(
+      `${agent === "claude" ? "Claude Code" : "Codex"} 版本太旧，缺少需要的功能。请在设置 · Agent 里更新。`,
+    );
+  return value;
+}
+function redact(text: string, token: string) {
+  return text
+    .replaceAll(token, "[redacted]")
+    .replace(/((?:x-api-key|authorization|api[_-]?key)["']?\s*[:=]\s*["']?)(?:Bearer\s+)?[^\s,;"']+/gi, "$1[redacted]")
+    .replace(/(Bearer\s+)[^\s,;"']+/gi, "$1[redacted]");
+}
+function failureMessage(agent: AgentKind, errors: string, code: number | null) {
+  const name = agent === "claude" ? "Claude Code" : "Codex";
+  if (/not logged in|login|unauthorized|401|invalid api key|authentication/i.test(errors))
+    return `${name} 没有登录或登录过期。请在终端运行 ${agent === "claude" ? "claude" : "codex login"} 登录后再试。`;
+  if (/ENOTFOUND|ECONNREFUSED|ETIMEDOUT|ECONNRESET|timed out|network|stream disconnected|reconnecting/i.test(errors))
+    return `${name} 连不上服务。请在设置 · 通用里检查网络代理。`;
+  if (/unexpected argument|unknown option|unrecognized|unknown flag/i.test(errors))
+    return `${name} 不认识庄Sir 传的参数，可能版本太旧。请在设置 · Agent 里更新。`;
+  return `${name} 退出了（退出码 ${code}）。`;
+}
+function killTree(child: ChildProcess, signal: NodeJS.Signals) {
+  if (process.platform === "win32" && child.pid) {
+    spawnProgram("taskkill", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" }).on(
+      "error",
+      () => child.kill(signal),
+    );
+  } else if (child.pid) {
+    try {
+      process.kill(-child.pid, signal);
+    } catch {
+      child.kill(signal);
+    }
+  } else child.kill(signal);
+}
 export interface Chat {
   id: string;
   agent: AgentKind;
@@ -35,10 +114,13 @@ export class Agents {
       commands?: Record<AgentKind, string>;
       directories?: string[];
       proxy?: () => string;
+      waitingPermission?: (chat: string) => boolean;
     },
   ) {}
   private async command(agent: AgentKind) {
-    const path = this.options.commands?.[agent] ?? (await findProgram(agent, this.options.directories));
+    const path =
+      this.options.commands?.[agent] ??
+      (await findProgram(agent, this.options.directories, process.platform, this.options.proxy?.()));
     if (!path) throw new Error(`没有找到 ${agent}`);
     return path;
   }
@@ -139,6 +221,19 @@ export class Agents {
         if (event.type === "end") this.writes = this.writes.then(() => this.options.emit(id, event));
         else this.options.emit(id, event);
       };
+      const command = await this.command(agent);
+      let help: string | null;
+      try {
+        help = await agentHelp(agent, command, this.options.proxy?.() ?? "");
+      } catch (error) {
+        emit({ type: "user", text });
+        emit({ type: "error", text: error instanceof Error ? error.message : String(error) });
+        emit({ type: "end" });
+        await this.writes;
+        await rm(directory, { recursive: true, force: true });
+        this.busy = false;
+        return { id };
+      }
       const args =
         agent === "claude"
           ? [
@@ -148,14 +243,13 @@ export class Agents {
               "--output-format",
               "stream-json",
               "--verbose",
-              "--include-partial-messages",
+              ...(help === null || hasOption(help, "--include-partial-messages") ? ["--include-partial-messages"] : []),
               "--mcp-config",
               config,
               "--strict-mcp-config",
               "--allowedTools",
               "mcp__zsir-cut__*",
-              "--tools",
-              "",
+              ...(help === null || hasOption(help, "--tools") ? ["--tools", ""] : []),
               "--append-system-prompt-file",
               skill,
               ...(resume ? ["--resume", resume] : []),
@@ -167,34 +261,80 @@ export class Agents {
               "--sandbox",
               "read-only",
               "-c",
+              'approval_policy="never"',
+              "-c",
               `mcp_servers.zsir-cut.url=${JSON.stringify(this.options.url)}`,
               "-c",
               'mcp_servers.zsir-cut.bearer_token_env_var="ZCUT_MCP_TOKEN"',
               "-c",
               'mcp_servers.zsir-cut.default_tools_approval_mode="approve"',
               ...(resume ? ["resume", resume] : []),
-              "-",
+              ...(help === null ||
+              /(?:stdin|standard input)[^\n]*`?-`?|`?-`?[^\n]*(?:stdin|standard input)/i.test(
+                help.replace(/\r?\n[ \t]+/g, " "),
+              )
+                ? ["-"]
+                : []),
             ];
-      const command = await this.command(agent);
       if (this.cancelRequested) throw new Error("已停止");
       const child = spawnProgram(command, args, {
         windowsHide: true,
         cwd: dirname(this.options.project),
         stdio: ["pipe", "pipe", "pipe"],
-        env: { ...proxyEnvironment(this.options.proxy?.()), PATH: hostPath(), ZCUT_MCP_TOKEN: this.options.token },
+        detached: process.platform !== "win32",
+        env: {
+          ...proxyEnvironment(this.options.proxy?.()),
+          PATH: hostPath(),
+          ZCUT_MCP_TOKEN: this.options.token,
+          ...codexEnvironment(command),
+        },
       });
+      let agentErrors = "";
+      let lastAgentError: string | undefined;
       const parse = agentParser(agent, (event) => {
+        if (event.type === "error" && event.text) {
+          const text = event.text;
+          agentErrors += `${text}\n`;
+          if (text.startsWith("Reconnecting...")) {
+            emit({ type: "log", text });
+            return;
+          }
+          if (text === lastAgentError) return;
+          lastAgentError = text;
+          emit({ ...event, text });
+          return;
+        }
         if (event.type !== "end") emit(event);
       });
       const output = createInterface({ input: child.stdout });
       output.on("line", parse);
+      let stderrText = "";
+      let timedOut = false;
+      let killTimer: ReturnType<typeof setTimeout> | undefined;
+      let lastActivity = Date.now();
+      let tick = lastActivity;
+      const resetIdle = () => {
+        lastActivity = Date.now();
+      };
+      const idleTimer = setInterval(() => {
+        const now = Date.now();
+        if (this.options.waitingPermission?.(id)) lastActivity += now - tick;
+        tick = now;
+        if (now - lastActivity >= 600000) {
+          clearInterval(idleTimer);
+          timedOut = true;
+          killTree(child, "SIGTERM");
+          killTimer = setTimeout(() => killTree(child, "SIGKILL"), 5000);
+          killTimer.unref();
+        }
+      }, 1000);
+      child.stdout.on("data", resetIdle);
+      child.stderr.on("data", resetIdle);
       const stderr = createInterface({ input: child.stderr });
-      const stderrLines: string[] = [];
       stderr.on("line", (line) => {
-        const text = line.replaceAll(this.options.token, "[redacted]");
-        stderrLines.push(text);
-        if (stderrLines.length > 20) stderrLines.shift();
-        emit({ type: "log", text });
+        const safe = redact(line, this.options.token);
+        stderrText = `${stderrText}${safe}\n`.slice(-2000);
+        process.stderr.write(`${safe}\n`);
       });
       emit({ type: "user", text });
       const temp = directory;
@@ -204,13 +344,17 @@ export class Agents {
           void (async () => {
             try {
               parse.finish();
-              if (code && !signal) {
-                const detail = stderrLines
+              clearInterval(idleTimer);
+              if (killTimer && !timedOut) clearTimeout(killTimer);
+              if (timedOut) emit({ type: "error", text: "Agent 10 分钟没有响应，已停止。" });
+              else if (code !== 0 && !this.cancelRequested) {
+                emit({ type: "error", text: failureMessage(agent, `${agentErrors}${stderrText}`, code) });
+                const detail = stderrText
+                  .split(/\r?\n/)
                   .filter((line) => line.trim())
                   .slice(-5)
                   .join("\n");
                 if (detail) emit({ type: "error", text: detail });
-                emit({ type: "error", text: `Agent 退出（${code}），请检查 CLI 输出和版本` });
               }
               await rm(temp, { recursive: true, force: true });
               await this.writes;
@@ -244,14 +388,16 @@ export class Agents {
     const directory = await mkdtemp(join(tmpdir(), "zcut-subtitle-pass-"));
     try {
       if (signal.aborted) throw new Error("整理已停止");
+      const command = await this.command(agent);
+      const help = await agentHelp(agent, command, this.options.proxy?.() ?? "");
+      if (signal.aborted) throw new Error("整理已停止");
       const args =
         agent === "claude"
           ? [
               "-p",
               "--output-format",
               "json",
-              "--tools",
-              "",
+              ...(help === null || hasOption(help, "--tools") ? ["--tools", ""] : []),
               "--strict-mcp-config",
               "--mcp-config",
               '{"mcpServers":{}}',
@@ -264,6 +410,8 @@ export class Agents {
               "exec",
               "--sandbox",
               "read-only",
+              "-c",
+              'approval_policy="never"',
               "--ignore-user-config",
               "--skip-git-repo-check",
               "--ephemeral",
@@ -293,16 +441,17 @@ export class Agents {
               "mcp_servers={}",
               "--output-last-message",
               join(directory, "output.json"),
-              "-",
+              ...(help === null || /(?:stdin|standard input)[^\n]*`?-`?|`?-`?[^\n]*(?:stdin|standard input)/i.test(help)
+                ? ["-"]
+                : []),
             ];
-      const command = await this.command(agent);
       const output = await new Promise<string>((resolve, reject) => {
         const child = spawnProgram(command, args, {
           windowsHide: true,
           cwd: directory,
           stdio: ["pipe", "pipe", "pipe"],
           detached: process.platform !== "win32",
-          env: { ...proxyEnvironment(this.options.proxy?.()), PATH: hostPath() },
+          env: { ...proxyEnvironment(this.options.proxy?.()), PATH: hostPath(), ...codexEnvironment(command) },
         });
         // CLI launchers can spawn another process; kill the whole group on timeout.
         const kill = () => {
@@ -315,9 +464,26 @@ export class Agents {
             }
           }
         };
+        let idleTimer: ReturnType<typeof setTimeout>;
+        let forceTimer: ReturnType<typeof setTimeout> | undefined;
+        const resetIdle = () => {
+          clearTimeout(idleTimer);
+          idleTimer = setTimeout(() => {
+            failure = new Error("Agent 10 分钟没有响应，已停止。");
+            killTree(child, "SIGTERM");
+            forceTimer = setTimeout(() => killTree(child, "SIGKILL"), 5000);
+          }, 600000);
+        };
         let stdout = "";
         let stderr = "";
+        const stderrLines = createInterface({ input: child.stderr });
+        stderrLines.on("line", (line) => {
+          const safe = redact(line, this.options.token);
+          stderr = `${stderr}${safe}\n`.slice(-2000);
+          process.stderr.write(`${safe}\n`);
+        });
         let failure: Error | undefined;
+        resetIdle();
         const abort = () => {
           failure = new Error("字幕整理 Agent 已停止");
           kill();
@@ -325,18 +491,22 @@ export class Agents {
         signal.addEventListener("abort", abort, { once: true });
         if (signal.aborted) abort();
         child.stdout.on("data", (data: Buffer) => {
+          resetIdle();
           if (stdout.length + data.length > 1024 * 1024) {
             failure = new Error("Agent 输出过大");
             kill();
           } else stdout += data.toString();
         });
         child.stderr.on("data", (data: Buffer) => {
-          stderr += data.toString().slice(0, Math.max(0, 65536 - stderr.length));
+          resetIdle();
+          void data;
         });
         child.once("error", () => {
           failure = new Error("无法启动字幕整理 Agent");
         });
         child.once("close", (code) => {
+          clearTimeout(idleTimer);
+          if (forceTimer) clearTimeout(forceTimer);
           signal.removeEventListener("abort", abort);
           if (failure) reject(failure);
           else if (code !== 0) {
@@ -370,8 +540,9 @@ export class Agents {
       this.cancelRequested = this.busy;
       return;
     }
-    active.child.kill("SIGTERM");
-    const timer = setTimeout(() => active.child.kill("SIGKILL"), 1000);
+    this.cancelRequested = true;
+    killTree(active.child, "SIGTERM");
+    const timer = setTimeout(() => killTree(active.child, "SIGKILL"), 1000);
     try {
       await active.done;
     } finally {

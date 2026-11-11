@@ -20,7 +20,7 @@ afterEach(async () => {
   );
   vi.unstubAllEnvs();
 });
-async function fixture(agent: AgentKind, mode = "normal", stderrLines: string[] = []) {
+async function fixture(agent: AgentKind, mode = "normal", stderrLines: string[] = [], help?: string, stdout?: string) {
   const directory = await mkdtemp(join(tmpdir(), "zcut37-test-"));
   directories.push(directory);
   const script = join(directory, agent);
@@ -30,7 +30,8 @@ async function fixture(agent: AgentKind, mode = "normal", stderrLines: string[] 
     `#!${process.execPath}
 import {readFileSync,writeFileSync,statSync} from 'node:fs';
 const args=process.argv.slice(2);
-if(args.includes('--version')) { console.log('${agent} test-version'); process.exit(0); }
+if(args.includes('--version')) { console.log('${agent} 1.2.3'); process.exit(0); }
+if(args.includes('--help')) { const help=${JSON.stringify(help ?? null)}; if(help === null) process.exit(1); console.log(help); process.exit(0); }
 const config=args[args.indexOf('--mcp-config')+1];
 writeFileSync(${JSON.stringify(capture)},JSON.stringify({args,cwd:process.cwd(),env:process.env,config:${agent === "claude" ? "config,mode:statSync(config).mode&0o777,body:JSON.parse(readFileSync(config,'utf8'))" : "null"}}));
 let input='';process.stdin.on('data',chunk=>input+=chunk);
@@ -79,7 +80,9 @@ const events=${JSON.stringify(
           ],
     )};
 process.stderr.write(${JSON.stringify(stderrLines.length ? `${stderrLines.join("\n")}\n` : "")});
+if (${JSON.stringify(stdout ?? null)} !== null) { process.stdout.write(${JSON.stringify(stdout ?? "")}); process.exitCode=1; return; }
 if (${JSON.stringify(mode)} === 'error') { process.stderr.write('not logged in\\n'); process.exitCode=1; return; }
+if (${JSON.stringify(mode)} === 'failure') { process.exitCode=1; return; }
 if (${JSON.stringify(mode)} === 'suggestion') {
 const text='\\n【下一步】 继续剪辑';
 events.splice(-1,0,${agent === "claude" ? "{type:'stream_event',event:{type:'content_block_delta',delta:{text}}}" : "{type:'item.completed',item:{id:'suggestion',type:'agent_message',text}}"});
@@ -121,7 +124,7 @@ describe("local agent conversations with fake executables", () => {
       const { directory, manager, events, capture } = await fixture(agent);
       expect((await manager.detect())[0]).toMatchObject({
         available: true,
-        version: expect.stringContaining("test-version"),
+        version: expect.stringContaining("1.2.3"),
       });
       const chat = await manager.send(agent, "做粗剪");
       await vi.waitFor(() => expect(events.at(-1)?.type).toBe("end"), { timeout: 15000, interval: 10 });
@@ -162,6 +165,7 @@ describe("local agent conversations with fake executables", () => {
         const approval = details.args.indexOf('mcp_servers.zsir-cut.default_tools_approval_mode="approve"');
         expect(approval).toBeGreaterThan(0);
         expect(details.args[approval - 1]).toBe("-c");
+        expect(details.args).toContain('approval_policy="never"');
         expect(details.args).not.toContain("resume");
       }
       events.length = 0;
@@ -172,6 +176,7 @@ describe("local agent conversations with fake executables", () => {
         expect.arrayContaining([agent === "claude" ? "--resume" : "resume", "native-session"]),
       );
       if (agent === "codex") {
+        expect(resumed.args).toContain('approval_policy="never"');
         expect(resumed.args).toContain("--skip-git-repo-check");
         expect(resumed.args.indexOf("--skip-git-repo-check")).toBeLessThan(resumed.args.indexOf("resume"));
         const approval = resumed.args.indexOf('mcp_servers.zsir-cut.default_tools_approval_mode="approve"');
@@ -188,8 +193,7 @@ describe("local agent conversations with fake executables", () => {
       const { manager, events } = await fixture(agent, "normal", stderr);
       const chat = await manager.send(agent, "hi");
       await vi.waitFor(() => expect(events.at(-1)?.type).toBe("end"), { timeout: 15000, interval: 10 });
-      for (const line of stderr)
-        expect(events).toContainEqual({ type: "log", text: line.replaceAll("test-token", "[redacted]") });
+      expect(JSON.stringify(events)).not.toContain("model refresh failed");
       expect(events.filter((event) => event.type === "error")).toEqual([]);
       expect((await manager.history(chat.id)).events).toEqual(events);
       expect(JSON.stringify(events)).not.toContain("test-token");
@@ -211,8 +215,11 @@ describe("local agent conversations with fake executables", () => {
       const chat = await manager.send(agent, "hi");
       await vi.waitFor(() => expect(events.at(-1)?.type).toBe("end"), { timeout: 15000, interval: 10 });
       expect(events.filter((event) => event.type === "error")).toEqual([
+        {
+          type: "error",
+          text: `${agent === "claude" ? "Claude Code" : "Codex"} 没有登录或登录过期。请在终端运行 ${agent === "claude" ? "claude" : "codex login"} 登录后再试。`,
+        },
         { type: "error", text: "diagnostic 22\ndiagnostic 23\ndiagnostic 24\n[redacted] [redacted]\nnot logged in" },
-        { type: "error", text: "Agent 退出（1），请检查 CLI 输出和版本" },
       ]);
       expect((await manager.history(chat.id)).events).toEqual(events);
       expect(JSON.stringify(events)).not.toContain("test-token");
@@ -237,7 +244,10 @@ describe("local agent conversations with fake executables", () => {
     await vi.waitFor(() => expect(events.at(-1)?.type).toBe("end"), { timeout: 15000, interval: 10 });
     expect(events).toContainEqual({ type: "error", text: "not logged in" });
     expect(events).toContainEqual(
-      expect.objectContaining({ type: "error", text: expect.stringContaining("退出（1）") }),
+      expect.objectContaining({
+        type: "error",
+        text: "Codex 没有登录或登录过期。请在终端运行 codex login 登录后再试。",
+      }),
     );
     const absent = new Agents({
       project: "/unused",
@@ -253,6 +263,149 @@ describe("local agent conversations with fake executables", () => {
     ]);
     await expect(manager.history("../../escape")).rejects.toThrow("Invalid chat ID");
   }, 20000);
+});
+
+it("omits unsupported optional flags and refuses missing required flags", async () => {
+  const optional = await fixture(
+    "claude",
+    "normal",
+    [],
+    "--mcp-config --strict-mcp-config --allowedTools --append-system-prompt-file",
+  );
+  await optional.manager.send("claude", "hello");
+  await vi.waitFor(() => expect(optional.events.at(-1)?.type).toBe("end"));
+  const args = JSON.parse(await readFile(optional.capture, "utf8")).args;
+  expect(args).not.toContain("--tools");
+  expect(args).not.toContain("--include-partial-messages");
+  const missing = await fixture("codex", "normal", [], "--json --sandbox");
+  await missing.manager.send("codex", "hello");
+  await vi.waitFor(() => expect(missing.events.at(-1)?.type).toBe("end"));
+  expect(missing.events).toContainEqual({
+    type: "error",
+    text: "Codex 版本太旧，缺少需要的功能。请在设置 · Agent 里更新。",
+  });
+  await expect(stat(missing.capture)).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+it.each([
+  ["claude", "claude-2.1.319-p-help.txt"],
+  ["codex", "codex-0.167.0-exec-help.txt"],
+] as const)("accepts real %s help and passes the supported flags", async (agent, file) => {
+  const help = await readFile(new URL(`./fixtures/${file}`, import.meta.url), "utf8");
+  const { manager, events, capture } = await fixture(agent, "normal", [], help);
+  await manager.send(agent, "hello");
+  await vi.waitFor(() => expect(events.at(-1)?.type).toBe("end"));
+  expect(events.filter((event) => event.type === "error")).toEqual([]);
+  const { args, input } = JSON.parse(await readFile(capture, "utf8"));
+  expect(input).toContain("hello");
+  if (agent === "claude") {
+    expect(args).toContain("--include-partial-messages");
+    expect(args.slice(args.indexOf("--tools"), args.indexOf("--tools") + 2)).toEqual(["--tools", ""]);
+    expect(args).toContain("--append-system-prompt-file");
+  } else expect(args.at(-1)).toBe("-");
+});
+
+it.each(["claude", "codex"] as const)("%s emits only the reason when failure stderr is empty", async (agent) => {
+  for (const stderr of [[], ["", " \t "]]) {
+    const { manager, events } = await fixture(agent, "failure", stderr);
+    await manager.send(agent, "hello");
+    await vi.waitFor(() => expect(events.at(-1)?.type).toBe("end"));
+    expect(events.filter((event) => event.type === "error")).toEqual([
+      { type: "error", text: `${agent === "claude" ? "Claude Code" : "Codex"} 退出了（退出码 1）。` },
+    ]);
+  }
+});
+
+it("replays real Codex 401 output with ordered errors and diagnostic reconnects", async () => {
+  const stdout = await readFile(new URL("./fixtures/codex-401.stdout.jsonl", import.meta.url), "utf8");
+  const stderr = await readFile(new URL("./fixtures/codex-401.stderr.txt", import.meta.url), "utf8");
+  const records = stdout
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  const { manager, events } = await fixture("codex", "failure", stderr.trimEnd().split("\n"), undefined, stdout);
+  const chat = await manager.send("codex", "hello");
+  await vi.waitFor(() => expect(events.at(-1)?.type).toBe("end"));
+  expect(events.filter((event) => event.type === "error")).toEqual([
+    { type: "error", text: records.find((record) => record.item?.type === "error").item.message },
+    { type: "error", text: records.at(-1).error.message },
+    { type: "error", text: "Codex 没有登录或登录过期。请在终端运行 codex login 登录后再试。" },
+    { type: "error", text: stderr.trimEnd().split("\n").slice(-5).join("\n") },
+  ]);
+  const reconnects = records.filter((record) => record.message?.startsWith("Reconnecting..."));
+  expect(events.filter((event) => event.type === "log" && event.text?.startsWith("Reconnecting..."))).toEqual(
+    reconnects.map((record) => ({ type: "log", text: record.message })),
+  );
+  expect(events.some((event) => event.type === "error" && event.text?.startsWith("Reconnecting..."))).toBe(false);
+  expect((await manager.history(chat.id)).events).toEqual(events);
+});
+
+it.each([
+  ["codex", [{ type: "error", message: "Reconnecting... 1/5 (401 Unauthorized)" }], [], "没有登录或登录过期"],
+  [
+    "codex",
+    [{ type: "item.completed", item: { type: "error", message: "unknown option --json" } }],
+    ["unknown option --json"],
+    "不认识庄Sir 传的参数",
+  ],
+  [
+    "codex",
+    [
+      { type: "error", message: "network failure" },
+      { type: "turn.failed", error: { message: "network failure" } },
+    ],
+    ["network failure"],
+    "连不上服务",
+  ],
+  [
+    "claude",
+    [
+      { type: "result", is_error: true, errors: ["authentication failed"] },
+      { type: "result", is_error: true, errors: ["authentication failed"] },
+    ],
+    ["authentication failed"],
+    "没有登录或登录过期",
+  ],
+] as const)("%s classifies and deduplicates JSON errors", async (agent, records, rawErrors, reason) => {
+  const stdout = records.map((record) => JSON.stringify(record)).join("\n");
+  const { manager, events } = await fixture(agent, "failure", [], undefined, stdout);
+  const chat = await manager.send(agent, "hello");
+  await vi.waitFor(() => expect(events.at(-1)?.type).toBe("end"));
+  expect(events.filter((event) => event.type === "error")).toEqual([
+    ...rawErrors.map((text) => ({ type: "error", text })),
+    { type: "error", text: expect.stringContaining(reason) },
+  ]);
+  if (!rawErrors.length) expect(events).toContainEqual({ type: "log", text: "Reconnecting... 1/5 (401 Unauthorized)" });
+  expect((await manager.history(chat.id)).events).toEqual(events);
+});
+
+it.each([
+  ["401 Unauthorized: invalid api key", "Codex 没有登录或登录过期。请在终端运行 codex login 登录后再试。"],
+  ["request failed: ECONNRESET", "Codex 连不上服务。请在设置 · 通用里检查网络代理。"],
+  ["error: unknown option --json", "Codex 不认识庄Sir 传的参数，可能版本太旧。请在设置 · Agent 里更新。"],
+  ["fatal: unexpected failure", "Codex 退出了（退出码 1）。"],
+])("classifies stderr: %s", async (line, message) => {
+  const { manager, events } = await fixture("codex", "failure", [line]);
+  await manager.send("codex", "hello");
+  await vi.waitFor(() => expect(events.at(-1)?.type).toBe("end"));
+  expect(events.filter((event) => event.type === "error")).toEqual([
+    { type: "error", text: message },
+    { type: "error", text: line },
+  ]);
+});
+
+it("stops a silent agent after ten minutes", async () => {
+  const { manager, events } = await fixture("claude", "stop");
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+  try {
+    await manager.send("claude", "hello");
+    await vi.waitFor(() => expect(events.some((event) => event.type === "text")).toBe(true));
+    await vi.advanceTimersByTimeAsync(610000);
+  } finally {
+    vi.useRealTimers();
+  }
+  await vi.waitFor(() => expect(events.at(-1)?.type).toBe("end"));
+  expect(events).toContainEqual({ type: "error", text: "Agent 10 分钟没有响应，已停止。" });
 });
 
 it("ignores malformed and unfamiliar records and normalizes error events", () => {
@@ -330,7 +483,7 @@ it.each(["claude", "codex"] as const)("runs an isolated headless subtitle pass w
     script,
     `#!${process.execPath}
 const {writeFileSync}=require('node:fs');
-const args=process.argv.slice(2); let input='';
+const args=process.argv.slice(2); if(args.includes('--version')) { console.log('1.2.3'); process.exit(0); } if(args.includes('--help')) process.exit(1); let input='';
 process.stdin.on('data',chunk=>input+=chunk);
 process.stdin.on('end',()=>{
 writeFileSync(${JSON.stringify(capture)},JSON.stringify({args,input,cwd:process.cwd(),env:process.env}));
@@ -378,6 +531,7 @@ else process.stdout.write(JSON.stringify({result,is_error:false}));
         "read-only",
         "--ignore-user-config",
         "--skip-git-repo-check",
+        'approval_policy="never"',
         "features.shell_tool=false",
         "features.apps=false",
         "mcp_servers={}",
@@ -396,6 +550,7 @@ it("aborts a subtitle Agent process and cleans its isolated directory", async ()
     script,
     `#!${process.execPath}
 const {writeFileSync}=require('node:fs');
+if(process.argv.includes('--version')) { console.log('1.2.3'); process.exit(0); } if(process.argv.includes('--help')) process.exit(1);
 writeFileSync(${JSON.stringify(capture)}, JSON.stringify({cwd:process.cwd(),pid:process.pid}));
 process.stdin.resume(); setInterval(()=>{},1000);`,
     { mode: 0o700 },
@@ -425,7 +580,7 @@ it("retains Claude authentication details from nonzero JSON output", async () =>
   const script = join(directory, "fake-agent");
   await writeFile(
     script,
-    `#!${process.execPath}\nprocess.stdout.write(JSON.stringify({is_error:true,result:'Failed to authenticate: OAuth session expired'})); process.exitCode=1;`,
+    `#!${process.execPath}\nif(process.argv.includes('--version')) { console.log('1.2.3'); process.exit(0); } if(process.argv.includes('--help')) process.exit(1); process.stdout.write(JSON.stringify({is_error:true,result:'Failed to authenticate: OAuth session expired'})); process.exitCode=1;`,
     { mode: 0o700 },
   );
   const manager = new Agents({
