@@ -189,7 +189,9 @@
 
 ### 4.1 找程序和版本
 
-依次在 `PATH`、`/opt/homebrew/bin`、`/usr/local/bin`、`~/.local/bin`、`~/.npm-global/bin`、`~/.claude/local`、一键安装目录（`~/.zsir-cut/agents/bin`，Windows 是 `~/.zsir-cut/agents`）里找 `claude` 和 `codex`，第一个可执行的就是它。用 `--version` 取版本，3 秒超时。启动 Agent 时用找到的绝对路径，不再靠 `PATH`。
+依次在 `PATH`、`/opt/homebrew/bin`、`/usr/local/bin`、`~/.local/bin`、`~/.npm-global/bin`、`~/.claude/local`、pnpm 全局目录（`$PNPM_HOME`，没有时 Mac 是 `~/Library/pnpm`，Windows 是 `%LOCALAPPDATA%\pnpm`）、`~/.volta/bin`、nvm 当前版本的 `bin`（`$NVM_BIN`，没有时取 `~/.nvm/versions/node/` 下版本号最大的一个）、fnm 默认版本的 `bin`（`~/.local/share/fnm/aliases/default/bin`，Mac 也查 `~/Library/Application Support/fnm/aliases/default/bin`）、一键安装目录（`~/.zsir-cut/agents/bin`，Windows 是 `~/.zsir-cut/agents`）里找 `claude` 和 `codex`。用 `--version` 取版本，3 秒超时。第一个能跑出版本号的就是它；可执行但跑不出版本号的（坏掉的包装脚本）跳过，继续找下一个，都跑不出时用第一个可执行的，`version` 为 null。启动 Agent 时用找到的绝对路径，不再靠 `PATH`。
+
+**Codex 用原生程序。** 找到的 `codex` 解析符号链接后，如果是 npm 包 `@openai/codex` 的 `bin/codex.js`，就在这个包的 `node_modules/@openai/codex-<平台>/vendor/<target>/bin/` 下找 `codex`（Windows 是 `codex.exe`）。`<平台>` 和 `<target>`：Mac M 芯片 `darwin-arm64` / `aarch64-apple-darwin`，Mac Intel `darwin-x64` / `x86_64-apple-darwin`，Windows `win32-x64` / `x86_64-pc-windows-msvc`。找到就用它取版本、启动对话，并像 `codex.js` 一样设环境变量 `CODEX_MANAGED_BY_NPM=1` 和 `CODEX_MANAGED_PACKAGE_ROOT=<@openai/codex 包目录>`。找不到时照旧用 `codex` 本身。`agents_list` 的 `path` 显示实际启动的程序。
 
 不查也不显示登录状态（Bill 2026-11-06）。没登录时 Agent 的第一次回复会说明，界面照常显示。
 
@@ -211,6 +213,36 @@
 **启动环境。** 发布版的宿主 `PATH` 依次是：应用的 `bin`（ffmpeg）、应用自带 Node 所在目录、`/opt/homebrew/bin`、`/usr/local/bin`（Windows 是对应的常用目录）、继承的 `PATH`。从 Finder 打开的应用继承不到终端的 `PATH`，这样 `npm`、`claude`、`codex` 这些靠 `#!/usr/bin/env node` 启动的程序才能跑。
 
 测试不联网：npm、`claude`、`codex` 都用假命令，registry 用假地址。
+
+### 4.4 启动对话
+
+AI 面板对话和字幕整理都按本节启动 Agent。参数的其余部分不变。
+
+**批准。** Codex 加 `-c approval_policy="never"`，盖过用户 `~/.codex/config.toml` 里的设置；`--sandbox read-only` 不变。Codex 请求批准时直接被拒，不会等。Claude Code 不变：只放行 `mcp__zsir-cut__*`。
+
+**参数检查。** 某个程序（按路径和版本号）第一次启动对话前，先跑一次 `claude -p --help` 或 `codex exec --help`，5 秒超时，结果缓存在内存里，直到宿主退出。
+
+| 参数 | 帮助里没有时 |
+|---|---|
+| Claude `--include-partial-messages` | 不传。回复不再逐字出现，整段出现 |
+| Claude `--tools` | 不传 |
+| Claude `--mcp-config`、`--strict-mcp-config`、`--allowedTools`、`--append-system-prompt-file` | 不启动，对话显示错误「Claude Code 版本太旧，缺少需要的功能。请在设置 · Agent 里更新。」 |
+| Codex `--skip-git-repo-check`、`--json`、`--sandbox` | 不启动，对话显示错误「Codex 版本太旧，缺少需要的功能。请在设置 · Agent 里更新。」 |
+
+帮助跑不起来或超时，按全都支持处理。最后的 stdin 参数 `-`：Codex 帮助里写了读 stdin 时用 `-` 的才传，否则不传，提示词照样从 stdin 写入。
+
+**stderr。** 运行中的 stderr 不推给界面，只在内存里留最后 2000 字（先把 MCP 令牌和 `X-Api-Key` 一类的值换成 `[redacted]`）。正常结束时丢掉。退出码不是 0 且不是用户停止的，推两条 `error`：第一条是下表的原因，第二条是留下的最后 5 个非空行。原因按 stderr 里的关键词判断，不分大小写，从上往下第一条命中的为准：
+
+| 原因 | 关键词 | 文字 |
+|---|---|---|
+| 没登录 | `not logged in`、`login`、`unauthorized`、`401`、`invalid api key`、`authentication` | 「<Agent 名> 没有登录或登录过期。请在终端运行 `claude` 或 `codex login` 登录后再试。」 |
+| 网络 | `ENOTFOUND`、`ECONNREFUSED`、`ETIMEDOUT`、`ECONNRESET`、`timed out`、`network`、`stream disconnected`、`reconnecting` | 「<Agent 名> 连不上服务。请在设置 · 通用里检查网络代理。」 |
+| 版本 | `unexpected argument`、`unknown option`、`unrecognized`、`unknown flag` | 「<Agent 名> 不认识庄Sir 传的参数，可能版本太旧。请在设置 · Agent 里更新。」 |
+| 其他 | 都没命中 | 「<Agent 名> 退出了（退出码 N）。」 |
+
+`<Agent 名>` 是「Claude Code」或「Codex」。宿主日志照旧记下全部 stderr（同样换掉令牌）。
+
+**没有输出就停止。** Agent 进程连续 10 分钟 stdout 和 stderr 都没有新内容，宿主先发 SIGTERM，5 秒后还在就发 SIGKILL（Mac 结束整个进程组，Windows 用 `taskkill /T /F`），推 `error`「Agent 10 分钟没有响应，已停止。」再推 `end`。等许可闸（第 5 节）回答的时间不算。
 
 ## 5. 许可闸
 
@@ -403,7 +435,7 @@ Agent 通过宿主的 MCP 调用会碰到工程外面的动词时，宿主先停
 
 ### 10.1 作用范围
 
-`network.proxy` 不为空时，下面这些联网都走它：
+有代理时（来源见下面的「用哪个地址」），下面这些联网都走它：
 
 - Claude Code、Codex 的进程：AI 面板对话、字幕整理、版本检查。
 - 一键安装和更新 Agent（npm），以及查新版（npm registry）。
@@ -411,7 +443,14 @@ Agent 通过宿主的 MCP 调用会碰到工程外面的动词时，宿主先停
 
 不走代理：豆包语音识别；宿主和界面、Agent 和宿主之间的本机连接。
 
-**怎么传。** 给上面这些子进程设 `HTTPS_PROXY`、`HTTP_PROXY`（大小写两种都设）为这个地址，同时设 `NO_PROXY=127.0.0.1,localhost,::1`，保证 Agent 连宿主 MCP 不经过代理。宿主自己发的请求（npm registry 查新版、模型下载）用同一个地址。`network.proxy` 为空时保持现状：继承启动环境里的代理变量，没有就直连。
+**用哪个地址。** 按顺序取第一个有的：
+
+1. `network.proxy`。
+2. 宿主启动环境里的 `HTTPS_PROXY`、`https_proxy`、`HTTP_PROXY`、`http_proxy`（按这个顺序）。
+3. 系统代理（10.4）。
+4. 都没有就直连。
+
+**怎么传。** 给上面这些子进程设 `HTTPS_PROXY`、`HTTP_PROXY`（大小写两种都设）为这个地址，再设 `NODE_USE_ENV_PROXY=1`，同时设 `NO_PROXY=127.0.0.1,localhost,::1`（用启动环境的代理时，再并上启动环境原有的 `NO_PROXY`），保证 Agent 连宿主 MCP 不经过代理。宿主自己发的请求（npm registry 查新版、模型下载）用同一个地址。直连时不设这几个变量。
 
 **生效时机。** 保存后，新启动的 Agent 进程和新开始的下载立即使用；正在运行的不打断。
 
@@ -429,4 +468,15 @@ Agent 通过宿主的 MCP 调用会碰到工程外面的动词时，宿主先停
 | 超时 | 8 秒内没有响应。检查代理是否能访问外网。 |
 | 其他 | 连不上。错误：原始错误的第一行 |
 
-`proxy` 为空时测直连，文字同上，「连不上代理」那一条不会出现。
+`proxy` 为空时按 10.1 的顺序取启动环境或系统代理来测，都没有才测直连，文字同上；直连时「连不上代理」那一条不会出现。结果另带 `source`：`setting`、`environment`、`system` 或 `none`，以及实际用的 `proxy`（直连为 null）。界面这一版不显示它们。
+
+### 10.4 系统代理
+
+宿主只读系统设置，不改任何系统、代理或网络配置。
+
+- **Mac**：运行 `scutil --proxy`，2 秒超时。`ProxyAutoConfigEnable` 是 1（用 PAC）时不取。否则 `HTTPSEnable` 是 1 时取 `http://<HTTPSProxy>:<HTTPSPort>`，不然 `HTTPEnable` 是 1 时取 `http://<HTTPProxy>:<HTTPPort>`。只开了 SOCKS 不取。
+- **Windows**：运行 `reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings"`，2 秒超时。`ProxyEnable` 是 `0x1` 时读 `ProxyServer`：形如 `主机:端口` 的直接加 `http://`；形如 `http=a:1;https=b:2` 的先取 `https=`，再取 `http=`。设了 `AutoConfigURL` 时不取。
+
+取到的值要通过 10.2 的格式检查才用；命令失败、超时或格式不对都当作没有系统代理。每次要用代理时重新读，最多缓存 30 秒，用户切换系统代理后不用重开应用。
+
+测试不调真命令：`scutil` 和 `reg` 的输出用 fixture，覆盖只开 HTTPS、只开 HTTP、PAC、只开 SOCKS、都没开、命令失败。
