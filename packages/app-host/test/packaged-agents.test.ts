@@ -118,6 +118,7 @@ it.skipIf(process.platform === "win32")(
       claude,
       `#!/usr/bin/env node
 if (process.argv.includes('--version')) console.log('1.2.3');
+else if (process.argv.includes('--help')) console.log('--mcp-config --strict-mcp-config --allowedTools --append-system-prompt-file --tools --include-partial-messages');
 else {
   process.stdin.resume();
   process.stdin.on('end', () => console.log(JSON.stringify({type:'result', result:'tidied', is_error:false})));
@@ -125,8 +126,9 @@ else {
 `,
       { mode: 0o700 },
     );
-    expect(agentDirectories()).toContain(bin);
-    expect(await findProgram("claude")).toBe(claude);
+    const directories = agentDirectories(directory, { PATH: "" }).filter((path) => path.startsWith(directory));
+    expect(directories).toContain(bin);
+    expect(await findProgram("claude", directories)).toBe(claude);
     expect(await programVersion(claude)).toBe("1.2.3");
     const events: { type: string }[] = [];
     const agents = new Agents({
@@ -134,6 +136,7 @@ else {
       projectId: "prj_test",
       url: "http://unused.invalid",
       token: "unused",
+      directories,
       emit: (_chat, event) => events.push(event),
     });
     try {
@@ -152,7 +155,8 @@ it("adds the Windows prefix itself to discovery and finds installed cmd shims", 
   const prefix = join(directory, ".zsir-cut/agents");
   await mkdir(prefix, { recursive: true });
   await writeFile(join(prefix, "codex.cmd"), "shim", { mode: 0o700 });
-  expect(agentDirectories()).toContain(prefix);
-  expect(agentDirectories()).not.toContain(join(prefix, "bin"));
-  expect(await findProgram("codex")).toBe(join(prefix, "codex.cmd"));
+  const directories = agentDirectories(directory, { PATH: "" }).filter((path) => path.startsWith(directory));
+  expect(directories).toContain(prefix);
+  expect(directories).not.toContain(join(prefix, "bin"));
+  expect(await findProgram("codex", directories)).toBe(join(prefix, "codex.cmd"));
 });

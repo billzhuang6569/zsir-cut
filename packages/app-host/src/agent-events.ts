@@ -124,7 +124,8 @@ export function agentParser(agent: AgentKind, emit: (event: ChatEvent) => void) 
               input: item.result ?? item.error,
               failed: !!item.error || item.status === "failed",
             });
-        } else emit({ type: "log", text: `Ignored Codex item: ${String(item.type)}` });
+        } else if (item.type === "error") emit({ type: "error", text: String(item.message ?? "Agent failed") });
+        else emit({ type: "log", text: `Ignored Codex item: ${String(item.type)}` });
       } else if (e.type === "turn.completed") {
         finish();
         emit({ type: "end" });

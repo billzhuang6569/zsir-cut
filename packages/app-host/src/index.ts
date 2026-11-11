@@ -979,6 +979,7 @@ export async function startHost(
       agents = new Agents({
         project: options.project,
         projectId: next.id,
+        waitingPermission: (chat) => permissions.waitingForChat(chat),
         proxy: () => prefs.get().prefs.network.proxy,
         url: `http://127.0.0.1:${address.port}/mcp`,
         token,

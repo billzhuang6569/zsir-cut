@@ -94,16 +94,7 @@ it("discovers PATH before fallback directories and caches versions/latest for 24
   const claude = await executable("claude", "console.log('2.0.0 (Claude Code)')");
   const codex = await executable("codex", "console.log('codex-cli 2.1.0')");
   const npm = await executable("npm", "");
-  expect(agentDirectories()).toEqual([
-    directory,
-    "/opt/homebrew/bin",
-    "/usr/local/bin",
-    join(directory, ".local/bin"),
-    join(directory, ".npm-global/bin"),
-    join(directory, ".claude/local"),
-    join(directory, ".zsir-cut/agents/bin"),
-  ]);
-  expect(await findProgram("claude")).toBe(claude);
+  expect(await findProgram("claude", agentDirectories(directory, { PATH: directory }))).toBe(claude);
   const fallback = join(directory, "fallback");
   await mkdir(fallback);
   await writeFile(join(fallback, "claude"), "", { mode: 0o700 });
@@ -125,6 +116,49 @@ it("discovers PATH before fallback directories and caches versions/latest for 24
   vi.spyOn(Date, "now").mockReturnValue(now + 24 * 60 * 60 * 1000 + 1);
   await management.list();
   expect(requests).toHaveLength(6);
+});
+it("discovers package-manager directories using only the supplied home and environment", async () => {
+  const nvm = join(directory, ".nvm/versions/node");
+  for (const version of ["v9.9.9", "v24.2.0", "v24.10.0", "unrelated"]) {
+    await mkdir(join(nvm, version, "bin"), { recursive: true });
+  }
+  expect(agentDirectories(directory, { PATH: directory })).toEqual([
+    directory,
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    join(directory, ".local/bin"),
+    join(directory, ".npm-global/bin"),
+    join(directory, ".claude/local"),
+    join(directory, "Library/pnpm"),
+    join(directory, ".volta/bin"),
+    join(nvm, "v24.10.0/bin"),
+    join(directory, ".local/share/fnm/aliases/default/bin"),
+    ...(process.platform === "darwin" ? [join(directory, "Library/Application Support/fnm/aliases/default/bin")] : []),
+    join(directory, ".zsir-cut/agents/bin"),
+  ]);
+  const env = {
+    PATH: directory,
+    PNPM_HOME: join(directory, "custom-pnpm"),
+    NVM_BIN: join(directory, "custom-nvm"),
+  };
+  const custom = agentDirectories(directory, env);
+  expect(custom).toContain(env.PNPM_HOME);
+  expect(custom).toContain(env.NVM_BIN);
+  expect(custom).not.toContain(join(nvm, "v24.10.0/bin"));
+});
+it("reuses the discovered version and probes a hanging executable only once", async () => {
+  const calls = join(directory, "versions.txt");
+  const claude = await executable(
+    "claude",
+    `require('node:fs').appendFileSync(${JSON.stringify(calls)}, 'claude\\n'); setInterval(() => {}, 1000)`,
+  );
+  await executable(
+    "codex",
+    `require('node:fs').appendFileSync(${JSON.stringify(calls)}, 'codex\\n'); console.log('1.2.3')`,
+  );
+  const result = await manager().list();
+  expect(result.agents).toMatchObject([{ path: claude, version: null }, { version: "1.2.3" }]);
+  expect((await readFile(calls, "utf8")).trim().split("\n").sort()).toEqual(["claude", "codex"]);
 });
 it("silently returns within three seconds when registry is down", async () => {
   const start = performance.now();

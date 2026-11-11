@@ -101,6 +101,9 @@ export class Permissions {
       resolve: (message: string | null) => void;
     }
   >();
+  waitingForChat(chat: string) {
+    return [...this.pending.values()].some((item) => item.chat === chat && item.shown);
+  }
   private operations = Promise.resolve();
   constructor(private ui: () => ((request: Request) => void) | undefined) {}
   request(

@@ -1,6 +1,6 @@
 import type { spawn as nodeSpawn } from "node:child_process";
-import { constants } from "node:fs";
-import { access, stat } from "node:fs/promises";
+import { constants, readdirSync } from "node:fs";
+import { access, realpath, stat } from "node:fs/promises";
 import * as http from "node:http";
 import * as https from "node:https";
 import { createRequire } from "node:module";
@@ -24,25 +24,90 @@ const programs = {
   claude: { name: "Claude Code", package: "@anthropic-ai/claude-code" },
   codex: { name: "Codex", package: "@openai/codex" },
 };
-export function agentDirectories() {
+export function agentDirectories(home = homedir(), env = process.env) {
+  let nvm = env.NVM_BIN;
+  if (!nvm) {
+    const root = join(home, ".nvm/versions/node");
+    try {
+      const versions = readdirSync(root).filter((v) => /^v?\d+\.\d+\.\d+$/.test(v));
+      versions.sort((a, b) => a.replace(/^v/, "").localeCompare(b.replace(/^v/, ""), undefined, { numeric: true }));
+      if (versions.length) nvm = join(root, versions.at(-1) as string, "bin");
+    } catch {}
+  }
   return [
-    ...(process.env.PATH ?? "").split(delimiter),
-    ...commonProgramDirectories(),
-    ...[".local/bin", ".npm-global/bin", ".claude/local"].map((path) => join(homedir(), path)),
-    join(homedir(), ".zsir-cut/agents", ...(process.platform === "win32" ? [] : ["bin"])),
+    ...(env.PATH ?? "").split(delimiter),
+    ...commonProgramDirectories(process.platform, env),
+    ...[".local/bin", ".npm-global/bin", ".claude/local"].map((path) => join(home, path)),
+    env.PNPM_HOME ??
+      (process.platform === "win32"
+        ? join(env.LOCALAPPDATA ?? join(home, "AppData/Local"), "pnpm")
+        : join(home, "Library/pnpm")),
+    join(home, ".volta/bin"),
+    ...(nvm ? [nvm] : []),
+    join(home, ".local/share/fnm/aliases/default/bin"),
+    ...(process.platform === "darwin" ? [join(home, "Library/Application Support/fnm/aliases/default/bin")] : []),
+    join(home, ".zsir-cut/agents", ...(process.platform === "win32" ? [] : ["bin"])),
   ];
 }
-export async function findProgram(name: string, directories = agentDirectories(), platform = process.platform) {
+export async function codexNative(path: string, platform = process.platform, arch = process.arch) {
+  try {
+    const target = await realpath(path);
+    if (!target.endsWith(`${join("@openai", "codex", "bin", "codex.js")}`)) return null;
+    const root = dirname(dirname(target));
+    const mapping: Record<string, string> = {
+      "darwin-arm64": "aarch64-apple-darwin",
+      "darwin-x64": "x86_64-apple-darwin",
+      "win32-x64": "x86_64-pc-windows-msvc",
+    };
+    const key = `${platform}-${arch}`;
+    if (!mapping[key]) return null;
+    const native = join(
+      root,
+      "node_modules",
+      "@openai",
+      `codex-${key}`,
+      "vendor",
+      mapping[key],
+      "bin",
+      platform === "win32" ? "codex.exe" : "codex",
+    );
+    await access(native, constants.X_OK);
+    if (!(await stat(native)).isFile()) return null;
+    return { path: native, root };
+  } catch {
+    return null;
+  }
+}
+export function codexEnvironment(path: string) {
+  const match = path.match(
+    /^(.*[\\/]@openai[\\/]codex)[\\/]node_modules[\\/]@openai[\\/]codex-[^\\/]+[\\/]vendor[\\/]/,
+  );
+  return match ? { CODEX_MANAGED_BY_NPM: "1", CODEX_MANAGED_PACKAGE_ROOT: match[1] } : {};
+}
+async function probeProgram(name: string, directories = agentDirectories(), platform = process.platform, proxy = "") {
+  let first: string | null = null;
   for (const directory of directories) {
     for (const suffix of platform === "win32" ? [".exe", ".cmd", ""] : [""]) {
       const path = resolve(directory, `${name}${suffix}`);
       try {
         await access(path, constants.X_OK);
-        if ((await stat(path)).isFile()) return path;
+        if (!(await stat(path)).isFile()) continue;
+        const candidate = name === "codex" ? ((await codexNative(path, platform))?.path ?? path) : path;
+        first ??= candidate;
+        const version = name === "claude" || name === "codex" ? await programVersion(candidate, proxy) : null;
+        if (version || (name !== "claude" && name !== "codex")) return { path: candidate, version };
       } catch {}
     }
   }
-  return null;
+  return { path: first, version: null };
+}
+export async function findProgram(
+  name: string,
+  directories = agentDirectories(),
+  platform = process.platform,
+  proxy = "",
+) {
+  return (await probeProgram(name, directories, platform, proxy)).path;
 }
 export async function programVersion(path: string | null, proxy = "") {
   if (!path) return null;
@@ -51,7 +116,7 @@ export async function programVersion(path: string | null, proxy = "") {
       const child = spawnProgram(path, ["--version"], {
         windowsHide: true,
         stdio: ["ignore", "pipe", "ignore"],
-        env: { ...proxyEnvironment(proxy), PATH: hostPath() },
+        env: { ...proxyEnvironment(proxy), PATH: hostPath(), ...codexEnvironment(path) },
       });
       let output = "";
       const timer = setTimeout(() => {
@@ -72,7 +137,8 @@ export async function programVersion(path: string | null, proxy = "") {
         else reject(new Error("Version check failed"));
       });
     });
-    return stdout.trim() || null;
+    const version = stdout.trim();
+    return /\d+(?:\.\d+)+/.test(version) ? version : null;
   } catch {
     return null;
   }
@@ -165,10 +231,7 @@ export class AgentManagement {
           Promise.all(
             (Object.keys(programs) as AgentKind[]).map(async (id) => {
               const [local, latest] = await Promise.all([
-                findProgram(id, this.options.directories).then(async (path) => ({
-                  path,
-                  version: await programVersion(path, this.prefs.get().prefs.network.proxy),
-                })),
+                probeProgram(id, this.options.directories, process.platform, this.prefs.get().prefs.network.proxy),
                 this.latest(programs[id].package),
               ]);
               const { path, version } = local;
