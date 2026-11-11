@@ -226,10 +226,10 @@ AI 面板对话和字幕整理都按本节启动 Agent。参数的其余部分�
 |---|---|
 | Claude `--include-partial-messages` | 不传。回复不再逐字出现，整段出现 |
 | Claude `--tools` | 不传 |
-| Claude `--mcp-config`、`--strict-mcp-config`、`--allowedTools`、`--append-system-prompt-file` | 不启动，对话显示错误「Claude Code 版本太旧，缺少需要的功能。请在设置 · Agent 里更新。」 |
+| Claude `--mcp-config`、`--strict-mcp-config`、`--allowedTools` | 不启动，对话显示错误「Claude Code 版本太旧，缺少需要的功能。请在设置 · Agent 里更新。」 |
 | Codex `--skip-git-repo-check`、`--json`、`--sandbox` | 不启动，对话显示错误「Codex 版本太旧，缺少需要的功能。请在设置 · Agent 里更新。」 |
 
-帮助跑不起来或超时，按全都支持处理。最后的 stdin 参数 `-`：Codex 帮助里写了读 stdin 时用 `-` 的才传，否则不传，提示词照样从 stdin 写入。
+帮助跑不起来或超时，按全都支持处理。帮助里不单独列出的参数不检查，照常传：Claude Code 2.1.319 的帮助只在别的参数说明里提到 `--append-system-prompt[-file]`，没有单独一行。最后的 stdin 参数 `-`：Codex 帮助里写了读 stdin 时用 `-` 的才传，否则不传，提示词照样从 stdin 写入。
 
 **stderr。** 运行中的 stderr 不推给界面，只在内存里留最后 2000 字（先把 MCP 令牌和 `X-Api-Key` 一类的值换成 `[redacted]`）。正常结束时丢掉。退出码不是 0 且不是用户停止的，推两条 `error`：第一条是下表的原因，第二条是留下的最后 5 个非空行。原因按 stderr 里的关键词判断，不分大小写，从上往下第一条命中的为准：
 
