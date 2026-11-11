@@ -148,7 +148,9 @@ it("bounds hanging registry requests and version probes", async () => {
 it("honours HTTPS_PROXY without accessing the target registry", async () => {
   await startRegistry();
   vi.stubEnv("HTTPS_PROXY", registryUrl);
-  const management = new AgentManagement(new DesktopPreferences(directory), () => {}, {
+  vi.resetModules();
+  const { AgentManagement: StartupAgentManagement } = await import("../src/agent-management.js");
+  const management = new StartupAgentManagement(new DesktopPreferences(directory), () => {}, {
     registryUrl: "http://unreachable.invalid",
     directories: [directory],
   });

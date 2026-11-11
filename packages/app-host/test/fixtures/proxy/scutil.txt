@@ -1,0 +1,10 @@
+<dictionary> {
+  HTTPEnable : 1
+  HTTPProxy : http.example
+  HTTPPort : 8080
+  HTTPSEnable : 1
+  HTTPSProxy : secure.example
+  HTTPSPort : 8443
+  ProxyAutoConfigEnable : 0
+  SOCKSEnable : 1
+}
