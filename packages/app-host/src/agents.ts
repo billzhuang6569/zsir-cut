@@ -170,6 +170,8 @@ export class Agents {
               `mcp_servers.zsir-cut.url=${JSON.stringify(this.options.url)}`,
               "-c",
               'mcp_servers.zsir-cut.bearer_token_env_var="ZCUT_MCP_TOKEN"',
+              "-c",
+              'mcp_servers.zsir-cut.default_tools_approval_mode="approve"',
               ...(resume ? ["resume", resume] : []),
               "-",
             ];
