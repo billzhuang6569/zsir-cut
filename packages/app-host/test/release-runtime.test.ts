@@ -85,7 +85,10 @@ it.skipIf(process.platform !== "win32")(
     directory = await mkdtemp(join(tmpdir(), "zcut cmd "));
     const script = join(directory, "echo.cjs");
     const shim = join(directory, "echo.cmd");
-    await writeFile(script, "console.log(JSON.stringify(process.argv.slice(2)))");
+    await writeFile(
+      script,
+      'console.log(process.argv[2] === "--version" ? "1.2.3 (test)" : JSON.stringify(process.argv.slice(2)))',
+    );
     await writeFile(shim, `@echo off\r\n"${process.execPath}" "${script}" %*\r\n`);
     const args = ["a b", "a&b", 'say "hi"', "(test)", "100%", "^caret"];
     const child = spawnProgram(shim, args, { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
@@ -98,6 +101,6 @@ it.skipIf(process.platform !== "win32")(
       child.once("close", (code) => (code === 0 ? resolve() : reject(new Error(`cmd exit ${code}`))));
     });
     expect(JSON.parse(stdout)).toEqual(args);
-    expect(await programVersion(shim)).toBe('["--version"]');
+    expect(await programVersion(shim)).toBe("1.2.3 (test)");
   },
 );
