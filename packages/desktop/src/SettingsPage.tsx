@@ -4,7 +4,7 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { type Action, actions, presets } from "../../app-host/src/keymap.js";
 import type { Preferences } from "../../app-host/src/preferences.js";
-import { proxyFormatMessage, validProxy } from "../../app-host/src/proxy.js";
+import { proxyFormatMessage, validProxy } from "../../app-host/src/proxy-format.js";
 import { AsrSettings } from "./AsrSettings.js";
 import { Icon, IconButton } from "./components.js";
 import type { HostPush, Subscribe } from "./connection.js";
