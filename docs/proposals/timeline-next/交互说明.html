@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>庄Sir剪辑助手 · 下一版试剪台</title>
+<style>
+:root{color-scheme:light;--ink:#202849;--sub:#566078;--paper:#eff2f9;--studio:#202941;--line:#c9d1e1;--blue:#a8c5ff;--sound:#90d3c2;--sun:#ffd993;--face:Inter,"PingFang SC","Microsoft YaHei",sans-serif;--mono:"IBM Plex Mono",Menlo,Consolas,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.65 var(--face)}main,nav{max-width:1336px;margin:auto;padding:0 clamp(16px,4vw,64px)}nav{display:flex;align-items:center;justify-content:space-between;height:68px;border-bottom:1px solid var(--line);font-size:14px}nav strong{font-size:16px}a{color:#384e86;text-underline-offset:4px}header{padding:36px 0 23px}header h1{margin:0;font-size:clamp(36px,4.1vw,61px);letter-spacing:-.055em;line-height:1.16}header p{margin:13px 0 0;color:var(--sub);max-width:780px}button{font:inherit;cursor:pointer}button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid #e3952b;outline-offset:3px}button:disabled{opacity:.55;cursor:default}h2,h3,p{margin:0}small,.mono{font-family:var(--mono)}.studio{background:var(--studio);color:#eff4ff;border:1px solid #24304b;border-radius:14px;overflow:hidden;box-shadow:0 14px 35px #26345019}.bar,.timeline-head,.panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.bar{background:#182137;padding:10px 20px;color:#c5cee4;font-size:13px}.bar span:last-child{font-family:var(--mono);font-variant-numeric:tabular-nums}.desks{display:grid;grid-template-columns:minmax(166px,.83fr) minmax(300px,2fr) minmax(220px,1.16fr)}.desk{padding:18px 20px}.desk h2,.timeline-head h2{font-size:15px;letter-spacing:.035em}.media-desk{border-right:1px solid #3b4561}.asset{background:#303b54;border:1px solid #617999;color:#fff;border-radius:7px;width:100%;padding:12px;display:grid;gap:2px;text-align:left;margin:13px 0 8px;cursor:grab}.asset:active{cursor:grabbing}.asset .grip{font:11px var(--mono);color:#bdd2f3;letter-spacing:.08em}.asset strong{font-size:17px}.asset small,.helper{font-size:12px;color:#c0cce1}.asset small{font-family:var(--face)}.secondary,.choice,.subtle,.run{border:1px solid #667494;border-radius:5px;color:#edf2ff;background:transparent;padding:5px 9px;font-size:13px;line-height:1.55}.subtle:hover:not(:disabled),.secondary:hover:not(:disabled),.choice:hover{background:#394866}.viewer{display:flex;flex-direction:column;background:#313e5d;min-height:195px}.viewer .panel-head{color:#c9d6ec;font-size:12px}.quote{margin:auto 0;padding:10px 0;font-size:clamp(21px,2.4vw,37px);line-height:1.4;letter-spacing:-.035em;font-weight:550}.viewer .helper{color:#c8d5eb}.decision{border-left:1px solid #43516b}.decision .panel-head{margin-bottom:13px}.count{font:12px var(--mono);border-radius:10px;background:#44516e;color:#f4f7ff;padding:3px 9px}.count.on{background:var(--sun);color:#352819}.decision p{font-size:14px}.answers{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}.choice{background:#4c4236;border-color:#af956a;color:#ffe6bb}.instruction{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 20px;background:#293450;border-block:1px solid #46516d}.instruction p{font-size:15px}.run{background:var(--blue);font-weight:700;border-color:var(--blue);color:#1a2a46;white-space:nowrap;padding:7px 15px}.timeline{padding:14px 20px}.timeline-head{margin-bottom:10px}.timeline-head div{display:flex;gap:6px}.lanes{overflow-x:auto}.inner{min-width:560px;display:grid;grid-template-columns:44px 1fr;align-items:stretch;row-gap:4px}.lane-id{font:12px/36px var(--mono);color:#becce4}.ruler,.row{display:flex;position:relative}.ruler{height:20px}.ruler span{font:11px/20px var(--mono);color:#bfcae0;flex-basis:0;min-width:0;white-space:nowrap}.row{background:#172138;gap:0}.clip,.wave{min-width:0;flex-basis:0;border-radius:4px;overflow:hidden;border:1px solid var(--studio)}.clip{position:relative;text-align:left;padding:7px 6px;background:#9fb9e8;color:#192b48;font-size:13px;line-height:1.3;white-space:nowrap;text-overflow:ellipsis;height:39px;font-weight:650}.clip.retake{background:#a99bbf;color:#252037}.clip.price{background:#d8c29e;color:#382e21}.clip.extra{background:#c3cbe5}.clip[aria-pressed=true]{box-shadow:inset 0 0 0 2px #fff}.wave{background:#8fd0bf;height:24px;display:flex;align-items:center;justify-content:space-evenly;gap:1px;padding:0 3px}.wave i{flex:1;background:#356b67;border-radius:2px;max-width:3px}.row.drag::after{content:"";position:absolute;pointer-events:none;top:-7px;bottom:-25px;left:clamp(0px,var(--drop-x),calc(100% - 3px));width:3px;background:#ffe59b;z-index:2}.lane-id.audio{line-height:24px}.feedback{margin-top:10px;color:#ccdbf3;font-size:13px;min-height:22px}.reading{margin:34px 0}.reading h2{font-size:26px;letter-spacing:-.045em}.notes{display:grid;grid-template-columns:repeat(3,1fr);gap:26px;margin:15px 0 30px}.notes article{border-top:3px solid #798fb8;padding-top:11px}.notes article:nth-child(2){border-color:#56968b}.notes article:nth-child(3){border-color:#b5956c}.notes h3{font-size:18px;margin-bottom:6px}.notes p,details p{font-size:15px;color:var(--sub)}details{border-block-start:1px solid var(--line);padding:12px 0}details:last-of-type{border-block-end:1px solid var(--line)}summary{cursor:pointer;font-weight:650}details p{margin:8px 0}footer{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:25px 0 42px;font-size:13px;color:var(--sub)}
+@media(max-width:850px){.desk{padding:14px}.desks{grid-template-columns:1fr 1.8fr}.decision{grid-column:1/-1;border:0;border-top:1px solid #43516b}.decision .panel-head{margin-bottom:6px}.viewer{min-height:160px}.notes{gap:16px}.timeline{padding:14px}.bar{padding:10px 14px}}
+@media(max-width:600px){nav{height:54px}.bar{font-size:11px}.desks{grid-template-columns:minmax(106px,.85fr) minmax(130px,1.3fr)}header{padding:23px 0 16px}header p{font-size:14px}.desk{padding:10px}.asset{padding:7px}.asset strong{font-size:14px}.instruction{padding:10px;align-items:start;flex-direction:column}.timeline-head{flex-wrap:wrap}.timeline{padding:10px}.notes{grid-template-columns:1fr;gap:14px}.reading{margin:22px 0}.reading h2{font-size:23px}footer{align-items:flex-start;flex-direction:column}.viewer{min-height:145px}}
+</style>
+</head>
+<body>
+<nav><strong>庄Sir剪辑助手</strong><a href="开发计划.md">完整开发计划 ↗</a></nav>
+<main>
+<header><h1>试剪一段客户采访</h1><p>用一段示例采访试试下一版。拖入素材，再让 AI 删掉重复开头。碰到两种预算说法时，决定权在你手里。</p></header>
+<section class="studio" aria-label="交互试剪台">
+<div class="bar"><span>客户采访 ／ 粗剪时间线</span><span id="duration"></span></div>
+<div class="desks">
+<section class="desk media-desk"><h2>素材库</h2><button type="button" id="asset" draggable="true" class="asset" title="拖到剪点；也可点击插到选段前"><span class="grip">⠿　CAM A</span><strong>主持人开场</strong><small>4 秒 · 画面＋同期声</small></button><button type="button" class="secondary" id="insert">插到选段前</button></section>
+<section class="desk viewer"><div class="panel-head"><span>所选片段 · 原话</span><span class="mono" id="sourceTime"></span></div><p class="quote" id="quote"></p><span class="helper" id="selectedLabel"></span></section>
+<section class="desk decision"><div class="panel-head"><h2>待你决定</h2><span class="count" id="count"></span></div><div id="question"></div></section>
+</div>
+<div class="instruction"><p>“删掉重复的开头。预算有出入，交给我选。”</p><button type="button" id="run" class="run">让 AI 粗剪</button></div>
+<div class="timeline"><div class="timeline-head"><h2>主时间线</h2><div><button type="button" class="subtle" id="undo">↶ 撤销一步</button><button type="button" class="subtle" id="reset">重置示例</button></div></div>
+<div class="lanes"><div class="inner"><span></span><div id="ruler" class="ruler"></div><span class="lane-id">V1</span><div id="video" class="row" aria-label="拖入素材到最近剪点"></div><span class="lane-id audio">A1</span><div id="audio" class="row" aria-label="联动同期声示意"></div></div></div>
+<p class="feedback" aria-live="polite" id="feedback"></p>
+</div>
+</section>
+<section class="reading"><h2>这版改动，落在三个地方</h2>
+<div class="notes"><article><h3>松手前就看见结果</h3><p>现在，按 Q 可以把音画一起插进去，拖到视频轨却只覆盖画面。新版会画出音轨和视频轨的落点，告诉你后面的内容会让位，还是会被覆盖。</p></article><article><h3>说「剪」就能看到剪点</h3><p>现在，桌面 Agent 会把工作交成一份待批草稿。新版会先读你选中的片段，剪完再从时间线核对结果。你可以点击改动回看，也可以撤销。</p></article><article><h3>只问影响成片的选择</h3><p>同一个开头多说一遍，AI 可以直接处理。两次说出的金额不同，就把两句原话放在右上角。你答哪一条，AI 就接着处理哪一条。</p></article></div>
+<details><summary>先做哪些，什么时候能试？</summary><p>建议用 4–6 周。第 1 周在安装包复现并定下落轨规则。第 2–3 周交付拖入、音画联动和主线编辑。第 3–4 周接上逐条回答和撤销。最后用两种真实 Agent、双平台安装包和三家剪辑软件验收。</p></details>
+<details><summary>如果我想先看方案，或者 AI 剪错了呢？</summary><p>说「先给我看方案」，继续走草稿审阅。让 AI 直接剪时，历史记录会留下剪点和理由。可以撤销这一轮；同一段后来被人改过，会指出冲突，保留人的修改。</p></details>
+<details><summary>这页能验证什么？</summary><p>试剪台用固定台词和模拟音轨展示插入、主线粗剪、局部决定及撤销。点击片段可看原话。实际预览播放、系统文件拖入、MCP 调用和 NLE 导入将在开发阶段分别实测。</p></details>
+</section><footer><span>产品提案 · 2026.11.18</span><a href="开发计划.md">查看任务、依赖与验收标准 ↗</a></footer>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const clips = {
+  intro: {name:"开场", text:"我们先从客户的预算说起。", sec:5, source:6},
+  repeat: {name:"重复开场", text:"我们先从客户的预算说起。", sec:4, source:13, tone:"retake"},
+  a: {name:"第一遍", text:"这个项目的预算是三十万。", sec:5, source:22, tone:"price"},
+  b: {name:"第二遍", text:"这个项目的预算是十三万。", sec:5, source:37, tone:"price"},
+  end: {name:"结尾", text:"我们先用两天，把样片做出来。", sec:6, source:49},
+  slate: {name:"主持人开场", text:"今天，请项目负责人来讲讲这次合作。", sec:4, source:0, tone:"extra"}
+};
+const initial = () => ({order:["intro","repeat","a","b","end"], chosen:"intro", ran:false, kept:null});
+let state = initial();
+const history = [];
+const clock = sec => String(Math.floor(sec/60)).padStart(2,"0")+":"+String(sec%60).padStart(2,"0");
+const total = () => state.order.reduce((n,id)=>n+clips[id].sec,0);
+const startAt = index => state.order.slice(0,index).reduce((n,id)=>n+clips[id].sec,0);
+function button(label,act,cls="choice") {
+  const el=document.createElement("button");
+  el.type="button"; el.textContent=label; el.className=cls; el.onclick=act;
+  return el;
+}
+function checkpoint(){ history.push({...state,order:[...state.order]}); }
+function selectClip(id){state.chosen=id;render("已定位到"+clips[id].name+"。",id);}
+function render(message,focusId){
+  const clip=clips[state.chosen];
+  $("duration").textContent="模拟工程　"+clock(total())+" / 25 fps";
+  $("sourceTime").textContent="源 "+clock(clip.source);
+  $("quote").textContent="“"+clip.text+"”";
+  $("selectedLabel").textContent=clip.name+"　·　时长 "+clip.sec+" 秒";
+  const video=$("video"), audio=$("audio"), ruler=$("ruler");
+  const columns=state.order.map(id=>clips[id].sec+"fr").join(" ");
+  for(const lane of [video,audio,ruler]){lane.replaceChildren();lane.style.display="grid";lane.style.gridTemplateColumns=columns;}
+  state.order.forEach((id,index)=>{
+    const item=clips[id], block=button(item.name,()=>selectClip(id),"clip "+(item.tone||""));
+    block.dataset.id=id;block.style.flexGrow=item.sec;
+    block.setAttribute("aria-pressed",String(state.chosen===id));
+    block.title=item.name+"　"+clock(startAt(index))+"　"+item.text;video.append(block);
+    const time=document.createElement("span");time.textContent=clock(startAt(index));time.style.flexGrow=item.sec;ruler.append(time);
+    const wave=document.createElement("div");wave.className="wave";wave.style.flexGrow=item.sec;
+    for(let j=0;j<item.sec*4;j++){const bar=document.createElement("i");bar.style.height=(3+((j*13+item.source*3+j*j)%15))+"px";wave.append(bar);}
+    audio.append(wave);
+  });
+  const pending=state.ran&&!state.kept;
+  $("count").textContent=pending?"1":"0";$("count").classList.toggle("on",pending);
+  const panel=$("question"); panel.replaceChildren();
+  const label=document.createElement("p");panel.append(label);
+  if(pending){
+    label.textContent="同一笔预算说了两遍。哪句是最终口径？";
+    const preview=document.createElement("div");preview.className="answers";
+    const choices=document.createElement("div");choices.className="answers";
+    for(const id of ["a","b"]){
+      const amount=id==="a"?"三十万":"十三万";
+      preview.append(button("看原话 "+clock(clips[id].source),()=>selectClip(id),"secondary"));
+      choices.append(button("保留"+amount,()=>decide(id)));
+    }
+    panel.append(preview,choices);
+  }else label.textContent=state.kept?"已采用"+(state.kept==="a"?"「三十万」":"「十三万」")+"，另一遍已从时间线移除。": "还没有问题。先让 AI 粗剪这段采访。";
+  $("run").disabled=state.ran;$("run").textContent=state.ran?"已剪去重复开头":"让 AI 粗剪";
+  $("undo").disabled=!history.length;
+  const inserted=state.order.includes("slate");$("asset").disabled=inserted;$("asset").draggable=!inserted;$("insert").disabled=inserted;
+  $("feedback").textContent=message;
+  if(focusId)video.querySelector('[data-id="'+focusId+'"]')?.focus({preventScroll:true});
+}
+function insertAt(index){
+  if(state.order.includes("slate"))return;
+  checkpoint();state.order.splice(index,0,"slate");state.chosen="slate";
+  render("已插入 4 秒开场，V1 和 A1 一起落轨，后续片段顺延。");
+}
+function decide(keep){
+  if(!state.ran||state.kept)return;
+  checkpoint();state.kept=keep;state.order=state.order.filter(id=>id!==(keep==="a"?"b":"a"));state.chosen=keep;
+  render("已按你的选择剪掉另一遍，时间线缩短 5 秒。",keep);
+}
+$("insert").onclick=$("asset").onclick=()=>insertAt(state.order.indexOf(state.chosen));
+$("asset").ondragstart=e=>{e.dataTransfer.setData("application/x-demo-clip","slate");e.dataTransfer.effectAllowed="copy";};
+function boundary(clientX){
+  const rect=$("video").getBoundingClientRect();
+  const at=(clientX-rect.left)/rect.width*total();
+  let best=0;
+  for(let i=1;i<=state.order.length;i++)if(Math.abs(startAt(i)-at)<Math.abs(startAt(best)-at))best=i;
+  return best;
+}
+$("video").ondragover=e=>{
+  if(!e.dataTransfer.types.includes("application/x-demo-clip"))return;
+  e.preventDefault();e.dataTransfer.dropEffect="copy";
+  const at=startAt(boundary(e.clientX));
+  $("video").style.setProperty("--drop-x",100*at/total()+"%");$("video").classList.add("drag");
+  $("feedback").textContent="将插入到 "+clock(at)+"，画面和同期声一起顺延。";
+};
+function clearDrag(){$("video").classList.remove("drag");}
+$("video").ondragleave=e=>{if(!$("video").contains(e.relatedTarget)){clearDrag();$("feedback").textContent="可拖到视频轨上的任意剪点。";}};
+$("asset").ondragend=()=>{if($("video").classList.contains("drag")){$("feedback").textContent="已取消拖入。";clearDrag();}};
+$("video").ondrop=e=>{e.preventDefault();clearDrag();if(e.dataTransfer.getData("application/x-demo-clip")==="slate")insertAt(boundary(e.clientX));};
+$("run").onclick=()=>{
+  if(state.ran)return;
+  checkpoint();state.ran=true;state.order=state.order.filter(id=>id!=="repeat");state.chosen="a";
+  render("AI 已直接剪掉重复开头，缩短 4 秒。两句预算原话都还在时间线上。");
+};
+$("undo").onclick=()=>{if(history.length){state=history.pop();render("已撤销上一步，片段和待决问题同步恢复。");}};
+$("reset").onclick=()=>{history.length=0;state=initial();render("示例已重置。拖入素材或直接开始粗剪。");};
+render("试试把「主持人开场」拖到剪点，或直接让 AI 粗剪。");
+</script></body></html>
