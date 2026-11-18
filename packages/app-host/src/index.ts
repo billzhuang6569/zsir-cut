@@ -811,6 +811,15 @@ export async function startHost(
                 },
                 result: {
                   historyBatches: await readHistoryBatches(join(dirname(resolve(projectPath)), ".zcut", project.id)),
+                  clipProperties: Object.fromEntries(
+                    (timeline?.tracks ?? []).flatMap((track) =>
+                      track.kind === "subtitle"
+                        ? []
+                        : track.clips
+                            .filter((clip) => clip.transform || clip.sync_broken)
+                            .map((clip) => [clip.id, { transform: clip.transform, sync_broken: clip.sync_broken }]),
+                    ),
+                  ),
                   media: project.media.map((item) => ({
                     uses: new Set(
                       timeline?.tracks.flatMap((track) =>

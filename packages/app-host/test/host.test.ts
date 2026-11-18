@@ -112,11 +112,16 @@ describe("desktop host", () => {
       subtitles.timelines[0].tracks
         .find((track: { kind: string }) => track.kind === "subtitle")
         .overrides.push({ occurrence_id: "occ_1", cue_id: "cue_1", text: "覆盖文字", style_id: "sty_override" });
+      Object.assign(subtitles.timelines[0].tracks[0].clips[0], {
+        transform: { position: [3, 4] },
+        sync_broken: true,
+      });
       await writeFile(project, JSON.stringify(subtitles));
       const preview = await send({ id: "subtitle-preview", type: "preview_data" });
       expect(preview.envelope.result).toMatchObject({
         recognition: subtitles.recognition,
         recognized: true,
+        clipProperties: { clp_v_1: { transform: { position: [3, 4] }, sync_broken: true } },
         subtitleTracks: subtitles.timelines[0].tracks
           .filter((track: { kind: string }) => track.kind === "subtitle")
           .map((track: { id: string; name: string; default_style_id: string }) => ({

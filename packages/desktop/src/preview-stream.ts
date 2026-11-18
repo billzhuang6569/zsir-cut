@@ -50,6 +50,9 @@ export class PreviewStream {
     private activate: () => void,
     private fail: () => void,
     private timelineEnd?: string,
+    private setGain = (element: HTMLVideoElement, clip: ClipView, _at: string) => {
+      element.volume = Math.min(1, 10 ** ((clip.gain_db ?? 0) / 20));
+    },
   ) {
     video.src = this.url;
     this.media.addEventListener("sourceopen", this.open, { once: true });
@@ -152,7 +155,7 @@ export class PreviewStream {
               ),
             ),
           );
-          this.video.volume = Math.min(1, 10 ** ((row.segment.clip.gain_db ?? 0) / 20));
+          this.setGain(this.video, row.segment.clip, at);
           this.video.playbackRate = 1;
           this.started = true;
           void this.video.play().then(() => {
@@ -183,7 +186,6 @@ export class PreviewStream {
     if (!row) return null;
     const ended = this.video.ended || compare(decoded, parseRational(row.end, true)) >= 0;
     const clip = row.segment.clip;
-    this.video.volume = Math.min(1, 10 ** ((clip.gain_db ?? 0) / 20));
     const at = ended
       ? clip.timeline_out.t
       : printRational(
@@ -199,6 +201,7 @@ export class PreviewStream {
           ),
           true,
         );
+    this.setGain(this.video, clip, at);
     return { at, ended };
   }
   dispose() {
@@ -224,6 +227,7 @@ export function usePreviewStream({
   at,
   playbackAt,
   prepare,
+  setGain,
 }: {
   project: ProjectView | null;
   top: TrackView | undefined;
@@ -234,6 +238,7 @@ export function usePreviewStream({
   at: string;
   playbackAt: React.MutableRefObject<string | null>;
   prepare?: () => void;
+  setGain?: (element: HTMLVideoElement, clip: ClipView, at: string) => void;
 }) {
   const video = useRef<HTMLVideoElement>(null);
   const engine = useRef<PreviewStream>();
@@ -371,12 +376,13 @@ export function usePreviewStream({
             },
             stop,
             project?.duration.t,
+            setGain,
           );
         }
       }
       return mapped?.ended ? mapped.at : null;
     },
-    [enabled, top, config, path, project, stop, prepare],
+    [enabled, top, config, path, project, stop, prepare, setGain],
   );
   return { video, visible, preparing, active, sample, cacheStatus };
 }
