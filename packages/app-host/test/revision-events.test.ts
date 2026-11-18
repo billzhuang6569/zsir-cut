@@ -287,3 +287,12 @@ it("counts all entity types beyond the 50-row limit without leaking non-clip sna
   expect(event.truncated).toBe(true);
   expect(event.changes).toEqual(changes.slice(0, 50).map(({ key, entity }) => ({ key, entity })));
 });
+
+it("publishes the target turn on a journaled turn withdrawal", () => {
+  expect(
+    projectChanged(
+      { kind: "undo", verb: "undo", revision: "rev_undo", parent: "rev_edit", seq: 3, at: "", turn_id: "turn_edit" },
+      null,
+    ).turn,
+  ).toBe("turn_edit");
+});

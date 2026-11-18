@@ -203,7 +203,20 @@ describe("AI panel", () => {
         return { events: [{ type: "user", text: "历史问题" }, { type: "text", text: "历史回复" }, { type: "end" }] };
       return {};
     });
-    const view = { revision: { id: "rev_main", seq: 1 }, media: [{ id: "med_test", name: "镜头 A" }] } as ProjectView;
+    const view: ProjectView = {
+      id: "tl_test",
+      name: "采访",
+      revision: { id: "rev_main", seq: 1 },
+      edit_rate: "25",
+      drop_frame: false,
+      start_timecode: "00:00:00:00",
+      duration: { t: "1s" },
+      tracks: [],
+      cues: [],
+      markers: [],
+      styles: [],
+      media: [{ id: "med_test", name: "镜头 A", kind: "video", duration: "1s" }],
+    };
     const notices: AiNotice[] = [];
     const container = document.createElement("div");
     document.body.append(container);
@@ -227,15 +240,16 @@ describe("AI panel", () => {
       });
       const input = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="发给 AI"]');
       if (!input) throw new Error("input missing");
-      await change(input, "@");
+      await change(input, "@镜头 A");
       await act(() => button(container, "镜头 A").click());
-      expect(input.value).toBe("@[镜头 A](med_test) ");
+      expect(input.value).toBe("");
+      expect(button(container, "移除引用：素材 · 镜头 A")).toBeDefined();
       await act(() =>
         input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true })),
       );
       expect(requestLog.some((entry) => entry.verb === "chat_send")).toBe(false);
       await act(async () => input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
-      expect(requestLog.find((entry) => entry.verb === "chat_send")?.request.text).toBe("@[镜头 A](med_test) ");
+      expect(requestLog.find((entry) => entry.verb === "chat_send")?.request.text).toBe("@素材 med_test（镜头 A）");
       for (const event of [
         { type: "user", text: "@[镜头 A](med_test)" },
         { type: "text", text: "# 标题\n- **重点**\n```js\n<unsafe>\n```" },

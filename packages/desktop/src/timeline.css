@@ -778,3 +778,31 @@
   background: repeating-linear-gradient(135deg, var(--attention) 0 2px, transparent 2px 6px);
   pointer-events: none;
 }
+
+.zc-clip[data-ai-change]::after {
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--attention);
+  border-radius: inherit;
+  content: "";
+  pointer-events: none;
+}
+
+.zc-ai-removal-line,
+.zc-ai-removal-tick {
+  position: absolute;
+  z-index: 5;
+  width: 7px;
+  transform: translateX(-50%);
+  background: linear-gradient(var(--attention), var(--attention)) center / 2px 100% no-repeat;
+}
+
+.zc-ai-removal-line {
+  inset-block: 0;
+}
+
+.zc-ai-removal-tick {
+  bottom: 1px;
+  height: 6px;
+  background-size: 5px 100%;
+}

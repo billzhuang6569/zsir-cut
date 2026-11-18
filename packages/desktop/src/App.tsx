@@ -93,6 +93,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
     revision: aiRevision,
     decisionRevision,
     turnChanges,
+    uiState: state,
     connectionEpoch,
     permissions,
     permissionAnswered: (id) => setPermissions((old) => old.filter((item) => item.id !== id)),
@@ -162,7 +163,8 @@ export function App({ config }: { config?: { port: number; token: string } }) {
       aiChanged: () => setAiRevision((value) => value + 1),
       decisionsChanged: () => setDecisionRevision((value) => value + 1),
       projectChanged: (event) => {
-        if (event.target === "main" && event.turn) setTurnChanges((old) => [...old, event]);
+        if (event.turn && (event.target === "main" || event.author?.kind === "agent"))
+          setTurnChanges((old) => [...old, event]);
         if (event.target === "session" && event.session_id === reviewSessionRef.current) setProjectChange(event);
       },
       icon: setFcpIcon,
@@ -345,6 +347,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
               if (media) update({ ...current.current, panel: "media" });
             }}
           />
+          {ai.progress}
           {ai.decisionStatus}
           {ai.draftStatus}
           {history.banner}
@@ -556,6 +559,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
                   placement={placement}
                   onPlacementChange={setPlacement}
                   project={history.view}
+                  aiChanges={history.viewing ? undefined : ai.timelineChanges}
                   onEditSubtitle={subtitles.editCue}
                   readOnly={history.viewing}
                   state={state}

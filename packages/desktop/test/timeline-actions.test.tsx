@@ -17,6 +17,7 @@ let host: HTMLDivElement;
 let root: Root;
 let state = initialState();
 let project: ProjectView;
+let aiChanges: Parameters<typeof TimelinePreview>[0]["aiChanges"];
 let preset: keyof typeof presets;
 let overrides: Partial<Record<Action, string | null>>;
 let ui: { snap: boolean; magnetic: boolean; skimming: boolean; track_height: "s" | "m" | "l" };
@@ -40,6 +41,7 @@ const render = () =>
   root.render(
     <TimelinePreview
       project={project}
+      aiChanges={aiChanges}
       state={state}
       update={(next) => {
         state = next;
@@ -106,6 +108,7 @@ beforeEach(async () => {
   overrides = {};
   ui = { snap: false, magnetic: true, skimming: false, track_height: "m" };
   readOnly = false;
+  aiChanges = undefined;
   sourceViewer = false;
   showViewer = false;
   dragging.current = false;
@@ -1472,4 +1475,22 @@ describe("timeline clipboard", () => {
     expect(ops[2]).toMatchObject({ op: "place", mode: "insert", at: "6s" });
     expect(ops[4]).toEqual({ op: "move", mode: "place", to: "3s", clip_ids: [ops[2]?.audio_clip_id] });
   });
+});
+
+it("outlines changed clips and marks deletions on the original track and ruler", async () => {
+  aiChanges = {
+    clips: new Map([["c00", "缩短开头"]]),
+    removals: new Map([["c_deleted", { track: "t1", at: "9s", label: "删掉停顿" }]]),
+  };
+  await act(async () => render());
+  const clip = get('[data-selection-id="c00"]');
+  expect(clip.title).toContain("缩短开头");
+  expect(clip.dataset.aiChange).toBe("缩短开头");
+  expect(get('[data-track-id="t1"] .zc-ai-removal-line').title).toBe("删掉停顿");
+  expect(get(".zc-ruler .zc-ai-removal-tick").style.left).toBe(get(".zc-ai-removal-line").style.left);
+  await click(clip);
+  expect(state.selected).toContain("c00");
+  aiChanges = undefined;
+  await act(async () => render());
+  expect(host.querySelector("[data-ai-change], .zc-ai-removal-line, .zc-ai-removal-tick")).toBeNull();
 });
