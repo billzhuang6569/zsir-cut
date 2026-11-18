@@ -1494,3 +1494,130 @@ it("outlines changed clips and marks deletions on the original track and ruler",
   await act(async () => render());
   expect(host.querySelector("[data-ai-change], .zc-ai-removal-line, .zc-ai-removal-tick")).toBeNull();
 });
+
+it.each([
+  ["slip", "滑动内容", "source", "14s"],
+  ["slide", "滑动片段", "right", "99/25s"],
+] as const)(
+  "previews and commits a bounded %s drag, then releases the temporary tool",
+  async (tool, label, detail, by) => {
+    aiChanges = { clips: new Map([["c00", "缩短开头"]]), removals: new Map() };
+    await act(async () => render());
+    await action(tool === "slip" ? "tool_slip" : "tool_slide");
+    const button = get(`button[aria-label^="${label}"]`);
+    expect(button.getAttribute("aria-pressed")).toBe("true");
+    const clip = get('[data-selection-id="c00"]');
+    await pointer(clip, "pointerdown", 48);
+    await pointer(clip, "pointermove", 900);
+    expect(clip.style.outline).toContain("attention");
+    const feedback = document.querySelector('[aria-label="拖动反馈"]')?.textContent;
+    expect(feedback).toContain(detail === "source" ? "源入点" : "右侧入点");
+    expect(feedback).toContain("+00:00:");
+    expect(feedback).toContain(tool === "slip" ? "已到素材边界" : "已到相邻片段或空隙边界");
+    expect(clip.dataset.aiChange).toBe("缩短开头");
+    await pointer(clip, "pointerup", 900);
+    expect(lastOps()).toEqual([{ op: tool, clip_id: "c00", by }]);
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent("keyup", { key: reply().keymap[tool === "slip" ? "tool_slip" : "tool_slide"] ?? "" }),
+      );
+    });
+    expect(button.getAttribute("aria-pressed")).toBe("false");
+    await click(button);
+    expect(button.getAttribute("aria-pressed")).toBe("true");
+  },
+);
+
+it.each([
+  ["select_edit_in", "left", "c00", "out", "trim"],
+  ["select_edit_out", "right", "c01", "in", "trim"],
+  ["select_edit_both", "both", "c00", "out", "roll"],
+] as const)("selects %s at the playhead and nudges the selected edge", async (name, side, clip_id, edge, op) => {
+  state.playhead = { at: "4s" };
+  await act(async () => render());
+  await action(name);
+  expect(get(".zc-seam.is-selected").dataset.side).toBe(side);
+  const extra = op === "trim" ? { ripple: true } : {};
+  await action("nudge_edit_back");
+  expect(lastOps()).toEqual([{ op, clip_id, edge, to: "99/25s", ...extra }]);
+  state.edit_point = { ...state.edit_point, track_id: "t0", at: "4s" };
+  await act(async () => render());
+  await action("nudge_edit_fwd10");
+  expect(lastOps()).toEqual([{ op, clip_id, edge, to: "22/5s", ...extra }]);
+});
+
+it("selects a gap across tracks, ignores lift, and closes gaps through the keyboard and menu", async () => {
+  project = {
+    ...project,
+    tracks: project.tracks.map((track) => ({
+      ...track,
+      clips: track.clips.map((clip, index) => (index === 0 ? { ...clip, timeline_out: { t: "3s" } } : clip)),
+    })),
+  };
+  await act(async () => render());
+  const gap = get('.zc-gap[data-gap="3s"]');
+  await click(gap);
+  expect(host.querySelectorAll('.zc-gap[aria-pressed="true"]')).toHaveLength(3);
+  await action("lift_delete");
+  expect(writes()).toHaveLength(0);
+  await action("ripple_delete");
+  expect(lastOps()).toEqual([{ op: "remove_span", range: { start: "3s", duration: "1s" }, ripple: true }]);
+  await pointer(gap, "contextmenu", 160);
+  const buttons = host.querySelectorAll<HTMLButtonElement>(".zc-timeline-menu button");
+  expect([...buttons].map((button) => button.textContent)).toEqual(["合拢这段空隙", "合拢全部空隙"]);
+  await click(buttons[0] as HTMLButtonElement);
+  expect(lastOps()).toEqual([{ op: "remove_span", range: { start: "3s", duration: "1s" }, ripple: true }]);
+  await pointer(gap, "contextmenu", 160);
+  await click(get(".zc-timeline-menu button:last-child"));
+  expect(lastOps()).toEqual([{ op: "close_gaps" }]);
+  expect(commandBlockReason("close_all_gaps")).toBeNull();
+  await act(async () => expect(runEditorCommand("close_all_gaps")).toBe(true));
+  expect(lastOps()).toEqual([{ op: "close_gaps" }]);
+});
+
+it("edits, drags, deletes and jumps to review markers", async () => {
+  const marker = get(".zc-marker");
+  await click(marker);
+  expect(marker.getAttribute("aria-pressed")).toBe("true");
+  await pointer(marker, "dblclick", 288);
+  const input = get(".zc-marker-text") as HTMLInputElement;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, "复查声音");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await key("Enter", input);
+  expect(lastOps()).toEqual([{ op: "update_marker", marker_id: "review", text: "复查声音" }]);
+  const updated = get(".zc-marker");
+  await pointer(updated, "pointerdown", 288);
+  await pointer(updated, "pointermove", 240);
+  expect(updated.style.left).toBe("240px");
+  await pointer(updated, "pointerup", 240);
+  expect(lastOps()).toEqual([{ op: "update_marker", marker_id: "review", at: "5s" }]);
+  await pointer(updated, "contextmenu", 288);
+  await click(get(".zc-timeline-menu button"));
+  expect(lastOps()).toEqual([{ op: "remove_marker", marker_id: "review" }]);
+  state.playhead = { at: "0s" };
+  await act(async () => render());
+  const list = get('select[aria-label="标记"]') as HTMLSelectElement;
+  await act(async () => {
+    list.value = "review";
+    list.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  expect(state.playhead).toEqual({ at: "6s" });
+});
+
+it("shows outgoing and incoming source frames while rolling a cut", async () => {
+  showViewer = true;
+  previewConfig = { port: 1234, token: "test" };
+  vi.spyOn(PreviewMix.prototype, "warm").mockImplementation(() => {});
+  await act(async () => render());
+  await action("tool_roll");
+  const seam = get('[data-track-id="t0"] .zc-seam');
+  await pointer(seam, "pointerdown", 192);
+  await pointer(seam, "pointermove", 240);
+  const frames = [...host.querySelectorAll<HTMLImageElement>(".zc-trim-frames img")];
+  expect(frames.map((frame) => new URL(frame.src).searchParams.get("at"))).toEqual(["174/25s", "3s"]);
+  await pointer(seam, "pointercancel", 240);
+  expect(get(".zc-trim-frames")).toBeNull();
+  expect(writes().filter(([verb]) => verb === "edit")).toHaveLength(0);
+});

@@ -1,6 +1,6 @@
 import type { UiState } from "../../app-host/src/ui.js";
 import type { ProjectView } from "./connection.js";
-import { compare, frameAt, frameTime, parseRational, printRational, sub } from "./timeline.js";
+import { add, compare, frameAt, frameTime, parseRational, printRational, sub } from "./timeline.js";
 import { moveGroup } from "./timelineMove.js";
 import { trimGroup } from "./timelineTrim.js";
 
@@ -70,15 +70,14 @@ export function editPoints(project: ProjectView) {
   return project.tracks
     .filter((track) => track.kind !== "subtitle")
     .flatMap((track) =>
-      track.clips.flatMap((left) =>
-        track.clips.some(
+      track.clips.flatMap((left) => {
+        const right = track.clips.find(
           (right) =>
             right.id !== left.id &&
             compare(parseRational(left.timeline_out.t, true), parseRational(right.timeline_in.t, true)) === 0,
-        )
-          ? [{ track_id: track.id, at: left.timeline_out.t, clip_id: left.id }]
-          : [],
-      ),
+        );
+        return right ? [{ track_id: track.id, at: left.timeline_out.t, clip_id: left.id, right_id: right.id }] : [];
+      }),
     );
 }
 
@@ -99,6 +98,20 @@ export function splitAllAt(project: ProjectView, at: string) {
 }
 
 export function timelineEdit(action: string, project: ProjectView, state: UiState, at: string, magnetic: boolean) {
+  if (action === "close_all_gaps") return { label: "合拢全部空隙", ops: [{ op: "close_gaps" }] };
+  if ((action === "ripple_delete" || action === "lift_delete") && state.gap) {
+    const { start, duration } = state.gap;
+    const end = printRational(add(parseRational(start, true), parseRational(duration, true)), true);
+    const onGrid = [start, end].every((at) => frameTime(frameAt(at, project.edit_rate), project.edit_rate) === at);
+    const current = timelineGaps(project).some((gap) => gap.start === start && gap.duration === duration);
+    return {
+      label: "合拢这段空隙",
+      ops:
+        action === "ripple_delete" && current
+          ? [{ op: "remove_span", range: state.gap, ripple: true, ...(onGrid ? {} : { snap: "in" }) }]
+          : [],
+    };
+  }
   const clips = project.tracks.filter((track) => track.kind !== "subtitle").flatMap((track) => track.clips);
   const selected = clips.filter((clip) => state.selected.includes(clip.id));
   const cut = frameTime(frameAt(at, project.edit_rate), project.edit_rate);
@@ -176,27 +189,45 @@ export function timelineEdit(action: string, project: ProjectView, state: UiStat
         .map((clip) => ({ op: "trim", clip_id: clip.id, edge, to: cut, ripple: magnetic })),
     };
   }
-  if (action === "extend_edit" || action === "nudge_edit_back" || action === "nudge_edit_fwd") {
-    const delta = action === "nudge_edit_back" ? -1n : 1n;
-    if (point)
+  if (["extend_edit", "nudge_edit_back", "nudge_edit_fwd", "nudge_edit_back10", "nudge_edit_fwd10"].includes(action)) {
+    const count = action.endsWith("10") ? 10n : 1n;
+    const delta = action.startsWith("nudge_edit_back") ? -count : count;
+    const selection = state.edit_point;
+    const side = action === "extend_edit" ? "both" : selection?.side;
+    const edge = side === "right" ? "in" : "out";
+    const oneSide = side === "left" || side === "right";
+    const selectedEdge = oneSide && selection?.clip_id;
+    const clipId = selectedEdge
+      ? clips.find(
+          (clip) =>
+            clip.id === selectedEdge && (edge === "in" ? clip.timeline_in.t : clip.timeline_out.t) === selection.at,
+        )?.id
+      : side === "right"
+        ? point?.right_id
+        : point?.clip_id;
+    if (selection && clipId) {
+      const to =
+        action === "extend_edit" ? cut : frameTime(frameAt(selection.at, project.edit_rate) + delta, project.edit_rate);
       return {
-        label: action === "extend_edit" ? "把剪点延到播放头" : "移动剪点一帧",
-        ops: [
-          {
-            op: "roll",
-            clip_id: point.clip_id,
-            edge: "out",
-            to:
-              action === "extend_edit"
-                ? cut
-                : frameTime(frameAt(point.at, project.edit_rate) + delta, project.edit_rate),
-          },
-        ],
+        label: action === "extend_edit" ? "把剪点延到播放头" : `移动剪点 ${count} 帧`,
+        ops:
+          to === selection.at
+            ? []
+            : [
+                {
+                  op: oneSide ? "trim" : "roll",
+                  clip_id: clipId,
+                  edge,
+                  to,
+                  ...(oneSide ? { ripple: magnetic } : {}),
+                },
+              ],
       };
+    }
     if (action !== "extend_edit" && selected.length) {
       const group = moveGroup(project, state.selected, selected[0]?.id ?? "");
       return {
-        label: "移动片段一帧",
+        label: `移动片段 ${count} 帧`,
         ops: [
           {
             op: "move",
@@ -210,4 +241,22 @@ export function timelineEdit(action: string, project: ProjectView, state: UiStat
     return { label: "移动剪点", ops: [] };
   }
   return null;
+}
+
+export function timelineGaps(project: ProjectView) {
+  const time = (value: string) => parseRational(value, true);
+  const clips = project.tracks
+    .filter((track) => track.kind !== "subtitle")
+    .flatMap((track) => track.clips)
+    .sort((a, b) => compare(time(a.timeline_in.t), time(b.timeline_in.t)));
+  const gaps: { start: string; duration: string }[] = [];
+  let cursor = time("0s");
+  for (const clip of clips) {
+    const start = time(clip.timeline_in.t);
+    const end = time(clip.timeline_out.t);
+    if (compare(start, cursor) > 0)
+      gaps.push({ start: printRational(cursor, true), duration: printRational(sub(start, cursor), true) });
+    if (compare(end, cursor) > 0) cursor = end;
+  }
+  return gaps;
 }

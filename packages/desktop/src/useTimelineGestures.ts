@@ -195,6 +195,7 @@ export function useTimelineGestures({
       preview: "timeline",
       playing: false,
       edit_point: null,
+      gap: null,
       selected: selectionIds(state.selected, ids, keys),
     });
   };
@@ -293,27 +294,31 @@ export function useTimelineGestures({
         const origin = contentPoint(event);
         const previous = [...latest.current.state.selected];
         const keys = { shiftKey: event.shiftKey, metaKey: event.metaKey, ctrlKey: event.ctrlKey };
-        start(event, {
-          move: (event) => setBox(rectangle(origin, event)),
-          end: (event, moved) => {
-            if (!moved) return;
-            const rect = rectangle(origin, event);
-            const hits: string[] = [];
-            for (const item of scroller.current?.querySelectorAll<HTMLElement>("[data-selection-id]") ?? []) {
-              const bounds = item.getBoundingClientRect();
-              const position = contentPoint({ clientX: bounds.left, clientY: bounds.top });
-              if (
-                position.x <= rect.left + rect.width &&
-                position.x + bounds.width >= rect.left &&
-                position.y <= rect.top + rect.height &&
-                position.y + bounds.height >= rect.top
-              )
-                hits.push(item.dataset.selectionId as string);
-            }
-            const { state, update } = latest.current;
-            update({ ...state, edit_point: null, selected: selectionIds(previous, hits, keys) });
+        start(
+          event,
+          {
+            move: (event) => setBox(rectangle(origin, event)),
+            end: (event, moved) => {
+              if (!moved) return;
+              const rect = rectangle(origin, event);
+              const hits: string[] = [];
+              for (const item of scroller.current?.querySelectorAll<HTMLElement>("[data-selection-id]") ?? []) {
+                const bounds = item.getBoundingClientRect();
+                const position = contentPoint({ clientX: bounds.left, clientY: bounds.top });
+                if (
+                  position.x <= rect.left + rect.width &&
+                  position.x + bounds.width >= rect.left &&
+                  position.y <= rect.top + rect.height &&
+                  position.y + bounds.height >= rect.top
+                )
+                  hits.push(item.dataset.selectionId as string);
+              }
+              const { state, update } = latest.current;
+              update({ ...state, edit_point: null, gap: null, selected: selectionIds(previous, hits, keys) });
+            },
           },
-        });
+          target.closest<HTMLElement>(".zc-gap") ?? event.currentTarget,
+        );
       },
       onPointerMove(event: PointerEvent<HTMLElement>) {
         pointer.current = { x: event.clientX, y: event.clientY };

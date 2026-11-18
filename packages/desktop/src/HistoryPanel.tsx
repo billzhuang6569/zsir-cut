@@ -105,6 +105,7 @@ export function useHistoryPanel({
       preview: "timeline",
       selected: [],
       edit_point: null,
+      gap: null,
     });
   }, []);
   const setOpen = useCallback((open: boolean) => {

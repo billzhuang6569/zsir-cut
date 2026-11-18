@@ -1024,6 +1024,8 @@ it("renders every chapter as a bar edge, shows only non-chapter diamonds and see
   expect(markers.every((node) => node.textContent === "")).toBe(true);
   for (const [index, marker] of markers.entries()) {
     await pointer(marker, "pointerdown", 100, 60);
+    expect(dragging.current).toBe(index === 2);
+    await pointer(marker, "pointerup", 100, 60);
     expect(dragging.current).toBe(false);
     await click(marker);
     expect(state.playhead).toEqual({ at: `${15 + index}s` });

@@ -317,14 +317,19 @@ describe("desktop host", () => {
       });
       await sendMessage(socket, { type: "ui_ready" });
       for (const fields of [
-        { edit_point: null, chapters: { view: "outline" }, history: { open: false, viewing: null } },
+        {
+          edit_point: null,
+          gap: { start: "2s", duration: "1s" },
+          chapters: { view: "outline" },
+          history: { open: false, viewing: null },
+        },
         {
           edit_point: { track_id: "trk_v1", at: "1001/300s" },
           chapters: { view: "timeline" },
           history: { open: true, viewing: "rev_previous" },
         },
         {
-          edit_point: { track_id: "trk_v1", at: "4s" },
+          edit_point: { track_id: "trk_v1", at: "4s", side: "right", clip_id: "clp_v1" },
           snap: false,
           chapters: { view: "timeline", levels: 2, timecodes: true, zoom: 1, folded: ["mrk_one"] },
           history: { open: true, viewing: "rev_previous", revision: "rev_previous", label: "上一步" },
