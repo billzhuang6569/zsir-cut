@@ -13,6 +13,7 @@ import { DESKTOP_AUTHOR, type ProjectView, type useTimelinePreferences } from ".
 import { type EditorCommand, type EditorShortcutHandler, useEditorShortcut } from "./editorShortcuts.js";
 import { isPlacementAction, type Placement, placementLabels, threePointEdit } from "./media.js";
 import { loadMediaResource, type Thumbs, thumbnailStyle, useMediaCache } from "./media-cache.js";
+import { layerStyle, PreviewLayer, visibleVideoLayers } from "./preview-layers.js";
 import { audioSpans, PreviewMix } from "./preview-mix.js";
 import { usePreviewStream } from "./preview-stream.js";
 import { useReverseAudio } from "./reverse-audio.js";
@@ -810,15 +811,16 @@ export function TimelinePreview({
   const skimTarget =
     skimming && hoverX !== null && !state.playing && !dragging.current && !viewerOnly ? timelinePoint(hoverX) : null;
   const previewAt = skimTarget?.to ?? at;
-  const top = project?.tracks.find(
+  const firstTrack = project?.tracks.find(
     (track) =>
       (track.kind === "video" || (viewerOnly && track.kind === "audio")) &&
       track.enabled &&
       track.clips.some((clip) => clip.enabled),
   );
-  const clip = top?.clips.find(
-    (item) => item.enabled && (viewerOnly || contains(item.timeline_in.t, item.timeline_out.t, previewAt)),
-  );
+  const layers = viewerOnly ? [] : visibleVideoLayers(project, previewAt);
+  const primary = layers[0];
+  const top = viewerOnly ? firstTrack : primary?.track;
+  const clip = viewerOnly ? firstTrack?.clips.find((clip) => clip.enabled) : primary?.clip;
   const points = useMemo(() => (project ? editPoints(project) : []), [project]);
   const gaps = useMemo(() => (project ? timelineGaps(project) : []), [project]);
   const reviewMarkers = useMemo(
@@ -843,11 +845,15 @@ export function TimelinePreview({
   const boundaries = useMemo(() => {
     if (!project) return [];
     return [
-      ...(top?.clips.flatMap((item) => [item.timeline_in.t, item.timeline_out.t]) ?? []),
+      ...project.tracks.flatMap((track) =>
+        track.enabled && track.kind === "video"
+          ? track.clips.flatMap((item) => (item.enabled ? [item.timeline_in.t, item.timeline_out.t] : []))
+          : [],
+      ),
       ...project.cues.flatMap((cue) => [cue.start, cue.end]),
     ].map((time) => ceil(mul(parseRational(time, true), parseRational(project.edit_rate))));
-  }, [project, top]);
-  const media = project?.media.find((item) => item.id === clip?.media_id);
+  }, [project]);
+  const media = viewerOnly ? project?.media.find((item) => item.id === clip?.media_id) : primary?.media;
   const activeGainPreview = gainPreview?.ids.every((id) => state.selected.includes(id)) ? gainPreview : null;
   const gain = viewerOnly ? timelineGain(project, clip, previewAt, activeGainPreview) : 0;
   const soloAudioTrackIds = state.soloAudioTrackIds;
@@ -889,7 +895,7 @@ export function TimelinePreview({
     cacheStatus,
   } = usePreviewStream({
     project,
-    top,
+    top: firstTrack,
     path: viewerOnly || readOnly ? null : state.project,
     config,
     call,
@@ -1934,6 +1940,10 @@ export function TimelinePreview({
       };
     });
   })();
+  const primaryStyle = viewerOnly ? { position: "absolute" as const, inset: 0 } : layerStyle(project, clip, media);
+  const format = project?.format;
+  const previewAspect =
+    ((format?.width ?? 1920) / (format?.height ?? 1080)) * numberOf(parseRational(format?.pixel_aspect ?? "1"));
   const viewer = (
     <section aria-label="预览" className="zc-viewer zc-panel" data-editor-region={viewerOnly ? "media" : "timeline"}>
       {(error || ((viewerOnly || hideTimeline) && writeError)) && (
@@ -1959,68 +1969,91 @@ export function TimelinePreview({
           preventPointerSelection(event);
           window.getSelection()?.removeAllRanges();
         }}
-        style={{ aspectRatio: `${project?.format?.width ?? 1920} / ${project?.format?.height ?? 1080}` }}
+        style={{ aspectRatio: previewAspect }}
       >
-        {src && media?.kind === "image" ? (
-          <img src={src} alt={media.name ?? "预览"} />
-        ) : (
-          [0, 1].map((index) => (
-            <video
-              key={index}
-              ref={(element) => {
-                videos.current[index] = element;
-              }}
-              data-preview-mode="preroll"
-              playsInline
-              crossOrigin="anonymous"
-              preload="auto"
-              muted={
-                !viewerOnly ||
-                previewMuted ||
-                !!skimTarget ||
-                index !== visibleVideo ||
-                streamVisible ||
-                streamPreparing
-              }
-              data-preroll={streamVisible || index !== visibleVideo ? "" : undefined}
-              data-preroll-lead={index === visibleVideo ? prerollLead : undefined}
-              data-preroll-state="idle"
-              onWaiting={(event) => {
-                resetTopPlayback(event.currentTarget);
-                if (event.currentTarget === videos.current[activeVideo.current]) mix?.stop();
-              }}
-              onSeeked={(event) => resetTopPlayback(event.currentTarget)}
-              style={{
-                position: "absolute",
-                inset: 0,
-                zIndex: index === visibleVideo ? 1 : 0,
-                visibility: streamVisible ? "hidden" : undefined,
-              }}
-              aria-hidden={streamVisible || index !== visibleVideo}
-              aria-label={
-                !streamVisible && index === visibleVideo ? (viewerOnly ? "素材预览" : "时间线预览") : undefined
-              }
-              onError={() => setWriteError("预览无法读取，请检查素材或代理")}
+        <div className="zc-preview-composition" style={{ "--preview-aspect": previewAspect } as React.CSSProperties}>
+          {src && media?.kind === "image" ? (
+            <img
+              src={src}
+              alt={media.name ?? "预览"}
+              style={viewerOnly ? undefined : { ...primaryStyle, opacity: streamVisible ? 0 : 1 }}
             />
-          ))
-        )}
-        <video
-          ref={streamVideo}
-          muted
-          onWaiting={() => mix?.stop()}
-          data-preview-mode="mse"
-          data-preroll={!streamVisible ? "" : undefined}
-          playsInline
-          preload="auto"
-          aria-label={streamVisible ? "时间线预览" : undefined}
-          aria-hidden={!streamVisible}
-          style={{
-            position: "absolute",
-            inset: 0,
-            zIndex: streamVisible ? 1 : 0,
-            opacity: streamVisible ? 1 : 0,
-          }}
-        />
+          ) : (
+            [0, 1].map((index) => (
+              <video
+                key={index}
+                ref={(element) => {
+                  videos.current[index] = element;
+                }}
+                data-preview-mode="preroll"
+                playsInline
+                crossOrigin="anonymous"
+                preload="auto"
+                muted={
+                  !viewerOnly ||
+                  previewMuted ||
+                  !!skimTarget ||
+                  index !== visibleVideo ||
+                  streamVisible ||
+                  streamPreparing
+                }
+                data-preroll={streamVisible || index !== visibleVideo ? "" : undefined}
+                data-preroll-lead={index === visibleVideo ? prerollLead : undefined}
+                data-preroll-state="idle"
+                onWaiting={(event) => {
+                  resetTopPlayback(event.currentTarget);
+                  if (event.currentTarget === videos.current[activeVideo.current]) mix?.stop();
+                }}
+                onSeeked={(event) => resetTopPlayback(event.currentTarget)}
+                style={{
+                  ...primaryStyle,
+                  zIndex: index === visibleVideo ? 1 : 0,
+                  opacity: index === visibleVideo ? 1 : 0,
+                  visibility: streamVisible || !clip ? "hidden" : primaryStyle.visibility,
+                }}
+                aria-hidden={streamVisible || index !== visibleVideo}
+                aria-label={
+                  !streamVisible && index === visibleVideo ? (viewerOnly ? "素材预览" : "时间线预览") : undefined
+                }
+                onError={() => setWriteError("预览无法读取，请检查素材或代理")}
+              />
+            ))
+          )}
+          {!streamVisible &&
+            config &&
+            layers
+              .slice(1)
+              .map(({ clip, media }) => (
+                <PreviewLayer
+                  key={clip.id}
+                  clip={clip}
+                  media={media}
+                  project={project}
+                  src={mediaUrl(config, "media", media.id)}
+                  at={previewAt}
+                  playback={subtitleAt}
+                  playing={state.playing && !streamPreparing}
+                  direction={direction}
+                />
+              ))}
+          <video
+            ref={streamVideo}
+            muted
+            onWaiting={() => mix?.stop()}
+            data-preview-mode="mse"
+            data-preroll={!streamVisible ? "" : undefined}
+            playsInline
+            preload="auto"
+            aria-label={streamVisible ? "时间线预览" : undefined}
+            aria-hidden={!streamVisible}
+            style={{
+              position: "absolute",
+              inset: 0,
+              zIndex: streamVisible ? 1 : 0,
+              opacity: streamVisible ? 1 : 0,
+            }}
+          />
+        </div>
         {trimFrames && (
           <div className="zc-trim-frames">
             {trimFrames.map(({ edge, url }) => (
@@ -2031,7 +2064,7 @@ export function TimelinePreview({
         {clip?.speed === "map" && (
           <span
             className="zc-approx"
-            title="近似：画面平滑变速按线性映射，倒放与静帧逐帧定位；声音仅支持线性变速；无转场混合或画面变换"
+            title="近似：画面平滑变速按线性映射，倒放与静帧逐帧定位；声音仅支持线性变速；无转场混合"
           >
             近似
           </span>
@@ -2590,41 +2623,44 @@ export function TimelinePreview({
                       ))}
                     {!readOnly &&
                       !viewerOnly &&
-                      project.tracks.flatMap((track) =>
-                        track.kind !== "video" || !track.enabled
-                          ? []
-                          : track.clips.flatMap((clip) => {
-                              if (
-                                !clip.enabled ||
-                                project.media.find((media) => media.id === clip.media_id)?.kind !== "video"
-                              )
-                                return [];
-                              const segment = cacheStatus?.segments?.find((segment) => segment.clip_id === clip.id);
-                              if (!segment || segment.state === "ready") return [];
-                              const message =
-                                cacheStatus?.paused === "battery"
-                                  ? "用电池时暂停了预览准备，可在设置里关掉"
-                                  : "这段还没准备好，播放到这里可能卡顿";
-                              return (
-                                <button
-                                  key={clip.id}
-                                  type="button"
-                                  className={`zc-render-bar${segment.state === "building" ? " is-building" : ""}`}
-                                  title={message}
-                                  aria-label={`${message}，打开预览与缓存设置`}
-                                  style={{
-                                    left: pixelAt(clip.timeline_in.t, scale),
-                                    width: Math.max(
-                                      0,
-                                      pixelAt(clip.timeline_out.t, scale) - pixelAt(clip.timeline_in.t, scale),
-                                    ),
-                                  }}
-                                  onPointerDown={(event) => event.stopPropagation()}
-                                  onClick={() => onOpenSettings?.("预览与缓存")}
-                                />
-                              );
-                            }),
-                      )}
+                      (cacheStatus?.revision === undefined || cacheStatus.revision === project.revision?.id) &&
+                      cacheStatus?.segments?.flatMap((segment) => {
+                        if (segment.state === "ready") return [];
+                        const clip =
+                          segment.start === undefined
+                            ? project.tracks
+                                .filter((track) => track.kind === "video" && track.enabled)
+                                .flatMap((track) => track.clips)
+                                .find(
+                                  (clip) =>
+                                    clip.id === segment.clip_id &&
+                                    clip.enabled &&
+                                    project.media.some((media) => media.id === clip.media_id && media.kind === "video"),
+                                )
+                            : undefined;
+                        const start = segment.start ?? clip?.timeline_in.t;
+                        const end = segment.end ?? clip?.timeline_out.t;
+                        if (start === undefined || end === undefined) return [];
+                        const message =
+                          cacheStatus.paused === "battery"
+                            ? "用电池时暂停了预览准备，可在设置里关掉"
+                            : "这段还没准备好，播放到这里可能卡顿";
+                        return (
+                          <button
+                            key={`${segment.clip_id}:${start}`}
+                            type="button"
+                            className={`zc-render-bar${segment.state === "building" ? " is-building" : ""}`}
+                            title={message}
+                            aria-label={`${message}，打开预览与缓存设置`}
+                            style={{
+                              left: pixelAt(start, scale),
+                              width: Math.max(0, pixelAt(end, scale) - pixelAt(start, scale)),
+                            }}
+                            onPointerDown={(event) => event.stopPropagation()}
+                            onClick={() => onOpenSettings?.("预览与缓存")}
+                          />
+                        );
+                      })}
                     {rulerTicks(width, scale, project.edit_rate).map((tick) => (
                       <span
                         key={tick.at}

@@ -618,6 +618,70 @@ it("shows video cache gaps at timeline positions and opens cache settings withou
   expect(host.querySelector(".zc-render-bar")).toBeNull();
 });
 
+it("appends adjacent composite ranges with the same clip ID and ignores older revision status", async () => {
+  const segments = [
+    { clip_id: "c0", key: "left", start: "10s", end: "12s", state: "ready", duration: "2s", composite: true },
+    { clip_id: "c0", key: "right", start: "12s", end: "14s", state: "ready", duration: "2s", composite: true },
+  ].map((segment) => ({ ...segment, clip_id: clips[0]!.id }));
+  const status = { ...cache(), revision: "old", segments };
+  call.mockResolvedValueOnce(status);
+  await mount();
+  expect(fetch).not.toHaveBeenCalled();
+  await act(() =>
+    window.dispatchEvent(new CustomEvent("desktop-preview-cache", { detail: { ...status, revision: "rev" } })),
+  );
+  await act(() => api.sample(at));
+  await settle();
+  expect(vi.mocked(fetch).mock.calls.map(([url]) => url)).toEqual([
+    expect.stringContaining("/left.mp4"),
+    expect.stringContaining("/right.mp4"),
+  ]);
+  expect(await sample(2)).toBe("12s");
+  expect(await sample(3)).toBe("13s");
+});
+
+it("updates a stopped layer's transform without waiting for a cache response or reloading its video", async () => {
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => recordingCanvas() as never);
+  const view = structuredClone(project);
+  const top = { ...clips[0]!, id: "overlay" };
+  view.tracks.push({ ...view.tracks[0]!, id: "top", clips: [top] });
+  const state = { ...initialState(), project: path, playhead: { at: "10s" } };
+  const update = vi.fn();
+  root = createRoot(host);
+  async function render(project: ProjectView) {
+    await act(async () =>
+      root?.render(
+        <TimelinePreview
+          project={project}
+          state={state}
+          update={update}
+          config={config}
+          call={call}
+          error={null}
+          dragging={{ current: false }}
+        />,
+      ),
+    );
+  }
+  await render(view);
+  const layer = host.querySelector<HTMLVideoElement>(".zc-preview-composition video:not([data-preview-mode])");
+  expect(layer?.muted).toBe(true);
+  const edited = {
+    ...view,
+    clipProperties: {
+      [top.id]: {
+        transform: { scale: 0.5, position: [0.25, 0.125] as [number, number], rotation_deg: 30, crop: { left: 0.2 } },
+      },
+    },
+  };
+  await render(edited);
+  expect(host.querySelector(".zc-preview-composition video:not([data-preview-mode])")).toBe(layer);
+  expect(layer?.style.transform).toContain("translate(25cqw, -12.5cqh) rotate(-30deg) scale(0.5)");
+  expect(layer?.style.clipPath).toBe("inset(0% 0% 0% 20%)");
+  await render({ ...edited, tracks: [view.tracks[0]!, { ...view.tracks[1]!, enabled: false }] });
+  expect(host.querySelector(".zc-preview-composition video:not([data-preview-mode])")).toBeNull();
+});
+
 it("sends a new hint when playback starts at the same playhead", async () => {
   at = "10s";
   enabled = false;

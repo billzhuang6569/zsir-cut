@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { parseProject, rational } from "../../core/src/index.ts";
 import { DesktopPreferences } from "../src/preferences.js";
-import { PreviewCache, segmentArgs, segmentKey } from "../src/preview-cache.js";
+import { PreviewCache, previewSegmentArgs, previewSegments, segmentArgs, segmentKey } from "../src/preview-cache.js";
 
 let root: string;
 let prefs: DesktopPreferences;
@@ -20,6 +20,15 @@ async function fixture() {
   );
   if (!parsed.ok) throw new Error("fixture");
   return parsed.project;
+}
+async function legacyFixture() {
+  const project = await fixture();
+  const timeline = project.timelines[0];
+  const track = timeline?.tracks.find((track) => track.kind === "video");
+  if (!timeline || track?.kind !== "video") throw new Error("video fixture");
+  timeline.tracks = timeline.tracks.filter((item) => item.kind !== "video" || item === track);
+  for (const clip of track.clips) delete clip.transform;
+  return project;
 }
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "zcut-cache-"));
@@ -83,6 +92,64 @@ const calls = async () =>
     .split("\n")
     .map((line) => JSON.parse(line) as string[])
     .filter((args) => args.includes("mp4"));
+
+it("cuts on the union of visible video boundaries and composites in timeline order", async () => {
+  const project = await legacyFixture();
+  const timeline = project.timelines[0];
+  const track = timeline?.tracks.find((track) => track.kind === "video");
+  const clip = track?.kind === "video" ? track.clips[0] : undefined;
+  if (!timeline || track?.kind !== "video" || !clip) throw new Error("video fixture");
+  track.clips = [{ ...clip, duration: rational(4n) }];
+  const transform = { scale: 0.5, rotation_deg: 30, position: [0.25, 0.125] as [number, number], crop: { left: 0.1 } };
+  const overlay = { ...clip, id: "overlay", timeline_start: rational(1n), duration: rational(2n), transform };
+  timeline.tracks.push(
+    { ...track, id: "overlay-track", clips: [overlay] },
+    { ...track, id: "hidden", enabled: false, clips: [{ ...clip, timeline_start: rational(2n) }] },
+    { ...track, id: "disabled-clip", clips: [{ ...clip, timeline_start: rational(2n), enabled: false }] },
+  );
+  const plan = previewSegments(project, "720p");
+  expect(
+    plan.map(({ clip, layers }) => [clip.timeline_start, clip.duration, layers.map(({ clip }) => clip.id)]),
+  ).toEqual([
+    [rational(0n), rational(1n), [clip.id]],
+    [rational(1n), rational(2n), [clip.id, overlay.id]],
+    [rational(3n), rational(1n), [clip.id]],
+  ]);
+  const segment = plan[1];
+  if (!segment) throw new Error("composite segment");
+  expect(segment.layers[1]?.clip.transform).toEqual(transform);
+  const args = previewSegmentArgs(segment, join(root, "test.zcut.json"), "out");
+  const filter = args?.[args.indexOf("-filter_complex") + 1];
+  expect(filter).toContain(")*0.5");
+  expect(filter).toContain("crop=w='max(1,iw*0.9)'");
+  expect(filter).toContain("rotate=-30*PI/180");
+  expect(filter).toContain("[base1][layer1]overlay=x='(W-w)/2+0.25*W':y='(H-h)/2-0.125*H'");
+  await cache.open(project, join(root, "test.zcut.json"));
+  await cache.idle();
+  const before = (await cache.status()).segments;
+  expect(before.map(({ state }) => state)).toEqual(["ready", "ready", "ready"]);
+  const count = (await calls()).length;
+  overlay.transform.scale = 0.75;
+  await cache.refresh(project);
+  await cache.idle();
+  const after = (await cache.status()).segments;
+  expect(after[0]).toEqual(before[0]);
+  expect(after[2]).toEqual(before[2]);
+  expect(after[1]?.key).not.toBe(before[1]?.key);
+  expect(after[1]?.state).toBe("ready");
+  expect(await calls()).toHaveLength(count + 1);
+});
+
+it("reuses the original key and encoder for a complete untransformed video", async () => {
+  const project = await legacyFixture();
+  const segment = previewSegments(project, "720p")[0];
+  const layer = segment?.layers[0];
+  if (!segment || !layer) throw new Error("video fixture");
+  expect(segment.key).toBe(segmentKey(layer.clip, layer.media, "720p"));
+  expect(previewSegmentArgs(segment, "/preview/test.zcut.json", "out")).toEqual(
+    segmentArgs(layer.clip, layer.media, "720p", join("/preview", layer.media.path), "out"),
+  );
+});
 
 describe("preview cache", () => {
   it("creates the default cache directory under a fresh HOME and starts encoding", async () => {
@@ -154,7 +221,7 @@ describe("preview cache", () => {
     expect(await readFile(file, "utf8")).toBe("original");
   });
   it("uses exact canonical keys, filters disabled/audio/images, and re-encodes only an edited source range", async () => {
-    const project = await fixture();
+    const project = await legacyFixture();
     const track = project.timelines[0]?.tracks.find((t) => t.kind === "video");
     if (!track || track.kind !== "video") throw new Error("video");
     const clip = track.clips[0];
@@ -172,10 +239,10 @@ describe("preview cache", () => {
     await cache.open(project, join(root, "test.zcut.json"));
     await cache.idle();
     const initial = await cache.status();
-    expect(initial.segments.length).toBe(track.clips.length + 1);
+    expect(initial.segments).toHaveLength(track.clips.length);
     expect(initial.segments.filter((s) => s.state === "ready")).toHaveLength(track.clips.length);
     const count = (await calls()).length;
-    clip.timeline_start = rational(20n);
+    clip.timeline_start = rational(30n);
     project.subtitle_styles = [];
     await cache.refresh(project);
     await cache.idle();
@@ -203,7 +270,7 @@ describe("preview cache", () => {
     expect((await cache.status()).segments).toHaveLength(initial.segments.length);
   });
   it("encodes constant speed and reverse with rational GOP and deterministic metadata flags; skips nonlinear maps", async () => {
-    const project = await fixture();
+    const project = await legacyFixture();
     const track = project.timelines[0]?.tracks.find((t) => t.kind === "video");
     const clip = track?.kind === "video" ? track.clips[0] : undefined;
     const media = project.media.find((m) => m.id === clip?.media_id);
@@ -309,7 +376,7 @@ describe("preview cache", () => {
     "prioritizes playhead then forward then backward, pauses on battery, and throttles pushes",
     { timeout: 20_000 },
     async () => {
-      const project = await fixture();
+      const project = await legacyFixture();
       await prefs.set({ preview_cache: { auto: false, pause_on_battery: true } });
       await cache.close();
       const battery = vi.fn(async () => true);
@@ -490,7 +557,7 @@ it("starts split keys immediately, aborts obsolete ffmpeg and removes its tempor
 });
 
 it("puts the hinted segment and its next two ahead of the remaining queue", { timeout: 20_000 }, async () => {
-  const project = await fixture();
+  const project = await legacyFixture();
   const track = project.timelines[0]?.tracks.find((track) => track.kind === "video");
   if (!track || track.kind !== "video" || !track.clips[0]) throw new Error("video");
   const template = track.clips[0];

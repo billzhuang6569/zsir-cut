@@ -98,7 +98,7 @@ export interface MediaView {
   duration?: string;
   start_timecode?: string;
   reel?: string;
-  video?: { rate: string; width: number; height: number };
+  video?: { rate: string; width: number; height: number; pixel_aspect?: string };
   audio?: { sample_rate: string; channels: number };
   organize?: { note?: string; link?: string; tags?: string[]; folders?: string[]; rating?: number };
 }
@@ -137,7 +137,7 @@ export interface PreviewData {
   recognition?: Recognition;
   recognized?: boolean;
   recognitionRevision?: number;
-  format?: { width: number; height: number };
+  format?: { width: number; height: number; pixel_aspect?: string };
   subtitleWarnings?: { code: string; ids: string[] }[];
   media: MediaView[];
   cues: CueView[];

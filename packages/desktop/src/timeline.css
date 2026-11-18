@@ -158,6 +158,16 @@
   flex: 1;
   container-type: size;
 }
+.zc-preview-composition {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(100cqw, 100cqh * var(--preview-aspect));
+  height: min(100cqh, 100cqw / var(--preview-aspect));
+  container-type: size;
+  overflow: hidden;
+}
 .zc-picture video,
 .zc-picture img {
   width: 100%;
