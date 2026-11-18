@@ -333,11 +333,19 @@ describe("proofread checks with a fake agent", () => {
     await finish(f);
     expect(edits(f).ops).toEqual([{ op: "mark_proofread", transcript_id: "trs_test" }]);
   });
-  it("chunks <=80 cues, runs six at once, and switches queued chunks to the replacement agent", async () => {
+  it("chunks <=80 cues, runs six at once, and switches queued chunks to the replacement agent", async ({
+    onTestFinished,
+  }) => {
+    let releaseFirstBatch!: () => void;
+    const firstBatch = new Promise<void>((resolve) => {
+      releaseFirstBatch = resolve;
+    });
+    onTestFinished(releaseFirstBatch);
     const f = await setup(transcript(Array(561).fill("我们今天工部了消息")), async (agent, prompt) => {
       active++;
       max = Math.max(max, active);
-      await new Promise((resolve) => setTimeout(resolve, 5));
+      if (active === 6) releaseFirstBatch();
+      if (agent === "claude") await firstBatch;
       active--;
       if (agent === "claude") throw new Error("Not logged in");
       expect(input(prompt).lines.length).toBeLessThanOrEqual(80);

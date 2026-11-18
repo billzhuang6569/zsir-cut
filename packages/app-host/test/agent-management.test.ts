@@ -53,6 +53,17 @@ async function executable(name: string, body: string) {
   await writeFile(path, `#!${process.execPath}\n${body}\n`, { mode: 0o700 });
   return path;
 }
+function waitForRelease(name: string) {
+  return `await new Promise((resolve) => {
+  const timer = setInterval(() => {
+    if (!existsSync(${JSON.stringify(directory)})) process.exit(1);
+    if (existsSync(${JSON.stringify(join(directory, name))})) {
+      clearInterval(timer);
+      resolve();
+    }
+  }, 10);
+});`;
+}
 function manager(events: Record<string, unknown>[] = []) {
   return new AgentManagement(new DesktopPreferences(directory), (event) => events.push(event), {
     registryUrl,
@@ -221,11 +232,15 @@ it("streams install lines to UI in order, rejects concurrent update, then sends 
   await startRegistry();
   await executable(
     "npm",
-    `import {writeFileSync} from 'node:fs';
+    `const {existsSync, writeFileSync} = require('node:fs');
+(async () => {
 writeFileSync(${JSON.stringify(join(directory, "args.json"))}, JSON.stringify(process.argv.slice(2)));
 console.log('first');
-setTimeout(() => console.error('second'), 50);
-setTimeout(() => {process.stdout.write('last');}, 100);`,
+${waitForRelease("emit-second")}
+console.error('second');
+${waitForRelease("emit-last")}
+process.stdout.write('last');
+})();`,
   );
   let client = await connect();
   const events: Record<string, unknown>[] = [];
@@ -236,6 +251,10 @@ setTimeout(() => {process.stdout.write('last');}, 100);`,
     status: "failed",
     error: { code: "E_IO", retryable: true },
   });
+  await vi.waitFor(() => expect(events.some((event) => event.line === "first")).toBe(true));
+  await writeFile(join(directory, "emit-second"), "");
+  await vi.waitFor(() => expect(events.some((event) => event.line === "second")).toBe(true));
+  await writeFile(join(directory, "emit-last"), "");
   await vi.waitFor(() => expect(events.at(-1)?.type).toBe("agents_changed"), { timeout: 5000 });
   expect(events.filter((event) => event.type === "agents_output")).toEqual([
     { type: "agents_output", job_id: accepted.result.job_id, line: "first", stream: "stdout" },
@@ -300,13 +319,22 @@ it("validates missing npm, discovery, install pushes and persistence without lis
   expect(await management.list(true)).toMatchObject({
     agents: [{ path, found: true, version: "1.2.3", default: true }, { found: false }],
   });
-  await executable("npm", "console.log('first'); setTimeout(() => { console.log('second'); }, 150);");
+  await executable(
+    "npm",
+    `const {existsSync} = require('node:fs');
+(async () => {
+console.log('first');
+${waitForRelease("emit-second")}
+console.log('second');
+})();`,
+  );
   const installed = await management.handle("agents_install", { id: "codex" });
   expect(installed.status).toBe("accepted");
   expect(await management.handle("agents_update", { id: "claude" })).toMatchObject({
     status: "failed",
     error: { code: "E_IO", retryable: true },
   });
+  await writeFile(join(directory, "emit-second"), "");
   await vi.waitFor(() => expect(events.at(-1)?.type).toBe("agents_changed"), { timeout: 5000 });
   expect(events.map(({ type, line, done, ok }) => ({ type, line, done, ok }))).toEqual([
     { type: "agents_output", line: "first" },

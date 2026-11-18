@@ -383,7 +383,7 @@ describe("subtitle pass", () => {
     await vi.advanceTimersByTimeAsync(3000);
     expect(f.run).not.toHaveBeenCalled();
   });
-  it("switches concurrent chunks and uses the replacement for queued chunks", async () => {
+  it("switches concurrent chunks and uses the replacement for queued chunks", async ({ onTestFinished }) => {
     const t = transcript(87);
     t.cues = Array.from({ length: 7 }, (_, i) => ({
       id: `locked_${i}`,
@@ -394,10 +394,16 @@ describe("subtitle pass", () => {
     for (let i = 0; i < t.tokens.length; i++) t.tokens[i]!.text = String.fromCharCode(0x4e00 + Math.floor(i / 11));
     let active = 0;
     let maxActive = 0;
+    let releaseFirstBatch!: () => void;
+    const firstBatch = new Promise<void>((resolve) => {
+      releaseFirstBatch = resolve;
+    });
+    onTestFinished(releaseFirstBatch);
     const f = await setup(t, async (agent, prompt) => {
       active++;
       maxActive = Math.max(maxActive, active);
-      await new Promise((resolve) => setTimeout(resolve, 5));
+      if (active === 6) releaseFirstBatch();
+      if (agent === "claude") await firstBatch;
       active--;
       if (agent === "claude") throw new Error("Failed to authenticate: OAuth session expired");
       return JSON.stringify({ lines: [JSON.parse(prompt.split("\n").at(-1)!).text] });

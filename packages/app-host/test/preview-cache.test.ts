@@ -49,7 +49,7 @@ else if (fs.existsSync(${JSON.stringify(join(root, "hold"))})) {
       fs.writeFileSync(args.at(-1), '0123456789');
     }
   }, 10);
-} else setTimeout(() => fs.writeFileSync(args.at(-1), '0123456789'), 15);
+} else fs.writeFileSync(args.at(-1), '0123456789');
 `,
   );
   await chmod(join(root, "ffmpeg"), 0o755);
@@ -305,65 +305,111 @@ describe("preview cache", () => {
     await cache.enforceLimit();
     expect((await cache.status()).used_bytes).toBe(0);
   });
-  it("prioritizes playhead then forward then backward, pauses on battery, and throttles pushes", async () => {
-    const project = await fixture();
-    await prefs.set({ preview_cache: { auto: false, pause_on_battery: true } });
-    await cache.close();
-    const battery = vi.fn(async () => true);
-    cache = new PreviewCache(prefs, (value) => pushes.push({ at: Date.now(), value }), battery);
-    await cache.open(project, join(root, "project.zcut.json"));
-    cache.hint(rational(6n));
-    await prefs.set({ preview_cache: { auto: true } });
-    await cache.refresh();
-    await cache.idle();
-    expect((await cache.status()).segments.every((s) => s.state === "missing")).toBe(true);
-    expect(await cache.status()).toMatchObject({ paused: "battery" });
-    battery.mockResolvedValue(false);
-    await cache.refresh();
-    await cache.idle();
-    expect(await cache.status()).not.toHaveProperty("paused");
-    const segments = (await cache.status()).segments;
-    const recorded = await calls();
-    expect(recorded.map((args) => args.at(-1)?.split("/").at(-1)?.replace(".tmp", ""))).toEqual([
-      segments[1]?.key,
-      segments[2]?.key,
-      segments[0]?.key,
-    ]);
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    for (let i = 1; i < pushes.length; i++)
-      expect((pushes[i]?.at ?? 0) - (pushes[i - 1]?.at ?? 0)).toBeGreaterThanOrEqual(500);
-    expect(pushes.length).toBeGreaterThan(1);
-  });
+  it(
+    "prioritizes playhead then forward then backward, pauses on battery, and throttles pushes",
+    { timeout: 20_000 },
+    async () => {
+      const project = await fixture();
+      await prefs.set({ preview_cache: { auto: false, pause_on_battery: true } });
+      await cache.close();
+      const battery = vi.fn(async () => true);
+      cache = new PreviewCache(prefs, (value) => pushes.push({ at: Date.now(), value }), battery);
+      await cache.open(project, join(root, "project.zcut.json"));
+      cache.hint(rational(6n));
+      await prefs.set({ preview_cache: { auto: true } });
+      await cache.refresh();
+      await cache.idle();
+      expect((await cache.status()).segments.every((s) => s.state === "missing")).toBe(true);
+      expect(await cache.status()).toMatchObject({ paused: "battery" });
+      await vi.waitFor(
+        () =>
+          expect(pushes).toContainEqual(
+            expect.objectContaining({ value: expect.objectContaining({ paused: "battery" }) }),
+          ),
+        { timeout: 10_000 },
+      );
+      battery.mockResolvedValue(false);
+      await cache.refresh();
+      await cache.idle();
+      expect(await cache.status()).not.toHaveProperty("paused");
+      const segments = (await cache.status()).segments;
+      const recorded = await calls();
+      expect(recorded.map((args) => args.at(-1)?.split("/").at(-1)?.replace(".tmp", ""))).toEqual([
+        segments[1]?.key,
+        segments[2]?.key,
+        segments[0]?.key,
+      ]);
+      await vi.waitFor(
+        () => expect(pushes).toContainEqual(expect.objectContaining({ value: expect.objectContaining({ segments }) })),
+        { timeout: 10_000 },
+      );
+      for (let i = 1; i < pushes.length; i++)
+        expect((pushes[i]?.at ?? 0) - (pushes[i - 1]?.at ?? 0)).toBeGreaterThanOrEqual(500);
+      expect(pushes.length).toBeGreaterThan(1);
+    },
+  );
 });
 
-it("persists the probed picture duration and includes it only for ready segments, including pushes", async () => {
-  const parsed = parseProject(
-    await readFile(new URL("../../../fixtures/regressions/preview-cache-seam.zcut.json", import.meta.url), "utf8"),
-  );
-  if (!parsed.ok) throw new Error("fixture");
-  const project = parsed.project;
+it(
+  "persists the probed picture duration and includes it only for ready segments, including pushes",
+  { timeout: 20_000 },
+  async () => {
+    const parsed = parseProject(
+      await readFile(new URL("../../../fixtures/regressions/preview-cache-seam.zcut.json", import.meta.url), "utf8"),
+    );
+    if (!parsed.ok) throw new Error("fixture");
+    const project = parsed.project;
+    await prefs.set({ preview_cache: { auto: false } });
+    await cache.open(project, join(root, "seam.zcut.json"));
+    await cache.idle();
+    expect((await cache.status()).segments.every((item) => !("duration" in item))).toBe(true);
+    await cache.updatePreferences({ preview_cache: { auto: true } });
+    await cache.idle();
+    const status = await cache.status();
+    expect(status.segments).toHaveLength(2);
+    expect(status.segments.every((item) => item.state === "ready" && item.duration === "1001/15000s")).toBe(true);
+    const index = JSON.parse(await readFile(join(root, "cache", project.id, "index.json"), "utf8"));
+    for (const segment of status.segments)
+      expect(index.segments[segment.key]).toEqual({ bytes: 10, duration: "1001/15000s" });
+    await vi.waitFor(
+      () =>
+        expect(pushes).toContainEqual(
+          expect.objectContaining({ value: expect.objectContaining({ segments: status.segments }) }),
+        ),
+      { timeout: 10_000 },
+    );
+    const probes = await readFile(join(root, "probes"), "utf8");
+    await cache.open(project, join(root, "seam.zcut.json"));
+    await cache.idle();
+    expect(await readFile(join(root, "probes"), "utf8")).toBe(probes);
+    expect((await cache.status()).segments).toEqual(status.segments);
+  },
+);
+
+it("discards an in-flight status push when reopening the cache", async () => {
   await prefs.set({ preview_cache: { auto: false } });
-  await cache.open(project, join(root, "seam.zcut.json"));
-  await cache.idle();
-  expect((await cache.status()).segments.every((item) => !("duration" in item))).toBe(true);
-  await cache.updatePreferences({ preview_cache: { auto: true } });
-  await cache.idle();
-  const status = await cache.status();
-  expect(status.segments).toHaveLength(2);
-  expect(status.segments.every((item) => item.state === "ready" && item.duration === "1001/15000s")).toBe(true);
-  const index = JSON.parse(await readFile(join(root, "cache", project.id, "index.json"), "utf8"));
-  for (const segment of status.segments)
-    expect(index.segments[segment.key]).toEqual({ bytes: 10, duration: "1001/15000s" });
-  const probes = await readFile(join(root, "probes"), "utf8");
-  await cache.open(project, join(root, "seam.zcut.json"));
-  await cache.idle();
-  expect(await readFile(join(root, "probes"), "utf8")).toBe(probes);
-  expect((await cache.status()).segments).toEqual(status.segments);
-  await vi.waitFor(() =>
-    expect(pushes).toContainEqual(
-      expect.objectContaining({ value: expect.objectContaining({ segments: status.segments }) }),
-    ),
-  );
+  const previous = await cache.status();
+  let resolvePrevious!: (status: typeof previous) => void;
+  const inFlight = new Promise<typeof previous>((resolve) => {
+    resolvePrevious = resolve;
+  });
+  const status = vi.spyOn(cache, "status").mockImplementationOnce(() => inFlight);
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    await cache.open(undefined);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(status).toHaveBeenCalledTimes(1);
+    await cache.open(await fixture(), join(root, "test.zcut.json"));
+    resolvePrevious(previous);
+    await vi.runOnlyPendingTimersAsync();
+    vi.useRealTimers();
+
+    await vi.waitFor(() => expect(pushes).toHaveLength(1));
+    expect(pushes[0]?.value).toMatchObject({ segments: expect.arrayContaining([expect.any(Object)]) });
+  } finally {
+    resolvePrevious(previous);
+    status.mockRestore();
+  }
 });
 
 it("keeps a segment missing and removes the temporary output when duration probing fails", async () => {
