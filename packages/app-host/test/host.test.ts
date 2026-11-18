@@ -737,15 +737,18 @@ it.runIf(process.platform !== "win32")(
     const project = join(appDataDir, "decisions.zcut.json");
     const agent = join(appDataDir, "claude");
     const release = join(appDataDir, "release");
+    const captured = join(appDataDir, "chat-input.jsonl");
     await copyFile(new URL("../../../fixtures/projects/std-25.zcut.json", import.meta.url), project);
     await writeFile(
       agent,
       `#!${process.execPath}
-const { existsSync } = require("node:fs");
+const { appendFileSync, existsSync } = require("node:fs");
 if (process.argv.includes("--version")) { console.log("Claude 1.2.3"); process.exit(0); }
 if (process.argv.includes("--help")) process.exit(1);
-process.stdin.resume();
+let input = "";
+process.stdin.on("data", (chunk) => { input += chunk; });
 process.stdin.on("end", () => {
+  appendFileSync(${JSON.stringify(captured)}, input);
   const timer = setInterval(() => {
     if (existsSync(${JSON.stringify(release)})) {
       clearInterval(timer);
@@ -781,12 +784,36 @@ process.stdin.on("end", () => {
       chat?: string;
       envelope?: { ok: boolean; result: Record<string, unknown> };
     }[] = [];
+    let playhead = "1s";
     Object.assign(socket, {
       readyState: WebSocket.OPEN,
       send: (raw: string) => {
         const message = JSON.parse(raw);
         messages.push(message);
         socket.emit("outgoing", message);
+        if (message.type === "ui_request") {
+          expect(message.verb).toBe("ui_state");
+          socket.emit(
+            "message",
+            JSON.stringify({
+              type: "ui_result",
+              id: message.id,
+              result: {
+                project,
+                panel: "chapters",
+                sub: "outline",
+                playhead: { at: playhead },
+                selected: ["clp_v1"],
+                playing: false,
+                range: null,
+                loop: false,
+                timelineMarks: { in: "0s", out: "2s" },
+                editTargets: { video: "trk_v1" },
+                soloAudioTrackIds: [],
+              },
+            }),
+          );
+        }
       },
       close: () => socket.emit("close"),
     });
@@ -808,6 +835,27 @@ process.stdin.on("end", () => {
     const followUp = vi.spyOn(Agents.prototype, "followUp");
     try {
       await send({ type: "ui_ready" });
+      const mode = async (id: string, verb: string, request = {}) => (await send({ id, verb, request }))?.envelope;
+      expect(await mode("initial", "agent_mode_get")).toMatchObject({
+        status: "no_op",
+        result: { edit_mode: "direct" },
+      });
+      expect(await mode("review", "agent_mode_set", { edit_mode: "review" })).toMatchObject({
+        status: "applied",
+        result: { edit_mode: "review" },
+      });
+      for (const [index, request] of [{}, { edit_mode: "auto" }, { edit_mode: "direct", extra: true }].entries()) {
+        expect(await mode(`invalid-${index}`, "agent_mode_set", request)).toMatchObject({
+          status: "rejected",
+          error: { code: "E_VALIDATION" },
+        });
+      }
+      expect(await mode("saved", "agent_mode_get")).toMatchObject({ result: { edit_mode: "review" } });
+      expect(JSON.parse(await readFile(join(appDataDir, "desktop.json"), "utf8"))).toMatchObject({
+        agent: { edit_mode: "review" },
+      });
+      expect(await mode("same", "agent_mode_set", { edit_mode: "review" })).toMatchObject({ status: "no_op" });
+      expect(await mode("direct", "agent_mode_set", { edit_mode: "direct" })).toMatchObject({ status: "applied" });
       const sent = await send({
         id: "chat",
         verb: "chat_send",
@@ -833,15 +881,22 @@ process.stdin.on("end", () => {
               question: "保留哪一版？",
               options: [{ id: "keep", label: "短版", ops: [{ op: "set_clip", clip_id: "clp_v1", label: "短版" }] }],
             },
+            {
+              id: "dec_pending",
+              question: "要保留结尾吗？",
+              options: [{ id: "keep_ending", label: "保留" }],
+            },
           ],
         },
       });
       expect(asked.structuredContent).toMatchObject({ ok: true });
-      const askedPush = { type: "decisions_changed", pending: 1, changed: ["dec_stale"] };
+      const askedPush = { type: "decisions_changed", pending: 2, changed: ["dec_stale", "dec_pending"] };
       await waitForMessage((item) => expect.objectContaining(askedPush).asymmetricMatch(item));
       expect(messages).toContainEqual(askedPush);
       const decisions = await client.callTool({ name: "zcut_inspect", arguments: { project, view: "decisions" } });
-      expect(decisions.structuredContent).toMatchObject({ result: { decisions: [{ turn: { id: turn } }] } });
+      expect(decisions.structuredContent).toMatchObject({
+        result: { decisions: [{ turn: { id: turn } }, { turn: { id: turn } }] },
+      });
       const written = await client.callTool({
         name: "zcut_edit",
         arguments: {
@@ -868,10 +923,11 @@ process.stdin.on("end", () => {
         },
       });
       expect(answered?.envelope?.result).toMatchObject({ decision: { execution: { state: "stale" } } });
-      expect(messages).toContainEqual({ type: "decisions_changed", pending: 0, changed: ["dec_stale"] });
+      expect(messages).toContainEqual({ type: "decisions_changed", pending: 1, changed: ["dec_stale"] });
       const text = "用户回答了：保留哪一版？ → 短版，这一处工程已经变了，请按当前工程重做";
       expect(followUp).toHaveBeenCalledWith(turn, text, expect.any(Function));
       expect(messages.filter(({ event }) => event?.type === "turn")).toHaveLength(1);
+      playhead = "2s";
       await writeFile(release, "");
       const continuedPush = expect.objectContaining({
         type: "chat_event",
@@ -883,11 +939,23 @@ process.stdin.on("end", () => {
       const continued = messages.findIndex(({ event }) => event?.text === text);
       expect(firstEnd).toBeGreaterThanOrEqual(0);
       expect(continued).toBeGreaterThan(firstEnd);
+      // The child captures stdin before exiting, so the second end event makes both prompts readable.
+      await waitForMessage((item) => item.event?.type === "end" && messages.indexOf(item) > continued);
+      const prompts = (await readFile(captured, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line).message.content);
+      expect(prompts).toHaveLength(2);
+      expect(prompts[0]).toContain("播放头：01:00:01:00（1s）\n入出点：01:00:00:00–01:00:02:00");
+      expect(prompts[0]).toContain("选中：片段 clp_v1");
+      expect(prompts[1]).toContain(`修订 ${applied.receipt?.after}（第 2 步）`);
+      expect(prompts[1]).toContain("播放头：01:00:02:00（2s）");
+      expect(prompts[1]).toContain(`待你决定：1 条\n</界面>\n\n${text}`);
     } finally {
       await writeFile(release, "");
       await client.close();
       socket.emit("close");
     }
   },
-  20_000,
+  35_000,
 );
