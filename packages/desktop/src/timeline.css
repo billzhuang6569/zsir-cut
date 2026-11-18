@@ -638,3 +638,59 @@
   pointer-events: none;
   z-index: 6;
 }
+
+.zc-placement {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  white-space: nowrap;
+}
+.zc-placement select {
+  color: inherit;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font: inherit;
+}
+.zc-drop-preview {
+  position: absolute;
+  inset-block: 0;
+  min-width: 3px;
+  box-sizing: border-box;
+  border: 1px solid var(--selection);
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--selection) 25%, transparent);
+  pointer-events: none;
+  z-index: 4;
+}
+.zc-drop-preview.is-invalid {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 30%, transparent);
+}
+.zc-drop-preview > span {
+  display: block;
+  width: max-content;
+  margin: 1px;
+  padding-inline: var(--space-2);
+  background: var(--bg-timeline);
+  color: var(--text);
+  font-size: var(--label-size);
+}
+.zc-drop-lane,
+.zc-drop-new-track {
+  position: absolute;
+  right: 0;
+  overflow: clip;
+  pointer-events: none;
+  z-index: 4;
+}
+.zc-drop-lane {
+  inset: 0;
+}
+.zc-drop-new-track {
+  left: var(--track-label-w);
+  height: 26px;
+}
+.zc-drop-error {
+  white-space: pre-line;
+}

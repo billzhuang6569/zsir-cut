@@ -16,6 +16,7 @@ export const DESKTOP_AUTHOR = { kind: "human", name: "桌面用户" } as const;
 interface ResultEnvelope {
   ok: boolean;
   result: unknown;
+  receipt?: { before: string | null; after: string | null } | null;
   error: { message: string; code?: string; details?: { manual?: string } } | null;
   verification?: { issues: { code: string; severity: string }[] };
 }
@@ -209,7 +210,11 @@ export function connectHost(
       if (envelope.ok) {
         if (item?.verb === "preview_cache_status")
           updateMediaCache(config, envelope.result as Parameters<typeof updateMediaCache>[1]);
-        item?.resolve(envelope.result);
+        item?.resolve(
+          item.verb === "import_media" && envelope.result && typeof envelope.result === "object"
+            ? { ...envelope.result, receipt: envelope.receipt }
+            : envelope.result,
+        );
         if (item?.verb === "prefs_set") window.dispatchEvent(new Event("desktop-prefs-changed"));
       } else {
         const sensitive =

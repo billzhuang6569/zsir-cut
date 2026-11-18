@@ -23,6 +23,19 @@ it("exposes revision events to subscribers while refreshing the project and subt
       const message = JSON.parse(raw);
       messages.push(message);
       requests.push(message.verb ?? message.type);
+      if (message.verb === "import_media") {
+        queueMicrotask(() =>
+          this.receive({
+            id: message.id,
+            envelope: {
+              ok: true,
+              result: { imported: [{ media_id: "med_new" }] },
+              receipt: { before: "rev_2", after: "rev_3" },
+            },
+          }),
+        );
+        return;
+      }
       if (message.verb === "session_approve") {
         queueMicrotask(() =>
           this.receive({
@@ -106,6 +119,10 @@ it("exposes revision events to subscribers while refreshing the project and subt
     await disconnect.call("preview_data", { session_id: "ses_test", at_revision: "rev_draft" });
     expect(messages.at(-1)).toMatchObject({ type: "preview_data", session_id: "ses_test", at_revision: "rev_draft" });
     expect(messages.at(-1)).not.toHaveProperty("verb");
+    await expect(disconnect.call("import_media", { paths: ["/素材.mov"] })).resolves.toEqual({
+      imported: [{ media_id: "med_new" }],
+      receipt: { before: "rev_2", after: "rev_3" },
+    });
     const diagnostic = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       await expect(disconnect.call("session_approve", { session_id: "ses_test" })).rejects.toMatchObject({

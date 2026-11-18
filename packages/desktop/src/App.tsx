@@ -17,7 +17,7 @@ import { ExportPanel } from "./ExportPanel.js";
 import { useHistoryPanel } from "./HistoryPanel.js";
 import { LayoutDivider } from "./LayoutDivider.js";
 import { useMediaPanel } from "./MediaPanel.js";
-import { sourceProject } from "./media.js";
+import { type Placement, sourceProject } from "./media.js";
 import { ProjectEntry } from "./ProjectEntry.js";
 import { ReviewView } from "./ReviewView.js";
 import { SettingsPage } from "./SettingsPage.js";
@@ -39,6 +39,7 @@ const parameters: Record<Panel, string> = {
 };
 export function App({ config }: { config?: { port: number; token: string } }) {
   const uniqueId = useId();
+  const [placement, setPlacement] = useState<Placement>("av");
   const [revisionControls, setRevisionControls] = useState<HTMLSpanElement | null>(null);
   const [layoutDraft, setLayoutDraft] = useState<Partial<Layout>>({});
   const [viewerTarget, setViewerTarget] = useState<HTMLDivElement | null>(null);
@@ -251,7 +252,17 @@ export function App({ config }: { config?: { port: number; token: string } }) {
     window.addEventListener("desktop-open-review", open);
     return () => window.removeEventListener("desktop-open-review", open);
   }, [update]);
-  const media = useMediaPanel({ project, state, update, call, config });
+  const media = useMediaPanel({
+    project,
+    state,
+    update,
+    call,
+    config,
+    placement,
+    magnetic: preferences.magnetic,
+    preset: preferences.preset,
+    canPlace: !history.viewing && !reviewSession,
+  });
   const chapters = useChapterPanel({
     project,
     state,
@@ -543,10 +554,8 @@ export function App({ config }: { config?: { port: number; token: string } }) {
                     );
                   }}
                   hideViewer={Boolean(source)}
-                  onMediaDrop={(id, at, track) => {
-                    const item = project?.media.find((m) => m.id === id);
-                    if (item && !history.viewing) media.place(item, at, track);
-                  }}
+                  placement={placement}
+                  onPlacementChange={setPlacement}
                   project={history.view}
                   onEditSubtitle={subtitles.editCue}
                   readOnly={history.viewing}

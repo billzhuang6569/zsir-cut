@@ -1,5 +1,4 @@
 import { isTauri } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
@@ -7,9 +6,11 @@ import type { UiState } from "../../app-host/src/ui.js";
 import { Icon, IconButton } from "./components.js";
 import type { ProjectView } from "./connection.js";
 import { DESKTOP_AUTHOR } from "./connection.js";
-import { mediaDuration, mediaRange, middle, placeMedia, sourceProject } from "./media.js";
+import { mediaDuration, mediaRange, middle, type Placement, placeMedia, sourceProject } from "./media.js";
 import { mediaUrl, Wave } from "./TimelinePreview.js";
 import { ceil, compare, floor, frameTime, type MediaView, parseRational, seekTarget, timecode } from "./timeline.js";
+import { dropMode, dropPosition, MEDIA_DRAG } from "./timelineDrop.js";
+import { listenFileDrop } from "./useFileDrop.js";
 import "./media.css";
 
 type Config = { port: number; token: string };
@@ -217,12 +218,20 @@ export function useMediaPanel({
   update,
   call,
   config,
+  placement = "av",
+  magnetic = true,
+  preset = "fcp",
+  canPlace = true,
 }: {
   project: ProjectView | null;
   state: UiState;
   update: (state: UiState) => void;
   call: (verb: string, request: Record<string, unknown>) => Promise<unknown>;
   config?: Config | undefined;
+  placement?: Placement;
+  magnetic?: boolean;
+  preset?: "fcp" | "premiere";
+  canPlace?: boolean;
 }) {
   const browser = state.mediaBrowser ?? { scope: "all", search: "", size: 150 };
   const { scope, search, size } = browser;
@@ -309,18 +318,18 @@ export function useMediaPanel({
           : undefined,
     });
   };
-  const place = (
-    media = selected,
-    at = project ? seekTarget(project, project.cues, state.playhead) : "0s",
-    track?: string,
-  ) => {
-    if (!media || !project || (track && project.tracks.find((item) => item.id === track)?.kind === "subtitle")) return;
-    const op = placeMedia(project, media, state, at, track);
-    if (!("video_track" in op) && !("audio_track" in op)) {
-      setError("没有可用的目标轨道");
+  const place = (event = { altKey: false, metaKey: false }) => {
+    if (!selected || !project || !canPlace) return;
+    const at = seekTarget(project, project.cues, state.playhead);
+    const plan = placeMedia(project, selected, state, at, { placement, mode: dropMode(magnetic, preset, event) });
+    if ("error" in plan) {
+      setError(plan.error);
       return;
     }
-    void write("edit", `把 ${media.name ?? "素材"} 加到时间线`, { timeline_id: project.id, ops: [op] });
+    void write("edit", `把 ${selected.name ?? "素材"} 加到时间线`, {
+      timeline_id: project.id,
+      ops: [...plan.added, plan.op],
+    });
   };
   const organize = (field: string, value: unknown) =>
     selected &&
@@ -368,38 +377,27 @@ export function useMediaPanel({
   const importRef = useRef(importPaths);
   importRef.current = importPaths;
   useEffect(() => {
-    if (!isTauri() || state.panel !== "media") return;
-    let disposed = false;
-    let unlisten: (() => void) | undefined;
-    void getCurrentWindow()
-      .onDragDropEvent((event) => {
-        if (event.payload.type !== "drop") return;
+    if (state.panel !== "media") return;
+    return listenFileDrop(
+      ({ payload }) => {
+        if (payload.type !== "drop") return;
         const rect = area.current?.getBoundingClientRect();
-        const { x, y } = event.payload.position;
-        const ratio = window.devicePixelRatio;
-        if (
-          rect &&
-          x / ratio >= rect.left &&
-          x / ratio <= rect.right &&
-          y / ratio >= rect.top &&
-          y / ratio <= rect.bottom
-        )
-          importRef.current(event.payload.paths);
-      })
-      .then((stop) => {
-        if (disposed) stop();
-        else unlisten = stop;
-      })
-      .catch(() => setError("无法接收拖入的文件"));
-    return () => {
-      disposed = true;
-      unlisten?.();
-    };
+        const { x, y } = dropPosition(payload.position, window.devicePixelRatio);
+        if (rect && x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom)
+          importRef.current(payload.paths);
+      },
+      () => setError("无法接收拖入的文件"),
+    );
   }, [state.panel]);
   useEffect(() => {
     if (state.panel !== "media") return;
     const key = (e: KeyboardEvent) => {
-      if (e.target instanceof Element && e.target.closest("input,textarea,select,[contenteditable=true]")) return;
+      if (e.defaultPrevented || e.isComposing || state.export?.open) return;
+      if (
+        e.target instanceof Element &&
+        e.target.closest('input,textarea,select,[contenteditable=true],[role="dialog"]')
+      )
+        return;
       const key = e.key.toLowerCase();
       if (e.metaKey && ["+", "=", "-"].includes(key)) {
         e.preventDefault();
@@ -408,9 +406,9 @@ export function useMediaPanel({
           mediaBrowser: { ...browser, size: Math.max(110, Math.min(280, size + (key === "-" ? -20 : 20))) },
         });
       }
-      if (key === "q") {
+      if (key === "q" && state.preview === "media" && !e.repeat && !e.ctrlKey && !e.shiftKey) {
         e.preventDefault();
-        place();
+        place(e);
       }
       if (
         state.preview === "media" &&
@@ -580,11 +578,12 @@ export function useMediaPanel({
             type="button"
             key={m.id}
             draggable
+            data-media-id={m.id}
             aria-pressed={selectedMedia.some((item) => item.id === m.id)}
             className="zc-media-card"
             onClick={(e) => choose(m, e.metaKey || e.ctrlKey)}
             onDragStart={(e) => {
-              e.dataTransfer.setData("application/x-zcut-media", m.id);
+              e.dataTransfer.setData(MEDIA_DRAG, m.id);
               e.dataTransfer.effectAllowed = "copy";
             }}
           >
@@ -804,7 +803,7 @@ export function useMediaPanel({
         value={selected.organize?.link ?? ""}
         commit={(v) => organize("link", v)}
       />
-      <button type="button" className="zc-btn" disabled={busy} onClick={() => place()}>
+      <button type="button" className="zc-btn" disabled={busy || !canPlace} onClick={() => place()}>
         加到时间线 <kbd>Q</kbd>
       </button>
       {isTauri() && selected.path && (
@@ -823,7 +822,7 @@ export function useMediaPanel({
   ) : (
     <p className="zc-muted">选择一份素材</p>
   );
-  return { header, library, parameters, selected, place };
+  return { header, library, parameters, selected };
 }
 
 import { div, mul, rational } from "./timeline.js";
