@@ -988,6 +988,22 @@ function applyOne(
   }
 }
 
+export function assertEditDomain(ops: Op[], tracks: Timeline["tracks"]): void {
+  const trackKinds = new Map(tracks.map((track) => [track.id, track.kind]));
+  let subtitleDomain: boolean | undefined;
+  for (const op of ops) {
+    const isSubtitle =
+      SUBTITLE_OPS.has(op.op) ||
+      (["rename_track", "set_track"].includes(op.op) && trackKinds.get(op.track_id as string) === "subtitle");
+    if (subtitleDomain !== undefined && subtitleDomain !== isSubtitle)
+      fail("E_MIXED_DOMAIN", "Editing and subtitle operations cannot be mixed");
+    subtitleDomain = isSubtitle;
+    if (typeof op.id === "string" && (op.op === "add_track" || op.op === "add_subtitle_track"))
+      trackKinds.set(op.id, op.op === "add_subtitle_track" ? "subtitle" : (op.kind as "video" | "audio"));
+    if (op.op === "remove_track") trackKinds.delete(op.track_id as string);
+  }
+}
+
 export function applyEdit(
   project: Project,
   ops: Op[],
@@ -1013,19 +1029,7 @@ export function applyEdit(
     (timelineId ? project.timelines.find((item) => item.id === timelineId) : project.timelines[0]) ??
     fail("E_NOT_FOUND", `Timeline ${timelineId} does not exist`);
   const imageIds = new Set(project.media.filter((media) => media.kind === "image").map((media) => media.id));
-  const trackKinds = new Map(timeline.tracks.map((track) => [track.id, track.kind]));
-  let subtitleDomain: boolean | undefined;
-  for (const op of ops) {
-    const isSubtitle =
-      SUBTITLE_OPS.has(op.op) ||
-      (["rename_track", "set_track"].includes(op.op) && trackKinds.get(op.track_id as string) === "subtitle");
-    if (subtitleDomain !== undefined && subtitleDomain !== isSubtitle)
-      fail("E_MIXED_DOMAIN", "Editing and subtitle operations cannot be mixed");
-    subtitleDomain = isSubtitle;
-    if (typeof op.id === "string" && (op.op === "add_track" || op.op === "add_subtitle_track"))
-      trackKinds.set(op.id, op.op === "add_subtitle_track" ? "subtitle" : (op.kind as "video" | "audio"));
-    if (op.op === "remove_track") trackKinds.delete(op.track_id as string);
-  }
+  assertEditDomain(ops, timeline.tracks);
   for (const op of ops) {
     const before = structuredClone(project);
     if (SUBTITLE_OPS.has(op.op)) applySubtitleEdit(project, timeline, op, generate, allowForce, warnings, authorName);

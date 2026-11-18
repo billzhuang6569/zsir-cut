@@ -36,6 +36,7 @@ export function projectChanged(entry: JournalEntry, sessionId: string | null) {
     reason: entry.reason ?? null,
     author: entry.author,
     batch: entry.batch ?? null,
+    turn: entry.turn?.id ?? null,
     summary,
     changes: changes.slice(0, 50).map((change) => ({
       key: change.key,

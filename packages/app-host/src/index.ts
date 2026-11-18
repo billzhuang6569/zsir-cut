@@ -515,6 +515,12 @@ export async function startHost(
     if (type === "project_changed") refreshCache();
     if (ui?.readyState === WebSocket.OPEN) ui.send(JSON.stringify({ type, ...(refresh ? { refresh } : {}) }));
   };
+  const turnVerbs = new Set(
+    VERBS.filter((verb) => {
+      const schema = flattenMcpSchema(commandSchemaForVerb(verb));
+      return schema.properties && "turn" in (schema.properties as object);
+    }),
+  );
   const published = new Set<string>();
   let revisionQueue = Promise.resolve();
   const publishRevisions = async (project: string, envelope: Envelope) => {
@@ -523,6 +529,7 @@ export async function startHost(
     const batch = envelope.result?.batch as { executed?: number[]; revisions: Record<string, string> } | undefined;
     const revisions = new Set(batch?.executed?.map((seq) => batch.revisions[String(seq)]));
     if (envelope.receipt?.after) revisions.add(envelope.receipt.after);
+    for (const revision of (envelope.result?.revisions as string[] | undefined) ?? []) revisions.add(revision);
     if (!revisions.size) return;
     const sessionId = (envelope.receipt as { session_id?: string } | null)?.session_id ?? null;
     const main = await loadPath(project);
@@ -553,6 +560,32 @@ export async function startHost(
       );
       revisionQueue = operation.catch(() => {});
       await operation;
+      if (epoch !== projectEpoch) return envelope;
+      if ((verb === "ask" || verb === "answer") && !envelope.receipt?.replayed && envelope.status !== "dry_run") {
+        const result = envelope.result;
+        if (typeof result?.pending === "number" && Array.isArray(result.changed) && ui?.readyState === WebSocket.OPEN)
+          ui.send(JSON.stringify({ type: "decisions_changed", pending: result.pending, changed: result.changed }));
+        const decision = result?.decision as
+          | {
+              question: string;
+              turn?: { id: string };
+              answer?: { option_id?: string; text?: string };
+              options: { id: string; label: string }[];
+              execution?: { state: string };
+            }
+          | undefined;
+        if (decision?.execution?.state === "stale" || decision?.execution?.state === "failed") {
+          const answer =
+            decision.options.find(({ id }) => id === decision.answer?.option_id)?.label ?? decision.answer?.text ?? "";
+          void agents
+            ?.followUp(
+              decision.turn?.id,
+              `用户回答了：${decision.question} → ${answer}，这一处工程已经变了，请按当前工程重做`,
+              () => epoch === projectEpoch,
+            )
+            .catch((error) => process.stderr.write(`无法通知 Agent：${String(error)}\n`));
+        }
+      }
     }
     if (envelope.ok && request?.batch?.id) {
       batches.add(request.batch.id);
@@ -566,7 +599,11 @@ export async function startHost(
     if (!options.project) throw new Error("No current project");
     const projectPath = options.project;
     const epoch = projectEpoch;
-    const request = input as Record<string, unknown>;
+    const turn = agents?.activeTurn;
+    const request: Record<string, unknown> = {
+      ...(input as Record<string, unknown>),
+      ...(turn && turnVerbs.has(verb) ? { turn: { id: turn } } : {}),
+    };
     const global = ["record_handoff_check", "terms_edit", "voice_edit", "voice_clone"].includes(verb);
     if (
       !global &&
@@ -1028,12 +1065,12 @@ export async function startHost(
   const bind = async (path: string | null) => {
     const next = path ? await loadPath(path) : undefined;
     if (path && next) await recent.add(path, next.name);
+    projectEpoch++;
     permissions.clear();
     await subtitlePass?.stop();
     subtitlePass = undefined;
     await agents?.stop();
     agents = undefined;
-    projectEpoch++;
     batches.clear();
     published.clear();
     disconnected();
@@ -1052,6 +1089,7 @@ export async function startHost(
       agents = new Agents({
         project: options.project,
         projectId: next.id,
+        ...(options.agentOptions?.directories ? { directories: options.agentOptions.directories } : {}),
         waitingPermission: (chat) => permissions.waitingForChat(chat),
         proxy: () => prefs.get().prefs.network.proxy,
         url: `http://127.0.0.1:${address.port}/mcp`,
@@ -1106,6 +1144,7 @@ export async function startHost(
     token,
     mcp,
     close: async () => {
+      projectEpoch++;
       permissions.clear();
       await asrModels.close();
       await cache.close();

@@ -720,3 +720,28 @@ it("launches a PATH-discovered absolute executable after changing working direct
   expect(JSON.parse(await readFile(capture, "utf8")).cwd).toBe(await realpath(directory));
   expect(events.some((event) => event.type === "text")).toBe(true);
 }, 20000);
+
+it("queues decision follow-ups in the originating chat and gives each message its own turn", async () => {
+  const { manager, events } = await fixture("claude", "stop");
+  const chat = await manager.send("claude", "先粗剪");
+  const first = events[0];
+  expect(first).toMatchObject({ type: "turn", id: expect.stringMatching(/^turn_/) });
+  expect(manager.activeTurn).toBe(first?.id);
+  const continued = manager.followUp(first?.id, "按当前工程重做", () => true);
+  const second = manager.followUp(first?.id, "第二条回答", () => true);
+  expect(events.filter(({ type }) => type === "turn")).toHaveLength(1);
+  await manager.stop();
+  await continued;
+  expect(manager.activeChat).toBe(chat.id);
+  expect(manager.activeTurn).not.toBe(first?.id);
+  await manager.stop();
+  await second;
+  await manager.stop();
+  const history = await manager.history(chat.id);
+  expect(history.events.filter(({ type }) => type === "user").map(({ text }) => text)).toEqual([
+    "先粗剪",
+    "按当前工程重做",
+    "第二条回答",
+  ]);
+  expect(new Set(history.events.filter(({ type }) => type === "turn").map(({ id }) => id)).size).toBe(3);
+}, 25_000);

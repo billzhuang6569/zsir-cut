@@ -1,6 +1,6 @@
 export type AgentKind = "claude" | "codex";
 export interface ChatEvent {
-  type: "user" | "text" | "tool_start" | "tool_end" | "end" | "error" | "session" | "log" | "suggestion";
+  type: "turn" | "user" | "text" | "tool_start" | "tool_end" | "end" | "error" | "session" | "log" | "suggestion";
   text?: string;
   id?: string;
   name?: string;

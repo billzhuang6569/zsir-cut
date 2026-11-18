@@ -1,13 +1,14 @@
 import { spawnSync } from "node:child_process";
-import { on, once } from "node:events";
+import { EventEmitter, on, once } from "node:events";
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { Server as HttpServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { WebSocket } from "ws";
+import { WebSocket, WebSocketServer } from "ws";
 import type { Envelope } from "../../core/src/index.ts";
 import { dispatch, VERBS } from "../../core/src/index.ts";
 import { Agents } from "../src/agents.js";
@@ -729,3 +730,162 @@ it("keeps cache controls on the authenticated UI channel and persists directory 
     socket.terminate();
   }
 });
+
+it.runIf(process.platform !== "win32")(
+  "tags Agent writes, pushes decisions and follows up after a busy Agent on stale answers",
+  async () => {
+    const project = join(appDataDir, "decisions.zcut.json");
+    const agent = join(appDataDir, "claude");
+    const release = join(appDataDir, "release");
+    await copyFile(new URL("../../../fixtures/projects/std-25.zcut.json", import.meta.url), project);
+    await writeFile(
+      agent,
+      `#!${process.execPath}
+const { existsSync } = require("node:fs");
+if (process.argv.includes("--version")) { console.log("Claude 1.2.3"); process.exit(0); }
+if (process.argv.includes("--help")) process.exit(1);
+process.stdin.resume();
+process.stdin.on("end", () => {
+  const timer = setInterval(() => {
+    if (existsSync(${JSON.stringify(release)})) {
+      clearInterval(timer);
+      console.log(JSON.stringify({ type: "result", is_error: false }));
+    }
+  }, 10);
+});
+`,
+      { mode: 0o700 },
+    );
+    // Drive the real message handlers without relying on loopback access.
+    vi.spyOn(HttpServer.prototype, "listen").mockImplementation(function (this: HttpServer) {
+      queueMicrotask(() => this.emit("listening"));
+      return this;
+    });
+    vi.spyOn(HttpServer.prototype, "address").mockReturnValue({ address: "127.0.0.1", family: "IPv4", port: 12345 });
+    vi.spyOn(HttpServer.prototype, "close").mockImplementation(function (this: HttpServer, callback) {
+      callback?.();
+      return this;
+    });
+    let uiServer: WebSocketServer | undefined;
+    const onConnection = WebSocketServer.prototype.on;
+    vi.spyOn(WebSocketServer.prototype, "on").mockImplementation(function (this: WebSocketServer, event, listener) {
+      if (event === "connection") uiServer = this;
+      return onConnection.call(this, event, listener);
+    });
+    host = await startHost({ project, appDataDir, agentOptions: { directories: [appDataDir] } });
+    const socket = new EventEmitter();
+    const messages: {
+      type?: string;
+      id?: string;
+      event?: { type: string; id?: string; text?: string };
+      chat?: string;
+      envelope?: { ok: boolean; result: Record<string, unknown> };
+    }[] = [];
+    Object.assign(socket, {
+      readyState: WebSocket.OPEN,
+      send: (raw: string) => messages.push(JSON.parse(raw)),
+      close: () => socket.emit("close"),
+    });
+    expect(uiServer).toBeDefined();
+    uiServer?.emit("connection", socket);
+    const send = async (message: Record<string, unknown>) => {
+      socket.emit("message", JSON.stringify(message));
+      return vi.waitFor(() => {
+        const response = messages.find((item) => (message.id ? item.id === message.id : item.type === "bootstrap"));
+        expect(response).toBeDefined();
+        return response;
+      });
+    };
+    const client = await mcpClient();
+    const followUp = vi.spyOn(Agents.prototype, "followUp");
+    try {
+      await send({ type: "ui_ready" });
+      const sent = await send({
+        id: "chat",
+        verb: "chat_send",
+        request: { agent: "claude", text: "先粗剪" },
+      });
+      expect(sent?.envelope?.ok).toBe(true);
+      const turn = messages.find(({ event }) => event?.type === "turn")?.event?.id;
+      expect(turn).toMatch(/^turn_/);
+      const base = {
+        project,
+        author: { kind: "agent", name: "claude" },
+        base_revision: "rev_fixture_1",
+        turn: { id: "turn_wrong" },
+      };
+      const asked = await client.callTool({
+        name: "zcut_ask",
+        arguments: {
+          ...base,
+          idempotency_key: "ask",
+          decisions: [
+            {
+              id: "dec_stale",
+              question: "保留哪一版？",
+              options: [{ id: "keep", label: "短版", ops: [{ op: "set_clip", clip_id: "clp_v1", label: "短版" }] }],
+            },
+          ],
+        },
+      });
+      expect(asked.structuredContent).toMatchObject({ ok: true });
+      await vi.waitFor(() =>
+        expect(messages).toContainEqual({ type: "decisions_changed", pending: 1, changed: ["dec_stale"] }),
+      );
+      const decisions = await client.callTool({ name: "zcut_inspect", arguments: { project, view: "decisions" } });
+      expect(decisions.structuredContent).toMatchObject({ result: { decisions: [{ turn: { id: turn } }] } });
+      const written = await client.callTool({
+        name: "zcut_edit",
+        arguments: {
+          ...base,
+          idempotency_key: "touch",
+          label: "调整片段",
+          ops: [{ op: "set_clip", clip_id: "clp_v1", label: "变更" }],
+        },
+      });
+      const applied = written.structuredContent as unknown as Envelope;
+      expect(applied.status).toBe("applied");
+      await vi.waitFor(() =>
+        expect(messages).toContainEqual(expect.objectContaining({ type: "project_changed", turn })),
+      );
+      const answered = await send({
+        id: "answer",
+        verb: "answer",
+        request: {
+          project,
+          base_revision: applied.receipt?.after,
+          author: { kind: "human", name: "剪辑师" },
+          idempotency_key: "answer",
+          decision_id: "dec_stale",
+          option_id: "keep",
+        },
+      });
+      expect(answered?.envelope?.result).toMatchObject({ decision: { execution: { state: "stale" } } });
+      expect(messages).toContainEqual({ type: "decisions_changed", pending: 0, changed: ["dec_stale"] });
+      const text = "用户回答了：保留哪一版？ → 短版，这一处工程已经变了，请按当前工程重做";
+      expect(followUp).toHaveBeenCalledWith(turn, text, expect.any(Function));
+      expect(messages.filter(({ event }) => event?.type === "turn")).toHaveLength(1);
+      await writeFile(release, "");
+      await vi.waitFor(
+        () =>
+          expect(messages).toContainEqual(
+            expect.objectContaining({
+              type: "chat_event",
+              chat: sent?.envelope?.result.id,
+              event: { type: "user", text },
+            }),
+          ),
+        { timeout: 10_000 },
+      );
+      const firstEnd = messages.findIndex(({ event }) => event?.type === "end");
+      const continued = messages.findIndex(({ event }) => event?.text === text);
+      expect(firstEnd).toBeGreaterThanOrEqual(0);
+      expect(continued).toBeGreaterThan(firstEnd);
+    } finally {
+      await writeFile(release, "");
+      await client.close();
+      socket.emit("close");
+    }
+  },
+  20_000,
+);

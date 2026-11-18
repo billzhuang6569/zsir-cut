@@ -96,11 +96,46 @@ export interface Chat {
 }
 const skill = fileURLToPath(new URL("../../../skills/zsir-cut/SKILL.md", import.meta.url));
 export class Agents {
-  private active: { chat: string; child: ChildProcess; done: Promise<void> } | undefined;
+  private active: { chat: string; turn: string; child: ChildProcess; done: Promise<void> } | undefined;
   get activeChat() {
     return this.active?.chat;
   }
+  get activeTurn() {
+    return this.active?.turn;
+  }
   private busy = false;
+  private idle = Promise.resolve();
+  private followUps = Promise.resolve();
+
+  followUp(turn: string | undefined, text: string, stillOpen: () => boolean) {
+    const active = this.active;
+    const currentChat = active && (!turn || active.turn === turn) ? active.chat : undefined;
+    this.followUps = this.followUps
+      .catch(() => {})
+      .then(async () => {
+        if (!stillOpen()) return;
+        let chat: Pick<Chat, "id" | "agent"> | undefined;
+        if (currentChat) chat = await this.history(currentChat);
+        else {
+          const chats = await this.list();
+          chat = chats[0];
+          if (turn) {
+            for (const candidate of chats) {
+              const history = await this.history(candidate.id);
+              if (history.events.some((event) => event.type === "turn" && event.id === turn)) {
+                chat = candidate;
+                break;
+              }
+            }
+          }
+        }
+        while (this.busy) await this.idle;
+        if (!stillOpen()) return;
+        const agent = chat?.agent ?? this.selected;
+        if (agent) await this.send(agent, text, chat?.id);
+      });
+    return this.followUps;
+  }
   selected: AgentKind | undefined;
   private cancelRequested = false;
   private writes = Promise.resolve();
@@ -179,6 +214,11 @@ export class Agents {
       throw new Error("Invalid message");
     this.selected = agent;
     this.busy = true;
+    let settleIdle = () => {};
+    this.idle = new Promise<void>((resolve) => {
+      settleIdle = resolve;
+    });
+    const turn = `turn_${randomUUID()}`;
     this.cancelRequested = false;
     let directory: string | undefined;
     try {
@@ -221,6 +261,7 @@ export class Agents {
         if (event.type === "end") this.writes = this.writes.then(() => this.options.emit(id, event));
         else this.options.emit(id, event);
       };
+      emit({ type: "turn", id: turn });
       const command = await this.command(agent);
       let help: string | null;
       try {
@@ -232,6 +273,7 @@ export class Agents {
         await this.writes;
         await rm(directory, { recursive: true, force: true });
         this.busy = false;
+        settleIdle();
         return { id };
       }
       const args =
@@ -361,16 +403,17 @@ export class Agents {
             } catch (error) {
               emit({ type: "error", text: `临时配置清理失败：${String(error)}` });
             } finally {
-              this.busy = false;
               this.active = undefined;
               emit({ type: "end", ...(signal ? { text: "已停止" } : {}) });
               await this.writes;
+              this.busy = false;
+              settleIdle();
               resolve();
             }
           })();
         });
       });
-      this.active = { chat: id, child, done };
+      this.active = { chat: id, turn, child, done };
       child.stdin.on("error", () => {});
       child.stdin.end(
         agent === "claude"
@@ -380,6 +423,7 @@ export class Agents {
       return { id };
     } catch (error) {
       this.busy = false;
+      settleIdle();
       if (directory) await rm(directory, { recursive: true, force: true });
       throw error;
     }

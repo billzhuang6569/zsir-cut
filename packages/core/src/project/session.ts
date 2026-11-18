@@ -10,7 +10,7 @@ import { diffProjectEntities, type EntityChange } from "./entities.ts";
 import { newId } from "./id.ts";
 import { parseProject, serializeProject } from "./io.ts";
 import { validateProjectSemantics } from "./semantics.ts";
-import { type JournalEntry, openProject, type WriteEnvelope, type WriteRequest } from "./store.ts";
+import { type JournalEntry, openProject, undoneRevisions, type WriteEnvelope, type WriteRequest } from "./store.ts";
 import type { Author, Project } from "./types.ts";
 
 type Input = Record<string, unknown>;
@@ -176,6 +176,8 @@ const writeRequest = (verb: WriteRequest["verb"], id: string, input: Input, ops:
   ops,
   ...(typeof input.timeline_id === "string" ? { timeline_id: input.timeline_id } : {}),
   ...(typeof input.target === "string" ? { target: input.target } : {}),
+  ...(input.turn ? { turn: input.turn as NonNullable<WriteRequest["turn"]> } : {}),
+  ...(typeof input.turn_id === "string" ? { turn_id: input.turn_id } : {}),
   ...(typeof input.label === "string" ? { label: input.label } : {}),
   ...(typeof input.reason === "string" ? { reason: input.reason } : {}),
   ...(typeof input.project === "string" ? { project: input.project } : {}),
@@ -185,18 +187,7 @@ const writeRequest = (verb: WriteRequest["verb"], id: string, input: Input, ops:
   ...(typeof input.batch_id === "string" ? { batch_id: input.batch_id } : {}),
 });
 const activeWrites = (entries: JournalEntry[]) => {
-  const undone = new Set<string>();
-  for (const entry of entries) {
-    const targets = entry.batch_id
-      ? entries.filter((item) => item.batch?.id === entry.batch_id).map((item) => item.revision)
-      : entry.target
-        ? [entry.target]
-        : [];
-    for (const revision of targets) {
-      if (entry.kind === "undo") undone.add(revision);
-      if (entry.kind === "redo") undone.delete(revision);
-    }
-  }
+  const undone = undoneRevisions(entries);
   return entries.filter((entry) => entry.kind === "write" && !undone.has(entry.revision));
 };
 const subtitleEntities = new Set(["transcript", "run", "token", "cue", "override", "free_cue", "style"]);
