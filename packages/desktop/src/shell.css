@@ -37,7 +37,7 @@ h3 {
   --icon-btn: var(--control-h);
   --icon-btn-compact: var(--space-6);
   --menubar-h: var(--topbar-h);
-  --track-label-w: calc(var(--track-header-w) + 6px);
+  --track-label-w: calc(var(--track-header-w) + var(--space-6) + var(--space-5) + var(--space-3));
   --track-video-h: 54px;
   --track-audio-h: var(--track-h);
   --track-subtitle-h: 26px;

@@ -167,7 +167,7 @@ export function threePointEdit(
   state: UiState,
   playhead: string,
   placement: Placement,
-  editTargets: Partial<Record<MediaKind, string>> = {},
+  editTargets: Partial<Record<MediaKind, string>> = state.editTargets ?? {},
 ) {
   if (media.kind === "audio" && placement === "video") return { error: "素材没有可放入的画面" } as const;
   const connect = action === "connect_edit";

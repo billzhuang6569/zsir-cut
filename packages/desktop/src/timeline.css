@@ -702,3 +702,72 @@
 .zc-drop-error {
   white-space: pre-line;
 }
+
+.zc-track-controls {
+  display: grid;
+  grid-template-rows: auto auto;
+  align-content: center;
+  justify-content: stretch;
+  padding-inline: var(--space-1) var(--space-2);
+  padding-bottom: var(--space-1);
+}
+
+.zc-track-title,
+.zc-track-controls input {
+  width: 100%;
+  min-width: 0;
+  height: calc(var(--space-4) - var(--space-1));
+  padding-inline: var(--space-1);
+  color: var(--text);
+  font: inherit;
+}
+
+.zc-track-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.zc-track-buttons {
+  display: flex;
+  align-items: center;
+}
+
+.zc-track-buttons .zc-icon-btn {
+  width: var(--space-5);
+  height: calc(var(--space-4) - var(--space-1));
+  padding: 0;
+  font-size: var(--label-size);
+}
+
+.zc-track-buttons .zc-icon-btn svg {
+  width: var(--space-3);
+  height: var(--space-3);
+}
+
+.zc-track-buttons .zc-icon-btn[aria-pressed="true"] {
+  color: var(--accent);
+}
+
+.zc-track-resize {
+  position: absolute;
+  inset: auto var(--space-2) 0 0;
+  height: var(--space-1);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.zc-track-resize:hover,
+.zc-track-resize:focus-visible {
+  background: var(--focus);
+}
+
+.zc-timeline .is-track-locked {
+  opacity: 0.55;
+}

@@ -519,3 +519,19 @@ it("exposes network_test only to the UI and rejects bad addresses without writin
   });
   expect((await send(socket, "prefs_get")).result.prefs.network.proxy).toBe("");
 });
+
+it("merges individual track heights and restores them across preference reloads", async () => {
+  const prefs = new DesktopPreferences(home);
+  await prefs.load();
+  expect(prefs.get().prefs.ui.track_heights).toBeUndefined();
+  const video = JSON.stringify(["/edit.zcut.json", "tl", "v1"]);
+  const audio = JSON.stringify(["/edit.zcut.json", "tl", "a1"]);
+  await Promise.all([
+    prefs.set({ ui: { track_heights: { [video]: 72 } } }),
+    prefs.set({ ui: { track_heights: { [audio]: 48 } } }),
+  ]);
+  await expect(prefs.set({ ui: { track_heights: { [audio]: 0 } } })).rejects.toThrow();
+  const reloaded = new DesktopPreferences(home);
+  await reloaded.load();
+  expect(reloaded.get().prefs.ui).toMatchObject({ track_height: "m", track_heights: { [video]: 72, [audio]: 48 } });
+});

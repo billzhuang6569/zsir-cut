@@ -1125,3 +1125,129 @@ it.each(["video", "audio"] as const)(
     expect("op" in plan && plan.op).not.toHaveProperty(placement === "video" ? "audio_track" : "video_track");
   },
 );
+
+describe("track heads", () => {
+  const head = (id: string) =>
+    get(`[data-track-id="${id}"]`).parentElement?.querySelector(".zc-track-head") as HTMLElement;
+  const control = (id: string, label: string) =>
+    head(id).querySelector<HTMLElement>(`[aria-label="${label}"]`) as HTMLElement;
+  const menuItem = (label: string) =>
+    [...document.querySelectorAll<HTMLButtonElement>(".zc-track-menu button")].find((item) =>
+      item.textContent?.startsWith(label),
+    ) as HTMLButtonElement;
+  const menu = (id: string) => pointer(head(id), "contextmenu", 10, 20, { button: 2 });
+
+  it("writes lock, visibility, mute and rename edits", async () => {
+    await click(control("t0", "锁定轨道"));
+    expect(lastOps()).toEqual([{ op: "set_track", track_id: "t0", locked: true }]);
+    await click(control("t0", "隐藏画面"));
+    expect(lastOps()).toEqual([{ op: "set_track", track_id: "t0", enabled: false }]);
+    await click(control("t1", "静音"));
+    expect(lastOps()).toEqual([{ op: "set_track", track_id: "t1", enabled: false }]);
+
+    await pointer(control("t0", "轨道 0"), "dblclick", 5);
+    const input = get('input[aria-label="轨道名"]') as HTMLInputElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, "画面 A");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await key("Enter", input);
+    expect(lastOps()).toEqual([{ op: "rename_track", track_id: "t0", name: "画面 A" }]);
+
+    project.tracks = project.tracks.map((track) => ({ ...track, enabled: false, locked: true }));
+    await act(async () => render());
+    await click(control("t0", "解锁轨道"));
+    expect(lastOps()).toEqual([{ op: "set_track", track_id: "t0", locked: false }]);
+    await click(control("t0", "显示画面"));
+    expect(lastOps()).toEqual([{ op: "set_track", track_id: "t0", enabled: true }]);
+    await click(control("t1", "取消静音"));
+    expect(lastOps()).toEqual([{ op: "set_track", track_id: "t1", enabled: true }]);
+  });
+
+  it("inserts tracks at the requested index and only deletes eligible empty tracks", async () => {
+    await menu("t1");
+    await click(menuItem("在上方新建视频轨"));
+    expect(lastOps()).toEqual([{ op: "add_track", id: expect.any(String), kind: "video", index: 1 }]);
+    await menu("t1");
+    await click(menuItem("在下方新建声音轨"));
+    expect(lastOps()).toEqual([{ op: "add_track", id: expect.any(String), kind: "audio", index: 2 }]);
+    await menu("t1");
+    expect(menuItem("删除轨道").getAttribute("aria-disabled")).toBe("true");
+    expect(menuItem("删除轨道").textContent).toContain("移走片段");
+    await click(menuItem("删除轨道"));
+    expect(writes()).toHaveLength(2);
+
+    project.tracks = project.tracks.map((track) => (track.id === "t1" ? { ...track, clips: [] } : track));
+    project.subtitleTracks = [{ id: "sub", name: "字幕", default_style_id: "style", carrier_tracks: ["t1"] }];
+    await act(async () => render());
+    expect(menuItem("删除轨道").textContent).toContain("字幕承载轨");
+    project.subtitleTracks = [];
+    await act(async () => render());
+    await click(menuItem("删除轨道"));
+    expect(lastOps()).toEqual([{ op: "remove_track", track_id: "t1" }]);
+  });
+
+  it("blocks pointer moves, trim handles, rolls and blade cuts on a locked lane", async () => {
+    project.tracks = project.tracks.map((track) => (track.id === "t0" ? { ...track, locked: true } : track));
+    await act(async () => render());
+    const lane = get('[data-track-id="t0"]');
+    const clip = get('[data-selection-id="c00"]');
+    expect(lane.classList.contains("is-track-locked")).toBe(true);
+    expect(clip.style.cursor).toBe("not-allowed");
+    expect(lane.querySelector("[data-trim-edge]")).toBeNull();
+    await pointer(clip, "pointerdown", 48);
+    await pointer(clip, "pointermove", 96);
+    await pointer(clip, "pointerup", 96);
+    await action("tool_roll");
+    const seam = lane.querySelector(".zc-seam") as HTMLElement;
+    await pointer(seam, "pointerdown", 192);
+    await pointer(seam, "pointermove", 215);
+    await pointer(seam, "pointerup", 215);
+    await action("tool_blade");
+    await pointer(clip, "pointermove", 48);
+    expect(lane.querySelector(".zc-blade-line")).toBeNull();
+    await pointer(clip, "click", 48);
+    expect(writes()).toHaveLength(0);
+  });
+
+  it("uses the selected target for three-point edits and keeps solo in UI state", async () => {
+    project.media = [{ id: "media", kind: "audio", duration: "20s", audio: { sample_rate: "48000", channels: 2 } }];
+    state.media = { id: "media", at: "0s", in: "0s", out: "2s" };
+    await act(async () => render());
+    await click(control("t2", "设为目标轨"));
+    await click(control("t1", "独奏"));
+    expect(state.soloAudioTrackIds).toEqual(["t1"]);
+    expect(writes()).toHaveLength(0);
+    await action("insert_edit");
+    expect(lastOps()).toEqual([expect.objectContaining({ op: "place", mode: "insert", audio_track: "t2" })]);
+    await action("overwrite_edit");
+    expect(lastOps()).toEqual([expect.objectContaining({ op: "place", mode: "overwrite", audio_track: "t2" })]);
+    await action("connect_edit");
+    expect(lastOps()).toEqual([
+      expect.objectContaining({ op: "add_track", kind: "audio", index: 3 }),
+      expect.objectContaining({ op: "place", mode: "overwrite" }),
+    ]);
+    await click(control("t2", "取消目标轨"));
+    await click(control("t1", "取消独奏"));
+    expect(state.soloAudioTrackIds).toEqual([]);
+    await action("insert_edit");
+    expect(lastOps()).toEqual([expect.objectContaining({ op: "place", audio_track: "t1" })]);
+  });
+
+  it("resizes one track and saves its height in the UI preferences", async () => {
+    const row = head("t1").parentElement as HTMLElement;
+    const handle = control("t1", "调整轨道高度");
+    vi.spyOn(row, "getBoundingClientRect").mockReturnValue({ height: 30 } as DOMRect);
+    await pointer(handle, "pointerdown", 10, 20);
+    await pointer(handle, "pointermove", 10, 65);
+    expect(row.style.height).toBe("75px");
+    expect(call).not.toHaveBeenCalled();
+    await pointer(handle, "pointerup", 10, 65);
+    expect(call).toHaveBeenCalledWith("prefs_set", {
+      patch: { ui: { track_heights: { [JSON.stringify([state.project, project.id, "t1"])]: 75 } } },
+    });
+    expect(row.style.height).toBe("75px");
+    expect(head("t0").parentElement?.style.height).toBe("");
+    expect(ui.track_height).toBe("m");
+  });
+});

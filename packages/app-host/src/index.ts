@@ -962,6 +962,7 @@ export async function startHost(
                         id: track.id,
                         name: track.name,
                         default_style_id: track.default_style_id,
+                        carrier_tracks: track.carrier_tracks,
                       })) ?? [],
                   subtitlePass: subtitlePass?.state,
                   subtitle_pass: subtitlePass?.latest ?? null,

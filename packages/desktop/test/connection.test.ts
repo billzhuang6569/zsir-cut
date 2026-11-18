@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
 import type { ProjectChanged } from "../../app-host/src/revision-events.js";
-import { connectHost } from "../src/connection.js";
+import { connectHost, requestError } from "../src/connection.js";
 import { initialState } from "../src/state.js";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -136,4 +136,10 @@ it("exposes revision events to subscribers while refreshing the project and subt
     window.removeEventListener("desktop-preview-cache", previewCache);
     disconnect();
   }
+});
+
+it("tells the editor how to retry a locked-track edit", () => {
+  expect(requestError({ ok: false, result: null, error: { code: "E_LOCKED", message: "Track is locked" } })).toBe(
+    "请先在轨道头解锁相关轨道，再重试",
+  );
 });
