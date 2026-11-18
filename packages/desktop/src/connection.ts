@@ -17,7 +17,7 @@ interface ResultEnvelope {
   ok: boolean;
   result: unknown;
   receipt?: { before: string | null; after: string | null } | null;
-  error: { message: string; code?: string; details?: { manual?: string } } | null;
+  error: { message: string; code?: string; details?: { manual?: string; keys?: string[] } } | null;
   verification?: { issues: { code: string; severity: string }[] };
 }
 export function requestError(envelope: ResultEnvelope) {
@@ -69,6 +69,7 @@ export function connectHost(
     project: (path: string | null, view: ProjectView | null) => void;
     chat?: (notice: import("./AiPanel.js").AiNotice) => void;
     aiChanged?: () => void;
+    decisionsChanged?: () => void;
     projectChanged?: (event: ProjectChanged) => void;
     permission?: (request: PermissionRequest) => void;
     icon: (value: string | null) => void;
@@ -176,6 +177,8 @@ export function connectHost(
       handlers.chat?.(message);
     } else if (message.type === "permission_request") {
       handlers.permission?.(message);
+    } else if (message.type === "decisions_changed") {
+      handlers.decisionsChanged?.();
     } else if (message.type === "ai_changed") {
       handlers.aiChanged?.();
     }
@@ -232,7 +235,12 @@ export function connectHost(
             ? requestError(envelope)
             : `${envelope.error?.code ?? ""} ${envelope.error?.message ?? ""}`.trim(),
         });
-        Object.assign(error, { code: envelope.error?.code, manual: envelope.error?.details?.manual });
+        Object.assign(error, {
+          code: envelope.error?.code,
+          manual: envelope.error?.details?.manual,
+          ...(envelope.error?.code === "E_UNDO_CONFLICT" ? { details: envelope.error.details } : {}),
+          ...(item?.verb === "answer" ? { result: envelope.result } : {}),
+        });
         if (envelope.error?.code === "E_CONFLICT") {
           void refresh().then(
             () => item?.reject(error),

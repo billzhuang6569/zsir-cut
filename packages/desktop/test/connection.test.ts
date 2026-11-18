@@ -36,6 +36,22 @@ it("exposes revision events to subscribers while refreshing the project and subt
         );
         return;
       }
+      if (message.verb === "answer" || message.verb === "undo") {
+        queueMicrotask(() =>
+          this.receive({
+            id: message.id,
+            envelope:
+              message.verb === "answer"
+                ? {
+                    ok: false,
+                    result: { decision: { execution: { state: "failed", error: { message: "失败原因" } } } },
+                    error: { code: "E_LOCKED" },
+                  }
+                : { ok: false, error: { code: "E_UNDO_CONFLICT", details: { keys: ["clp_a"] } } },
+          }),
+        );
+        return;
+      }
       if (message.verb === "session_approve") {
         queueMicrotask(() =>
           this.receive({
@@ -61,6 +77,7 @@ it("exposes revision events to subscribers while refreshing the project and subt
   const project = vi.fn();
   const projectChanged = vi.fn();
   const aiChanged = vi.fn();
+  const decisionsChanged = vi.fn();
   const error = vi.fn();
   const disconnect = connectHost(
     { port: 1, token: "test" },
@@ -69,6 +86,7 @@ it("exposes revision events to subscribers while refreshing the project and subt
       project,
       projectChanged,
       aiChanged,
+      decisionsChanged,
       icon: vi.fn(),
       error,
     },
@@ -99,6 +117,7 @@ it("exposes revision events to subscribers while refreshing the project and subt
       reason: "调整开头",
       author: { kind: "agent", name: "test" },
       batch: null,
+      turn: "turn_test",
       summary: { marker: { added: 1, removed: 0, changed: 0 } },
       changes: [{ key: "mrk_test", entity: "marker" }],
       truncated: false,
@@ -116,6 +135,15 @@ it("exposes revision events to subscribers while refreshing the project and subt
     expect(aiChanged).toHaveBeenCalledTimes(1);
     expect(projectChanged).toHaveBeenCalledTimes(1);
     expect(error).not.toHaveBeenCalled();
+    socket?.receive({ type: "decisions_changed", pending: 1, changed: ["dec_test"] });
+    expect(decisionsChanged).toHaveBeenCalledOnce();
+    await expect(disconnect.call("undo", {})).rejects.toMatchObject({
+      code: "E_UNDO_CONFLICT",
+      details: { keys: ["clp_a"] },
+    });
+    await expect(disconnect.call("answer", {})).rejects.toMatchObject({
+      result: { decision: { execution: { state: "failed" } } },
+    });
     await disconnect.call("preview_data", { session_id: "ses_test", at_revision: "rev_draft" });
     expect(messages.at(-1)).toMatchObject({ type: "preview_data", session_id: "ses_test", at_revision: "rev_draft" });
     expect(messages.at(-1)).not.toHaveProperty("verb");

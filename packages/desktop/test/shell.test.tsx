@@ -7,6 +7,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mergeKeymap } from "../../app-host/src/keymap.js";
+import type { ProjectChanged } from "../../app-host/src/revision-events.js";
 import type { UiState } from "../../app-host/src/ui.js";
 import { App } from "../src/App.js";
 import { Icon } from "../src/components.js";
@@ -499,6 +500,46 @@ it("opens the project through inspect and receives UI commands", async () => {
       if (previousScroll) Object.defineProperty(HTMLElement.prototype, "scrollIntoView", previousScroll);
       else Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
     }
+    const track = (data.timeline as ProjectView).tracks.find(({ kind }) => kind === "video");
+    const edited = track?.clips.at(1) ?? track?.clips[0];
+    if (!track || !edited) throw new Error("Missing edited clip");
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[role="tab"][id$="-ai"]')?.click();
+      socket?.receive({ type: "chat_event", chat: "chat_activity", event: { type: "turn", id: "turn_test" } });
+      socket?.receive({
+        type: "project_changed",
+        target: "main",
+        session_id: null,
+        revision: fixture.revision,
+        verb: "edit",
+        label: "AI 调整片段",
+        reason: "缩短开头",
+        author: { kind: "agent", name: "claude" },
+        batch: null,
+        turn: "turn_test",
+        summary: {},
+        truncated: false,
+        changes: [
+          {
+            key: edited.id,
+            entity: "clip",
+            before: null,
+            after: { track_id: track.id, start: edited.timeline_in.t, end: edited.timeline_out.t },
+          },
+        ],
+      } satisfies ProjectChanged);
+    });
+    const activity = container.querySelector('[aria-label="本轮改动"]');
+    const step = [...(activity?.querySelectorAll("button") ?? [])].find((item) => item.textContent === "AI 调整片段");
+    expect(step).toBeDefined();
+    await act(async () => step?.click());
+    expect(container.querySelector('[aria-label="参数区"] h2')?.textContent).toBe("AI 动态");
+    expect(container.querySelector('[aria-label="本轮改动"]')).toBe(activity);
+    await act(async () => socket?.receive({ type: "ui_request", id: "activity", verb: "ui_state", request: {} }));
+    expect(replies.at(-1)).toMatchObject({
+      id: "activity",
+      result: { playhead: { at: edited.timeline_in.t }, selected: [edited.id] },
+    });
   } finally {
     await act(() => root.unmount());
     container.remove();

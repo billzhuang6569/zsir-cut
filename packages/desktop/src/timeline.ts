@@ -76,7 +76,7 @@ export interface TranscriptView {
   ext?: Record<string, unknown>;
   id: string;
   media_id: string;
-  tokens: { id: string; text: string; align: { start: string; end: string } }[];
+  tokens: { id: string; text: string; heard?: string; align: { start: string; end: string } }[];
   cues: {
     id: string;
     first_token: string;

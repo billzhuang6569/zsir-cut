@@ -97,7 +97,7 @@ function Panel({
         {ai.chat}
       </main>
       <aside>
-        <h2>决定</h2>
+        <h2>AI 动态</h2>
         {ai.decisionStatus}
         {ai.parameters}
       </aside>
@@ -185,9 +185,10 @@ it("keeps failed permission answers retryable and removes only the answered card
     ),
   );
   expect(node.querySelectorAll('[role="alertdialog"]')).toHaveLength(2);
-  expect(node.querySelector("aside")?.textContent?.indexOf(permission.title)).toBeLessThan(
-    node.querySelector("aside")?.textContent?.indexOf("方案 ·") ?? 0,
+  expect(node.querySelector("aside")?.textContent?.indexOf(permission.title)).toBeGreaterThan(
+    node.querySelector("aside")?.textContent?.indexOf("待你决定") ?? 0,
   );
+  expect(node.querySelector("aside .zc-chip")?.textContent).toBe("3 件待定");
   await act(async () => button(node, "允许这一次").click());
   expect(node.querySelector('[role="alert"]')?.textContent).toContain("请重试");
   expect(node.querySelectorAll('[role="alertdialog"]')).toHaveLength(2);
@@ -236,7 +237,7 @@ it("renders suggestions only inside the composer; Tab fills, Enter sends, typing
   expect(call.mock.calls.filter(([verb]) => verb === "chat_send")).toHaveLength(2);
 });
 
-it("places the plan in 决定 and opens review from all three links", async () => {
+it("places the plan in AI 动态 and opens review from all three links", async () => {
   const { node, root } = mount();
   const call = host();
   const opened = vi.fn();
@@ -249,7 +250,7 @@ it("places the plan in 决定 and opens review from all three links", async () =
       />,
     ),
   );
-  expect(node.querySelectorAll("aside .zc-draft")).toHaveLength(1);
+  expect(node.querySelectorAll('aside section[aria-label="方案"] .zc-draft')).toHaveLength(1);
   expect(node.querySelector("main .zc-draft")).toBeNull();
   expect(
     (node.querySelector("aside .zc-draft")?.compareDocumentPosition(node.querySelector("aside .zc-q") as Node) ?? 0) &

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentKind, ChatEvent } from "../../app-host/src/agent-events.js";
+import type { ProjectChanged } from "../../app-host/src/revision-events.js";
+import { ProjectDecisions, TurnActivity, useProjectDecisions } from "./AiActivity.js";
 import {
   Button,
   type Decision,
@@ -94,6 +96,8 @@ export function useAiPanel({
   notices,
   revision,
   connectionEpoch = 0,
+  decisionRevision = 0,
+  turnChanges = [],
   permissions = [],
   permissionAnswered,
 }: {
@@ -103,6 +107,8 @@ export function useAiPanel({
   notices: AiNotice[];
   revision: number;
   connectionEpoch?: number;
+  decisionRevision?: number;
+  turnChanges?: ProjectChanged[];
   permissions?: PermissionRequest[];
   permissionAnswered?: (id: string) => void;
 }) {
@@ -123,7 +129,8 @@ export function useAiPanel({
   }, [input, agents.length]);
   const [suggestion, setSuggestion] = useState("");
   const permissionCards = useRef<HTMLDivElement>(null);
-  const draftCards = useRef<HTMLDivElement>(null);
+  const projectDecisions = useProjectDecisions(call, path, connectionEpoch, decisionRevision, project);
+  const [answerLog, setAnswerLog] = useState<{ id: string; chat: string | undefined; line: string }[]>([]);
   const [error, setError] = useState("");
   const [history, setHistory] = useState<ChatSummary[] | null>(null);
   const messageList = useRef<HTMLDivElement>(null);
@@ -166,6 +173,7 @@ export function useAiPanel({
   // biome-ignore lint/correctness/useExhaustiveDependencies: A new host connection must restore persisted history.
   useEffect(() => {
     setGenerating(false);
+    setAnswerLog([]);
     setInput("");
     setSuggestion("");
     setError("");
@@ -219,7 +227,7 @@ export function useAiPanel({
   useEffect(() => {
     const list = messageList.current;
     if (list) list.scrollTop = list.scrollHeight;
-  }, [events, agents]);
+  }, [events, agents, answerLog]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: Host notifications invalidate the session view.
   useEffect(() => {
     if (!path) return;
@@ -314,7 +322,11 @@ export function useAiPanel({
   const decisions = [...(session?.decisions ?? [])].sort((a, b) => a.seq - b.seq);
   const pending = decisions.filter((item) => item.state === "pending");
   const decision = pending[0];
-  const draftSession = session ?? ai.sessions.at(-1);
+  const draftSession = session;
+  const pendingCount =
+    projectDecisions.pending.length +
+    draftSessions.reduce((count, item) => count + item.pending_count, 0) +
+    permissions.length;
   const answer = async (value: { option_id: string } | { text: string } | { skip: true }) => {
     if (!session || !decision || saving || generating) return;
     setSaving(true);
@@ -628,6 +640,13 @@ export function useAiPanel({
                 )}
               </div>
             ))}
+            {answerLog
+              .filter((item) => item.chat === chatId)
+              .map(({ id, line }) => (
+                <p className="zc-muted" key={id}>
+                  {line}
+                </p>
+              ))}
             {ai.sessions.some((item) => item.state === "in_review" && item.changes?.length) && (
               <Button
                 className="zc-chat-pointer"
@@ -727,136 +746,167 @@ export function useAiPanel({
   );
   const parameters = (
     <>
-      <div ref={permissionCards} className="zc-permission-list">
-        {permissions.map((request) => (
-          <PermissionCard
-            key={request.id}
-            request={request}
-            answer={async (answer, message) => {
-              await call("permission_answer", { id: request.id, answer, ...(message ? { message } : {}) });
-              permissionAnswered?.(request.id);
-            }}
-          />
-        ))}
-      </div>
-      <div ref={draftCards} className="zc-draft-list">
-        {draftSessions.map((item) => {
-          const changes = item.changes ?? [];
-          const reason = approvalReason(item);
-          const title = item.intent || item.label || "剪辑方案";
-          return (
-            <section
-              className={`zc-draft${session?.session_id === item.session_id ? " is-selected" : ""}`}
-              aria-label="AI 草稿"
-              key={item.session_id}
-            >
-              <button
-                type="button"
-                className="zc-draft-select"
-                aria-label={`选择方案：${title}`}
-                aria-pressed={session?.session_id === item.session_id}
-                disabled={saving}
-                onClick={() => {
-                  setSessionId(item.session_id);
-                  setConfirmApprove(undefined);
-                  answers.current = [];
-                }}
-              />
-              <strong>方案 · {title}</strong>
-              <div className="zc-draft-counts">
-                {[
-                  { icon: "list", label: "步", count: item.revision_count },
-                  {
-                    icon: "clip",
-                    label: "片段",
-                    count: changes.filter((change) => change.entity === "clip").length,
-                  },
-                  {
-                    icon: "subtitle",
-                    label: "字幕改动",
-                    count: changes.filter((change) =>
-                      ["cue", "transcript", "run", "token", "override", "free_cue", "style"].includes(change.entity),
-                    ).length,
-                  },
-                ]
-                  .filter((entry) => entry.count > 0)
-                  .map((entry) => (
-                    <span role="img" key={entry.label} aria-label={`${entry.count} ${entry.label}`} title={entry.label}>
-                      <Icon name={entry.icon} />
-                      {entry.count} {entry.label}
-                    </span>
-                  ))}
-              </div>
-              {confirmApprove === item.session_id && (
-                <p role="alert">还有 {item.pending_count} 件决定未答，仍要批准吗？</p>
-              )}
-              {reason && <p className="zc-draft-reason">{reason}</p>}
-              <Button
-                variant="approve"
-                icon="check"
-                disabled={Boolean(reason)}
-                onClick={() => {
-                  void approve(item);
-                }}
-              >
-                {confirmApprove === item.session_id ? "仍然批准" : "全部批准"}
-              </Button>
-              {reason === "工程在这之后又改过" && (
-                <Button
-                  disabled={saving || generating || !available.some((item) => item.agent === agent)}
-                  onClick={() =>
-                    void send(
-                      `请基于主工程的最新版本重做「${title}」（原编辑会话 ${item.session_id}），新建 manual 编辑会话，完成后用 session_review 重新交审。`,
-                    )
-                  }
-                >
-                  让 AI 按新版本重做
-                </Button>
-              )}
-              {reason === "这一版没有改动" && (
-                <Button disabled={saving || generating} onClick={() => void reject(item.session_id)}>
-                  丢掉这一版
-                </Button>
-              )}
-              {changes.length > 0 && (
-                <Button icon="image" onClick={() => void showReview(item)}>
-                  看对比
-                </Button>
-              )}
-            </section>
-          );
-        })}
-      </div>
+      {path && (
+        <TurnActivity
+          key={`turns-${path}-${connectionEpoch}`}
+          call={call}
+          path={path}
+          project={project}
+          turn={
+            notices.findLast(({ event }) => event.type === "turn")?.event.id ??
+            events.findLast((event) => event.type === "turn")?.id
+          }
+          changes={turnChanges}
+        />
+      )}
       {runningBatch && (
         <output>
           AI 正在做第 {Math.min(runningBatch.count, runningBatch.applied.length + 1)} / {runningBatch.count} 步
         </output>
       )}
-      {decision ? (
-        <DecisionCard
-          key={`${session?.session_id}-${decision.id}`}
-          decision={decision}
-          done={decisions.length - pending.length}
-          total={decisions.length}
-          last={pending.length === 1}
-          busy={saving || generating}
-          answer={(value) => {
-            void answer(value);
-          }}
-        />
-      ) : (
-        <p className="zc-muted">暂无待定事项</p>
+      {draftSessions.length > 0 && (
+        <section className="zc-activity-section" aria-label="方案">
+          <h3>方案</h3>
+          <div className="zc-draft-list">
+            {draftSessions.map((item) => {
+              const changes = item.changes ?? [];
+              const reason = approvalReason(item);
+              const title = item.intent || item.label || "剪辑方案";
+              return (
+                <section
+                  className={`zc-draft${session?.session_id === item.session_id ? " is-selected" : ""}`}
+                  aria-label="AI 草稿"
+                  key={item.session_id}
+                >
+                  <button
+                    type="button"
+                    className="zc-draft-select"
+                    aria-label={`选择方案：${title}`}
+                    aria-pressed={session?.session_id === item.session_id}
+                    disabled={saving}
+                    onClick={() => {
+                      setSessionId(item.session_id);
+                      setConfirmApprove(undefined);
+                      answers.current = [];
+                    }}
+                  />
+                  <strong>方案 · {title}</strong>
+                  <div className="zc-draft-counts">
+                    {[
+                      { icon: "list", label: "步", count: item.revision_count },
+                      {
+                        icon: "clip",
+                        label: "片段",
+                        count: changes.filter((change) => change.entity === "clip").length,
+                      },
+                      {
+                        icon: "subtitle",
+                        label: "字幕改动",
+                        count: changes.filter((change) =>
+                          ["cue", "transcript", "run", "token", "override", "free_cue", "style"].includes(
+                            change.entity,
+                          ),
+                        ).length,
+                      },
+                    ]
+                      .filter((entry) => entry.count > 0)
+                      .map((entry) => (
+                        <span
+                          role="img"
+                          key={entry.label}
+                          aria-label={`${entry.count} ${entry.label}`}
+                          title={entry.label}
+                        >
+                          <Icon name={entry.icon} />
+                          {entry.count} {entry.label}
+                        </span>
+                      ))}
+                  </div>
+                  {confirmApprove === item.session_id && (
+                    <p role="alert">还有 {item.pending_count} 件决定未答，仍要批准吗？</p>
+                  )}
+                  {reason && <p className="zc-draft-reason">{reason}</p>}
+                  <Button
+                    variant="approve"
+                    icon="check"
+                    disabled={Boolean(reason)}
+                    onClick={() => {
+                      void approve(item);
+                    }}
+                  >
+                    {confirmApprove === item.session_id ? "仍然批准" : "全部批准"}
+                  </Button>
+                  {reason === "工程在这之后又改过" && (
+                    <Button
+                      disabled={saving || generating || !available.some((item) => item.agent === agent)}
+                      onClick={() =>
+                        void send(
+                          `请基于主工程的最新版本重做「${title}」（原编辑会话 ${item.session_id}），新建 manual 编辑会话，完成后用 session_review 重新交审。`,
+                        )
+                      }
+                    >
+                      让 AI 按新版本重做
+                    </Button>
+                  )}
+                  {reason === "这一版没有改动" && (
+                    <Button disabled={saving || generating} onClick={() => void reject(item.session_id)}>
+                      丢掉这一版
+                    </Button>
+                  )}
+                  {changes.length > 0 && (
+                    <Button icon="image" onClick={() => void showReview(item)}>
+                      看对比
+                    </Button>
+                  )}
+                </section>
+              );
+            })}
+          </div>
+          {decision && (
+            <DecisionCard
+              key={`${session?.session_id}-${decision.id}`}
+              decision={decision}
+              done={decisions.length - pending.length}
+              total={decisions.length}
+              last={pending.length === 1}
+              busy={saving || generating}
+              answer={(value) => {
+                void answer(value);
+              }}
+            />
+          )}
+        </section>
+      )}
+      <ProjectDecisions
+        key={`decisions-${path}-${connectionEpoch}`}
+        decisions={projectDecisions}
+        call={call}
+        project={project}
+        answered={(id, line) => setAnswerLog((old) => [...old, { id, chat: currentChat.current, line }])}
+      />
+      {permissions.length > 0 && (
+        <section className="zc-activity-section" aria-label="许可">
+          <h3>许可 · {permissions.length}</h3>
+          <div ref={permissionCards} className="zc-permission-list">
+            {permissions.map((request) => (
+              <PermissionCard
+                key={request.id}
+                request={request}
+                answer={async (answer, message) => {
+                  await call("permission_answer", { id: request.id, answer, ...(message ? { message } : {}) });
+                  permissionAnswered?.(request.id);
+                }}
+              />
+            ))}
+          </div>
+        </section>
       )}
     </>
   );
   return {
     chat,
     header,
-    decisionStatus: (
-      <span className="zc-chip is-sm is-attention">
-        {permissions.length ? "Agent 在等你" : `${pending.length} 件待定`}
-      </span>
-    ),
+    decisionStatus: pendingCount > 0 ? <span className="zc-chip is-sm is-attention">{pendingCount} 件待定</span> : null,
     draftStatus: draftSession ? (
       <span className="zc-chip is-sm is-attention">
         <span className="zc-dot is-attention" />
