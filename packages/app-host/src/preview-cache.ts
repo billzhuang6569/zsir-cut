@@ -214,6 +214,12 @@ export class PreviewCache {
       () => {
         void this.push();
       },
+      (args, signal) => this.encode(args, signal),
+      () => {
+        void this.enforceLimit()
+          .then(() => this.push())
+          .catch(() => {});
+      },
     );
     this.poll = setInterval(() => {
       this.kick();

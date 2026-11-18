@@ -6,6 +6,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 import type { ProjectView } from "../src/connection.js";
+import { PreviewMix } from "../src/preview-mix.js";
 import { initialState } from "../src/state.js";
 import { recordingCanvas } from "./canvas.js";
 import { TimelinePreview } from "./timeline-preview.js";
@@ -30,6 +31,7 @@ it("follows decoded frames without repeated seeks and keeps React updates below 
   );
   expect(run.status, run.stderr).toBe(0);
   const project = JSON.parse(run.stdout) as ProjectView;
+  const mixSample = vi.spyOn(PreviewMix.prototype, "sample");
   let scheduled: FrameRequestCallback | undefined;
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
     scheduled = callback;
@@ -93,6 +95,10 @@ it("follows decoded frames without repeated seeks and keeps React updates below 
     expect(seeks).toHaveBeenCalledTimes(1);
     expect(play).toHaveBeenCalledTimes(1);
     expect(container.querySelector('[aria-label="播放时码"]')?.textContent).toBe("00:00:01:00");
+    expect(mixSample.mock.lastCall?.[1]).toEqual({ numerator: 1n, denominator: 1n });
+    decoded = 11.012;
+    await act(() => scheduled?.(1017));
+    expect(mixSample.mock.lastCall?.[1]).toEqual({ numerator: 253n, denominator: 250n });
     const count = update.mock.calls.length;
     await act(() => scheduled?.(1800)); // Decoder stalls: the timeline must not seek ahead.
     expect(update).toHaveBeenCalledTimes(count);

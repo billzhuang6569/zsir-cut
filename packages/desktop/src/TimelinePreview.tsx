@@ -13,6 +13,7 @@ import { DESKTOP_AUTHOR, type ProjectView, type useTimelinePreferences } from ".
 import { useEditorShortcut } from "./editorShortcuts.js";
 import { isPlacementAction, type Placement, placementLabels, threePointEdit } from "./media.js";
 import { loadMediaResource, type Thumbs, thumbnailStyle, useMediaCache } from "./media-cache.js";
+import { audioSpans, PreviewMix } from "./preview-mix.js";
 import { usePreviewStream } from "./preview-stream.js";
 import { useReverseAudio } from "./reverse-audio.js";
 import { SubtitleCanvas } from "./SubtitleCanvas.js";
@@ -566,6 +567,7 @@ export function TimelinePreview({
     };
   }
   const [direction, setDirection] = useState(1n);
+  const [previewMuted, setPreviewMuted] = useState(false);
   const videos = useRef<(HTMLVideoElement | null)[]>([]);
   const activeVideo = useRef(0);
   const [visibleVideo, setVisibleVideo] = useState(0);
@@ -650,14 +652,34 @@ export function TimelinePreview({
   }, [project, top]);
   const media = project?.media.find((item) => item.id === clip?.media_id);
   const activeGainPreview = gainPreview?.ids.every((id) => state.selected.includes(id)) ? gainPreview : null;
-  const gain = timelineGain(project, clip, previewAt, activeGainPreview);
+  const gain = viewerOnly ? timelineGain(project, clip, previewAt, activeGainPreview) : 0;
+  const soloAudioTrackIds = state.soloAudioTrackIds;
+  const spans = useMemo(
+    () => audioSpans(project?.tracks ?? [], new Set(soloAudioTrackIds)),
+    [project, soloAudioTrackIds],
+  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Media IDs are scoped to the open project.
+  const mix = useMemo(
+    () =>
+      config && !viewerOnly && !hideViewer
+        ? new PreviewMix((id, index) => `${mediaUrl(config, "media-audio", id)}&chunk=${index}`)
+        : undefined,
+    [config, viewerOnly, hideViewer, state.project],
+  );
   const latestGainPreview = useRef(activeGainPreview);
   latestGainPreview.current = activeGainPreview;
-  const applyTimelineGain = useCallback(
-    (element: HTMLVideoElement, clip: ClipView, at: string) =>
-      applyGain(element, timelineGain(latest.current.project, clip, at, latestGainPreview.current)),
-    [applyGain],
-  );
+  const mixPlaying = state.playing && direction === 1n && !previewMuted;
+  const mixOptions = useRef({ spans, playing: mixPlaying });
+  mixOptions.current = { spans, playing: mixPlaying };
+  useEffect(() => () => mix?.dispose(), [mix]);
+  useEffect(() => {
+    mix?.warm(spans, parseRational(at, true));
+  }, [mix, spans, at]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Cancel scheduled nodes when the set of audio spans changes.
+  useEffect(() => {
+    if (mixPlaying) mix?.resume();
+    return () => mix?.stop();
+  }, [mix, mixPlaying, spans]);
   const speed = clip ? sourceSpeed(clip, previewAt) : 0;
   const source = clip ? sourceAt(clip, previewAt) : rational(0n);
   const src = config && clip ? mediaUrl(config, "media", clip.media_id) : undefined;
@@ -674,18 +696,17 @@ export function TimelinePreview({
     path: viewerOnly || readOnly ? null : state.project,
     config,
     call,
-    enabled: state.playing && direction > 0n && !hideViewer && !viewerOnly && !readOnly && !dragging.current,
+    enabled: state.playing && direction === 1n && !hideViewer && !viewerOnly && !readOnly && !dragging.current,
     at,
     playbackAt,
     prepare: pauseOriginal,
-    setGain: applyTimelineGain,
   });
   useReverseAudio(
-    media?.kind === "image" ? undefined : src,
+    !viewerOnly || media?.kind === "image" ? undefined : src,
     clip?.id,
     numberOf(source),
     speed * Number(direction),
-    state.playing && !hideViewer,
+    state.playing && viewerOnly && !previewMuted && !hideViewer,
     gain,
     setWriteError,
   );
@@ -712,7 +733,9 @@ export function TimelinePreview({
     subtitleAt.current = seekTarget(project, project.cues, latest.current.state.playhead);
     let started = performance.now();
     let previous = seekTarget(project, project.cues, latest.current.state.playhead);
-    let start = frameAt(previous, project.edit_rate);
+    let start = parseRational(previous, true);
+    const editRate = parseRational(project.edit_rate);
+    const frameDuration = numberOf(div(rational(1n), editRate));
     let published = performance.now();
     let animation = 0;
     const tick = (now: number) => {
@@ -721,12 +744,14 @@ export function TimelinePreview({
       const target = seekTarget(project, project.cues, current.state.playhead);
       if (target !== previous) {
         started = now;
-        start = frameAt(target, project.edit_rate);
+        start = parseRational(target, true);
+        mix?.stop();
         discardPreroll();
       }
       if (dragging.current) discardPreroll();
       const elapsed = rational(BigInt(Math.max(0, Math.round((now - started) * 1000))), 1_000_000n);
-      let frame = start + direction * floor(mul(elapsed, parseRational(project.edit_rate)));
+      let exact = add(start, mul(rational(direction), elapsed));
+      let mixReady = true;
       const active =
         preroll.current?.outgoing ??
         top?.clips.find((item) => item.enabled && contains(item.timeline_in.t, item.timeline_out.t, target));
@@ -748,22 +773,26 @@ export function TimelinePreview({
       // Let decoding/buffering drive forward playback instead of seeking to catch a wall clock.
       if (native && element && element.readyState >= 2 && !element.seeking && lastClip.current === active.id) {
         const decoded = rational(BigInt(Math.round(element.currentTime * 1_000_000)), 1_000_000n);
-        frame = floor(
-          mul(
-            add(
-              parseRational(active.timeline_in.t, true),
-              div(sub(decoded, parseRational(active.source_in.t, true)), parseRational(active.speed)),
-            ),
-            parseRational(project.edit_rate),
-          ),
-        );
-        // Source-to-frame rounding must not select the previous clip again.
-        const first = frameAt(active.timeline_in.t, project.edit_rate);
-        if (frame < first) frame = first;
-      } else if (native) frame = frameAt(target, project.edit_rate);
+        const first = parseRational(active.timeline_in.t, true);
+        exact = add(first, div(sub(decoded, parseRational(active.source_in.t, true)), parseRational(active.speed)));
+        if (compare(exact, first) < 0) exact = first;
+        mixReady = !element.paused && !element.ended && playback.steady;
+      } else if (native) {
+        exact = parseRational(target, true);
+        mixReady = false;
+      }
       const streamed = !dragging.current ? sampleStream(target) : null;
-      if (streamed) frame = frameAt(streamed, project.edit_rate);
+      if (streamed !== null) {
+        exact = parseRational(streamed, true);
+        const stream = streamVideo.current;
+        mixReady = !!stream && !stream.paused && !stream.seeking && !stream.ended && stream.readyState >= 3;
+      } else if (streamActive.current) mixReady = false;
+      const frame = (direction < 0n ? ceil : floor)(mul(exact, editRate));
       let next = frameTime(frame, project.edit_rate);
+      if (native || streamed !== null || streamActive.current) {
+        start = exact;
+        started = now;
+      }
       let looped = false;
       const range = current.state.range;
       const end = range
@@ -781,12 +810,13 @@ export function TimelinePreview({
             ? end
             : (range?.start ?? "0s");
         if (!current.state.loop) {
+          mix?.stop();
           update({ ...current.state, playing: false, playhead: { at: next } });
           return;
         }
         looped = true;
         started = now;
-        start = frameAt(next, project.edit_rate);
+        start = parseRational(next, true);
       }
       if (streamActive.current) {
         pauseOriginal();
@@ -932,8 +962,6 @@ export function TimelinePreview({
             element.style.zIndex = "0";
             element.setAttribute("data-preroll", "");
             element.dataset.prerollState = "idle";
-            applyTimelineGain(incoming, prepared.clip, active.timeline_out.t);
-            incoming.muted = false;
             incoming.style.zIndex = "1";
             incoming.removeAttribute("data-preroll");
             incoming.dataset.prerollState = "swapped";
@@ -947,10 +975,10 @@ export function TimelinePreview({
               boundary,
               div(sub(decoded, sourceAt(prepared.clip, active.timeline_out.t)), parseRational(prepared.clip.speed)),
             );
-            next =
-              compare(landed, boundary) < 0
-                ? active.timeline_out.t
-                : frameTime(floor(mul(landed, parseRational(project.edit_rate))), project.edit_rate);
+            exact = compare(landed, boundary) < 0 ? boundary : landed;
+            next = frameTime(floor(mul(exact, editRate)), project.edit_rate);
+            start = exact;
+            mixReady = true;
             prepared.cancel();
             preroll.current = null;
             swapped = true;
@@ -961,6 +989,7 @@ export function TimelinePreview({
                 prepared.heldAt = performance.now();
               }
               next = active.timeline_out.t;
+              mixReady = false;
             } else {
               fallback = prepared.heldAt !== null;
               discardPreroll(
@@ -984,6 +1013,15 @@ export function TimelinePreview({
           discardPreroll(unsupported ?? (playback.steady ? "insufficient-time" : "top-not-steady"));
         }
       }
+      if (mixOptions.current.playing && mixReady && !looped && !dragging.current) {
+        mix?.sample(
+          mixOptions.current.spans,
+          exact,
+          parseRational(end, true),
+          frameDuration,
+          latestGainPreview.current,
+        );
+      } else mix?.stop();
       subtitleAt.current = next;
       if (playhead.current) playhead.current.style.left = `calc(var(--track-label-w) + ${pixelAt(next, scale)}px)`;
       if (clock.current) clock.current.textContent = timecode(next, project);
@@ -1001,6 +1039,7 @@ export function TimelinePreview({
     animation = requestAnimationFrame(tick);
     return () => {
       cancelAnimationFrame(animation);
+      mix?.stop();
       discardPreroll();
     };
   }, [
@@ -1017,7 +1056,8 @@ export function TimelinePreview({
     dragging,
     discardPreroll,
     sampleStream,
-    applyTimelineGain,
+    mix,
+    streamVideo,
     streamActive,
     pauseOriginal,
   ]);
@@ -1051,7 +1091,7 @@ export function TimelinePreview({
         topPlayback.current = { time: seconds, steady: false };
       }
       lastClip.current = clip.id;
-      applyGain(element, gain);
+      if (viewerOnly) applyGain(element, gain);
       const rate = speed * Number(direction);
       const playable = rate >= 0.0625 && rate <= 16;
       if (playable) {
@@ -1072,6 +1112,7 @@ export function TimelinePreview({
     clip,
     gain,
     applyGain,
+    viewerOnly,
     source,
     speed,
     state.playing,
@@ -1292,6 +1333,7 @@ export function TimelinePreview({
     const transportState = viewerOnly || !hideViewer ? state : { ...state, preview: "timeline" as const };
     if (action === "shuttle_stop") update({ ...transportState, playing: false });
     if (["play_pause", "shuttle_back", "shuttle_fwd"].includes(action)) {
+      mix?.resume();
       setDirection(
         action === "shuttle_back"
           ? direction < 0n
@@ -1555,11 +1597,21 @@ export function TimelinePreview({
               playsInline
               crossOrigin="anonymous"
               preload="auto"
-              muted={!!skimTarget || index !== visibleVideo || streamVisible || streamPreparing}
+              muted={
+                !viewerOnly ||
+                previewMuted ||
+                !!skimTarget ||
+                index !== visibleVideo ||
+                streamVisible ||
+                streamPreparing
+              }
               data-preroll={streamVisible || index !== visibleVideo ? "" : undefined}
               data-preroll-lead={index === visibleVideo ? prerollLead : undefined}
               data-preroll-state="idle"
-              onWaiting={(event) => resetTopPlayback(event.currentTarget)}
+              onWaiting={(event) => {
+                resetTopPlayback(event.currentTarget);
+                if (event.currentTarget === videos.current[activeVideo.current]) mix?.stop();
+              }}
               onSeeked={(event) => resetTopPlayback(event.currentTarget)}
               style={{
                 position: "absolute",
@@ -1575,9 +1627,10 @@ export function TimelinePreview({
             />
           ))
         )}
-        {/* biome-ignore lint/a11y/useMediaCaption: SubtitleCanvas renders the editable timeline captions. */}
         <video
           ref={streamVideo}
+          muted
+          onWaiting={() => mix?.stop()}
           data-preview-mode="mse"
           data-preroll={!streamVisible ? "" : undefined}
           playsInline
@@ -1594,7 +1647,7 @@ export function TimelinePreview({
         {clip?.speed === "map" && (
           <span
             className="zc-approx"
-            title="近似：平滑变速按线性映射；倒放与静帧逐帧定位，倒放声音按采样近似；无转场混合或画面变换"
+            title="近似：画面平滑变速按线性映射，倒放与静帧逐帧定位；声音仅支持线性变速；无转场混合或画面变换"
           >
             近似
           </span>
@@ -1664,20 +1717,16 @@ export function TimelinePreview({
           type="button"
           className="zc-icon-btn zc-play-button"
           aria-label={state.playing ? "暂停" : "播放"}
-          onClick={() => update({ ...state, playing: !state.playing })}
+          onClick={() => {
+            mix?.resume();
+            update({ ...state, playing: !state.playing });
+          }}
         >
           <Icon name={state.playing ? "pause" : "play"} />
         </button>
         <IconButton icon="fwd" label="下一个剪点" onClick={() => jumpCut(1)} disabled={!project} />
         <span className="zc-grow" />
-        <IconButton
-          icon="volume"
-          label="音量"
-          onClick={() => {
-            const video = videos.current[visibleVideo];
-            if (video) video.muted = !video.muted;
-          }}
-        />
+        <IconButton icon="volume" label="音量" onClick={() => setPreviewMuted((muted) => !muted)} />
         <IconButton
           icon="fit"
           label="全屏"

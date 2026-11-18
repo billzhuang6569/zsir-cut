@@ -362,11 +362,12 @@ it.each([false, true])(
     await settle();
     if (rejectPlay) {
       expect(video.style.opacity).toBe("0");
-      expect(originals[0]?.muted).toBe(false);
+      expect(originals[0]?.muted).toBe(true);
       expect(vi.mocked(HTMLMediaElement.prototype.play).mock.contexts.slice(plays)).toEqual([video, originals[0]]);
       return;
     }
     expect(video.style.opacity).toBe("1");
+    expect(video.muted).toBe(true);
     const status = cache();
     status.segments[3]!.state = "missing";
     await act(() => window.dispatchEvent(new CustomEvent("desktop-preview-cache", { detail: status })));
@@ -401,6 +402,7 @@ it.each([false, true])(
     await act(() => frame?.(15100));
     await settle();
     expect(video.style.opacity).toBe("1");
+    expect(video.muted).toBe(true);
     expect(sources).toHaveLength(2);
   },
 );
