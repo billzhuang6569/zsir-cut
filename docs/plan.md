@@ -91,7 +91,7 @@
 
 第一批预发布版 0.1.0 见 [ADR-0025](adr/0025-first-release-packaging.md) 和 [docs/tasks/release-0.1.md](tasks/release-0.1.md)。
 
-下一个版本 0.2（剪辑手感、AI 直接剪、Agent 接口）见 [docs/tasks/v0.2.md](tasks/v0.2.md) 和 [ADR-0027](adr/0027-agent-edits-directly.md)（2026-11-18 草案）。
+下一个版本 0.2（剪辑手感、AI 直接剪、Agent 接口）见 [docs/tasks/v0.2.md](tasks/v0.2.md) 和 [ADR-0027](adr/0027-agent-edits-directly.md)（2026-11-18 定）。
 
 把验收矩阵做成 CI 门禁：逐切点 0 帧、移盘后重链接、音频脉冲同步、字幕不随剪辑漂移、重复导入幂等。每个里程碑打 tag，`CHANGELOG` 记录三家 NLE 版本的兼容状态。
 
