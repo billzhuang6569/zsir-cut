@@ -1,6 +1,7 @@
 // biome-ignore-all lint/style/noNonNullAssertion: Token and time-map indexes are checked before use.
 import { readdir, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { readProjectDecisions } from "./project/decisions.ts";
 import { serializeProject } from "./project/io.ts";
 import { projectSubtitles } from "./project/projection.ts";
 import { validateProjectSemantics } from "./project/semantics.ts";
@@ -201,6 +202,36 @@ export async function inspect(
     if (!found) throw new Error(`E_NOT_FOUND: ${input.id}`);
     return found;
   }
+  if (input.view === "decisions") {
+    const decisions = await readProjectDecisions(mainProjectPath, project);
+    const pending = decisions.filter(({ state }) => state === "pending");
+    const timeline = project.timelines[0];
+    return {
+      decisions: (input.all ? decisions : pending).map((decision) => ({
+        ...decision,
+        ...(decision.refs
+          ? {
+              refs: decision.refs.map((ref) => {
+                if (ref.kind === "entity") return ref;
+                if (ref.kind === "time")
+                  return { ...ref, at: timeline ? sequenceTime(parseRational(ref.at, true), timeline) : { t: ref.at } };
+                const media = project.media.find(({ id }) => id === ref.media_id);
+                return {
+                  ...ref,
+                  source_start: sourceTime(parseRational(ref.source_start, true), media),
+                  duration: durationTime(
+                    parseRational(ref.duration, true),
+                    media?.video?.rate ?? rational(25n),
+                    media?.start_timecode,
+                  ),
+                };
+              }),
+            }
+          : {}),
+      })),
+      pending_count: pending.length,
+    };
+  }
   const journal =
     input.view === "history" || input.view === "brief" ? await openProject({ projectPath }).journal() : [];
   if (input.view === "history") {
@@ -225,6 +256,7 @@ export async function inspect(
           reason: entry.reason ?? null,
           session_id: entry.session_id ?? null,
           batch: entry.batch ?? null,
+          turn: entry.turn ?? null,
         })),
     };
   }
@@ -339,6 +371,7 @@ export async function inspect(
       at: item.at,
       op_count: item.ops?.length ?? 0,
     }));
+  const pending = (await readProjectDecisions(mainProjectPath, project)).filter(({ state }) => state === "pending");
   return {
     project: {
       id: project.id,
@@ -353,6 +386,10 @@ export async function inspect(
     transcripts,
     transcripts_truncated: false,
     recent_revisions: recent,
+    decisions: {
+      pending_count: pending.length,
+      items: pending.slice(0, 5).map(({ id, question }) => ({ id, question })),
+    },
     sessions: await sessions(mainProjectPath, project),
     sessions_truncated: false,
     issues: counts,

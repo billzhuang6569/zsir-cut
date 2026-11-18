@@ -297,7 +297,7 @@ describe("CLI and MCP", () => {
     await Promise.all([server.connect(left), client.connect(right)]);
     try {
       const tools = await client.listTools();
-      expect(tools.tools).toHaveLength(31);
+      expect(tools.tools).toHaveLength(33);
       for (const tool of tools.tools) {
         if (
           ![
@@ -951,7 +951,7 @@ it("shares queued admission, batch status, undo, restore and historical reads be
   const [left, right] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(left), client.connect(right)]);
   try {
-    expect((await client.listTools()).tools).toHaveLength(31);
+    expect((await client.listTools()).tools).toHaveLength(33);
     const base = { base_revision: "rev_fixture_1", author, label: "Parity step" };
     const pair = async (verb: string, input: Record<string, unknown>, expectedStatus: string) => {
       const cliResult = invokeCli(verb, input);
@@ -1393,3 +1393,76 @@ it("publishes shared descriptions and an MCP-only summary, and CLI help prints t
     await server.close();
   }
 });
+
+it("shares project ask, answer, decisions inspection and turn undo between CLI and MCP", async () => {
+  const server = createServer();
+  const client = new Client({ name: "decision-parity", version: "1" });
+  const [left, right] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(left), client.connect(right)]);
+  const compare = async (verb: string, input: Record<string, unknown>, status: string, replay = true) => {
+    const first = invokeCli(verb, input);
+    const second = await client.callTool({ name: `zcut_${verb}`, arguments: { project, ...input } });
+    const actual = second.structuredContent as Record<string, unknown>;
+    expect(first.code).toBe(0);
+    expect(first.envelope.status).toBe(status);
+    expect(validateEnvelope(actual).valid).toBe(true);
+    if (replay) expect(actual.receipt).toMatchObject({ replayed: true });
+    expect(withoutRequestId(actual)).toEqual(
+      withoutRequestId({
+        ...first.envelope,
+        ...(replay ? { receipt: { ...(first.envelope.receipt as object), replayed: true } } : {}),
+      }),
+    );
+    return actual;
+  };
+  try {
+    const base = { author, base_revision: "rev_fixture_1" };
+    const turn = { id: "turn_parity" };
+    await compare(
+      "ask",
+      {
+        ...base,
+        idempotency_key: "ask",
+        turn,
+        decisions: [
+          {
+            id: "dec_parity",
+            question: "改标签？",
+            options: [
+              {
+                id: "yes",
+                label: "修改",
+                ops: [{ op: "set_clip", clip_id: "clp_v1", label: "修改" }],
+              },
+            ],
+          },
+        ],
+      },
+      "no_op",
+    );
+    await compare("inspect", { view: "decisions" }, "no_op", false);
+    const answered = await compare(
+      "answer",
+      {
+        ...base,
+        idempotency_key: "answer",
+        decision_id: "dec_parity",
+        option_id: "yes",
+      },
+      "applied",
+    );
+    await compare(
+      "undo",
+      {
+        ...base,
+        base_revision: (answered.receipt as { after: string }).after,
+        idempotency_key: "undo",
+        turn_id: turn.id,
+      },
+      "applied",
+    );
+  } finally {
+    await client.close();
+    await server.close();
+  }
+}, 30_000);

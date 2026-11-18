@@ -44,6 +44,8 @@
         }
       }
     },
+    "turn_id": { "type": "string", "pattern": "^turn_[A-Za-z0-9_-]{1,64}$" },
+    "turn": { "type": "object", "required": ["id"], "properties": { "id": { "$ref": "#/$defs/turn_id" } }, "additionalProperties": false },
     "write": {
       "type": "object",
       "allOf": [{ "$ref": "#/$defs/write_fields" }],
@@ -75,6 +77,7 @@
           "$ref": "#/$defs/author"
         },
         "session_id": { "$ref": "#/$defs/session_id" },
+        "turn": { "$ref": "#/$defs/turn" },
         "dry_run": {
           "type": "boolean"
         },
@@ -412,7 +415,8 @@
         "properties": {
           "project": { "type": "string", "minLength": 1 },
           "author": { "$ref": "#/$defs/author" },
-          "view": { "enum": ["brief", "timeline", "entity", "history", "session", "chapters", "review"] },
+          "view": { "enum": ["brief", "timeline", "entity", "history", "session", "chapters", "review", "decisions"] },
+          "all": { "type": "boolean" },
           "timeline_id": { "$ref": "#/$defs/id" },
           "range": { "$ref": "#/$defs/range" },
           "id": { "$ref": "#/$defs/id" },
@@ -665,6 +669,7 @@
           }
         ],
         "properties": {
+          "turn_id": { "$ref": "#/$defs/turn_id" },
           "target": {
             "type": "string",
             "pattern": "^rev_[A-Za-z0-9_-]{1,64}$"
@@ -675,14 +680,11 @@
         },
         "unevaluatedProperties": false,
         "not": {
-          "required": [
-            "target",
-            "batch_id"
-          ],
-          "properties": {
-            "target": true,
-            "batch_id": true
-          }
+          "anyOf": [
+            { "required": ["target", "batch_id"], "properties": { "target": true, "batch_id": true } },
+            { "required": ["target", "turn_id"], "properties": { "target": true, "turn_id": true } },
+            { "required": ["batch_id", "turn_id"], "properties": { "batch_id": true, "turn_id": true } }
+          ]
         }
       },
       "redo": {
@@ -933,6 +935,213 @@
           }
         ]
       },
+      "ask": {
+        "type": "object",
+        "allOf": [
+          {
+            "$ref": "#/$defs/write"
+          }
+        ],
+        "required": [
+          "decisions"
+        ],
+        "properties": {
+          "decisions": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 50,
+            "items": {
+              "type": "object",
+              "required": [
+                "question",
+                "options"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^dec_[A-Za-z0-9_-]{1,64}$"
+                },
+                "tag": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "question": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "options": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 9,
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "id",
+                      "label"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "label": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "note": {
+                        "type": "string"
+                      },
+                      "recommended": {
+                        "type": "boolean"
+                      },
+                      "ops": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                          "$ref": "#/$defs/edit_op"
+                        }
+                      },
+                      "label_after": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 80
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "allow_other": {
+                  "type": "boolean"
+                },
+                "refs": {
+                  "type": "array",
+                  "items": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "required": [
+                          "kind",
+                          "at"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "const": "time"
+                          },
+                          "at": {
+                            "$ref": "#/$defs/seconds"
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "kind",
+                          "id"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "const": "entity"
+                          },
+                          "id": {
+                            "$ref": "#/$defs/id"
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "kind",
+                          "occurrence_id",
+                          "media_id",
+                          "source_start",
+                          "duration"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "const": "source"
+                          },
+                          "occurrence_id": {
+                            "$ref": "#/$defs/id"
+                          },
+                          "media_id": {
+                            "$ref": "#/$defs/id"
+                          },
+                          "source_start": {
+                            "$ref": "#/$defs/seconds"
+                          },
+                          "duration": {
+                            "$ref": "#/$defs/seconds"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "answer": {
+        "type": "object",
+        "allOf": [
+          {
+            "$ref": "#/$defs/write"
+          }
+        ],
+        "required": [
+          "decision_id"
+        ],
+        "properties": {
+          "decision_id": {
+            "type": "string",
+            "pattern": "^dec_[A-Za-z0-9_-]{1,64}$"
+          },
+          "option_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          },
+          "skip": {
+            "const": true
+          }
+        },
+        "unevaluatedProperties": false,
+        "oneOf": [
+          {
+            "required": [
+              "option_id"
+            ],
+            "properties": {
+              "option_id": true
+            }
+          },
+          {
+            "required": [
+              "text"
+            ],
+            "properties": {
+              "text": true
+            }
+          },
+          {
+            "required": [
+              "skip"
+            ],
+            "properties": {
+              "skip": true
+            }
+          }
+        ]
+      },
       "render_preview": {
         "type": "object",
         "allOf": [
@@ -1014,6 +1223,7 @@
             "additionalProperties": false
           },
           "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "turn": { "$ref": "#/$defs/turn" },
           "author": { "$ref": "#/$defs/author" }
         },
         "additionalProperties": false

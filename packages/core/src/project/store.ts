@@ -4,6 +4,7 @@ import { hostname } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { collectProjectTerms } from "../term-library.ts";
 import { type Batch, type BatchStep, batchPath, batchView, readBatches, saveBatchFile } from "./batch.ts";
+import { projectDecisionStore } from "./decisions.ts";
 import { applyEdit, EditError } from "./edit.ts";
 import { diffProjectEntities, type EntityChange, type EntitySnapshot, projectEntitySnapshots } from "./entities.ts";
 import { newId } from "./id.ts";
@@ -12,6 +13,8 @@ import { type ValidationIssue, validateProjectSemantics } from "./semantics.ts";
 import type { Author, Project } from "./types.ts";
 
 export type WriteVerb =
+  | "ask"
+  | "answer"
   | "export"
   | "create_project"
   | "edit"
@@ -35,6 +38,9 @@ export interface WriteRequest {
   reason?: string;
   batch?: Batch;
   batch_id?: string;
+  turn?: { id: string };
+  turn_id?: string;
+  target_revisions?: string[];
   dry_run?: boolean;
   project?: string;
   session_id?: string;
@@ -105,6 +111,9 @@ export interface JournalEntry {
   session_id?: string | null;
   batch?: Omit<Batch, "timeout_s"> | null;
   batch_id?: string;
+  turn?: { id: string } | null;
+  turn_id?: string;
+  target_revisions?: string[];
   revision: string;
   parent: string | null;
   seq: number;
@@ -117,6 +126,33 @@ export interface JournalEntry {
   timeline_id?: string;
   changes?: EntityChange[];
   target?: string;
+}
+
+function historyTargets(entry: JournalEntry, entries: JournalEntry[]): string[] {
+  if (entry.target_revisions) return entry.target_revisions;
+  if (entry.batch_id) return entries.filter((item) => item.batch?.id === entry.batch_id).map((item) => item.revision);
+  return entry.target ? [entry.target] : [];
+}
+
+export function undoneRevisions(entries: JournalEntry[]): Set<string> {
+  const undone = new Set<string>();
+  const seen = new Map<string, JournalEntry>();
+  const toggle = (entry: JournalEntry, undo: boolean) => {
+    const targets = historyTargets(entry, entries);
+    const reverse = (entry.kind === "undo") !== undo;
+    for (const revision of reverse ? targets.toReversed() : targets) {
+      const target = seen.get(revision);
+      if (!target || undone.has(revision) === reverse) continue;
+      if (reverse) undone.add(revision);
+      else undone.delete(revision);
+      if (target.kind === "undo" || target.kind === "redo") toggle(target, reverse);
+    }
+  };
+  for (const entry of entries) {
+    if (entry.kind === "undo" || entry.kind === "redo") toggle(entry, false);
+    seen.set(entry.revision, entry);
+  }
+  return undone;
 }
 
 interface IdempotencyEntry {
@@ -359,6 +395,8 @@ export function openProject(options: OpenProjectOptions) {
     result: Record<string, unknown> | null = null,
     create?: () => Promise<Project>,
     inLock = false,
+    decisionInput?: Record<string, unknown>,
+    prepare?: (entry: JournalEntry, output: WriteEnvelope) => Promise<void>,
   ): Promise<WriteEnvelope> {
     const envelope = (status: EnvelopeStatus, before: string, after: string | null = null): WriteEnvelope => ({
       ok: status === "queued" || status === "applied" || status === "dry_run" || status === "no_op",
@@ -392,13 +430,15 @@ export function openProject(options: OpenProjectOptions) {
         "E_SESSION_STATE",
         "Restore is only available on the main project",
       );
+    if (request.turn && !/^turn_[A-Za-z0-9_-]{1,64}$/.test(request.turn.id))
+      return fail("rejected", request.base_revision, "E_VALIDATION", "Invalid turn ID");
     if (request.reason !== undefined && (typeof request.reason !== "string" || [...request.reason].length > 200))
       return fail("rejected", request.base_revision, "E_VALIDATION", "Reason must contain at most 200 characters");
     if (request.label !== undefined && (!request.label || [...request.label].length > 80))
       return fail("rejected", request.base_revision, "E_VALIDATION", "Label must contain 1 to 80 characters");
     if (request.verb === "edit" && request.author.kind === "agent" && !request.label)
       return fail("rejected", request.base_revision, "E_VALIDATION", "Agent edit requires label");
-    if (request.dry_run) return previewWrite(request, mutator, entityOps, result ?? {});
+    if (request.dry_run && !decisionInput) return previewWrite(request, mutator, entityOps, result ?? {});
     let before = request.base_revision;
     let lockPath = "";
     let locked = false;
@@ -433,7 +473,7 @@ export function openProject(options: OpenProjectOptions) {
       }
       const directory = join(dirname(projectPath), ".zcut", initialProject.id);
       lockPath = join(directory, "lock");
-      if (!inLock) {
+      if (!inLock && !request.dry_run) {
         if (options.batchRoot && options.batchRoot !== directory) {
           await acquireLock(options.batchRoot, request.request_id, lockWaitMs, () => clock().toISOString());
           batchLock = join(options.batchRoot, "lock");
@@ -441,18 +481,60 @@ export function openProject(options: OpenProjectOptions) {
         await acquireLock(directory, request.request_id, lockWaitMs, () => clock().toISOString());
         locked = true;
       }
-      const parsed =
-        create && !exists
-          ? { ok: true as const, project: initialProject }
-          : parseProject(await readFile(projectPath, "utf8"));
-      if (!parsed.ok) throw new Error("Project file is invalid");
-      const current = parsed.project;
-      before = current.revision.id;
       const journalPath = join(directory, "journal.jsonl");
       const idempotencyPath = join(directory, "idempotency.jsonl");
+      const loadCurrent = async () => {
+        const parsed = parseProject(await readFile(projectPath, "utf8"));
+        if (!parsed.ok) throw new Error("Project file is invalid");
+        return parsed.project;
+      };
+      const decisions =
+        !inLock && !create && !options.sessionId
+          ? await projectDecisionStore(projectPath, initialProject.id, {
+              project: loadCurrent,
+              journal: () => readLines<JournalEntry>(journalPath),
+              snapshotAt,
+              append: (entry) => appendSynced(journalPath, entry),
+              edit: (editRequest, ops, stage, previewProject) => {
+                const entityOps = {};
+                const result = {};
+                const edit = (project: Project) =>
+                  applyEdit(
+                    project,
+                    ops,
+                    entityOps,
+                    `${editRequest.base_revision}:${editRequest.idempotency_key}`,
+                    editRequest.timeline_id,
+                    false,
+                    undefined,
+                    result,
+                    editRequest.author.name,
+                    editRequest.author.kind,
+                  );
+                if (editRequest.dry_run) return previewWrite(editRequest, edit, entityOps, result, previewProject);
+                return write(
+                  editRequest,
+                  edit,
+                  "write",
+                  undefined,
+                  entityOps,
+                  result,
+                  undefined,
+                  true,
+                  undefined,
+                  stage,
+                );
+              },
+              undo: (undoRequest, stage, projected) => history(undoRequest, "undo", true, stage, projected),
+              clock,
+            })
+          : undefined;
+      if (!request.dry_run) await decisions?.resume();
+      const current = create && !exists ? initialProject : await loadCurrent();
+      before = current.revision.id;
       const journal = await readLines<JournalEntry>(journalPath);
       let recoveredWrite = false;
-      if (!create && current.revision.seq > (journal.at(-1)?.seq ?? 1)) {
+      if (!create && !request.dry_run && current.revision.seq > (journal.at(-1)?.seq ?? 1)) {
         const recovered: JournalEntry = {
           kind: "recovered",
           label: null,
@@ -468,7 +550,7 @@ export function openProject(options: OpenProjectOptions) {
         journal.push(recovered);
         recoveredWrite = true;
       }
-      const batches = inLock ? [] : await readBatches(options.batchRoot ?? directory, clock());
+      const batches = inLock || request.dry_run ? [] : await readBatches(options.batchRoot ?? directory, clock());
       if (recoveredWrite) {
         for (const state of batches.filter(
           (state) => state.state === "open" && state.target === (options.sessionId ?? null),
@@ -483,8 +565,17 @@ export function openProject(options: OpenProjectOptions) {
           await saveBatchFile(join(batchPath(options.batchRoot ?? directory, state.id), "state.json"), state);
         }
       }
-      const records = await readLines<IdempotencyEntry>(idempotencyPath);
-      const hash = requestHash(request);
+      const records = prepare || request.dry_run ? [] : await readLines<IdempotencyEntry>(idempotencyPath);
+      const hash = requestHash(decisionInput ? { ...request, ops: [decisionInput] } : request);
+      const priorDecision = request.dry_run ? undefined : decisions?.check(request.idempotency_key, hash);
+      if (priorDecision === "mismatch")
+        return fail("rejected", before, "E_IDEMPOTENCY_MISMATCH", "Idempotency key was used for another request");
+      if (priorDecision) {
+        return {
+          ...priorDecision,
+          receipt: priorDecision.receipt ? { ...priorDecision.receipt, replayed: true } : null,
+        };
+      }
       if (
         create &&
         exists &&
@@ -506,7 +597,7 @@ export function openProject(options: OpenProjectOptions) {
         };
       }
       if (create && exists) return fail("rejected", "", "E_VALIDATION", "工程文件已存在，缺少新建工程的幂等回执");
-      if (!inLock) {
+      if (!inLock && !request.dry_run) {
         const root = options.batchRoot ?? directory;
         const targetId = options.sessionId ?? null;
         const occupied = batches.find(
@@ -633,7 +724,8 @@ export function openProject(options: OpenProjectOptions) {
         output.result = { current_revision: before, changed_entity_keys };
         return output;
       }
-      if (inLock) {
+      if (decisionInput && decisions) return await decisions.handle(request, decisionInput, hash, current);
+      if (inLock && !prepare) {
         const unverified = journal.find((entry) => entry.idempotency_key === request.idempotency_key);
         if (unverified) {
           const output = envelope("committed_unverified", unverified.parent ?? before, unverified.revision);
@@ -695,17 +787,19 @@ export function openProject(options: OpenProjectOptions) {
         changes.length === 0 &&
         !request.batch &&
         !request.batch_id &&
+        !request.target_revisions &&
         (kind !== "restore" || request.target === before)
       ) {
         const output = envelope("no_op", before);
         output.result = result;
         output.verification = { level: "L1", passed: true, issues };
-        await appendSynced(idempotencyPath, {
-          idempotency_key: request.idempotency_key,
-          request_hash: hash,
-          at: clock().toISOString(),
-          envelope: output,
-        });
+        if (!prepare)
+          await appendSynced(idempotencyPath, {
+            idempotency_key: request.idempotency_key,
+            request_hash: hash,
+            at: clock().toISOString(),
+            envelope: output,
+          });
         return output;
       }
       candidate.revision = create
@@ -732,6 +826,29 @@ export function openProject(options: OpenProjectOptions) {
       output.verification = { level: "L1", passed: true, issues };
       if (request.verb === "voice_generate") changes.sort((a, b) => (a.after_index ?? 0) - (b.after_index ?? 0));
       output.changes = changes.map((change) => describeChange(change, entityOps, request.verb));
+      const entry: JournalEntry = {
+        kind,
+        label: request.label ?? null,
+        reason: request.reason ?? null,
+        session_id: options.sessionId ?? (request.verb === "session_approve" ? (request.session_id ?? null) : null),
+        batch: request.batch ? { id: request.batch.id, seq: request.batch.seq, count: request.batch.count } : null,
+        ...(request.batch_id ? { batch_id: request.batch_id } : {}),
+        turn: request.turn ?? null,
+        ...(request.turn_id ? { turn_id: request.turn_id, target_revisions: request.target_revisions } : {}),
+        revision: candidate.revision.id,
+        parent: create ? null : before,
+        seq: candidate.revision.seq,
+        at: candidate.revision.created_at,
+        author: request.author,
+        verb: request.verb,
+        request_id: request.request_id,
+        idempotency_key: request.idempotency_key,
+        ops: request.ops,
+        ...(request.timeline_id ? { timeline_id: request.timeline_id } : {}),
+        changes,
+        ...((request.target ?? target) ? { target: (request.target ?? target) as string } : {}),
+      };
+      await prepare?.(entry, output);
       options.fault?.("before_step_7");
       const temp = join(dirname(projectPath), `.${current.id}.${randomUUID()}.tmp`);
       try {
@@ -757,26 +874,6 @@ export function openProject(options: OpenProjectOptions) {
         await rm(temp, { force: true });
       }
       options.fault?.("after_step_7");
-      const entry: JournalEntry = {
-        kind,
-        label: request.label ?? null,
-        reason: request.reason ?? null,
-        session_id: options.sessionId ?? (request.verb === "session_approve" ? (request.session_id ?? null) : null),
-        batch: request.batch ? { id: request.batch.id, seq: request.batch.seq, count: request.batch.count } : null,
-        ...(request.batch_id ? { batch_id: request.batch_id } : {}),
-        revision: candidate.revision.id,
-        parent: create ? null : before,
-        seq: candidate.revision.seq,
-        at: candidate.revision.created_at,
-        author: request.author,
-        verb: request.verb,
-        request_id: request.request_id,
-        idempotency_key: request.idempotency_key,
-        ops: request.ops,
-        ...(request.timeline_id ? { timeline_id: request.timeline_id } : {}),
-        changes,
-        ...((request.target ?? target) ? { target: (request.target ?? target) as string } : {}),
-      };
       await appendSynced(journalPath, entry);
       if (!options.sessionId && (request.verb === "edit" || request.verb === "session_approve")) {
         try {
@@ -787,6 +884,7 @@ export function openProject(options: OpenProjectOptions) {
           output.result.warnings = [...warnings, { code: "W_TERMS_LIBRARY", reason: String(error) }];
         }
       }
+      if (prepare) return output;
       const now = clock().getTime();
       const recentKeys = new Set(
         [...new Set([request.idempotency_key, ...records.toReversed().map((record) => record.idempotency_key)])].slice(
@@ -856,45 +954,65 @@ export function openProject(options: OpenProjectOptions) {
     }
   }
 
-  async function history(input: WriteRequest, direction: "undo" | "redo"): Promise<WriteEnvelope> {
+  async function history(
+    input: WriteRequest,
+    direction: "undo" | "redo",
+    inLock = false,
+    prepare?: (entry: JournalEntry, output: WriteEnvelope) => Promise<void>,
+    projected?: (project: Project) => void,
+  ): Promise<WriteEnvelope> {
     const request = { ...input };
+    if (request.turn_id) request.label ??= "撤回 AI 这一轮";
     let target = request.target;
     const mutator = async (project: Project) => {
       const entries = await readLines<JournalEntry>(join(dirname(projectPath), ".zcut", project.id, "journal.jsonl"));
-      const undone = new Set<string>();
-      for (const entry of entries) {
-        const targets = entry.batch_id
-          ? entries.filter((item) => item.batch?.id === entry.batch_id).map((item) => item.revision)
-          : entry.target
-            ? [entry.target]
-            : [];
-        for (const revision of targets) {
-          if (entry.kind === "undo") undone.add(revision);
-          if (entry.kind === "redo") undone.delete(revision);
-        }
-      }
+      const undone = undoneRevisions(entries);
       target ??=
         direction === "undo"
           ? entries.findLast((entry) => entry.kind === "write" && !undone.has(entry.revision))?.revision
-          : entries.findLast((entry) => entry.kind === "undo" && entry.target && undone.has(entry.target))?.target;
-      const redoBatch =
+          : entries.findLast(
+              (entry) =>
+                entry.kind === "undo" && entry.target && !undone.has(entry.revision) && undone.has(entry.target),
+            )?.target;
+      const undoEntry =
         direction === "redo"
-          ? entries.findLast((entry) => entry.kind === "undo" && entry.target === target)?.batch_id
+          ? entries.findLast((entry) => entry.kind === "undo" && entry.target === target)
           : undefined;
-      const batchId = request.batch_id ?? redoBatch;
+      const turnId = request.turn_id ?? undoEntry?.turn_id;
+      const batchId = request.batch_id ?? undoEntry?.batch_id;
       let targetEntry = entries.find((entry) => entry.revision === target);
-      if (batchId) {
-        const group = entries.filter((entry) => entry.batch?.id === batchId);
+      if (batchId || turnId) {
+        const group = turnId
+          ? entries.filter((entry) =>
+              direction === "undo"
+                ? entry.turn?.id === turnId && entry.turn_id !== turnId
+                : undoEntry?.target_revisions?.includes(entry.revision),
+            )
+          : entries.filter((entry) => entry.batch?.id === batchId);
+        if (turnId && !group.length) return;
         const first = group[0];
         const last = group.at(-1);
         if (
           !first?.parent ||
+          group.some(({ verb }) => verb === "create_project") ||
           !last ||
-          group.some((entry) => (direction === "undo" ? undone.has(entry.revision) : !undone.has(entry.revision)))
+          (!turnId &&
+            group.some((entry) => (direction === "undo" ? undone.has(entry.revision) : !undone.has(entry.revision)))) ||
+          (turnId &&
+            (direction === "undo" ? group.every(({ revision }) => undone.has(revision)) : !undone.has(last.revision)))
         )
-          throw new UndoConflict([batchId], "No undoable batch");
+          throw new UndoConflict([turnId ?? batchId ?? ""], turnId ? "No undoable turn" : "No undoable batch");
         const combined = new Map<string, EntityChange>();
-        for (const entry of group) {
+        const groupSet = new Set(group);
+        const conflicts = new Set<string>();
+        for (const entry of entries.slice(entries.indexOf(first))) {
+          if (!groupSet.has(entry)) {
+            if (turnId && direction === "undo" && entry.turn_id !== turnId && !undone.has(entry.revision)) {
+              for (const key of entry.changes?.map((change) => change.key) ?? combined.keys())
+                if (combined.has(key)) conflicts.add(key);
+            }
+            continue;
+          }
           if (!entry.changes) throw new HistoryError("E_UNSUPPORTED");
           for (const change of entry.changes) {
             const previous = combined.get(change.key);
@@ -911,16 +1029,22 @@ export function openProject(options: OpenProjectOptions) {
             );
           }
         }
+        if (conflicts.size) throw new UndoConflict([...conflicts].sort(), "Entity changed after turn writes");
         target = last.revision;
-        request.batch_id = batchId;
+        if (batchId) request.batch_id = batchId;
+        if (turnId) {
+          request.turn_id = turnId;
+          request.target_revisions = group.map((entry) => entry.revision);
+        }
         targetEntry = { ...last, changes: [...combined.values()] };
       }
       if (target) request.target = target;
       if (
         !targetEntry ||
-        targetEntry.kind !== "write" ||
         !targetEntry.changes ||
-        (direction === "undo" ? undone.has(targetEntry.revision) : !undone.has(targetEntry.revision))
+        (!turnId &&
+          (targetEntry.kind !== "write" ||
+            (direction === "undo" ? undone.has(targetEntry.revision) : !undone.has(targetEntry.revision))))
       )
         throw new UndoConflict(target ? [target] : [], "No undoable target revision");
       if (targetEntry.verb === "create_project") throw new EditError("E_UNSUPPORTED", "Cannot undo project creation");
@@ -938,8 +1062,9 @@ export function openProject(options: OpenProjectOptions) {
       const restored = restoreEntities(project, targetEntry.changes, direction === "undo" ? "before" : "after");
       if (!restored.recognition) delete project.recognition;
       Object.assign(project, restored);
+      projected?.(project);
     };
-    return write(request, mutator, direction, target);
+    return write(request, mutator, direction, target, {}, null, undefined, inLock, undefined, prepare);
   }
 
   async function snapshotAt(revision: string): Promise<Project> {
@@ -982,8 +1107,11 @@ export function openProject(options: OpenProjectOptions) {
     mutator: (project: Project) => void | Promise<void>,
     entityOps: Record<string, string> = {},
     result: Record<string, unknown> = {},
+    inputProject?: Project,
   ): Promise<WriteEnvelope> {
-    const parsed = parseProject(await readFile(projectPath, "utf8"));
+    const parsed = inputProject
+      ? { ok: true as const, project: inputProject }
+      : parseProject(await readFile(projectPath, "utf8"));
     if (!parsed.ok) throw new Error("Project file is invalid");
     const before = parsed.project;
     const output: WriteEnvelope = {
@@ -1071,6 +1199,8 @@ export function openProject(options: OpenProjectOptions) {
         "restore",
         request.target,
       ),
+    decide: (request: WriteRequest, input: Record<string, unknown>) =>
+      write(request, () => {}, "write", undefined, {}, null, undefined, false, input),
     undo: (request: WriteRequest) => history(request, "undo"),
     redo: (request: WriteRequest) => history(request, "redo"),
     journal: async () => {

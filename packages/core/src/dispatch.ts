@@ -85,6 +85,8 @@ export const VERBS = [
   "session_approve",
   "session_reject",
   "session_ask",
+  "ask",
+  "answer",
   "session_answer",
   "render_preview",
   "view_timeline",
@@ -158,7 +160,17 @@ export function errorEnvelope(
 }
 
 function writeRequest(
-  verb: "voice_generate" | "export" | "edit" | "import_media" | "transcribe" | "undo" | "redo" | "restore",
+  verb:
+    | "ask"
+    | "answer"
+    | "voice_generate"
+    | "export"
+    | "edit"
+    | "import_media"
+    | "transcribe"
+    | "undo"
+    | "redo"
+    | "restore",
   requestId: string,
   input: Request,
 ): WriteRequest {
@@ -200,6 +212,8 @@ function writeRequest(
                 ? (input.ops as unknown[])
                 : [],
     ...(typeof input.timeline_id === "string" ? { timeline_id: input.timeline_id } : {}),
+    ...(input.turn ? { turn: input.turn as NonNullable<WriteRequest["turn"]> } : {}),
+    ...(typeof input.turn_id === "string" ? { turn_id: input.turn_id } : {}),
     ...(typeof input.target === "string" ? { target: input.target } : {}),
     ...(typeof input.label === "string" ? { label: input.label } : {}),
     ...(typeof input.reason === "string" ? { reason: input.reason } : {}),
@@ -259,6 +273,11 @@ async function importMedia(input: Request, requestId: string, probe: Probe): Pro
 function limitBrief(output: Envelope): void {
   const brief = output.result as Record<string, unknown>;
   while (Buffer.byteLength(JSON.stringify(output), "utf8") > 16 * 1024) {
+    const decisions = brief.decisions as { items: unknown[] };
+    if (decisions.items.length) {
+      decisions.items.pop();
+      continue;
+    }
     const timelines = brief.timelines as {
       review_markers: unknown[];
       review_markers_truncated: boolean;
@@ -356,6 +375,8 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
     verb !== "inspect" &&
     verb !== "read_transcript" &&
     verb !== "diff" &&
+    verb !== "ask" &&
+    verb !== "answer" &&
     verb !== "undo" &&
     verb !== "redo" &&
     verb !== "restore" &&
@@ -424,6 +445,7 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
           base_revision: "",
           idempotency_key: create.idempotency_key,
           author: create.author,
+          ...(request.turn ? { turn: request.turn as NonNullable<WriteRequest["turn"]> } : {}),
           ...(typeof request.reason === "string" ? { reason: request.reason } : {}),
           ops: [create],
         },
@@ -489,6 +511,7 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
     const mediaProjectPath = projectPath;
     if (
       request.session_id !== undefined &&
+      !(verb === "inspect" && request.view === "decisions") &&
       ["inspect", "read_transcript", "validate", "diff", "render_preview", "view_timeline"].includes(verb)
     ) {
       const main = parseProject(await readFile(projectPath, "utf8"));
@@ -937,6 +960,11 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
     }
     if (verb.startsWith("session_") || (request.session_id !== undefined && ["edit", "undo", "redo"].includes(verb)))
       return await runSession(verb, request, requestId);
+    if (verb === "ask" || verb === "answer")
+      return await openProject({ projectPath: request.project as string }).decide(
+        writeRequest(verb, requestId, request),
+        request,
+      );
     if (verb === "edit") {
       const ops = request.ops as ({ op: string } & Record<string, unknown>)[];
       const store = openProject({ projectPath: request.project as string });

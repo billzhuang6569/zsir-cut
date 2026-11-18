@@ -17,6 +17,7 @@ export interface HistoryEntry {
   label: string | null;
   author?: { kind: string; name: string };
   batch: { id: string; seq: number; count: number } | null;
+  turn?: { id: string } | null;
   target?: string;
   reason?: string | null;
   session_id?: string | null;
