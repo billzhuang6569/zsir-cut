@@ -15,7 +15,11 @@ export interface UiState {
   sub: string | null;
   playhead: { at: string } | { id: string };
   selected: string[];
-  edit_point?: { track_id: string; at: string } | null | undefined;
+  gap?: { start: string; duration: string } | null | undefined;
+  edit_point?:
+    | { track_id: string; at: string; side?: "left" | "right" | "both" | undefined; clip_id?: string | undefined }
+    | null
+    | undefined;
   snap?: boolean | undefined;
   playing: boolean;
   range: { start: string; duration: string } | null;

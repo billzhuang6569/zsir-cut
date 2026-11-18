@@ -341,6 +341,18 @@ it("opens the project through inspect and receives UI commands", async () => {
     await searchFor("panel_ai");
     await act(() => rows()[0]?.click());
     expect(rail?.querySelector('[aria-selected="true"]')?.textContent).toBe("AI");
+    for (const [command, tool] of [
+      ["tool_slip", "slip"],
+      ["tool_slide", "slide"],
+    ] as const) {
+      await act(() => paletteButton?.click());
+      await searchFor(command);
+      expect(rows()).toHaveLength(1);
+      expect(rows()[0]?.getAttribute("aria-disabled")).not.toBe("true");
+      await press("Enter");
+      expect(search()).toBeNull();
+      expect(container.querySelector(".zc-timeline")?.getAttribute("data-tool")).toBe(tool);
+    }
     const parametersBefore = container.querySelector('[aria-label="参数区"]')?.innerHTML;
     await act(async () => historyButton?.click());
     expect(document.body.querySelector('[role="dialog"][aria-label="历史"]')).not.toBeNull();

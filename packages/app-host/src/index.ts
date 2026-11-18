@@ -177,7 +177,16 @@ const uiStateSchema = z.strictObject({
   sub: z.string().nullable(),
   playhead: z.union([z.strictObject({ at: time }), z.strictObject({ id })]),
   selected: z.array(id),
-  edit_point: z.strictObject({ track_id: id, at: time }).nullable().optional(),
+  gap: z.strictObject({ start: time, duration }).nullable().optional(),
+  edit_point: z
+    .strictObject({
+      track_id: id,
+      at: time,
+      side: z.enum(["left", "right", "both"]).optional(),
+      clip_id: id.optional(),
+    })
+    .nullable()
+    .optional(),
   snap: z.boolean().optional(),
   subtitle_selection: z
     .strictObject({ cue_ids: z.array(id), editing: id.nullable() })

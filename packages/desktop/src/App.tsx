@@ -250,6 +250,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
         preview: "timeline",
         selected: [],
         edit_point: null,
+        gap: null,
       });
       setReviewSession(id);
     };

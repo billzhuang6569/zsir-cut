@@ -58,6 +58,8 @@ export const ICONS: Record<string, ReactNode> = {
       <circle cx="12" cy="12" r="1.5" fill="currentColor" />
     </>
   ),
+  slip: <path d="M4 4v16m16-16v16M7 12h10m-7-3-3 3 3 3m4-6 3 3-3 3" />,
+  slide: <path d="M8 6h8v12H8zM2 12h4m-2-2-2 2 2 2m14-2h4m-2-2 2 2-2 2" />,
   roll: <path d="M12 3v18M8 7l-4 5 4 5M16 7l4 5-4 5" />,
   blade: (
     <>

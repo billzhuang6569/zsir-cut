@@ -70,7 +70,7 @@ export function applyUi(state: UiState, verb: UiVerb, request: Record<string, un
     case "ui_seek":
       return { ...state, playhead: typeof request.at === "string" ? { at: request.at } : { id: request.id as string } };
     case "ui_select":
-      return { ...state, selected: request.ids as string[], edit_point: null };
+      return { ...state, selected: request.ids as string[], edit_point: null, gap: null };
     case "ui_play":
       return {
         ...state,

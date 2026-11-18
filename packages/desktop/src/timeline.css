@@ -806,3 +806,69 @@
   height: 6px;
   background-size: 5px 100%;
 }
+
+.zc-seam.is-selected[data-side="left"]::before {
+  left: -9px;
+}
+
+.zc-seam.is-selected[data-side="right"]::before {
+  left: 3px;
+}
+
+.zc-gap {
+  position: absolute;
+  inset-block: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.zc-gap[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--selection) 24%, transparent);
+  box-shadow: inset 0 0 0 1px var(--selection);
+}
+
+.zc-marker[aria-pressed="true"] {
+  outline: 2px solid var(--selection);
+}
+
+.zc-marker-text {
+  position: absolute;
+  z-index: 7;
+  top: 0;
+}
+
+.zc-timeline-menu {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+}
+
+.zc-toolbar > select[aria-label="标记"] {
+  max-width: 12em;
+  color: inherit;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font: inherit;
+}
+
+.zc-trim-frames {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line);
+  pointer-events: none;
+}
+
+.zc-trim-frames > div {
+  min-height: 0;
+  background: var(--bg-viewer);
+}
+
+.zc-timeline:is([data-tool="slip"], [data-tool="slide"]) .zc-seam {
+  pointer-events: none;
+}

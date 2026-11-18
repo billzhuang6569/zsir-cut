@@ -48,7 +48,14 @@ import {
   type TrackView,
   timecode,
 } from "./timeline.js";
-import { editPoints, markedTimelineRange, splitAllAt, timelineEdit, timelineMarks } from "./timelineActions.js";
+import {
+  editPoints,
+  markedTimelineRange,
+  splitAllAt,
+  timelineEdit,
+  timelineGaps,
+  timelineMarks,
+} from "./timelineActions.js";
 import { copyClips, pasteOps, planPaste } from "./timelineClipboard.js";
 import {
   moveBlockReason,
@@ -59,6 +66,7 @@ import {
   moveTarget,
   snapEdges,
 } from "./timelineMove.js";
+import { slideGesture } from "./timelineSlide.js";
 import { cueTrimTarget, rollTarget, type TrimEdge, trimTarget } from "./timelineTrim.js";
 import { useClipGain } from "./useClipGain.js";
 import { DropGhost, useTimelineDrop } from "./useTimelineDrop.js";
@@ -70,17 +78,6 @@ import "./timeline.css";
 
 let prerollLead = 0.3;
 
-const unsupportedCommands = [
-  "select_edit_in",
-  "select_edit_out",
-  "select_edit_both",
-  "nudge_edit_back10",
-  "nudge_edit_fwd10",
-  "tool_slip",
-  "tool_slide",
-  "close_all_gaps",
-  "command_palette",
-];
 const editReasons: Partial<Record<EditorCommand, string>> = {
   split_at_playhead: "请将播放头移到可切割的片段内",
   split_all_at_playhead: "请将播放头移到可切割的片段内",
@@ -91,11 +88,20 @@ const editReasons: Partial<Record<EditorCommand, string>> = {
   extend_edit: "请选择剪点",
   nudge_edit_back: "请选择剪点或片段",
   nudge_edit_fwd: "请选择剪点或片段",
+  nudge_edit_back10: "请选择剪点或片段",
+  nudge_edit_fwd10: "请选择剪点或片段",
+  close_all_gaps: "时间线上没有可合拢的空隙",
 };
 
-function editCursor(mode: "trim" | "ripple" | "roll", edge: TrimEdge = "out") {
+function editCursor(mode: "trim" | "ripple" | "roll" | "slip" | "slide", edge: TrimEdge = "out") {
   const bracket = edge === "in" ? "M15 5H10V19H15" : "M9 5H14V19H9";
-  const path = mode === "roll" ? "M9 5H6V19H9M15 5H18V19H15M9 12H15" : bracket;
+  const path = {
+    roll: "M9 5H6V19H9M15 5H18V19H15M9 12H15",
+    slip: "M4 5V19M20 5V19M7 12H17M10 9L7 12L10 15M14 9L17 12L14 15",
+    slide: "M8 6H16V18H8ZM1 12H6M3 10L1 12L3 14M18 12H23M21 10L23 12L21 14",
+    trim: bracket,
+    ripple: bracket,
+  }[mode];
   const film = mode === "ripple" ? '<path d="M2 8V16M5 8V16M19 12H23M21 10L23 12L21 14"/>' : "";
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><g fill="none" stroke="black" stroke-width="4"><path d="${path}"/></g><g fill="none" stroke="white" stroke-width="2"><path d="${path}"/>${film}</g></svg>`;
   return `url("data:image/svg+xml,${encodeURIComponent(svg)}") 12 12, ew-resize`;
@@ -271,12 +277,13 @@ export function TimelinePreview({
   const [trimPreview, setTrimPreview] = useState<
     (ReturnType<typeof trimTarget> & { edge: TrimEdge; following?: ClipView[] }) | null
   >(null);
+  const [slidePreview, setSlidePreview] = useState<ReturnType<ReturnType<typeof slideGesture>> | null>(null);
   const [metaKey, setMetaKey] = useState(false);
   const [dragFeedback, setDragFeedback] = useState<{
     x: number;
     y: number;
     delta: string;
-    durations: string[];
+    details: string[];
     cursor: string;
   } | null>(null);
   useEffect(() => {
@@ -296,6 +303,34 @@ export function TimelinePreview({
     edge: TrimEdge;
     target: NonNullable<ReturnType<typeof cueTrimTarget>>;
   } | null>(null);
+  const [markerSelection, selectMarker] = useState<{ path: string | null; id: string } | null>(null);
+  const [markerDraft, setMarkerDraft] = useState<{ path: string | null; id: string; text: string } | null>(null);
+  const [markerMove, setMarkerMove] = useState<{ id: string; at: string } | null>(null);
+  const [timelineMenu, setTimelineMenu] = useState<{
+    path: string | null;
+    x: number;
+    y: number;
+    element: HTMLElement;
+    gap?: NonNullable<UiState["gap"]>;
+    markerId?: string;
+  } | null>(null);
+  const menuRef = useRef<HTMLFieldSetElement>(null);
+  useEffect(() => {
+    if (!timelineMenu) return;
+    menuRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+    const dismiss = (event: Event) => {
+      if (event instanceof KeyboardEvent && event.key !== "Escape") return;
+      if (event.type === "pointerdown" && menuRef.current?.contains(event.target as Node)) return;
+      setTimelineMenu(null);
+      if (event instanceof KeyboardEvent) timelineMenu.element.focus();
+    };
+    window.addEventListener("pointerdown", dismiss);
+    window.addEventListener("keydown", dismiss);
+    return () => {
+      window.removeEventListener("pointerdown", dismiss);
+      window.removeEventListener("keydown", dismiss);
+    };
+  }, [timelineMenu]);
   const [cueMenu, setCueMenu] = useState<{ cue: CueView; x: number; y: number; element: HTMLElement } | null>(null);
   useEffect(() => {
     if (!cueMenu) return;
@@ -325,7 +360,73 @@ export function TimelinePreview({
     scale,
     setScale,
     clipDrag: (event, element) => {
-      if (!project || busy || readOnly || (tool !== "select" && tool !== "roll")) return;
+      if (!project || busy || readOnly) return;
+      if (tool === "slip" || tool === "slide") {
+        const clip = project.tracks
+          .filter((track) => track.kind !== "subtitle")
+          .flatMap((track) => track.clips)
+          .find((clip) => clip.id === element.dataset.selectionId);
+        if (!clip) return;
+        const plan = slideGesture(project, clip, tool);
+        const origin = event.clientX;
+        const scroll = gestures.scroller.current?.scrollLeft ?? 0;
+        const calculate = (x: number) =>
+          plan(x - origin + (gestures.scroller.current?.scrollLeft ?? 0) - scroll, scale);
+        const reset = () => {
+          setSlidePreview(null);
+          setDragFeedback(null);
+        };
+        return {
+          edgeScroll: tool === "slide",
+          move: (event: { clientX: number; clientY: number }) => {
+            const target = calculate(event.clientX);
+            setSlidePreview(target);
+            const result = target.clips.get(clip.id) ?? clip;
+            const media = project.media.find((media) => media.id === clip.media_id);
+            const source = {
+              ...project,
+              edit_rate: media?.video?.rate ?? project.edit_rate,
+              drop_frame: media?.start_timecode?.includes(";") ?? false,
+              start_timecode: media?.start_timecode ?? "00:00:00:00",
+            };
+            const details =
+              tool === "slip"
+                ? [`源入点 ${timecode(result.source_in.t, source)} / 源出点 ${timecode(result.source_out.t, source)}`]
+                : [...target.clips.values()].flatMap((item) => {
+                    const original = project.tracks.flatMap((track) => track.clips).find((clip) => clip.id === item.id);
+                    if (
+                      !original ||
+                      item.id === clip.id ||
+                      (clip.occurrence_id && original.occurrence_id === clip.occurrence_id)
+                    )
+                      return [];
+                    return [
+                      ...(original.timeline_out.t === item.timeline_out.t
+                        ? []
+                        : [`左侧出点 ${timecode(item.timeline_out.t, project)}`]),
+                      ...(original.timeline_in.t === item.timeline_in.t
+                        ? []
+                        : [`右侧入点 ${timecode(item.timeline_in.t, project)}`]),
+                    ];
+                  });
+            feedback(event, target.by, [], editCursor(tool), [
+              ...new Set(details),
+              ...(target.reason ? [target.reason] : []),
+            ]);
+          },
+          end: (event: React.PointerEvent<HTMLElement>, moved: boolean) => {
+            reset();
+            if (!moved) return;
+            const { by } = calculate(event.clientX);
+            if (by.numerator !== 0n)
+              void write("edit", tool === "slip" ? "滑动内容" : "滑动片段", [
+                { op: tool, clip_id: clip.id, by: printRational(by, true) },
+              ]);
+          },
+          cancel: reset,
+        };
+      }
+      if (tool !== "select" && tool !== "roll") return;
       if ((event.target as Element).closest(".zc-clip-trim-disabled")) return;
       const id = element.dataset.selectionId;
       const edge = (event.target as Element).closest<HTMLElement>("[data-trim-edge]")?.dataset.trimEdge as
@@ -574,6 +675,7 @@ export function TimelinePreview({
     delta: ReturnType<typeof rational>,
     durations: ReturnType<typeof rational>[],
     cursor: string,
+    details?: string[],
   ) {
     if (!project) return;
     const elapsed = { ...project, start_timecode: "00:00:00:00" };
@@ -583,7 +685,9 @@ export function TimelinePreview({
       y: point.clientY + 20,
       cursor,
       delta: `${negative ? "−" : "+"}${timecode(printRational(negative ? mul(delta, rational(-1n)) : delta, true), elapsed)}`,
-      durations: durations.map((duration) => timecode(printRational(duration, true), elapsed)),
+      details: details ?? [
+        `时长 ${durations.map((duration) => timecode(printRational(duration, true), elapsed)).join(" / ")}`,
+      ],
     });
   }
   function rollDrag(
@@ -716,6 +820,26 @@ export function TimelinePreview({
     (item) => item.enabled && (viewerOnly || contains(item.timeline_in.t, item.timeline_out.t, previewAt)),
   );
   const points = useMemo(() => (project ? editPoints(project) : []), [project]);
+  const gaps = useMemo(() => (project ? timelineGaps(project) : []), [project]);
+  const reviewMarkers = useMemo(
+    () =>
+      project?.markers
+        .filter((marker) => marker.kind === "review")
+        .sort((a, b) => compare(parseRational(a.at.t, true), parseRational(b.at.t, true))) ?? [],
+    [project],
+  );
+  const selectedPoint = state.edit_point;
+  const detachedClip = selectedPoint?.clip_id
+    ? project?.tracks
+        .find((track) => track.id === selectedPoint.track_id)
+        ?.clips.find((clip) => clip.id === selectedPoint.clip_id)
+    : undefined;
+  const seams =
+    detachedClip &&
+    selectedPoint &&
+    !points.some((point) => point.track_id === selectedPoint.track_id && point.at === selectedPoint.at)
+      ? [...points, { ...selectedPoint, clip_id: detachedClip.id, right_id: detachedClip.id }]
+      : points;
   const boundaries = useMemo(() => {
     if (!project) return [];
     return [
@@ -1242,7 +1366,7 @@ export function TimelinePreview({
   const openClipMenu = (id: string, element: HTMLButtonElement, x: number, y: number) => {
     const current = latest.current.state;
     const ids = current.selected.includes(id) ? current.selected : [id];
-    update({ ...current, selected: ids, edit_point: null, preview: "timeline" });
+    update({ ...current, selected: ids, edit_point: null, gap: null, preview: "timeline" });
     setCueMenu(null);
     setClipMenu({ path: current.project, ids, element, x, y });
   };
@@ -1253,27 +1377,67 @@ export function TimelinePreview({
       current.edit_point?.track_id === point.track_id &&
       current.edit_point.at === point.at
     )
-      update({ ...current, edit_point: { track_id: point.track_id, at: to } });
+      update({ ...current, edit_point: { ...current.edit_point, at: to } });
   };
-  const planTimelineEdit = (action: string) => {
+  const planTimelineEdit = (action: string, gap?: NonNullable<UiState["gap"]>) => {
     if (!project) return;
     const target = ["split_at_playhead", "trim_start_to_playhead", "trim_end_to_playhead", "extend_edit"].includes(
       action,
     )
       ? previewAt
       : at;
-    return timelineEdit(action, project, state, target, magnetic);
+    return timelineEdit(action, project, gap ? { ...state, gap } : state, target, magnetic);
   };
-  const editAction = (action: string) => {
-    const edit = planTimelineEdit(action);
+  const editAction = (action: string, gap?: NonNullable<UiState["gap"]>) => {
+    const edit = planTimelineEdit(action, gap);
     if (edit && "reason" in edit) setWriteError(edit.reason);
     if (edit?.ops.length)
       void write("edit", edit.label, edit.ops).then((ok) => {
         const op = edit.ops[0];
-        if (ok && op && op.op === "roll" && "to" in op && typeof op.to === "string" && state.edit_point)
-          updateRollSelection(state.edit_point, op.to);
+        if (ok && state.gap && (op?.op === "remove_span" || op?.op === "close_gaps")) {
+          const current = latest.current.state;
+          if (current.project === state.project && current.gap === state.gap) update({ ...current, gap: null });
+        }
+        if (
+          ok &&
+          op &&
+          (op.op === "roll" || (op.op === "trim" && action.startsWith("nudge_edit_"))) &&
+          "to" in op &&
+          typeof op.to === "string" &&
+          state.edit_point
+        )
+          updateRollSelection(
+            state.edit_point,
+            op.op === "trim" && "edge" in op && op.edge === "in" && "ripple" in op && op.ripple
+              ? state.edit_point.at
+              : op.to,
+          );
       });
     return !!edit;
+  };
+  const selectGap = (gap: NonNullable<UiState["gap"]>) => {
+    selectMarker(null);
+    update({ ...latest.current.state, gap, selected: [], edit_point: null, playing: false, preview: "timeline" });
+  };
+  const jumpMarker = (id: string, at: string) => {
+    selectMarker({ path: state.project, id });
+    update({
+      ...latest.current.state,
+      playhead: { at },
+      gap: null,
+      selected: [],
+      edit_point: null,
+      playing: false,
+      preview: "timeline",
+    });
+  };
+  const finishMarkerText = () => {
+    if (!markerDraft || markerDraft.path !== state.project) return;
+    setMarkerDraft(null);
+    const original = reviewMarkers.find((marker) => marker.id === markerDraft.id);
+    const text = markerDraft.text;
+    if (original && text !== original.text)
+      void write("edit", "编辑标记", [{ op: "update_marker", marker_id: original.id, text }]);
   };
   const marker = () =>
     project &&
@@ -1306,11 +1470,18 @@ export function TimelinePreview({
   const commandAvailability = (action: EditorCommand) => {
     if (!project) return "请先打开工程";
     if (state.export?.open) return "请先关闭导出面板";
-    if (unsupportedCommands.includes(action)) return "当前版本尚未提供此动作";
+    if (action === "command_palette") return "命令面板已打开";
     if (dragging.current) return "请先完成拖动";
 
+    if (action === "close_all_gaps" && !gaps.length) return editReasons.close_all_gaps;
     const editReason = editReasons[action];
-    if (editReason || isPlacementAction(action) || ["cut", "paste", "undo", "redo", "add_marker"].includes(action)) {
+    if (
+      editReason ||
+      action === "tool_slip" ||
+      action === "tool_slide" ||
+      isPlacementAction(action) ||
+      ["cut", "paste", "undo", "redo", "add_marker"].includes(action)
+    ) {
       if (readOnly) return "请先返回当前工程";
       if (writing.current) return "请等待当前编辑完成";
     }
@@ -1356,7 +1527,7 @@ export function TimelinePreview({
       !(action === "clear_in_out" || action === "open_settings" || action === "toggle_history")
     )
       return;
-    if (unsupportedCommands.includes(action)) return;
+    if (action === "command_palette") return;
     if (action === "open_settings") {
       onOpenSettings?.();
       return true;
@@ -1421,6 +1592,33 @@ export function TimelinePreview({
           setClipboardStatus(null);
           if (action === "cut") editAction(magnetic ? "ripple_delete" : "lift_delete");
         }
+      }
+      return true;
+    }
+    if (action === "select_edit_in" || action === "select_edit_out" || action === "select_edit_both") {
+      const cut = frameTime(frameAt(at, project.edit_rate), project.edit_rate);
+      const candidates = points.filter((point) => point.at === cut);
+      const point =
+        candidates.find((point) => point.track_id === state.edit_point?.track_id) ??
+        candidates.find((point) => state.selected.includes(point.clip_id) || state.selected.includes(point.right_id)) ??
+        candidates.find((point) => !project.tracks.find((track) => track.id === point.track_id)?.locked) ??
+        candidates[0];
+      if (point) {
+        selectMarker(null);
+        const side = action === "select_edit_in" ? "left" : action === "select_edit_out" ? "right" : "both";
+        update({
+          ...state,
+          selected: [],
+          gap: null,
+          preview: "timeline",
+          playing: false,
+          edit_point: {
+            track_id: point.track_id,
+            at: point.at,
+            side,
+            ...(side === "both" ? {} : { clip_id: side === "left" ? point.clip_id : point.right_id }),
+          },
+        });
       }
       return true;
     }
@@ -1704,6 +1902,38 @@ export function TimelinePreview({
     const candidates = cuts.filter((cut) => compare(parseRational(cut, true), parseRational(at, true)) === direction);
     seek((direction === -1 ? candidates.at(-1) : candidates[0]) ?? at);
   }
+  const trimFrames = (() => {
+    if (!project || !trimPreview || !config || viewerOnly) return null;
+    const track = project.tracks.find(
+      (track) => track.kind === "video" && track.clips.some((clip) => trimPreview.clips.includes(clip)),
+    );
+    const anchor = track?.clips.find((clip) => trimPreview.clips.includes(clip));
+    if (!anchor) return null;
+    const cut = trimPreview.edge === "in" ? anchor.timeline_in.t : anchor.timeline_out.t;
+    return (["out", "in"] as const).map((edge) => {
+      const boundary = edge === "out" ? "timeline_out" : "timeline_in";
+      const item =
+        edge === trimPreview.edge
+          ? anchor
+          : track?.clips.find((clip) => clip.id !== anchor.id && clip[boundary].t === cut);
+      if (!item) return { edge };
+      const media = project.media.find((media) => media.id === item.media_id);
+      const source = parseRational(edge === "out" ? item.source_out.t : item.source_in.t, true);
+      const moved = item === anchor || trimPreview.following?.some((clip) => clip.id === item.id);
+      const delta = moved ? sub(parseRational(trimPreview.to, true), parseRational(cut, true)) : rational(0n);
+      const frame = div(rational(1n), parseRational(media?.video?.rate ?? project.edit_rate));
+      const offset = media?.kind === "image" ? rational(0n) : add(source, edge === "out" ? sub(delta, frame) : delta);
+      return {
+        edge,
+        url: mediaUrl(
+          config,
+          media?.kind === "image" ? "media" : "thumb",
+          item.media_id,
+          printRational(offset.numerator < 0n ? rational(0n) : offset, true),
+        ),
+      };
+    });
+  })();
   const viewer = (
     <section aria-label="预览" className="zc-viewer zc-panel" data-editor-region={viewerOnly ? "media" : "timeline"}>
       {(error || ((viewerOnly || hideTimeline) && writeError)) && (
@@ -1791,6 +2021,13 @@ export function TimelinePreview({
             opacity: streamVisible ? 1 : 0,
           }}
         />
+        {trimFrames && (
+          <div className="zc-trim-frames">
+            {trimFrames.map(({ edge, url }) => (
+              <div key={edge}>{url && <img src={url} alt={edge === "out" ? "剪点前一帧" : "剪点后一帧"} />}</div>
+            ))}
+          </div>
+        )}
         {clip?.speed === "map" && (
           <span
             className="zc-approx"
@@ -1959,6 +2196,53 @@ export function TimelinePreview({
           />
         </div>
       )}
+      {timelineMenu && timelineMenu.path === state.project && (
+        <fieldset
+          ref={menuRef}
+          className="zc-cue-menu zc-timeline-menu"
+          aria-label={timelineMenu.markerId ? "标记操作" : "空隙操作"}
+          style={{ left: timelineMenu.x, top: timelineMenu.y }}
+        >
+          {timelineMenu.markerId ? (
+            <button
+              type="button"
+              disabled={busy || readOnly}
+              onClick={() => {
+                setTimelineMenu(null);
+                timelineMenu.element.focus();
+                void write("edit", "删除标记", [{ op: "remove_marker", marker_id: timelineMenu.markerId }]);
+              }}
+            >
+              删除标记
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                disabled={busy || readOnly || !timelineMenu.gap}
+                onClick={() => {
+                  setTimelineMenu(null);
+                  timelineMenu.element.focus();
+                  editAction("ripple_delete", timelineMenu.gap);
+                }}
+              >
+                合拢这段空隙
+              </button>
+              <button
+                type="button"
+                disabled={busy || readOnly || !gaps.length}
+                onClick={() => {
+                  setTimelineMenu(null);
+                  timelineMenu.element.focus();
+                  editAction("close_all_gaps");
+                }}
+              >
+                合拢全部空隙
+              </button>
+            </>
+          )}
+        </fieldset>
+      )}
       {!hideViewer && (viewerTarget ? createPortal(viewer, viewerTarget) : viewer)}
       {!viewerOnly && !hideTimeline && (
         <section className="zc-timeline-card zc-panel" aria-label="时间线卡片" data-editor-region="timeline">
@@ -2025,6 +2309,37 @@ export function TimelinePreview({
                 setTool("roll");
               }}
             />
+            {(["slip", "slide"] as const).map((mode) => (
+              <IconButton
+                key={mode}
+                icon={mode}
+                label={`${mode === "slip" ? "滑动内容" : "滑动片段"} ${keymap[`tool_${mode}`] ?? ""}`.trim()}
+                pressed={tool === mode}
+                disabled={!project || busy || readOnly}
+                onClick={() => {
+                  temporaryTool.current = null;
+                  setBladeHover(null);
+                  setTool(mode);
+                }}
+              />
+            ))}
+            {project && (
+              <select
+                aria-label="标记"
+                value=""
+                onChange={(event) => {
+                  const marker = reviewMarkers.find((marker) => marker.id === event.target.value);
+                  if (marker) jumpMarker(marker.id, marker.at.t);
+                }}
+              >
+                <option value="">标记</option>
+                {reviewMarkers.map((marker) => (
+                  <option key={marker.id} value={marker.id}>
+                    {timecode(marker.at.t, project)} {marker.text}
+                  </option>
+                ))}
+              </select>
+            )}
             <span className="zc-grow" />
             <span className="zc-count" title="片段">
               <Icon name="clip" />
@@ -2059,6 +2374,7 @@ export function TimelinePreview({
           <section
             aria-label="时间线"
             className={`zc-timeline zc-track-height-${trackHeight}${tool === "blade" ? " is-blade" : ""}`}
+            data-tool={tool}
             ref={gestures.scroller}
             tabIndex={-1}
             {...gestures.handlers}
@@ -2071,6 +2387,24 @@ export function TimelinePreview({
             onClick={(event) => {
               if ((event.target as Element).closest(".zc-track-controls,.zc-track-menu")) return;
               if (tool !== "blade") gestures.handlers.onClick(event);
+            }}
+            onContextMenu={(event) => {
+              const target = event.target as HTMLElement;
+              if (
+                !target.closest(".zc-timeline-content") ||
+                target.closest(".zc-clip,.zc-seam,.zc-track-name,.zc-ruler-row,.zc-playhead")
+              )
+                return;
+              event.preventDefault();
+              const gap = gaps.find((gap) => gap.start === target.closest<HTMLElement>(".zc-gap")?.dataset.gap);
+              if (gap) selectGap(gap);
+              setTimelineMenu({
+                path: state.project,
+                element: target,
+                x: event.clientX,
+                y: event.clientY,
+                ...(gap ? { gap } : {}),
+              });
             }}
             onPointerMove={(event) => {
               gestures.handlers.onPointerMove(event);
@@ -2093,6 +2427,7 @@ export function TimelinePreview({
             onPointerDownCapture={(event) => {
               if ((event.target as Element).closest(".zc-track-controls,.zc-track-menu")) return;
               setHoverX(null);
+              if (!(event.target as Element).closest(".zc-marker,.zc-marker-text")) selectMarker(null);
               if (temporaryTool.current) temporaryTool.current.used = true;
               setBladeHover(null);
               if (
@@ -2131,7 +2466,9 @@ export function TimelinePreview({
                     style={{ left: dragFeedback.x, top: dragFeedback.y }}
                   >
                     <span>{dragFeedback.delta}</span>
-                    <span>时长 {dragFeedback.durations.join(" / ")}</span>
+                    {dragFeedback.details.map((detail) => (
+                      <span key={detail}>{detail}</span>
+                    ))}
                     {movePreview?.reason && <span>{movePreview.reason}</span>}
                     {copyPreview && (copyPreview.error || copyPreview.warning) && (
                       <span>{copyPreview.error ?? copyPreview.warning}</span>
@@ -2299,18 +2636,100 @@ export function TimelinePreview({
                     ))}
                     {project.markers
                       .filter((marker) => marker.kind !== "chapter")
-                      .map((marker) => (
-                        <button
-                          type="button"
-                          key={marker.id}
-                          className="zc-marker"
-                          title={marker.text}
-                          aria-label={marker.text}
-                          style={{ left: pixelAt(marker.at.t, scale) }}
-                          onPointerDown={(event) => event.stopPropagation()}
-                          onClick={() => seek(marker.at.t)}
-                        />
-                      ))}
+                      .map((marker) => {
+                        const review = marker.kind === "review";
+                        const position = markerMove?.id === marker.id ? markerMove.at : marker.at.t;
+                        if (markerDraft?.path === state.project && markerDraft.id === marker.id)
+                          return (
+                            <input
+                              key={marker.id}
+                              ref={(element) => {
+                                if (element && document.activeElement !== element) element.focus();
+                              }}
+                              className="zc-marker-text"
+                              style={{ left: pixelAt(position, scale) }}
+                              aria-label="标记文字"
+                              value={markerDraft.text}
+                              onPointerDown={(event) => event.stopPropagation()}
+                              onClick={(event) => event.stopPropagation()}
+                              onChange={(event) => setMarkerDraft({ ...markerDraft, text: event.target.value })}
+                              onBlur={finishMarkerText}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter" || event.key === "Escape") {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  if (event.key === "Enter") finishMarkerText();
+                                  else setMarkerDraft(null);
+                                }
+                              }}
+                            />
+                          );
+                        const editText = () => {
+                          if (review && !readOnly && !busy)
+                            setMarkerDraft({ path: state.project, id: marker.id, text: marker.text });
+                        };
+                        const menu = (element: HTMLElement, x: number, y: number) => {
+                          selectMarker({ path: state.project, id: marker.id });
+                          setTimelineMenu({ path: state.project, element, x, y, markerId: marker.id });
+                        };
+                        return (
+                          <button
+                            type="button"
+                            key={marker.id}
+                            className="zc-marker"
+                            title={marker.text}
+                            aria-label={marker.text}
+                            aria-pressed={
+                              review
+                                ? markerSelection?.path === state.project && markerSelection.id === marker.id
+                                : undefined
+                            }
+                            style={{ left: pixelAt(position, scale) }}
+                            onPointerDown={(event) => {
+                              event.stopPropagation();
+                              const ruler = event.currentTarget.parentElement;
+                              if (!review || !ruler || readOnly || busy) return;
+                              const origin =
+                                event.clientX - (ruler.getBoundingClientRect().left + pixelAt(marker.at.t, scale));
+                              const target = (x: number) =>
+                                seekTarget(project, project.cues, {
+                                  at: dropPoint(x - origin, ruler) ?? marker.at.t,
+                                });
+                              gestures.start(event, {
+                                edgeScroll: true,
+                                move: (event) => setMarkerMove({ id: marker.id, at: target(event.clientX) }),
+                                end: (event, moved) => {
+                                  setMarkerMove(null);
+                                  if (!moved) return;
+                                  const at = target(event.clientX);
+                                  if (at !== marker.at.t)
+                                    void write("edit", "移动标记", [{ op: "update_marker", marker_id: marker.id, at }]);
+                                },
+                                cancel: () => setMarkerMove(null),
+                              });
+                            }}
+                            onClick={() => (review ? jumpMarker(marker.id, marker.at.t) : seek(marker.at.t))}
+                            onDoubleClick={editText}
+                            onContextMenu={(event) => {
+                              if (!review) return;
+                              event.preventDefault();
+                              event.stopPropagation();
+                              menu(event.currentTarget, event.clientX, event.clientY);
+                            }}
+                            onKeyDown={(event) => {
+                              if (!review) return;
+                              if (event.key === "F2") {
+                                event.preventDefault();
+                                editText();
+                              } else if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+                                event.preventDefault();
+                                const bounds = event.currentTarget.getBoundingClientRect();
+                                menu(event.currentTarget, bounds.left, bounds.bottom);
+                              }
+                            }}
+                          />
+                        );
+                      })}
                   </div>
                 </div>
                 {previewTracks?.map((track, index) => (
@@ -2328,6 +2747,33 @@ export function TimelinePreview({
                       data-track-id={track.id}
                       style={{ width, cursor: track.locked ? "not-allowed" : undefined }}
                     >
+                      {track.kind !== "subtitle" &&
+                        tool !== "blade" &&
+                        gaps.map((gap) => (
+                          <button
+                            key={gap.start}
+                            type="button"
+                            className="zc-gap"
+                            data-gap={gap.start}
+                            aria-label={`空隙 ${timecode(gap.start, project)}`}
+                            aria-pressed={state.gap?.start === gap.start && state.gap.duration === gap.duration}
+                            style={{ left: pixelAt(gap.start, scale), width: pixelAt(gap.duration, scale) }}
+                            onClick={() => selectGap(gap)}
+                            onKeyDown={(event) => {
+                              if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
+                              event.preventDefault();
+                              const bounds = event.currentTarget.getBoundingClientRect();
+                              selectGap(gap);
+                              setTimelineMenu({
+                                path: state.project,
+                                element: event.currentTarget,
+                                x: bounds.left,
+                                y: bounds.bottom,
+                                gap,
+                              });
+                            }}
+                          />
+                        ))}
                       {bladeTarget && bladeTracks.some((item) => item.id === track.id) && (
                         <span
                           aria-hidden="true"
@@ -2366,7 +2812,7 @@ export function TimelinePreview({
                               <span>+</span>
                             </span>
                           ))}
-                      {points
+                      {seams
                         .filter((point) => point.track_id === track.id)
                         .map((point) => (
                           <button
@@ -2377,6 +2823,11 @@ export function TimelinePreview({
                               state.edit_point?.track_id === point.track_id && state.edit_point.at === point.at
                             }
                             className={`zc-seam${trimPreview?.blocked && trimPreview.following && trimPreview.clips.some((clip) => clip.id === point.clip_id) ? " is-blocked" : ""}${state.edit_point?.track_id === point.track_id && state.edit_point.at === point.at ? " is-selected" : ""}`}
+                            data-side={
+                              state.edit_point?.track_id === point.track_id && state.edit_point.at === point.at
+                                ? state.edit_point.side
+                                : undefined
+                            }
                             data-edit-cursor={tool === "roll" ? "roll" : undefined}
                             style={{
                               left: pixelAt(
@@ -2393,6 +2844,7 @@ export function TimelinePreview({
                               update({
                                 ...latest.current.state,
                                 selected: [],
+                                gap: null,
                                 preview: "timeline",
                                 playing: false,
                                 edit_point: { track_id: point.track_id, at: point.at },
@@ -2404,6 +2856,7 @@ export function TimelinePreview({
                               update({
                                 ...latest.current.state,
                                 selected: [],
+                                gap: null,
                                 preview: "timeline",
                                 playing: false,
                                 edit_point: { track_id: point.track_id, at: point.at },
@@ -2444,7 +2897,7 @@ export function TimelinePreview({
                                     }
                                   : { timeline_out: { t: trimPreview.to } }),
                               }
-                            : original;
+                            : (slidePreview?.clips.get(original.id) ?? original);
                         const clipWidth = Math.max(
                           1,
                           pixelAt(item.timeline_out.t, scale) - pixelAt(item.timeline_in.t, scale),
@@ -2467,9 +2920,22 @@ export function TimelinePreview({
                               (state.selected.length > 0 && !state.selected.includes(item.id))
                             }
                             style={{
-                              cursor: track.locked ? "not-allowed" : tool === "roll" ? "default" : undefined,
+                              cursor: track.locked
+                                ? "not-allowed"
+                                : tool === "roll"
+                                  ? "default"
+                                  : tool === "slip" || tool === "slide"
+                                    ? editCursor(tool)
+                                    : undefined,
                               left: pixelAt(item.timeline_in.t, scale),
                               width: clipWidth,
+                              ...(slidePreview?.clips.has(item.id)
+                                ? {
+                                    opacity: 0.5,
+                                    outline: slidePreview.blocked ? "2px solid var(--attention)" : undefined,
+                                    zIndex: 4,
+                                  }
+                                : {}),
                               ...(trimming
                                 ? {
                                     opacity: 0.5,
@@ -2544,7 +3010,7 @@ export function TimelinePreview({
                                   style={{ left: pixelAt(offset, scale), width: pixelAt(duration, scale) }}
                                 />
                               ))}
-                            {!track.locked && original.time_map && tool !== "blade" && (
+                            {!track.locked && original.time_map && (tool === "select" || tool === "roll") && (
                               <>
                                 <span
                                   className="zc-trim-in zc-clip-trim-disabled"
