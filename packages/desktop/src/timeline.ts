@@ -145,6 +145,19 @@ export interface PreviewData {
 }
 // Numbers are used only at browser pixel/media API boundaries; timeline state remains rational.
 export const numberOf = (value: Rational) => Number(value.numerator) / Number(value.denominator);
+export function scrollTimelineEdge(element: HTMLElement, x: number, y: number) {
+  const viewport = element.getBoundingClientRect();
+  if (x < viewport.left || x >= viewport.right || y < viewport.top || y >= viewport.bottom) return false;
+  const label = element.querySelector(".zc-ruler-row > .zc-track-name")?.getBoundingClientRect().width ?? 0;
+  const left = x - viewport.left - label;
+  const right = viewport.right - x;
+  const delta = right < 36 ? (36 - right) / 3 : left < 36 ? -(36 - left) / 3 : 0;
+  if (!delta) return false;
+  const previous = element.scrollLeft;
+  element.scrollLeft += delta;
+  return previous !== element.scrollLeft;
+}
+
 export const pixelAt = (at: string, scale: number) => numberOf(mul(parseRational(at, true), rational(BigInt(scale))));
 export const frameTime = (frame: bigint, rate: string) =>
   printRational(div(rational(frame < 0n ? 0n : frame), parseRational(rate)), true);

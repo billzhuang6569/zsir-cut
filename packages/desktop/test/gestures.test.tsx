@@ -485,12 +485,12 @@ it.each(["重叠 E_VALIDATION", "修订冲突 E_CONFLICT"])(
     await pointer(clip, "pointerup", 240, 85);
     expect(clip.style.left).toBe("96px");
     expect(clip.style.opacity).toBe("");
-    expect(host.textContent).toContain(message);
+    expect(get(".zc-move-status").textContent).toContain(message);
     expect(call).toHaveBeenCalledTimes(1);
   },
 );
 
-it("submits the target lane to core, including disallowed cross-track groups", async () => {
+it("submits a valid cross-track move and blocks disallowed groups", async () => {
   project.tracks.push({ id: "v2", name: "视频 B", kind: "video", enabled: true, clips: [] });
   await act(render);
   const clip = get('[data-selection-id="c1"]');
@@ -506,16 +506,13 @@ it("submits the target lane to core, including disallowed cross-track groups", a
   );
   state = { ...state, selected: ["c1", "c2"] };
   await act(render);
-  call.mockRejectedValueOnce(new Error("Track change requires a single requested clip"));
+  call.mockClear();
   await pointer(clip, "pointerdown", 192, 85);
+  await pointer(clip, "pointermove", 240, 165);
+  expect(clip.style.cursor).toBe("not-allowed");
+  expect(feedbackOutput()?.textContent).toContain("一次只能跨轨移动一个选中的片段");
   await pointer(clip, "pointerup", 240, 165);
-  expect(call).toHaveBeenLastCalledWith(
-    "edit",
-    expect.objectContaining({
-      ops: [{ op: "move", mode: "place", clip_ids: ["c1", "c2"], to: "3s", track_id: "v2" }],
-    }),
-  );
-  expect(host.textContent).toContain("Track change requires a single requested clip");
+  expect(call).not.toHaveBeenCalled();
   expect(clip.style.transform).toBe("");
 });
 
@@ -1301,7 +1298,7 @@ it.each(["fcp", "premiere"] as const)("updates %s move mode and preview on Cmd k
   expect(call).toHaveBeenCalledExactlyOnceWith(
     "edit",
     expect.objectContaining({
-      ops: [expect.objectContaining({ op: "move", mode: habit === "premiere" ? "insert" : "place" })],
+      ops: [expect.objectContaining({ op: "move", mode: habit === "premiere" ? "insert" : "overwrite" })],
     }),
   );
 });
@@ -1326,3 +1323,94 @@ it.each([
     expect(call).not.toHaveBeenCalled();
   },
 );
+
+it.each([
+  ["fcp", false, "overwrite"],
+  ["fcp", true, "insert"],
+  ["premiere", false, "overwrite"],
+  ["premiere", true, "insert"],
+] as const)("previews and submits %s with magnetic %s as %s", async (habit, magnetic, mode) => {
+  preset = habit;
+  prefsUi = { ...prefsUi, magnetic, snap: false };
+  await act(async () => window.dispatchEvent(new Event("desktop-prefs-changed")));
+  const clip = get('[data-selection-id="c1"]');
+  await pointer(clip, "pointerdown", 192, 85);
+  await pointer(clip, "pointermove", 456, 85);
+  const stripe = get(".zc-move-overwrite");
+  if (mode === "overwrite") {
+    expect(stripe.style.left).toBe(`${pixelAt("12/25s", 48)}px`);
+    expect(stripe.style.width).toBe(`${pixelAt("38/25s", 48)}px`);
+  } else expect(stripe).toBeNull();
+  await pointer(clip, "pointerup", 456, 85);
+  expect(call).toHaveBeenCalledExactlyOnceWith(
+    "edit",
+    expect.objectContaining({
+      ops: [expect.objectContaining({ op: "move", mode })],
+    }),
+  );
+});
+
+it("uses P as a temporary FCP position tool during an active drag", async () => {
+  await magneticOn();
+  const clip = get('[data-selection-id="c1"]');
+  await pointer(clip, "pointerdown", 192, 85);
+  await pointer(clip, "pointermove", 480, 85);
+  expect(get(".zc-insert-line")).not.toBeNull();
+  await act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "p" })));
+  expect(get(".zc-move-overwrite")).not.toBeNull();
+  await act(() => window.dispatchEvent(new KeyboardEvent("keyup", { key: "p" })));
+  expect(get(".zc-insert-line")).not.toBeNull();
+  await act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "p" })));
+  await pointer(clip, "pointerup", 480, 85);
+  expect(call).toHaveBeenCalledExactlyOnceWith(
+    "edit",
+    expect.objectContaining({
+      ops: [expect.objectContaining({ op: "move", mode: "overwrite" })],
+    }),
+  );
+});
+
+it("scrolls at the right edge with a stationary pointer and Escape stops the gesture", async () => {
+  const frames = new Map<number, FrameRequestCallback>();
+  let frameId = 0;
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+    frames.set(++frameId, callback);
+    return frameId;
+  });
+  vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => {
+    frames.delete(id);
+  });
+  Object.defineProperty(timeline(), "scrollWidth", { value: 1000 });
+  const clip = get('[data-selection-id="c1"]');
+  await pointer(clip, "pointerdown", 192, 85);
+  await pointer(clip, "pointermove", 496, 85);
+  const before = Number.parseInt(clip.style.left, 10);
+  const pending = [...frames.values()];
+  frames.clear();
+  await act(() => {
+    for (const callback of pending) callback(0);
+  });
+  expect(timeline().scrollLeft).toBeCloseTo(32 / 3);
+  expect(Number.parseInt(clip.style.left, 10)).toBeGreaterThan(before);
+  await act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
+  expect(frames.size).toBe(0);
+  expect(clip.style.left).toBe("96px");
+  await pointer(clip, "pointerup", 496, 85);
+  expect(call).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["audio", false, "目标轨道类型与片段不匹配"],
+  ["video", true, "请解锁目标轨道后再移动片段"],
+] as const)("shows a blocked destination before dropping on a %s track, locked %s", async (kind, locked, reason) => {
+  project.tracks.push({ id: "target", name: "目标", kind, enabled: true, locked, clips: [] });
+  await act(render);
+  const clip = get('[data-selection-id="c1"]');
+  await pointer(clip, "pointerdown", 192, 85);
+  await pointer(clip, "pointermove", 240, 165);
+  expect(clip.style.cursor).toBe("not-allowed");
+  expect(clip.style.outline).toContain("var(--danger)");
+  expect(feedbackOutput()?.textContent).toContain(reason);
+  await pointer(clip, "pointerup", 240, 165);
+  expect(call).not.toHaveBeenCalled();
+});

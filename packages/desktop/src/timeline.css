@@ -771,3 +771,10 @@
 .zc-timeline .is-track-locked {
   opacity: 0.55;
 }
+
+.zc-move-overwrite {
+  position: absolute;
+  inset-block: 0;
+  background: repeating-linear-gradient(135deg, var(--attention) 0 2px, transparent 2px 6px);
+  pointer-events: none;
+}

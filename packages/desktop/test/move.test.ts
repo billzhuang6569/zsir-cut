@@ -1,10 +1,18 @@
 import { readFileSync } from "node:fs";
 import { expect, it } from "vitest";
-import { parseProject, printRational } from "../../core/src/index.js";
+import { parseProject, printRational, validateProjectSemantics } from "../../core/src/index.js";
 import { applyEdit } from "../../core/src/project/edit.js";
 import type { ProjectView } from "../src/connection.js";
 import { add, frameAt, frameTime, parseRational, sourceAt } from "../src/timeline.js";
-import { moveClipPreview, moveGroup, moveInsert, moveOverlaps, moveTarget } from "../src/timelineMove.js";
+import {
+  moveBlockReason,
+  moveClipPreview,
+  moveCoverage,
+  moveGroup,
+  moveInsert,
+  moveOverlaps,
+  moveTarget,
+} from "../src/timelineMove.js";
 
 const bytes = readFileSync("fixtures/regressions/move-snap-ntsc.zcut.json", "utf8");
 function fixture() {
@@ -78,8 +86,11 @@ it.each([
   { ids: ["clp_v1"], track: "trk_v2", error: null },
   { ids: ["clp_v1"], track: "trk_a1", error: "Destination track kind differs" },
   { ids: ["clp_v1", "clp_a1"], track: "trk_v2", error: "Track change requires a single requested clip" },
-])("leaves cross-track limits to core: $track, $ids", ({ ids, track, error }) => {
-  const { project, timeline } = fixture();
+])("matches core cross-track limits: $track, $ids", ({ ids, track, error }) => {
+  const { project, timeline, view } = fixture();
+  const group = moveGroup(view, ids, "clp_v1");
+  const target = moveTarget(view, group, 48, 48, false, "0s");
+  expect(!!moveBlockReason(view, group, target, "clp_v1", track, "place")).toBe(!!error);
   const edit = () => applyEdit(project, [{ op: "move", clip_ids: ids, to: "1001/500s", track_id: track }], {}, "test");
   if (error) expect(edit).toThrow(error);
   else {
@@ -91,10 +102,17 @@ it.each([
 });
 
 it("rejects a cross-track move when linked clips include multiple clips of the anchor kind", () => {
-  const { project, timeline } = fixture();
+  const { project, timeline, view } = fixture();
   const track = timeline.tracks[0];
   if (!track || track.kind === "subtitle" || !track.clips[0]) throw new Error("fixture");
   track.clips.push({ ...track.clips[0], id: "clp_extra", timeline_start: parseRational("1001/100s", true) });
+  const source = view.tracks[0];
+  const anchor = source?.clips[0];
+  if (!anchor) throw new Error("fixture view");
+  source.clips.push({ ...anchor, id: "clp_extra" });
+  const group = moveGroup(view, [], anchor.id);
+  const target = moveTarget(view, group, -48, 48, false, "0s");
+  expect(moveBlockReason(view, group, target, anchor.id, "trk_v2", "place")).toContain("同类型片段");
   expect(() =>
     applyEdit(project, [{ op: "move", clip_ids: ["clp_v1"], to: "0s", track_id: "trk_v2" }], {}, "test"),
   ).toThrow("Linked group has multiple clips of this track kind");
@@ -281,4 +299,120 @@ it("uses only colliding destination tracks when the pointer is in a gap", () => 
   const group = moveGroup(view, [], first.id);
   const target = moveTarget(view, group, 240, 48, false, "0s");
   expect(moveInsert(view, group, target, first.id, video.id, parseRational("15/2s", true))?.to).toBe("8s");
+});
+
+it.each(["place", "overwrite", "insert"] as const)(
+  "matches the core when landing on another clip in %s mode",
+  (mode) => {
+    const { project, timeline, view } = fixture();
+    const source = timeline.tracks.find((track) => track.id === "trk_v1");
+    const destination = timeline.tracks.find((track) => track.id === "trk_v2");
+    const lane = view.tracks.find((track) => track.id === "trk_v2");
+    const clip = view.tracks[0]?.clips[0];
+    if (
+      !source ||
+      source.kind === "subtitle" ||
+      !source.clips[0] ||
+      !destination ||
+      destination.kind === "subtitle" ||
+      !lane ||
+      !clip
+    )
+      throw new Error("fixture");
+    destination.clips.push({
+      ...source.clips[0],
+      id: "clp_stationary",
+      occurrence_id: "occ_stationary",
+      timeline_start: parseRational("1001/250s", true),
+    });
+    lane.clips.push({
+      ...clip,
+      id: "clp_stationary",
+      occurrence_id: "occ_stationary",
+      timeline_in: { t: "1001/250s" },
+      timeline_out: { t: "3003/500s" },
+    });
+    const group = moveGroup(view, [], clip.id);
+    const target = moveTarget(view, group, 48, 48, false, "0s");
+    expect(moveCoverage(view, group, target.delta, clip.id, lane.id)).toEqual([
+      { clipId: clip.id, offset: "1001/1000s", duration: "1001/1000s" },
+    ]);
+    expect(moveBlockReason(view, group, target, clip.id, lane.id, mode)).toBe(
+      mode === "place" ? "这里有别的片段" : null,
+    );
+    applyEdit(project, [{ op: "move", mode, clip_ids: [clip.id], track_id: lane.id, to: target.to }], {}, "test");
+    expect(validateProjectSemantics(project).some((issue) => issue.code === "E_OVERLAP")).toBe(mode === "place");
+  },
+);
+
+it.each([
+  { mode: "overwrite", destination: "trk_v2", lock: "trk_v2", reason: "请解锁目标轨道" },
+  { mode: "place", destination: "trk_v1", lock: "trk_a1", reason: "请解锁片段所在轨道" },
+  { mode: "insert", destination: "trk_v1", lock: "trk_v2", reason: "插入会改动锁定轨道" },
+] as const)("matches core lock checks for $mode and $lock", ({ mode, destination, lock, reason }) => {
+  const { project, timeline, view } = fixture();
+  const coreTrack = timeline.tracks.find((track) => track.id === lock);
+  const desktopTrack = view.tracks.find((track) => track.id === lock);
+  const coreClip = timeline.tracks[0];
+  const viewClip = view.tracks[0]?.clips[0];
+  if (
+    !coreTrack ||
+    coreTrack.kind === "subtitle" ||
+    !desktopTrack ||
+    !coreClip ||
+    coreClip.kind === "subtitle" ||
+    !coreClip.clips[0] ||
+    !viewClip
+  )
+    throw new Error("fixture");
+  coreTrack.locked = desktopTrack.locked = true;
+  if (mode === "insert") {
+    coreTrack.clips.push({
+      ...coreClip.clips[0],
+      id: "clp_later",
+      occurrence_id: "occ_later",
+      timeline_start: parseRational("1001/100s", true),
+    });
+    desktopTrack.clips.push({
+      ...viewClip,
+      id: "clp_later",
+      occurrence_id: "occ_later",
+      timeline_in: { t: "1001/100s" },
+      timeline_out: { t: "3003/250s" },
+    });
+  }
+  const group = moveGroup(view, [], viewClip.id);
+  const target = moveTarget(view, group, 48, 48, false, "0s");
+  expect(moveBlockReason(view, group, target, viewClip.id, destination, mode)).toContain(reason);
+  expect(() =>
+    applyEdit(
+      project,
+      [
+        {
+          op: "move",
+          mode,
+          clip_ids: [viewClip.id],
+          to: target.to,
+          ...(destination !== "trk_v1" ? { track_id: destination } : {}),
+        },
+      ],
+      {},
+      "test",
+    ),
+  ).toThrow(expect.objectContaining({ code: "E_LOCKED" }));
+});
+
+it("matches core when inserting multiple occurrences", () => {
+  const { project, timeline, view } = fixture();
+  const track = timeline.tracks.find((track) => track.id === "trk_a1");
+  const audio = view.tracks.find((track) => track.id === "trk_a1")?.clips[0];
+  if (!track || track.kind !== "audio" || !track.clips[0] || !audio) throw new Error("fixture");
+  track.clips[0].occurrence_id = audio.occurrence_id = "occ_other";
+  const ids = ["clp_v1", "clp_a1"];
+  const group = moveGroup(view, ids, "clp_v1");
+  const target = moveTarget(view, group, 48, 48, false, "0s");
+  expect(moveBlockReason(view, group, target, "clp_v1", "trk_v1", "insert")).toBe("一次只能插入一组片段");
+  expect(() => applyEdit(project, [{ op: "move", mode: "insert", clip_ids: ids, to: target.to }], {}, "test")).toThrow(
+    "Insert move requires a single occurrence",
+  );
 });

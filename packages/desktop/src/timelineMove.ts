@@ -120,24 +120,89 @@ export function snapEdges(
   };
 }
 
-export function moveOverlaps(
+export function moveCoverage(
   project: ProjectView,
   group: ReturnType<typeof moveGroup>,
   delta: ReturnType<typeof rational>,
   anchor: string,
   trackId: string,
 ) {
-  return project.tracks.some((source) =>
-    source.clips.some((clip) => {
-      if (!group.moving.some((item) => item.id === clip.id)) return false;
-      const destination = clip.id === anchor ? project.tracks.find((track) => track.id === trackId) : source;
-      const start = add(parseRational(clip.timeline_in.t, true), delta);
-      const end = add(parseRational(clip.timeline_out.t, true), delta);
-      return destination?.clips.some(
-        (other) => !group.moving.some((item) => item.id === other.id) && clipsOverlap(start, end, other),
-      );
-    }),
+  const moving = new Set(group.moving.map((clip) => clip.id));
+  const target = project.tracks.find((track) => track.id === trackId);
+  return project.tracks.flatMap((source) =>
+    source.clips
+      .filter((clip) => moving.has(clip.id))
+      .flatMap((clip) => {
+        const destination = clip.id === anchor ? target : source;
+        const start = add(parseRational(clip.timeline_in.t, true), delta);
+        const end = add(parseRational(clip.timeline_out.t, true), delta);
+        return (destination?.clips ?? [])
+          .filter((other) => !moving.has(other.id) && clipsOverlap(start, end, other))
+          .map((other) => {
+            const left = parseRational(other.timeline_in.t, true);
+            const right = parseRational(other.timeline_out.t, true);
+            return {
+              clipId: clip.id,
+              offset: printRational(compare(left, start) > 0 ? sub(left, start) : rational(0n), true),
+              duration: printRational(
+                sub(compare(right, end) < 0 ? right : end, compare(left, start) > 0 ? left : start),
+                true,
+              ),
+            };
+          });
+      }),
   );
+}
+
+export function moveOverlaps(...args: Parameters<typeof moveCoverage>) {
+  return moveCoverage(...args).length > 0;
+}
+
+export function moveBlockReason(
+  project: ProjectView,
+  group: ReturnType<typeof moveGroup>,
+  target: ReturnType<typeof moveTarget>,
+  anchor: string,
+  trackId: string,
+  mode: "place" | "insert" | "overwrite",
+) {
+  const source = project.tracks.find((track) => track.clips.some((clip) => clip.id === anchor));
+  const destination = project.tracks.find((track) => track.id === trackId);
+  if (mode === "insert" && new Set(group.moving.map((clip) => clip.occurrence_id ?? clip.id)).size !== 1)
+    return "一次只能插入一组片段";
+  if (source !== destination) {
+    if (group.requested.length !== 1) return "一次只能跨轨移动一个选中的片段";
+    if (
+      project.tracks
+        .filter((track) => track.kind === source?.kind)
+        .flatMap((track) => track.clips)
+        .filter((clip) => group.moving.includes(clip)).length !== 1
+    )
+      return "联动组中有多个同类型片段，无法跨轨移动";
+    if (!destination || destination.kind !== source?.kind) return "目标轨道类型与片段不匹配";
+    if (destination.locked) return "请解锁目标轨道后再移动片段";
+    if (source?.locked) return "请解锁源轨道后再移动片段";
+  }
+  if (mode === "insert" || target.to !== printRational(group.earliest, true)) {
+    if (project.tracks.some((track) => track.locked && track.clips.some((clip) => group.moving.includes(clip))))
+      return "请解锁片段所在轨道后再移动";
+  }
+  if (mode === "place" && moveOverlaps(project, group, target.delta, anchor, trackId)) return "这里有别的片段";
+  if (mode === "insert") {
+    const { at, close, stop } = insertGeometry(project, group, target.to);
+    const locked = project.tracks.find(
+      (track) =>
+        track.kind !== "subtitle" &&
+        track.locked &&
+        track.clips.some((clip) => {
+          const start = parseRational(clip.timeline_in.t, true);
+          if (close && compare(start, stop) >= 0) return true;
+          return compare(parseRational(clip.timeline_out.t, true), at) > 0;
+        }),
+    );
+    if (locked) return `插入会改动锁定轨道「${locked.name}」`;
+  }
+  return null;
 }
 
 export function clipsOverlap(
@@ -198,27 +263,36 @@ export function moveInsert(
     undefined,
   );
   if (boundary === undefined) return null;
+  const insert = insertGeometry(project, group, boundary);
+  return {
+    ...target,
+    to: boundary,
+    delta: sub(insert.at, group.earliest),
+    line: null,
+    distance: null,
+    insert,
+  };
+}
+
+function insertGeometry(project: ProjectView, group: ReturnType<typeof moveGroup>, to: string) {
   const stop = group.moving.reduce((end, clip) => {
     const time = parseRational(clip.timeline_out.t, true);
     return compare(time, end) > 0 ? time : end;
   }, group.earliest);
   const duration = sub(stop, group.earliest);
-  const close = !stationary.some((clip) => clipsOverlap(group.earliest, stop, clip));
-  const before = parseRational(boundary, true);
+  const close = !project.tracks.some(
+    (track) =>
+      track.kind !== "subtitle" &&
+      track.clips.some((clip) => !group.moving.includes(clip) && clipsOverlap(group.earliest, stop, clip)),
+  );
+  const before = parseRational(to, true);
   const at =
     close && compare(before, stop) >= 0
       ? sub(before, duration)
       : close && compare(before, group.earliest) > 0
         ? group.earliest
         : before;
-  return {
-    ...target,
-    to: boundary,
-    delta: sub(at, group.earliest),
-    line: null,
-    distance: null,
-    insert: { at, duration, stop, close },
-  };
+  return { at, duration, stop, close };
 }
 
 export function moveClipPreview(
