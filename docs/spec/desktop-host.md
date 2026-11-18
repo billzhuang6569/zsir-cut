@@ -138,6 +138,17 @@
 | `undo` / `redo` | 撤销 / 重做 | `⌘Z` / `⇧⌘Z` | `⌘Z` / `⇧⌘Z` |
 | `toggle_history` ◇ | 历史悬浮窗 | `⌥⌘H` | `⌥⌘H` |
 | `open_settings` | 设置 | `⌘,` | `⌘,` |
+| `insert_edit` | 0.2：把素材的入出点范围插入到播放头（时间线有入点时放到入点） | `,` | `W` |
+| `overwrite_edit` | 0.2：同上，覆盖 | `.` | `D` |
+| `append_edit` | 0.2：追加到时间线末尾 | `⇧E` ◇ | `E` |
+| `connect_edit` | 0.2：放到主轨上方（FCP 的连接） | `⇧,` ◇ | `Q` |
+| `clear_in_out` | 0.2：清除时间线入出点 | `⌃⇧X` | `⌥X` |
+| `select_edit_in` / `select_edit_out` / `select_edit_both` | 0.2：选中播放头处剪点的左边、右边、两边 | `[` / `]` / `⇧\` ◇ | `[` / `]` / `\` |
+| `nudge_edit_back10` / `nudge_edit_fwd10` | 0.2：同 `nudge_edit_*`，一次 10 帧 | `⇧⌥Left` / `⇧⌥Right` | `⇧,` / `⇧.` |
+| `tool_slip` / `tool_slide` | 0.2：滑动内容工具 / 滑动片段工具 | `Y` / `U` | `Y` ◇ / `U` ◇ |
+| `copy` / `cut` / `paste` | 0.2：复制 / 剪切 / 粘贴到播放头 | `⌘C` / `⌘X` / `⌘V` | `⌘C` / `⌘X` / `⌘V` |
+| `close_all_gaps` ◇ | 0.2：合拢时间线上全部空隙 | `⌥⌘G` | `⌥⌘G` |
+| `command_palette` ◇ | 0.2：命令面板，搜索全部动作 | `⇧⌘P` | `⇧⌘P` |
 
 `keymap.ts` 的测试要保证：每个动作在两套里都有值；同一套里没有重复的键。
 
@@ -155,6 +166,16 @@
 | 用滚动工具拖剪点、`nudge_edit_*`（选中剪点时）、`extend_edit` | `roll` | `roll` |
 | `split_at_playhead` | `split` | `split` |
 | `split_all_at_playhead` | 一个 `edit` 里，对所有轨道上横跨播放头的每个片段各一个 `split`，`linked: false` | 同左 |
+| `insert_edit` / `overwrite_edit` | `place`，`mode: insert` / `overwrite`；源范围取素材面板的入出点（没设时整段）；目标轨取轨道头的目标轨（T5），没设时用第一条视频轨和第一条声音轨；放入范围按工具栏「音画 / 仅画面 / 仅声音」 | 同左 |
+| `append_edit` | `place`，`at: "end"`，`mode: insert` | 同左 |
+| `connect_edit` | `place`，`mode: overwrite`，画面放到目标视频轨上方第一条在这一段空着的视频轨，没有就同一个 `edit` 里 `add_track` 新建；声音同理放到空着的声音轨 | 同左 |
+| 有入出点、没有选中片段时的 `ripple_delete` / `lift_delete` | `remove_span`，`range` 是入出点，`ripple: true` / `false`，`tracks` 取没锁定的全部轨道 | 同左 |
+| 选中空隙时的 `ripple_delete` / `lift_delete` | `remove_span`，`range` 是这段空隙，`ripple: true`；`lift_delete` 什么也不做 | 同左 |
+| `close_all_gaps` | `close_gaps`（宏操作），不带 `scope` | 同左 |
+| 用滑动内容 / 滑动片段工具拖片段 | `slip` / `slide`，`by` 是拖动的帧数 | 同左 |
+| `paste` | 每个复制来的使用（`occurrence_id`）一个 `place`（同素材、同源范围，保持彼此的相对位置和轨道），再用 `set_clip` 带上 `label`、`enabled`、`gain_db`、`transform`、`time_map`；`mode: insert` | 同左，`mode: overwrite` |
+| `cut` | 先复制，再按 `ripple_delete` | 先复制，再按 `lift_delete` |
+| 按住 `⌥` 拖片段 | 松手时按 `paste` 的规则在落点放一份副本，原片段不动 | 同左 |
 
 `premiere` 习惯下多一条：拖片段或片段边缘时按住 `⌘`，这一次按磁性开关的反面发（开时发 `place` / `ripple: false`，关时发 `insert` / `ripple: true`），松开 `⌘` 后下一次拖动恢复。`fcp` 习惯没有这个修饰键。
 
