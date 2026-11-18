@@ -26,6 +26,8 @@
 | `preview_cache` | 推送 | 6 |
 | `project_changed` | 推送（改为带内容） | 7 |
 | `chat_event` 的 `suggestion` 类型 | 推送 | 8 |
+| `chat_event` 的 `turn` 类型、`decisions_changed` | 推送 | 4.5（0.2 新增） |
+| `agent_mode_get` / `agent_mode_set` | 动词 | 4.5（0.2 新增） |
 
 这些动词只在本机通道上有，宿主的 MCP 不暴露它们：Agent 不能改用户的偏好、不能自己答许可。
 
@@ -252,6 +254,49 @@ AI 面板对话和字幕整理都按本节启动 Agent。参数的其余部分�
 
 **没有输出就停止。** Agent 进程连续 10 分钟 stdout 和 stderr 都没有新内容，宿主先发 SIGTERM，5 秒后还在就发 SIGKILL（Mac 结束整个进程组，Windows 用 `taskkill /T /F`），推 `error`「Agent 10 分钟没有响应，已停止。」再推 `end`。等许可闸（第 5 节）回答的时间不算。
 
+### 4.5 剪辑方式、提示词和每轮上下文（0.2 新增）
+
+ADR-0027。本节取代 4.4 之前写死在 `desktopInstructions` 里的「使用 manual 编辑会话，交出草稿用 session_review」。
+
+**剪辑方式**：应用偏好 `agent.edit_mode`，取 `direct`（直接剪，默认）或 `review`（先出方案让我审）。通道动词 `agent_mode_get` / `agent_mode_set` 读写它，写法同第 2 节。`review` 时提示词换成旧的会话流程，其他不变。
+
+**提示词**：宿主按顺序拼三段，作为 Claude 的 `--append-system-prompt-file`、Codex 的提示词开头：
+
+1. `skills/zsir-cut/rules.md`：共享剪辑规则（剪辑判断、什么时候问、锁定和授权边界、写后自查）。命令行 Skill 也引用它。
+2. `skills/zsir-cut/desktop.md`：桌面入口，只讲 MCP 用法和三种用法（下文）。`edit_mode` 为 `review` 时追加 `desktop.md` 里「先出方案」一节。
+3. 原来的语言和 `【下一步】` 约定（第 8 节）。
+
+`references/` 下的粗剪、字幕说明不整段塞进提示词：`desktop.md` 写明「需要时调用 `zcut_inspect` 的 `guide` 视图读取」，宿主的 MCP 加这个视图，参数 `name`（`rough-cut`、`subtitles`、`handoff`），返回对应文件正文。只在桌面宿主的 MCP 上有，内核没有这个视图。
+
+**三种用法**（写进 `desktop.md`，宿主不判断）：
+
+| 用户说的 | Agent 做的 |
+|---|---|
+| 要剪、要改，对象能确定 | 直接 `edit` 主工程，不开会话 |
+| 只问建议（「这段怎么剪好」） | 只读，不写入 |
+| 明确要先看方案、要两版 | 开 `manual` 会话，做完 `session_review`，不能自己批准 |
+
+**每轮上下文**：用户每发一条消息，宿主在消息前加一段，Agent 不用自己调 `ui_state`：
+
+```text
+<界面>
+工程：<名称>，修订 rev_…（第 N 步），时间线 <ID>，总长 <时码>
+播放头：<时码>（<序列时间>）
+入出点：<时码>–<时码> 或 无
+选中：片段 clp_…（视频 A，00:01:02:03–00:01:10:00，素材「<名称>」）；最多 10 个，超过写「等 N 个」
+正在看：<面板>，<子标签>
+待你决定：N 条
+</界面>
+```
+
+各项取自 `ui_state` 和工程视图；界面没连上时写「界面没有打开」，其余照写。整段不超过 1500 字。
+
+**轮次**：用户每发一条消息开始新的一轮，宿主生成 `turn_` 开头的 ID，推 `chat_event` `{type: "turn", id}`。这一轮里 Agent 经宿主 MCP 发的写请求，宿主都把 `turn` 改成这个值（`command-protocol.md` 第 3 节），`ask` 写的决定也带上它。`project_changed`（第 7 节）加 `turn` 字段。
+
+**工程决定的推送**：`ask`、`answer` 成功后，宿主推 `{type: "decisions_changed", pending: N, changed: [决定 ID…]}`。
+
+**答一条就继续**：界面对工程决定点了选项后调 `answer`。执行状态是 `applied` 或 `none` 时，界面只在对话里加一条记录；是 `stale` 或 `failed` 时，宿主立刻给 Agent 发一条消息（Agent 正在回复就排在这一轮之后），内容是「用户回答了：<问题> → <选项>，这一处工程已经变了，请按当前工程重做」。不再等全部决定答完才发。
+
 ## 5. 许可闸
 
 Agent 通过宿主的 MCP 调用会碰到工程外面的动词时，宿主先停下来问用户（F9）。CLI 和内核自己的 MCP 不经过闸：许可是桌面版里「人在旁边看着」的约定，不是权限系统。
@@ -364,6 +409,7 @@ Agent 通过宿主的 MCP 调用会碰到工程外面的动词时，宿主先停
   "reason": null,
   "author": { "kind": "agent", "name": "claude" },
   "batch": { "id": "bat_…", "seq": 2, "count": 5 },
+  "turn": "turn_…",
   "summary": { "clip": { "added": 0, "removed": 2, "changed": 3 } },
   "changes": [ { "key": "clp_…", "entity": "clip", "before": { "track_id": "trk_v1", "start": "…", "end": "…" }, "after": null } ],
   "truncated": false

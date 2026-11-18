@@ -32,6 +32,19 @@
 
 **MCP**：每个动词一个工具，名字是 `zcut_<动词>`。工具的输入 schema 就是请求，输出放在 `structuredContent`，内容就是结果信封。
 
+**工具说明**（0.2 新增）：每个工具都有 `description`，内容只在内核里写一处（一张按动词索引的表），无头 MCP 和桌面宿主的 MCP 都从这里取，CLI 的 `zcut help <动词>` 也打印它。每段说明依次写：
+
+1. 一句话：做什么。
+2. 什么时候用、什么时候不用（例如「删一段话用 `remove_span` 的 `tokens`，不要按时间猜」）。
+3. 写到哪：主工程还是会话草稿，要不要 `base_revision`。
+4. 最常用的两三个参数。
+5. 一个最小的请求例子（JSON，一行）。
+6. 成功后通常下一步做什么。
+
+`edit` 的说明按剪辑域、字幕域、宏操作分组，每个操作一行：名字、作用、关键参数。整段说明不超过 4000 字。
+
+**文字摘要**（0.2 新增）：MCP 结果除了 `structuredContent`，`content` 里放一个文本项，是这个信封的摘要：第一行 `状态 动词 修订`（例如 `applied edit rev_0042`），然后最多 20 行：改了什么（按实体类型数增删改）、`label`、警告码和一句说明、错误码和 `message`、长任务的 `job_id`。不超过 2000 字。CLI 不输出摘要，对等测试只比 `structuredContent`。
+
 **对等测试**：同一组请求分别经 CLI 和 MCP 执行，信封除了 `request_id` 和耗时字段，必须逐字节相同。
 
 ## 3. 请求公共字段
@@ -44,6 +57,7 @@
 | `session_id` | — | 可选 | 写进编辑会话的草稿，而不是主工程 |
 | `dry_run` | — | 可选 | 只演算，不写入。`export` 也接受它，只返回损失报告，不生成交接包 |
 | `author` | 可选 | 必填 | `{kind, name}`，同 schema 里的 `revision.author` |
+| `turn` | — | 可选 | 0.2 新增。`{id}`，`turn_` 开头。桌面宿主给一轮对话里 Agent 的全部写入打上同一个标记（Agent 不用自己写，写了也会被宿主覆盖）；日志照抄，见 6.1「按轮撤回」 |
 
 ## 4. 结果信封
 
@@ -215,6 +229,8 @@
 
 **整批撤销**：`undo` 可以带 `batch_id` 代替 `target`：把这个批次已执行的全部修订合起来，按第 6 节的规则核对和恢复，写成一个 `undo` 修订。某个实体之后被别的修订改过，返回 `E_UNDO_CONFLICT`。
 
+**按轮撤回**（0.2 新增）：`undo` 可以带 `turn_id` 代替 `target`：把带这个 `turn` 标记的全部修订合起来撤销，规则同整批撤销，写成一个 `undo` 修订，`label` 默认「撤回 AI 这一轮」。这一轮之后人改过其中同样的实体时返回 `E_UNDO_CONFLICT`，`details` 列出冲突的实体，界面据此说明「这几处你后来改过」。这一轮里没有写入时返回 `no_op`。`inspect` 的 `history` 视图每条带上 `turn`，同一轮折叠成一组。
+
 **回到任意一步**：`restore`，参数 `target`（修订 ID）加写请求的公共字段。
 
 1. 按 7.5 节 `diff` 的方法还原出目标修订的完整工程内容。
@@ -313,6 +329,45 @@
 4. 引用的实体被删掉后，决定照常保留，`refs` 里那一项在读视图里标 `missing: true`。
 5. 一个会话最多 50 条决定，超过返回 `E_VALIDATION`。
 
+### 7.7 工程上的决定（0.2 新增）
+
+ADR-0027：桌面版 AI 默认直接写主工程，拿不准的事也要能问。决定因此可以不挂在会话上，直接挂在工程上。会话里的决定（7.6）照旧。
+
+**存放**：`.zcut/<project_id>/decisions.json`，`{"schema": "zsir-cut/decisions", "version": 1, "decisions": [...]}`，写法同第 5 节的元数据文件（先写临时文件再替换，在工程写锁内）。没有这个文件就是空队列，旧工程打开不报错。不进工程文件，不产生修订。
+
+**动词**：
+
+| 动词 | 类型 | 作用 |
+|---|---|---|
+| `ask` | 写（不产生修订） | 写入一条或多条工程决定。参数 `decisions`（每项字段同 7.6，另加下面的 `options[].ops`），加写请求的公共字段；`base_revision` 是主工程当前修订，记为这条决定的 `asked_at_revision` |
+| `answer` | 写 | 回答一条工程决定，参数同 `session_answer` 去掉 `session_id`。选中的选项带 `ops` 时接着执行，见下文 |
+
+`inspect` 新增 `decisions` 视图：列出工程决定，默认只列 `pending`，`all: true` 列全部；每条带 `execution` 和 `refs` 的 `missing`。
+
+**字段**（在 7.6 的基础上）：
+
+| 字段 | 说明 |
+|---|---|
+| `asked_at_revision` | 提问时主工程的修订 |
+| `turn` | 提问那一轮的标记，可选 |
+| `refs[]` | 除 7.6 的两种外，可以写 `{"kind": "source", "occurrence_id", "media_id", "source_start", "duration"}`：按素材和源范围锚定，片段被切开、挪动后仍能找回 |
+| `options[].ops` | 可选。选了这一项就执行的 `edit` 操作（只能是一个域）。没有 `ops` 的选项只记录回答，例如「保留现状」 |
+| `options[].label_after` | 可选，执行后写进修订 `label` 的话；没写用「按你的选择：<选项 label>」 |
+| `execution` | 回答以后才有：`{state, revision, error}`。`state` 取 `none`（选项没有操作）、`applied`、`stale`、`failed` |
+
+**回答和执行分两步**：
+
+1. `answer` 先把回答写进 `decisions.json`（`state` 变 `answered`），这一步按幂等键去重：同一个键重发只算一次。
+2. 选项带 `ops` 时，内核接着在主工程上执行一次 `edit`：`author` 是回答的人，`turn` 取这条决定的 `turn`，`label` 按上表，`base_revision` 用此刻的当前修订。执行前检查：从 `asked_at_revision` 到当前修订，`ops` 引用的实体有没有被改过或删掉（按日志的 `changes` 键判断）。
+   - 都没变：执行。成功写 `execution: {state: "applied", revision}`，失败写 `failed` 和错误。
+   - 有变：不执行，写 `execution: {state: "stale"}`，`refs` 里对应项标 `missing` 或 `moved`。界面显示「这一段已经改过」，同时把回答发给 Agent，由它按最新工程重做。
+3. 返回的信封：执行了就是那次 `edit` 的结果（`applied` 或 `rejected`），`result.decision` 是更新后的决定；没执行就是 `no_op`。
+4. 第 1 步成功、第 2 步之前进程退出：下次任何写请求加锁时，内核找到 `answered` 但没有 `execution` 的决定，按第 2 步补做。同一条决定只执行一次。
+5. 改答：已经 `applied` 的决定改答时，先按 `execution.revision` 撤销那次执行（规则同 `undo`，冲突返回 `E_UNDO_CONFLICT`，不改答），再按新选项执行。
+6. 一个工程最多 50 条 `pending` 的工程决定，超过返回 `E_VALIDATION`。`answered`、`skipped` 的保留 200 条，更早的删掉。
+
+`ask`、`answer` 不能带 `session_id`，带了返回 `rejected`、`E_SESSION_STATE`；会话里继续用 `session_ask`、`session_answer`。
+
 ## 8. 授权边界
 
 - **文字与剪辑分开。** `edit` 的操作分两个域：剪辑域和字幕域。一个请求里只能有一个域的操作，混用返回 `rejected`，错误码 `E_MIXED_DOMAIN`。「把字幕里的嗯改成呃」和「删掉音频里的语气词」必须是两个请求，一句自然语言不能悄悄变成剪辑。
@@ -323,7 +378,7 @@
 
 | 动词 | 类型 | 作用 |
 |---|---|---|
-| `inspect` | 读 | 按视图读工程：`brief`、`timeline`、`entity`、`history`、`session`、`chapters`、`review` |
+| `inspect` | 读 | 按视图读工程：`brief`、`timeline`、`entity`、`history`、`session`、`chapters`、`review`、`decisions` |
 | `read_transcript` | 读 | 读打包后的转写文本，可按时间线投影 |
 | `validate` | 读 | 跑 L1 校验，`media: true` 时加跑 L2 |
 | `diff` | 读 | 比较两个修订，输出实体级差异 |
@@ -335,6 +390,7 @@
 | `transcribe` | 写，长任务 | 跑识别和对齐，写入母稿第 1、3 层，并生成初始的第 2、4 层 |
 | `session_begin` / `session_review` / `session_approve` / `session_reject` | 会话 | 见第 7 节 |
 | `session_ask` / `session_answer` | 会话 | 写入、回答决定，见 7.6 |
+| `ask` / `answer` | 写 | 工程上的决定，不挂会话，见 7.7（0.2 新增） |
 | `render_preview` | 长任务 | 渲染整条时间线的代理预览，不改工程。参数：`timeline_id`（必填）、`output`（输出文件夹，必填）。一期只渲染整条时间线，不渲染转场混合和画面变换 |
 | `view_timeline` | 长任务 | 在每个剪点出胶片条 PNG 和波形，供 Agent 视觉自检。参数：`timeline_id`（必填）、`output`（输出文件夹，必填） |
 | `export` | 长任务 | 按交接 profile 生成交接包，见 `handoff-profile.md`。带 `dry_run` 时只返回损失报告；报告有 `error` 级记录时，除非带 `accept_losses: true`，否则返回 `rejected` |
@@ -346,7 +402,7 @@
 | `voice_list` / `voice_edit` / `voice_clone` | 读 / 写 / 长任务 | 全局音色库，不属于工程，见 `voice.md` 第 2、3 节 |
 | `voice_generate` | 长任务 | 用音色生成配音，结果作为素材写进工程，见 `voice.md` 第 4、5 节 |
 
-共 23 个。新增动词要先改本文。另有只在桌面版运行时存在的界面动词，见 9.6，不计入这 21 个。
+共 25 个（0.2 加了 `ask`、`answer`）。新增动词要先改本文。另有只在桌面版运行时存在的界面动词，见 9.6，不计入。
 
 ### 9.1 给 Agent 的读视图
 
@@ -377,10 +433,11 @@
 
 - `project`：ID、名称、版本、当前修订的序号和 ID。
 - `media`：每个素材的 ID、名称、类型、时长；最多 50 条，超出时 `media_truncated` 为 true。不跑 L2，不报在线状态。
-- `timelines`：每条时间线的 ID、名称、帧率、是否丢帧、起始时码、总长；每条轨道的 ID、类型、名称、启用状态、片段数；`review` 类标记最多 50 条。
+- `timelines`：每条时间线的 ID、名称、帧率、是否丢帧、起始时码、总长；每条轨道的 ID、类型、名称、启用状态、锁定状态、片段数；`review` 类标记最多 50 条。
 - `transcripts`：每份母稿的 ID、素材 ID、语言、字词数、字幕条数、各状态的字词数，以及字词覆盖的源时间范围。
 - `recent_revisions`：最近 5 个日志条目的序号、修订 ID、作者、动词、时间、操作个数。
 - `sessions`：未结束的编辑会话的 ID、状态、approval、intent，以及 `pending` 决定的个数。
+- `decisions`：工程上 `pending` 决定的个数和最多 5 条的 `id`、`question`（0.2 新增）。
 - `recognition`：工程的字幕识别设置，`reference_text` 只给前 200 个字和总字数。
 - `issues`：L1 校验的问题编号和个数，不列明细。
 
@@ -519,7 +576,10 @@
 | `trim` | `clip_id`、`edge`、`to`、`ripple`、`linked` | 改入点或出点。`linked` 为 true 时同一次使用的视音频一起改；J/L cut 就是只改其中一个 |
 | `split` | `clip_id`、`at`、`new_id` | 在序列时刻切开，后半段拿新 ID |
 | `roll` | `clip_id`、`edge`、`to`、`linked` | 移动剪点：前一段出点和后一段入点一起变，总时长不变 |
-| `move` | `clip_ids`、`to`、`track_id` | 移动片段 |
+| `move` | `clip_ids`、`to`、`track_id`、`mode` | 移动片段；`mode` 取 `place`、`insert`、`overwrite`（0.2 加 `overwrite`） |
+| `slip` / `slide` | `clip_id`、`by`、`linked` | 0.2 新增。slip 只挪源内容；slide 挪片段、邻居跟着变 |
+| `set_track` | `track_id`、`enabled`、`locked` | 0.2 新增。隐藏、静音、锁定轨道 |
+| `tighten_pauses` / `remove_fillers` / `keep_tokens` / `close_gaps` | 见 `edit-ops.md` 宏操作 | 0.2 新增宏操作，内核展开成基础操作 |
 | `set_clip` | `clip_id`、`gain_db`、`enabled`、`transform`、`time_map`、`label`、`sync_broken` | 改片段属性 |
 | `add_transition` / `remove_transition` | | |
 | `add_marker` / `update_marker` / `remove_marker` | | |

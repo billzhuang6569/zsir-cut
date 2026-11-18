@@ -95,12 +95,37 @@
 把所列片段中最早的那个移到 `to`，其余按相同的位移移动。`linked` 为 true 时同组片段一起移动。`track_id` 只在移动单个片段（联动时为单个视频片段或单个音频片段）时可用，目标轨类型必须相同。引用被移动片段的转场，如果两侧不再相接则删除。
 
 - `place`：不合拢；移动后重叠返回 `E_VALIDATION`。
+- `overwrite`（0.2 新增）：原位置留下空隙；在目标轨上按 `place` 的 `overwrite` 规则清空落点区间（被盖住的片段删除、横跨边界的修剪或切开），然后放回被移动的片段。联动时作用于这组片段落到的每条轨。不合拢，其他轨不动。
 - `insert`：像 Final Cut Pro 那样把目标位置之后的内容往后推（2026-10-30 Bill 选定）。一次只能移动一组：`clip_ids` 加上联动的片段必须同属一个 `occurrence_id`，否则 `E_VALIDATION`。`to` 按**移动前**的时间线计算。设被移动的片段合起来占 `[s, e)`，`D = e − s`：
   1. 取下被移动的片段。
   2. 原位置合拢：所有视频、音频轨上 `[s, e)` 里除被移动片段外没有别的片段时，按 `remove_span` 的合拢规则把 `e` 之后的内容前移 `D`，同时 `to` 不小于 `e` 时改为 `to − D`，`to` 在 `(s, e)` 之间时改为 `s`。有别的片段时不合拢，留下空隙。
   3. 在 `to` 处按 `place` 的 `insert` 规则后移 `D`：横跨 `to` 的片段切开，右半段拿新 ID，和 `to` 之后的内容、标记、独立字幕条一起后移。
   4. 把被移动的片段放回，最早的那个从 `to` 开始，片段之间的相对位置不变。
   整个操作是一个修订。`changes` 里被推后、被切开的片段各有记录。
+
+### `slip`（0.2 新增）
+
+参数：`clip_id`、`by`（有理数秒，可正可负）、`linked`（默认 true）。
+
+片段在序列上的位置和时长不变，只把源入点挪 `by`：`source_start` 加 `by`。联动时同组片段一起挪。
+
+- `by` 必须是素材帧网格的整数倍（纯音频按时间线帧网格），否则 `E_VALIDATION`。
+- 挪完后源区间超出素材范围返回 `E_VALIDATION`，`details` 写出最多能挪多少（`min_by`、`max_by`）。
+- 有 `time_map` 的片段和静帧片段返回 `E_UNSUPPORTED`。
+- 挂在这个片段上的转场保留。
+
+### `slide`（0.2 新增）
+
+参数：`clip_id`、`by`（有理数秒，可正可负）、`linked`（默认 true）。
+
+片段内容和时长不变，在序列上整体挪 `by`，两侧邻居跟着变，总时长不变：
+
+1. 设片段占 `[s, e)`，同一条轨上紧挨着的前一个片段出点是 `s`、后一个片段入点是 `e`（相接才算邻居）。
+2. `by > 0`：后邻居的入点修剪 `+by`（源入点后移），前邻居的出点延长 `+by`（需要素材里有这么多）。`by < 0` 反过来。
+3. 某一侧没有相接的邻居而是空隙：那一侧的空隙变长或变短，变到负数（会和别的片段重叠）返回 `E_VALIDATION`。
+4. 邻居素材不够延长、被修剪到时长为 0 或以下，返回 `E_VALIDATION`，`details` 写出最多能挪多少。
+5. 联动时，同组每个片段在自己的轨上按同样的规则挪；任何一条轨不能挪，整个操作失败。
+6. 被修剪到的邻居有 `time_map` 时返回 `E_UNSUPPORTED`。
 
 ### `set_clip`
 
@@ -114,7 +139,24 @@
 
 - `add_transition`：`id`、`from_clip`、`to_clip`、`duration`、`alignment`。`remove_transition`：`transition_id`。
 - `add_marker`：`id`、`at`、`duration`、`kind`、`text`、`level`（可选，只用于 `chapter`，取 1 或 2）、`description`（可选，只用于 `chapter`，见 `timeline-schema.md` 4.6）。`update_marker`：`marker_id` 加要改的字段。`remove_marker`：`marker_id`。
+- `set_track`（0.2 新增）：`track_id`，加要改的字段：`enabled`（视频轨为 false 时隐藏画面，音频轨为 false 时静音）、`locked`。字幕轨也能用，属于字幕域。
+- **锁定的轨道**（`locked: true`）：任何会改变这条轨上片段、转场的操作返回 `rejected`、`E_LOCKED`，`details.track_id` 写出是哪条轨。合拢会推动这条轨上的内容时同样拒绝，所以锁了一条轨以后，要合拢的删除和插入只能在它后面没有内容时做。`set_track` 本身和 `rename_track` 不受锁定限制。独奏只在界面上，不写进工程。
 - `add_track`：`id`、`kind`（`video` 或 `audio`）、`name`（可选，没给时按 `timeline-schema.md` 4.4 自动命名）、`index`（插入位置，默认末尾）。`rename_track`：`track_id`、`name`。它属于被改名轨道所在的域：视频、音频轨是剪辑域，字幕轨是字幕域。`remove_track`：`track_id`，轨道必须是空的，并且不是任何字幕轨的承载轨。
+
+### 宏操作（0.2 新增）
+
+宏操作把 Agent 常做的一类剪辑一次说清楚。内核把它们展开成基础操作，按顺序在同一个请求里执行，和直接发这些基础操作效果相同。日志条目的 `ops` 保留调用方发的原文，另记 `expanded_ops`（展开后的基础操作）；`changes` 照常按实体列出。展开结果为空时这个宏是 `no_op`，不报错。
+
+范围参数 `scope` 四个宏共用：`{"range": {start, duration}}`（序列区间）、`{"clip_ids": [...]}`（这些片段所在的区间），或省略表示整条时间线。
+
+| 宏 | 参数 | 展开成 |
+|---|---|---|
+| `tighten_pauses` | `scope`、`max_pause`（有理数秒）、`min_gap`（可选，默认 `max_pause`） | 在范围内，按字幕投影找同一片段上相邻两个 `text` 非空的字词，它们之间的静音长于 `max_pause` 且长于 `min_gap` 的，用 `remove_span`（`range`，所有轨，合拢，`snap: nearest`）删到只剩 `max_pause`，中间留的那段两边各一半。字幕条跨过的位置照常按投影跟着走。跨片段的剪点不处理 |
+| `remove_fillers` | `scope`、`words`（可选，默认用工程 `recognition.filler_words`，没写时用默认表）、`pause`（可选，默认 `"1/5s"`） | 范围内投影可见的字词里，`heard` 或 `text` 去掉首尾标点后整个等于 `words` 里某一项的，每个（相邻的合并成一段）发一个 `remove_span`（`tokens`，带 `clip_id` 和 `pause`，合拢）。只比较整个字词，和 `asr-worker.md` 的去水词同一规则 |
+| `keep_tokens` | `clip_id`、`keep`（`[{from_token, to_token}, …]`，同一母稿，按顺序、不重叠）、`pause`（可选） | 在这个片段（联动时整组）上，把 `keep` 各段以外的部分全部 `remove_span` 掉并合拢，`keep` 各段两端按 `pause` 留停顿。用来「这一段只留这几句」 |
+| `close_gaps` | `scope` | 范围内所有视频、音频轨上都没有片段的空隙，逐个 `remove_span`（`range`，所有轨，合拢）。只有部分轨是空的不算空隙 |
+
+锁定轨道、`approved` 字词的规则对展开后的每个基础操作照常检查。
 
 ## 3. 字幕域
 
