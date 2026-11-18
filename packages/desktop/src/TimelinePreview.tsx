@@ -19,6 +19,7 @@ import { SubtitleCanvas } from "./SubtitleCanvas.js";
 import { preventPointerSelection } from "./selection.js";
 import type { UiState } from "./state.js";
 import { subtitleStyleOps } from "./subtitles.js";
+import { TrackHead } from "./TrackHead.js";
 import {
   add,
   type ClipView,
@@ -43,6 +44,7 @@ import {
   sourceAt,
   sourceSpeed,
   sub,
+  type TrackView,
   timecode,
 } from "./timeline.js";
 import { editPoints, markedTimelineRange, splitAllAt, timelineEdit, timelineMarks } from "./timelineActions.js";
@@ -316,7 +318,7 @@ export function TimelinePreview({
       const track = project.tracks.find(
         (track) => track.kind !== "subtitle" && track.clips.some((clip) => clip.id === id),
       );
-      if (!id || !track) return;
+      if (!id || !track || track.locked) return;
       if (edge && tool === "roll") {
         const anchor = track.clips.find((clip) => clip.id === id);
         const at = edge === "in" ? anchor?.timeline_in.t : anchor?.timeline_out.t;
@@ -387,6 +389,8 @@ export function TimelinePreview({
       }
       if (tool !== "select") return;
       const group = moveGroup(project, state.selected, id);
+      if (project.tracks.some((track) => track.locked && track.clips.some((clip) => group.moving.includes(clip))))
+        return;
       const origin = Math.round(event.clientX);
       const scroll = gestures.scroller.current?.scrollLeft ?? 0;
       const lane = element.closest<HTMLElement>(".zc-track-lane");
@@ -412,10 +416,14 @@ export function TimelinePreview({
           rational(BigInt(scale)),
         );
         const insertion = magnetic ? moveInsert(project, group, target, id, trackId, pointer) : null;
-        const blocked = magnetic && new Set(group.moving.map((clip) => clip.occurrence_id ?? clip.id)).size !== 1;
+        const locked = !!project.tracks.find((item) => item.id === trackId)?.locked;
+        const blocked =
+          locked || (magnetic && new Set(group.moving.map((clip) => clip.occurrence_id ?? clip.id)).size !== 1);
+
         return {
           target: blocked ? target : (insertion ?? target),
           blocked,
+          locked,
           insert: !!insertion && !blocked,
           trackId,
           y: targetLane && lane ? targetLane.getBoundingClientRect().top - lane.getBoundingClientRect().top : 0,
@@ -430,7 +438,7 @@ export function TimelinePreview({
               event,
               sub(parseRational(preview.target.to, true), group.earliest),
               [sub(parseRational(anchor.timeline_out.t, true), parseRational(anchor.timeline_in.t, true))],
-              dragMagnetic(event.metaKey) ? "copy" : "grabbing",
+              preview.locked ? "not-allowed" : dragMagnetic(event.metaKey) ? "copy" : "grabbing",
             );
           setMovePreview({
             ids: group.moving.map((clip) => clip.id),
@@ -446,7 +454,7 @@ export function TimelinePreview({
           if (!moved) return;
           const result = calculate(event);
           if (result.blocked) {
-            setWriteError("一次只能插入一组片段");
+            setWriteError(result.locked ? "请解锁目标轨道后再移动片段" : "一次只能插入一组片段");
             setWriteErrorDetail(undefined);
             return;
           }
@@ -480,7 +488,8 @@ export function TimelinePreview({
   const [gainPreview, setGainPreview] = useState<GainPreview | null>(null);
   const clipBlocked = readOnly ? "返回当前工程后编辑片段" : busy ? "等待当前编辑完成" : undefined;
 
-  const { keymap, preset, snap, magnetic, skimming, trackHeight, setUi } = preferences;
+  const { keymap, preset, snap, magnetic, skimming, trackHeight, trackHeights, setUi } = preferences;
+  const [resizedTrack, setResizedTrack] = useState<{ key: string; height: number } | null>(null);
   const snapRef = useRef(snap);
   snapRef.current = snap;
   function dragMagnetic(meta: boolean) {
@@ -1425,6 +1434,53 @@ export function TimelinePreview({
   // Keep the canvas unchanged between caption boundaries.
   // biome-ignore lint/correctness/useExhaustiveDependencies: captionKey includes every rendered cue field.
   const captions = useMemo(() => visibleCues, [project, captionKey]);
+  const trackHeightKey = (id: string) => JSON.stringify([state.project, project?.id, id]);
+  const trackHeightAt = (id: string) => {
+    const key = trackHeightKey(id);
+    return resizedTrack?.key === key ? resizedTrack.height : trackHeights?.[key];
+  };
+  const renderTrackHead = (track: TrackView, index: number) => {
+    const kind = track.kind;
+    const heightKey = trackHeightKey(track.id);
+    const target = kind !== "subtitle" && state.editTargets?.[kind] === track.id;
+    const solo = state.soloAudioTrackIds?.includes(track.id) ?? false;
+    return kind === "subtitle" ? (
+      <span className="zc-track-name zc-track-head" role="img" title={track.name} aria-label={track.name}>
+        <Icon name="subtitles" />
+      </span>
+    ) : (
+      <TrackHead
+        key={heightKey}
+        track={track}
+        index={index}
+        blocked={readOnly || busy}
+        carrier={project?.subtitleTracks?.some((item) => item.carrier_tracks?.includes(track.id)) ?? false}
+        target={target}
+        solo={solo}
+        edit={editClips}
+        toggleTarget={() => {
+          const current = latest.current.state;
+          const editTargets = { ...current.editTargets };
+          if (target) delete editTargets[kind];
+          else editTargets[kind] = track.id;
+          update({ ...current, editTargets });
+        }}
+        toggleSolo={() => {
+          const current = latest.current.state;
+          const ids = current.soloAudioTrackIds ?? [];
+          update({ ...current, soloAudioTrackIds: solo ? ids.filter((id) => id !== track.id) : [...ids, track.id] });
+        }}
+        resize={(height, commit) => {
+          const next = height === undefined ? null : { key: heightKey, height };
+          setResizedTrack(next);
+          if (commit && height !== undefined)
+            void setUi({ track_heights: { [heightKey]: height } }).finally(() =>
+              setResizedTrack((current) => (current === next ? null : current)),
+            );
+        }}
+      />
+    );
+  };
   const previewTracks = project?.tracks.map((track) => ({
     ...track,
     clips: track.clips.flatMap((clip) =>
@@ -1812,10 +1868,12 @@ export function TimelinePreview({
             {...gestures.handlers}
             {...drop.handlers}
             onPointerDown={(event) => {
+              if ((event.target as Element).closest(".zc-track-controls,.zc-track-menu")) return;
               if (tool !== "blade" || (event.target as Element).closest(".zc-clip-video,.zc-clip-audio"))
                 gestures.handlers.onPointerDown(event);
             }}
             onClick={(event) => {
+              if ((event.target as Element).closest(".zc-track-controls,.zc-track-menu")) return;
               if (tool !== "blade") gestures.handlers.onClick(event);
             }}
             onPointerMove={(event) => {
@@ -1827,7 +1885,7 @@ export function TimelinePreview({
                 update({ ...state, preview: "timeline" });
               const clip = (event.target as Element).closest<HTMLElement>(".zc-clip-video,.zc-clip-audio");
               setBladeHover(
-                tool === "blade" && clip && !dragging.current
+                tool === "blade" && clip && !clip.closest(".is-track-locked") && !dragging.current
                   ? { id: clip.dataset.selectionId ?? "", x: event.clientX, shift: event.shiftKey, alt: event.altKey }
                   : null,
               );
@@ -1837,6 +1895,7 @@ export function TimelinePreview({
               setHoverX(null);
             }}
             onPointerDownCapture={(event) => {
+              if ((event.target as Element).closest(".zc-track-controls,.zc-track-menu")) return;
               setHoverX(null);
               if (temporaryTool.current) temporaryTool.current.used = true;
               setBladeHover(null);
@@ -2045,18 +2104,20 @@ export function TimelinePreview({
                       ))}
                   </div>
                 </div>
-                {previewTracks?.map((track) => (
-                  <div key={track.id} className={`zc-track zc-track-${track.kind}`}>
-                    <span className="zc-track-name zc-track-head" role="img" title={track.name} aria-label={track.name}>
-                      <Icon name={track.kind === "video" ? "eye" : track.kind === "audio" ? "volume" : "subtitles"} />
-                    </span>
+                {previewTracks?.map((track, index) => (
+                  <div
+                    key={track.id}
+                    className={`zc-track zc-track-${track.kind}`}
+                    style={{ height: trackHeightAt(track.id) }}
+                  >
+                    {renderTrackHead(track, index)}
                     {/* biome-ignore lint/a11y/useSemanticElements: A timeline drop lane is not a form fieldset. */}
                     <div
                       role="group"
                       aria-label={`${track.name} 放置区域`}
-                      className="zc-track-lane"
+                      className={`zc-track-lane${track.locked ? " is-track-locked" : ""}`}
                       data-track-id={track.id}
-                      style={{ width }}
+                      style={{ width, cursor: track.locked ? "not-allowed" : undefined }}
                     >
                       {bladeTarget && bladeTracks.some((item) => item.id === track.id) && (
                         <span
@@ -2087,7 +2148,7 @@ export function TimelinePreview({
                                   : point.at,
                                 scale,
                               ),
-                              cursor: tool === "roll" ? editCursor("roll") : "default",
+                              cursor: track.locked ? "not-allowed" : tool === "roll" ? editCursor("roll") : "default",
                             }}
                             onClick={(event) => {
                               event.stopPropagation();
@@ -2110,7 +2171,7 @@ export function TimelinePreview({
                                 playing: false,
                                 edit_point: { track_id: point.track_id, at: point.at },
                               });
-                              if (readOnly || busy || tool !== "roll") return;
+                              if (readOnly || busy || track.locked || tool !== "roll") return;
                               const left = track.clips.find((clip) => clip.id === point.clip_id);
                               if (left) gestures.start(event, rollDrag(event, left, point));
                             }}
@@ -2168,7 +2229,7 @@ export function TimelinePreview({
                               (state.selected.length > 0 && !state.selected.includes(item.id))
                             }
                             style={{
-                              cursor: tool === "roll" ? "default" : undefined,
+                              cursor: track.locked ? "not-allowed" : tool === "roll" ? "default" : undefined,
                               left: pixelAt(item.timeline_in.t, scale),
                               width: clipWidth,
                               ...(trimming
@@ -2210,7 +2271,7 @@ export function TimelinePreview({
                                 gestures.select([item.id], event);
                                 return;
                               }
-                              if (busy || readOnly || track.kind === "subtitle") return;
+                              if (busy || readOnly || track.locked || track.kind === "subtitle") return;
                               const target = timelinePoint(event.clientX);
                               if (
                                 !target ||
@@ -2234,7 +2295,7 @@ export function TimelinePreview({
                               );
                             }}
                           >
-                            {original.time_map && tool !== "blade" && (
+                            {!track.locked && original.time_map && tool !== "blade" && (
                               <>
                                 <span
                                   className="zc-trim-in zc-clip-trim-disabled"
@@ -2249,6 +2310,7 @@ export function TimelinePreview({
                               </>
                             )}
                             {track.kind !== "subtitle" &&
+                              !track.locked &&
                               (tool === "select" || tool === "roll") &&
                               !readOnly &&
                               !busy &&

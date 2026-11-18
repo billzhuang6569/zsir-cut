@@ -32,6 +32,7 @@ const ui = z.strictObject({
   skimming: z.boolean(),
   timeline_zoom: z.number().positive().nullable(),
   track_height: z.enum(["s", "m", "l"]),
+  track_heights: z.record(z.string(), z.number().int().min(30).max(240)).optional(),
   chapters,
   layout: layout.default(defaultLayout),
 });

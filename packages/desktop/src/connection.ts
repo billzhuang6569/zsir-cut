@@ -26,6 +26,7 @@ export function requestError(envelope: ResultEnvelope) {
   if (code === "E_VOICE_AUTH") return "请在设置中添加或更换 fish.audio API Key";
   if (code === "E_VOICE_PAYMENT") return "fish.audio 余额不足，请充值后重试";
   if (code === "E_VOICE_UPSTREAM") return "暂时无法连接 fish.audio，请稍后重试或检查代理设置";
+  if (code === "E_LOCKED") return "请先在轨道头解锁相关轨道，再重试";
   if (code === "E_CONFLICT") return "工程刚被别处改过，已刷新，请重试";
   if (
     code === "E_OVERLAP" ||
@@ -275,7 +276,14 @@ interface TimelinePreferences {
   keymap: Record<string, string | null>;
   prefs: {
     keymap?: { preset: "fcp" | "premiere" };
-    ui: { snap: boolean; magnetic: boolean; skimming?: boolean; track_height: "s" | "m" | "l"; layout?: Layout };
+    ui: {
+      snap: boolean;
+      magnetic: boolean;
+      skimming?: boolean;
+      track_height: "s" | "m" | "l";
+      track_heights?: Record<string, number> | undefined;
+      layout?: Layout;
+    };
   };
 }
 export function useTimelinePreferences(
@@ -338,6 +346,7 @@ export function useTimelinePreferences(
     magnetic: preferences?.prefs.ui.magnetic ?? true,
     skimming: preferences?.prefs.ui.skimming ?? false,
     trackHeight: preferences?.prefs.ui.track_height ?? "m",
+    trackHeights: preferences?.prefs.ui.track_heights,
     layout: preferences?.prefs.ui.layout,
     setUi,
   };

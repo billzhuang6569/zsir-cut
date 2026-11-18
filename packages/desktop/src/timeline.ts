@@ -38,6 +38,7 @@ export interface TrackView {
   enabled: boolean;
   locked?: boolean;
   clips: ClipView[];
+  transitions?: unknown[];
 }
 export interface TimelineView {
   id: string;
@@ -129,7 +130,7 @@ export interface PreviewData {
     progress?: { transcript_id: string; done: number; total: number; phase?: "breaking" | "proofread" }[];
   };
   subtitleOverlays?: OverlayView[];
-  subtitleTracks?: { id: string; name: string; default_style_id: string }[];
+  subtitleTracks?: { id: string; name: string; default_style_id: string; carrier_tracks?: string[] }[];
   recognition?: Recognition;
   recognized?: boolean;
   recognitionRevision?: number;
