@@ -1,6 +1,6 @@
 import type { UiState } from "../../app-host/src/ui.js";
 import type { ProjectView } from "./connection.js";
-import { compare, frameAt, frameTime, parseRational, printRational } from "./timeline.js";
+import { compare, frameAt, frameTime, parseRational, printRational, sub } from "./timeline.js";
 import { moveGroup } from "./timelineMove.js";
 import { trimGroup } from "./timelineTrim.js";
 
@@ -35,6 +35,35 @@ export function keyboardKey(event: KeyboardEvent) {
       ? event.code.slice(3)
       : (codes[event.code] ?? names[event.key] ?? event.key.toUpperCase());
   return `${event.ctrlKey ? "⌃" : ""}${event.altKey ? "⌥" : ""}${event.shiftKey ? "⇧" : ""}${event.metaKey ? "⌘" : ""}${key}`;
+}
+
+export function timelineMarks(
+  action: "mark_in" | "mark_out" | "clear_in_out",
+  state: UiState,
+  at: string,
+  project: ProjectView,
+): UiState {
+  if (action === "clear_in_out") return { ...state, timelineMarks: null, range: null };
+  const end = parseRational(project.duration.t, true);
+  const head = frameTime(frameAt(at, project.edit_rate), project.edit_rate);
+  const time = parseRational(head, true);
+  const marks = { in: null, out: null, ...state.timelineMarks };
+  if (action === "mark_in") {
+    if (compare(time, end) >= 0) return state;
+    marks.in = head;
+    if (marks.out && compare(time, parseRational(marks.out, true)) >= 0) marks.out = null;
+  } else {
+    if (compare(time, parseRational("0s", true)) <= 0) return state;
+    marks.out = head;
+    if (marks.in && compare(time, parseRational(marks.in, true)) <= 0) marks.in = null;
+  }
+  return { ...state, timelineMarks: marks, range: markedTimelineRange(marks, project.duration.t) };
+}
+
+export function markedTimelineRange(marks: NonNullable<UiState["timelineMarks"]>, timelineEnd: string) {
+  const start = marks.in ?? "0s";
+  const duration = sub(parseRational(marks.out ?? timelineEnd, true), parseRational(start, true));
+  return duration.numerator > 0n ? { start, duration: printRational(duration, true) } : null;
 }
 
 export function editPoints(project: ProjectView) {
@@ -100,7 +129,12 @@ export function timelineEdit(action: string, project: ProjectView, state: UiStat
         .map((clip) => ({ op: "split", clip_id: clip.id, at: cut })),
     };
   }
-  if (action === "ripple_delete" || action === "lift_delete")
+  if (action === "ripple_delete" || action === "lift_delete") {
+    const { in: start, out: stop } = state.timelineMarks ?? {};
+    const tracks = project.tracks
+      .filter((track) => track.kind !== "subtitle" && !track.locked)
+      .map((track) => track.id);
+    const duration = start && stop ? sub(parseRational(stop, true), parseRational(start, true)) : null;
     return {
       label: action === "ripple_delete" ? "删除并合拢" : "删除留空隙",
       ops: selected.length
@@ -111,8 +145,18 @@ export function timelineEdit(action: string, project: ProjectView, state: UiStat
               ...(action === "ripple_delete" ? { ripple: true } : {}),
             },
           ]
-        : [],
+        : start && duration && duration.numerator > 0n && tracks.length
+          ? [
+              {
+                op: "remove_span",
+                range: { start, duration: printRational(duration, true) },
+                tracks,
+                ripple: action === "ripple_delete",
+              },
+            ]
+          : [],
     };
+  }
   if (action === "trim_start_to_playhead" || action === "trim_end_to_playhead") {
     const edge = action === "trim_start_to_playhead" ? "in" : "out";
     const targets = selected.filter((clip) => crossing.includes(clip));

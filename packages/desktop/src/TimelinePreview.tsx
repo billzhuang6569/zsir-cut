@@ -10,7 +10,8 @@ import { ClipMenu, type ClipMenuAnchor } from "./ClipMenu.js";
 import { type GainPreview, timelineGain } from "./clipProperties.js";
 import { Clip, Icon, IconButton } from "./components.js";
 import { DESKTOP_AUTHOR, type ProjectView, type useTimelinePreferences } from "./connection.js";
-import type { Placement } from "./media.js";
+import { useEditorShortcut } from "./editorShortcuts.js";
+import { isPlacementAction, type Placement, placementLabels, threePointEdit } from "./media.js";
 import { loadMediaResource, type Thumbs, thumbnailStyle, useMediaCache } from "./media-cache.js";
 import { usePreviewStream } from "./preview-stream.js";
 import { useReverseAudio } from "./reverse-audio.js";
@@ -44,7 +45,7 @@ import {
   sub,
   timecode,
 } from "./timeline.js";
-import { editPoints, keyboardKey, splitAllAt, timelineEdit } from "./timelineActions.js";
+import { editPoints, markedTimelineRange, splitAllAt, timelineEdit, timelineMarks } from "./timelineActions.js";
 import { moveClipPreview, moveGroup, moveInsert, moveTarget, snapEdges } from "./timelineMove.js";
 import { cueTrimTarget, rollTarget, type TrimEdge, trimTarget } from "./timelineTrim.js";
 import { useClipGain } from "./useClipGain.js";
@@ -1149,169 +1150,175 @@ export function TimelinePreview({
         text: "标记",
       },
     ]);
+  const markedRange = project && state.timelineMarks && markedTimelineRange(state.timelineMarks, project.duration.t);
+  const markInLabel = `设入点 ${keymap.mark_in ?? ""}`.trim();
+  const markRange = (action: "mark_in" | "mark_out" | "clear_in_out") => {
+    if (project) update(timelineMarks(action, state, at, project));
+  };
+  useEditorShortcut(viewerOnly ? "source" : "timeline", (key, event, region) => {
+    if (state.export?.open) return;
+    const action = Object.entries(keymap).find(([, binding]) => binding === key)?.[0];
+    if (!action) return;
+    const transport = ["play_pause", "shuttle_back", "shuttle_stop", "shuttle_fwd", "step_back", "step_fwd"].includes(
+      action,
+    );
+    if (viewerOnly && !transport) return;
+    if (!viewerOnly && isPlacementAction(action)) {
+      if (!project || readOnly || dragging.current || event.repeat) return;
+      const media = project.media.find((item) => item.id === state.media?.id);
+      if (!media) return;
+      const plan = threePointEdit(action, project, media, state, at, placement);
+      if ("error" in plan) setWriteError(plan.error);
+      else editClips(placementLabels[action], [...plan.added, plan.op]);
+      return true;
+    }
+    if (
+      region === "media" &&
+      !viewerOnly &&
+      !(action === "clear_in_out" || action === "open_settings" || action === "toggle_history")
+    )
+      return;
+    if (
+      [
+        "select_edit_in",
+        "select_edit_out",
+        "select_edit_both",
+        "nudge_edit_back10",
+        "nudge_edit_fwd10",
+        "tool_slip",
+        "tool_slide",
+        "copy",
+        "cut",
+        "paste",
+        "close_all_gaps",
+        "command_palette",
+      ].includes(action)
+    )
+      return;
+    if (action === "open_settings") {
+      onOpenSettings?.();
+      return true;
+    }
+    if (action === "toggle_history") {
+      update({
+        ...state,
+        history: {
+          revision: null,
+          label: null,
+          ...state.history,
+          open: !state.history?.open,
+          viewing: state.history?.revision ?? null,
+        },
+      });
+      return true;
+    }
+    if (action === "toggle_snap") {
+      void setUi({ snap: !snap });
+      return true;
+    }
+    if (action === "toggle_magnetic") {
+      void setUi({ magnetic: !magnetic });
+      return true;
+    }
+    if (action === "toggle_skimming") {
+      void setUi({ skimming: !skimming });
+      return true;
+    }
+    if (action === "track_taller" || action === "track_shorter") {
+      const heights = ["s", "m", "l"] as const;
+      void setUi({
+        track_height:
+          heights[Math.max(0, Math.min(2, heights.indexOf(trackHeight) + (action === "track_taller" ? 1 : -1)))] ?? "m",
+      });
+      return true;
+    }
+    if (action === "zoom_in" || action === "zoom_out" || action === "zoom_fit") {
+      if (!project) return;
+      const pixels = Math.max(12, (gestures.scroller.current?.clientWidth ?? 800) - 80);
+      const seconds = parseRational(project.duration.t, true);
+      const fit = seconds.numerator > 0n ? Number((BigInt(pixels) * seconds.denominator) / seconds.numerator) : 48;
+      gestures.zoom(action === "zoom_fit" ? fit : scale + (action === "zoom_out" ? -12 : 12));
+      return true;
+    }
+    if (!project || dragging.current) return;
+    if (action.startsWith("tool_")) {
+      if (event.repeat) return true;
+      temporaryTool.current = {
+        key: event.code || event.key.toLowerCase(),
+        previous: temporaryTool.current?.previous ?? tool,
+        started: performance.now(),
+        used: false,
+      };
+      setBladeHover(null);
+      setTool(action.slice(5));
+      return true;
+    }
+    if (action === "undo" || action === "redo") {
+      void write(action, action === "undo" ? "撤销" : "重做");
+      return true;
+    }
+    if (action === "add_marker") {
+      marker();
+      return true;
+    }
+    if (editAction(action)) return true;
+    if (action === "prev_edit" || action === "next_edit") {
+      jumpCut(action === "prev_edit" ? -1 : 1);
+      return true;
+    }
+    if (action === "next_review") {
+      const next = project.markers
+        .filter(
+          (marker) =>
+            marker.kind === "review" && compare(parseRational(marker.at.t, true), parseRational(at, true)) > 0,
+        )
+        .sort((a, b) => compare(parseRational(a.at.t, true), parseRational(b.at.t, true)))[0];
+      if (next) seek(next.at.t);
+      return true;
+    }
+    if (action === "mark_in" || action === "mark_out" || action === "clear_in_out") {
+      markRange(action);
+      return true;
+    }
+    const transportState = viewerOnly || !hideViewer ? state : { ...state, preview: "timeline" as const };
+    if (action === "shuttle_stop") update({ ...transportState, playing: false });
+    if (["play_pause", "shuttle_back", "shuttle_fwd"].includes(action)) {
+      setDirection(
+        action === "shuttle_back"
+          ? direction < 0n
+            ? direction <= -8n
+              ? -16n
+              : direction * 2n
+            : -1n
+          : action === "shuttle_fwd"
+            ? direction > 0n && state.playing
+              ? direction >= 8n
+                ? 16n
+                : direction * 2n
+              : 1n
+            : 1n,
+      );
+      update({
+        ...transportState,
+        playing: action === "play_pause" ? !state.playing || transportState !== state : true,
+      });
+    }
+    if (action === "step_back" || action === "step_fwd")
+      update({
+        ...transportState,
+        playing: false,
+        playhead: {
+          at: seekTarget(project, project.cues, {
+            at: frameTime(frameAt(at, project.edit_rate) + (action === "step_back" ? -1n : 1n), project.edit_rate),
+          }),
+        },
+      });
+    return true;
+  });
   useEffect(() => {
     const modifiers = (event: KeyboardEvent) => {
       if (event.key === "Shift" || event.key === "Alt")
         setBladeHover((hover) => hover && { ...hover, shift: event.shiftKey, alt: event.altKey });
-    };
-    const keydown = (event: KeyboardEvent) => {
-      modifiers(event);
-      if (event.defaultPrevented || event.isComposing || state.export?.open) return;
-      if (
-        event.target instanceof Element &&
-        event.target.closest('input,textarea,select,[contenteditable=true],[role="dialog"]')
-      )
-        return;
-      const action = Object.entries(keymap).find(([, key]) => key === keyboardKey(event))?.[0];
-      if (!action) return;
-      // The source viewer owns transport while the timeline remains mounted below it.
-      if (
-        hideViewer &&
-        state.preview === "media" &&
-        ![
-          "open_settings",
-          "toggle_history",
-          "toggle_snap",
-          "toggle_magnetic",
-          "toggle_skimming",
-          "track_taller",
-          "track_shorter",
-        ].includes(action)
-      )
-        return;
-      if (
-        viewerOnly &&
-        !["play_pause", "shuttle_back", "shuttle_stop", "shuttle_fwd", "step_back", "step_fwd"].includes(action)
-      )
-        return;
-      event.preventDefault();
-      if (action === "open_settings") {
-        onOpenSettings?.();
-        return;
-      }
-      if (action === "toggle_history") {
-        update({
-          ...state,
-          history: {
-            revision: null,
-            label: null,
-            ...state.history,
-            open: !state.history?.open,
-            viewing: state.history?.revision ?? null,
-          },
-        });
-        return;
-      }
-      if (action === "toggle_snap") {
-        void setUi({ snap: !snap });
-        return;
-      }
-      if (action === "toggle_magnetic") {
-        void setUi({ magnetic: !magnetic });
-        return;
-      }
-      if (action === "toggle_skimming") {
-        void setUi({ skimming: !skimming });
-        return;
-      }
-      if (action === "track_taller" || action === "track_shorter") {
-        const heights = ["s", "m", "l"] as const;
-        void setUi({
-          track_height:
-            heights[Math.max(0, Math.min(2, heights.indexOf(trackHeight) + (action === "track_taller" ? 1 : -1)))] ??
-            "m",
-        });
-        return;
-      }
-      if (action === "zoom_in" || action === "zoom_out" || action === "zoom_fit") {
-        if (state.panel === "media" || !project) return;
-        const pixels = Math.max(12, (gestures.scroller.current?.clientWidth ?? 800) - 80);
-        const seconds = parseRational(project.duration.t, true);
-        const fit = seconds.numerator > 0n ? Number((BigInt(pixels) * seconds.denominator) / seconds.numerator) : 48;
-        gestures.zoom(action === "zoom_fit" ? fit : scale + (action === "zoom_out" ? -12 : 12));
-        return;
-      }
-      if (!project || dragging.current) return;
-      if (action.startsWith("tool_")) {
-        if (event.repeat) return;
-        temporaryTool.current = {
-          key: event.code || event.key.toLowerCase(),
-          previous: temporaryTool.current?.previous ?? tool,
-          started: performance.now(),
-          used: false,
-        };
-        setBladeHover(null);
-        setTool(action.slice(5));
-        return;
-      }
-      if (action === "undo" || action === "redo") {
-        void write(action, action === "undo" ? "撤销" : "重做");
-        return;
-      }
-      if (action === "add_marker") {
-        marker();
-        return;
-      }
-      if (editAction(action)) return;
-      if (action === "prev_edit" || action === "next_edit") {
-        jumpCut(action === "prev_edit" ? -1 : 1);
-        return;
-      }
-      if (action === "next_review") {
-        const next = project.markers
-          .filter(
-            (marker) =>
-              marker.kind === "review" && compare(parseRational(marker.at.t, true), parseRational(at, true)) > 0,
-          )
-          .sort((a, b) => compare(parseRational(a.at.t, true), parseRational(b.at.t, true)))[0];
-        if (next) seek(next.at.t);
-        return;
-      }
-      if (action === "mark_in" || action === "mark_out") {
-        const head = parseRational(at, true);
-        const start = action === "mark_in" ? head : parseRational(state.range?.start ?? "0s", true);
-        const end =
-          action === "mark_out"
-            ? head
-            : state.range
-              ? add(parseRational(state.range.start, true), parseRational(state.range.duration, true))
-              : parseRational(project.duration.t, true);
-        if (compare(end, start) > 0)
-          update({
-            ...state,
-            range: { start: printRational(start, true), duration: printRational(sub(end, start), true) },
-          });
-        return;
-      }
-      if (action === "shuttle_stop") update({ ...state, playing: false });
-      if (["play_pause", "shuttle_back", "shuttle_fwd"].includes(action)) {
-        setDirection(
-          action === "shuttle_back"
-            ? direction < 0n
-              ? direction <= -8n
-                ? -16n
-                : direction * 2n
-              : -1n
-            : action === "shuttle_fwd"
-              ? direction > 0n && state.playing
-                ? direction >= 8n
-                  ? 16n
-                  : direction * 2n
-                : 1n
-              : 1n,
-        );
-        update({ ...state, playing: action === "play_pause" ? !state.playing : true });
-      }
-      if (action === "step_back" || action === "step_fwd")
-        update({
-          ...state,
-          playing: false,
-          playhead: {
-            at: seekTarget(project, project.cues, {
-              at: frameTime(frameAt(at, project.edit_rate) + (action === "step_back" ? -1n : 1n), project.edit_rate),
-            }),
-          },
-        });
     };
     const keyup = (event: KeyboardEvent) => {
       modifiers(event);
@@ -1328,11 +1335,11 @@ export function TimelinePreview({
       temporaryTool.current = null;
       setBladeHover(null);
     };
-    window.addEventListener("keydown", keydown);
+    window.addEventListener("keydown", modifiers);
     window.addEventListener("keyup", keyup);
     window.addEventListener("blur", blur);
     return () => {
-      window.removeEventListener("keydown", keydown);
+      window.removeEventListener("keydown", modifiers);
       window.removeEventListener("keyup", keyup);
       window.removeEventListener("blur", blur);
     };
@@ -1453,7 +1460,7 @@ export function TimelinePreview({
     seek((direction === -1 ? candidates.at(-1) : candidates[0]) ?? at);
   }
   const viewer = (
-    <section aria-label="预览" className="zc-viewer zc-panel">
+    <section aria-label="预览" className="zc-viewer zc-panel" data-editor-region={viewerOnly ? "media" : "timeline"}>
       {(error || writeError) && (
         <p role="alert" title={error ? errorDetail : writeErrorDetail}>
           {error || writeError}
@@ -1588,7 +1595,9 @@ export function TimelinePreview({
         />
       </div>
       <div className="zc-player">
-        <IconButton icon="inOut" label="设入点 I" />
+        {!viewerOnly && (
+          <IconButton icon="inOut" label={markInLabel} onClick={() => markRange("mark_in")} disabled={!project} />
+        )}
         <output ref={clock} aria-label="播放时码">
           {project ? timecode(previewAt, project) : "00:00:00:00"}
         </output>
@@ -1700,13 +1709,14 @@ export function TimelinePreview({
       )}
       {!hideViewer && (viewerTarget ? createPortal(viewer, viewerTarget) : viewer)}
       {!viewerOnly && !hideTimeline && (
-        <section className="zc-timeline-card zc-panel" aria-label="时间线卡片">
+        <section className="zc-timeline-card zc-panel" aria-label="时间线卡片" data-editor-region="timeline">
           <section aria-label="工具栏" className="zc-toolbar">
             <IconButton
               icon="select"
               label={`选择 ${keymap.tool_select ?? ""}`}
               pressed={tool === "select"}
-              onClick={() => {
+              onClick={(event) => {
+                event.currentTarget.focus({ preventScroll: true });
                 setBladeHover(null);
                 setTool("select");
               }}
@@ -1716,7 +1726,8 @@ export function TimelinePreview({
               label={`切割 ${keymap.tool_blade ?? ""}`}
               pressed={tool === "blade"}
               disabled={!project || busy || readOnly}
-              onClick={() => {
+              onClick={(event) => {
+                event.currentTarget.focus({ preventScroll: true });
                 setBladeHover(null);
                 setTool("blade");
               }}
@@ -1727,6 +1738,9 @@ export function TimelinePreview({
               disabled={!project || busy || readOnly}
               onClick={marker}
             />
+            {hideViewer && (
+              <IconButton icon="inOut" label={markInLabel} onClick={() => markRange("mark_in")} disabled={!project} />
+            )}
             {revisionControlsTarget ? createPortal(revisionControls, revisionControlsTarget) : revisionControls}
             <IconButton
               icon="snap"
@@ -1753,7 +1767,8 @@ export function TimelinePreview({
               icon="roll"
               label={`滚动编辑 ${keymap.tool_roll ?? ""}`}
               pressed={tool === "roll"}
-              onClick={() => {
+              onClick={(event) => {
+                event.currentTarget.focus({ preventScroll: true });
                 setBladeHover(null);
                 setTool("roll");
               }}
@@ -1793,6 +1808,7 @@ export function TimelinePreview({
             aria-label="时间线"
             className={`zc-timeline zc-track-height-${trackHeight}${tool === "blade" ? " is-blade" : ""}`}
             ref={gestures.scroller}
+            tabIndex={-1}
             {...gestures.handlers}
             {...drop.handlers}
             onPointerDown={(event) => {
@@ -1830,6 +1846,9 @@ export function TimelinePreview({
                   'input,textarea,select,[contenteditable]:not([contenteditable="false"]),.zc-selectable,p[role="alert"]',
                 )
               ) {
+                const focus =
+                  (event.target as Element).closest<HTMLElement>("button,[tabindex]") ?? event.currentTarget;
+                focus.focus({ preventScroll: true });
                 preventPointerSelection(event);
                 window.getSelection()?.removeAllRanges();
               }
@@ -1896,6 +1915,13 @@ export function TimelinePreview({
                         point(event.clientX, ruler);
                     }}
                   >
+                    {markedRange && (
+                      <span
+                        className="zc-timeline-range"
+                        aria-hidden="true"
+                        style={{ left: pixelAt(markedRange.start, scale), width: pixelAt(markedRange.duration, scale) }}
+                      />
+                    )}
                     {project.markers
                       .filter((marker) => marker.kind === "chapter")
                       .sort((a, b) => compare(parseRational(a.at.t, true), parseRational(b.at.t, true)))

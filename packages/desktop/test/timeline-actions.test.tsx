@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type Action, mergeKeymap, type presets } from "../../app-host/src/keymap.js";
 import { connectHost, DESKTOP_AUTHOR, type ProjectView } from "../src/connection.js";
+import { type Placement, threePointEdit } from "../src/media.js";
 import { applyUi, initialState } from "../src/state.js";
 import { add, compare, frameTime, parseRational, sub } from "../src/timeline.js";
 import { recordingCanvas } from "./canvas.js";
@@ -1015,3 +1016,112 @@ describe.each(["fcp", "premiere"] as const)("%s timeline clicks", (value) => {
     expect(state.playhead).toEqual({ at: "1s" });
   });
 });
+
+it("sets timeline I/O, highlights the range and clears it", async () => {
+  showViewer = true;
+  await act(async () => render());
+  await click(get('[aria-label="设入点 I"]'));
+  expect(state.timelineMarks).toEqual({ in: "2s", out: null });
+  expect(get(".zc-timeline-range").style.left).toBe("96px");
+  state = { ...state, playhead: { at: "4s" } };
+  await act(async () => render());
+  await action("mark_out");
+  expect(state.timelineMarks).toEqual({ in: "2s", out: "4s" });
+  expect(state.range).toEqual({ start: "2s", duration: "2s" });
+  expect(get(".zc-timeline-range").style.width).toBe("96px");
+  await action("clear_in_out");
+  expect(state.timelineMarks).toBeNull();
+  expect(state.range).toBeNull();
+  expect(get(".zc-timeline-range")).toBeNull();
+});
+
+it.each(["insert_edit", "overwrite_edit", "append_edit", "connect_edit"] as const)(
+  "submits a single edit for %s",
+  async (name) => {
+    project = {
+      ...project,
+      media: [
+        {
+          id: "media",
+          kind: "video",
+          duration: "20s",
+          video: { rate: "25", width: 1920, height: 1080 },
+          audio: { sample_rate: "48000", channels: 2 },
+        },
+      ],
+    };
+    state = {
+      ...state,
+      media: { id: "media", at: "1s", in: "1s", out: "3s" },
+      timelineMarks: { in: "1s", out: "4s" },
+    };
+    await act(async () => render());
+    await action(name);
+    const connect = name === "connect_edit";
+    expect(writes()).toHaveLength(1);
+    expect(writes()[0]).toEqual([
+      "edit",
+      expect.objectContaining({
+        author: DESKTOP_AUTHOR,
+        base_revision: "revision",
+        timeline_id: project.id,
+      }),
+    ]);
+    const ops = lastOps() as Record<string, unknown>[];
+    expect(ops).toHaveLength(connect ? 3 : 1);
+    if (connect) {
+      expect(ops.slice(0, 2)).toEqual([
+        { op: "add_track", kind: "video", index: 1, id: expect.any(String) },
+        { op: "add_track", kind: "audio", index: 3, id: expect.any(String) },
+      ]);
+    }
+    expect(ops.at(-1)).toEqual({
+      op: "place",
+      media_id: "media",
+      source_start: "1s",
+      duration: "2s",
+      at: connect ? "2s" : name === "append_edit" ? "end" : "1s",
+      mode: connect || name === "overwrite_edit" ? "overwrite" : "insert",
+      video_track: connect ? ops[0]?.id : "t0",
+      audio_track: connect ? ops[1]?.id : "t1",
+    });
+  },
+);
+
+it.each(["ripple_delete", "lift_delete"] as const)(
+  "deletes a marked interval with %s on unlocked media tracks",
+  async (name) => {
+    project = { ...project, tracks: project.tracks.map((track, i) => (i === 1 ? { ...track, locked: true } : track)) };
+    state = { ...state, timelineMarks: { in: "1s", out: "3s" } };
+    await act(async () => render());
+    await action(name);
+    expect(writes()).toHaveLength(1);
+    expect(lastOps()).toEqual([
+      {
+        op: "remove_span",
+        range: { start: "1s", duration: "2s" },
+        tracks: ["t0", "t2"],
+        ripple: name === "ripple_delete",
+      },
+    ]);
+  },
+);
+
+it.each(["video", "audio"] as const)(
+  "uses the playhead for an out-only range and places only %s",
+  (placement: Placement) => {
+    const media = {
+      id: "media",
+      kind: "video",
+      duration: "3s",
+      video: { rate: "25", width: 1920, height: 1080 },
+      audio: { sample_rate: "48000", channels: 2 },
+    };
+    const range = { ...state, timelineMarks: { in: null, out: "4s" } };
+    const plan = threePointEdit("overwrite_edit", project, media, range, "2s", placement);
+    expect(plan).toMatchObject({
+      op: { at: "2s", duration: "3s", ...(placement === "video" ? { video_track: "t0" } : { audio_track: "t1" }) },
+    });
+    expect("op" in plan && plan.op).not.toHaveProperty(placement === "video" ? "audio_track" : "video_track");
+  },
+);

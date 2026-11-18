@@ -65,7 +65,7 @@ async function send(socket: WebSocket, verb: string, request: unknown = {}) {
   return response.envelope;
 }
 it("defines every action exactly once in both presets using canonical notation", () => {
-  expect(actions).toHaveLength(36);
+  expect(actions).toHaveLength(53);
   expect(presets.fcp.toggle_skimming).toBe("S");
   expect(presets.premiere.toggle_skimming).toBe("⇧S");
   expect(keyNotation.test("A\n")).toBe(false);

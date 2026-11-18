@@ -2,14 +2,17 @@ import { isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { type Action, fcp } from "../../app-host/src/keymap.js";
 import type { UiState } from "../../app-host/src/ui.js";
 import { Icon, IconButton } from "./components.js";
 import type { ProjectView } from "./connection.js";
 import { DESKTOP_AUTHOR } from "./connection.js";
-import { mediaDuration, mediaRange, middle, type Placement, placeMedia, sourceProject } from "./media.js";
+import { useEditorShortcut } from "./editorShortcuts.js";
+import { mediaDuration, mediaRange, middle, type Placement, sourceProject, threePointEdit } from "./media.js";
+import { displayKey } from "./settings-keymap.js";
 import { mediaUrl, Wave } from "./TimelinePreview.js";
 import { ceil, compare, floor, frameTime, type MediaView, parseRational, seekTarget, timecode } from "./timeline.js";
-import { dropMode, dropPosition, MEDIA_DRAG } from "./timelineDrop.js";
+import { dropPosition, MEDIA_DRAG } from "./timelineDrop.js";
 import { listenFileDrop } from "./useFileDrop.js";
 import "./media.css";
 
@@ -219,7 +222,7 @@ export function useMediaPanel({
   call,
   config,
   placement = "av",
-  magnetic = true,
+  keymap = fcp,
   preset = "fcp",
   canPlace = true,
 }: {
@@ -229,7 +232,7 @@ export function useMediaPanel({
   call: (verb: string, request: Record<string, unknown>) => Promise<unknown>;
   config?: Config | undefined;
   placement?: Placement;
-  magnetic?: boolean;
+  keymap?: Record<Action, string | null>;
   preset?: "fcp" | "premiere";
   canPlace?: boolean;
 }) {
@@ -318,10 +321,11 @@ export function useMediaPanel({
           : undefined,
     });
   };
-  const place = (event = { altKey: false, metaKey: false }) => {
+  const placementAction = preset === "fcp" ? "connect_edit" : "insert_edit";
+  const place = () => {
     if (!selected || !project || !canPlace) return;
     const at = seekTarget(project, project.cues, state.playhead);
-    const plan = placeMedia(project, selected, state, at, { placement, mode: dropMode(magnetic, preset, event) });
+    const plan = threePointEdit(placementAction, project, selected, state, at, placement);
     if ("error" in plan) {
       setError(plan.error);
       return;
@@ -389,49 +393,37 @@ export function useMediaPanel({
       () => setError("无法接收拖入的文件"),
     );
   }, [state.panel]);
-  useEffect(() => {
-    if (state.panel !== "media") return;
-    const key = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.isComposing || state.export?.open) return;
+  useEditorShortcut(
+    "media",
+    (key, event) => {
+      if (state.panel !== "media" || state.export?.open) return;
+      const action = Object.entries(keymap).find(([, binding]) => binding === key)?.[0];
       if (
-        e.target instanceof Element &&
-        e.target.closest('input,textarea,select,[contenteditable=true],[role="dialog"]')
-      )
-        return;
-      const key = e.key.toLowerCase();
-      if (e.metaKey && ["+", "=", "-"].includes(key)) {
-        e.preventDefault();
+        ["⌘=", "⇧⌘=", "⌘-"].includes(key) &&
+        event.metaKey &&
+        (!action || ["zoom_in", "zoom_out", "track_taller", "track_shorter"].includes(action))
+      ) {
         update({
           ...state,
-          mediaBrowser: { ...browser, size: Math.max(110, Math.min(280, size + (key === "-" ? -20 : 20))) },
+          mediaBrowser: { ...browser, size: Math.max(110, Math.min(280, size + (key === "⌘-" ? -20 : 20))) },
         });
+        return true;
       }
-      if (key === "q" && state.preview === "media" && !e.repeat && !e.ctrlKey && !e.shiftKey) {
-        e.preventDefault();
-        place(e);
+      const markIn = key === keymap.mark_in;
+      if (!selected || !state.media || selected.kind === "image" || (!markIn && key !== keymap.mark_out)) return;
+      const media = { ...state.media };
+      if (markIn) {
+        if (compare(parseRational(media.at, true), parseRational(mediaDuration(selected), true)) >= 0) return true;
+        media.in = media.at;
+        if (media.out && compare(parseRational(media.out, true), parseRational(media.at, true)) <= 0) media.out = null;
+      } else if (compare(parseRational(media.at, true), parseRational(media.in ?? "0s", true)) > 0) {
+        media.out = media.at;
       }
-      if (
-        state.preview === "media" &&
-        selected &&
-        state.media &&
-        ["i", "o"].includes(key) &&
-        selected.kind !== "image"
-      ) {
-        e.preventDefault();
-        const media = { ...state.media };
-        if (key === "i") {
-          if (compare(parseRational(media.at, true), parseRational(mediaDuration(selected), true)) >= 0) return;
-          media.in = media.at;
-          if (media.out && compare(parseRational(media.out, true), parseRational(media.at, true)) <= 0)
-            media.out = null;
-        } else if (compare(parseRational(media.at, true), parseRational(media.in ?? "0s", true)) > 0)
-          media.out = media.at;
-        update({ ...state, media });
-      }
-    };
-    window.addEventListener("keydown", key);
-    return () => window.removeEventListener("keydown", key);
-  });
+      update({ ...state, media });
+      return true;
+    },
+    state.panel === "media" && state.preview === "media",
+  );
   const folders = [
     ...new Set(
       media.flatMap(
@@ -496,7 +488,7 @@ export function useMediaPanel({
     />
   );
   const library = (
-    <div ref={area} className="zc-panel-body zc-media-library">
+    <div ref={area} className="zc-panel-body zc-media-library" data-editor-region="media">
       <header className="zc-media-head">
         <label className="zc-search">
           <Icon name="search" />
@@ -581,7 +573,10 @@ export function useMediaPanel({
             data-media-id={m.id}
             aria-pressed={selectedMedia.some((item) => item.id === m.id)}
             className="zc-media-card"
-            onClick={(e) => choose(m, e.metaKey || e.ctrlKey)}
+            onClick={(e) => {
+              e.currentTarget.focus({ preventScroll: true });
+              choose(m, e.metaKey || e.ctrlKey);
+            }}
             onDragStart={(e) => {
               e.dataTransfer.setData(MEDIA_DRAG, m.id);
               e.dataTransfer.effectAllowed = "copy";
@@ -654,12 +649,18 @@ export function useMediaPanel({
         把视频、音频、图片拖到这里
       </section>
       <p className="zc-hint zc-media-shortcuts zc-media-hint">
-        <kbd>I</kbd> <kbd>O</kbd> 设范围　<kbd>Q</kbd> 加到时间线
+        {keymap.mark_in && <kbd>{displayKey(keymap.mark_in)}</kbd>}{" "}
+        {keymap.mark_out && <kbd>{displayKey(keymap.mark_out)}</kbd>} 设范围
+        {keymap[placementAction] && (
+          <>
+            　<kbd>{displayKey(keymap[placementAction])}</kbd> 加到时间线
+          </>
+        )}
       </p>
     </div>
   );
   const parameters = selected ? (
-    <div className="zc-panel-body zc-media-info" key={selected.id}>
+    <div className="zc-panel-body zc-media-info" data-editor-region="media" key={selected.id}>
       {config && selected.kind !== "audio" && (
         <img className="zc-media-cover" alt="素材封面" src={mediaUrl(config, "thumb", selected.id, middle(selected))} />
       )}
@@ -804,7 +805,7 @@ export function useMediaPanel({
         commit={(v) => organize("link", v)}
       />
       <button type="button" className="zc-btn" disabled={busy || !canPlace} onClick={() => place()}>
-        加到时间线 <kbd>Q</kbd>
+        加到时间线 {keymap[placementAction] && <kbd>{displayKey(keymap[placementAction])}</kbd>}
       </button>
       {isTauri() && selected.path && (
         <button

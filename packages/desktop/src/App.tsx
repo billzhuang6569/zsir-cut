@@ -14,6 +14,7 @@ import {
   useTimelinePreferences,
 } from "./connection.js";
 import { ExportPanel } from "./ExportPanel.js";
+import { useEditorShortcut } from "./editorShortcuts.js";
 import { useHistoryPanel } from "./HistoryPanel.js";
 import { LayoutDivider } from "./LayoutDivider.js";
 import { useMediaPanel } from "./MediaPanel.js";
@@ -22,7 +23,6 @@ import { ProjectEntry } from "./ProjectEntry.js";
 import { ReviewView } from "./ReviewView.js";
 import { SettingsPage } from "./SettingsPage.js";
 import { useSubtitlePanel } from "./SubtitlePanel.js";
-import { recordedKey } from "./settings-keymap.js";
 import { applyUi, initialState, type UiState } from "./state.js";
 import { TimelinePreview } from "./TimelinePreview.js";
 import { seekTarget } from "./timeline.js";
@@ -191,50 +191,19 @@ export function App({ config }: { config?: { port: number; token: string } }) {
       }}
     />
   );
-  useEffect(() => {
-    const keydown = (event: KeyboardEvent) => {
-      if (
-        (event.metaKey || event.ctrlKey) &&
-        event.key.toLowerCase() === "a" &&
-        !event.altKey &&
-        !event.isComposing &&
-        !(
-          event.target instanceof Element &&
-          event.target.closest('input,textarea,[contenteditable]:not([contenteditable="false"])')
-        )
-      )
-        event.preventDefault();
-    };
-    window.addEventListener("keydown", keydown);
-    return () => window.removeEventListener("keydown", keydown);
-  }, []);
   const history = useHistoryPanel({ project, state, update, call: rawCall, subscribe });
-  const settingsKey = preferences.keymap.open_settings;
-  const historyKey = preferences.keymap.toggle_history;
-  useEffect(() => {
-    const keydown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.isComposing || event.repeat || document.querySelector("dialog[open]")) return;
-      if (
-        !event.metaKey &&
-        !event.ctrlKey &&
-        !event.altKey &&
-        event.target instanceof Element &&
-        event.target.closest("input, textarea, [contenteditable=true]")
-      )
-        return;
-      if (historyKey && recordedKey(event) === historyKey && current.current.project) {
-        event.preventDefault();
-        event.stopPropagation();
-        history.toggle();
-      } else if (settingsKey && recordedKey(event) === settingsKey) {
-        event.preventDefault();
-        event.stopPropagation();
-        setSettingsOpen("通用");
-      }
-    };
-    window.addEventListener("keydown", keydown, true);
-    return () => window.removeEventListener("keydown", keydown, true);
-  }, [settingsKey, historyKey, history.toggle]);
+  useEditorShortcut("global", (key, event) => {
+    if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "a") return true;
+    if (event.repeat || document.querySelector("dialog[open]")) return;
+    if (key === preferences.keymap.toggle_history && current.current.project) {
+      history.toggle();
+      return true;
+    }
+    if (key === preferences.keymap.open_settings) {
+      setSettingsOpen("通用");
+      return true;
+    }
+  });
   useEffect(() => {
     const open = (event: Event) => {
       const id = (event as CustomEvent<string>).detail;
@@ -259,7 +228,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
     call,
     config,
     placement,
-    magnetic: preferences.magnetic,
+    keymap: preferences.keymap,
     preset: preferences.preset,
     canPlace: !history.viewing && !reviewSession,
   });
