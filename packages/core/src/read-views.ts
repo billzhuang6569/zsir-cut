@@ -250,6 +250,7 @@ export async function inspect(
         kind: track.kind,
         name: track.name,
         enabled: track.enabled,
+        ...(track.locked === true ? { locked: true } : {}),
         ...(track.kind === "subtitle"
           ? { clips: [], transitions: [] }
           : {

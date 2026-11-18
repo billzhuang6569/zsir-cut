@@ -36,6 +36,7 @@ export interface TrackView {
   name: string;
   kind: "video" | "audio" | "subtitle";
   enabled: boolean;
+  locked?: boolean;
   clips: ClipView[];
 }
 export interface TimelineView {

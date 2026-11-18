@@ -2,6 +2,7 @@ import type { UiState } from "../../app-host/src/ui.js";
 import type { ProjectView } from "./connection.js";
 import {
   add,
+  compare,
   div,
   floor,
   frameAt,
@@ -55,13 +56,23 @@ export function placeMedia(
   at: string,
   options: {
     target?: DropTarget;
+    editTargets?: Partial<Record<MediaKind, string>>;
+    connect?: boolean;
     placement?: Placement;
     mode?: PlaceMode;
     trackId?: (kind: MediaKind) => string;
     pairs?: ReadonlyMap<string, string>;
   } = {},
 ) {
-  const { target, placement = "av", mode = "insert", trackId = () => `trk_${crypto.randomUUID()}`, pairs } = options;
+  const {
+    target,
+    placement = "av",
+    mode = "insert",
+    trackId = () => `trk_${crypto.randomUUID()}`,
+    pairs,
+    editTargets,
+    connect,
+  } = options;
   const range = placementRange(project, media, state);
   const kinds = placementKinds(media, placement);
   const clicked = target && "track" in target ? project.tracks.find((track) => track.id === target.track) : undefined;
@@ -83,22 +94,47 @@ export function placeMedia(
     return { error: kinds[0] === "audio" ? "请把声音放到声音轨" : "请把画面放到视频轨" } as const;
   if (range.duration === "0s") return { error: "素材范围不足一帧" } as const;
 
-  const primary =
-    clicked?.id ??
-    (target && "index" in target
-      ? create(primaryKind, target.index)
-      : (byKind(primaryKind)[0]?.id ?? create(primaryKind)));
-  const primaryTracks = byKind(primaryKind);
-  const ordinal = primaryTracks.findIndex((track) => track.id === primary);
-  const occurrences = new Set(primaryTracks[ordinal]?.clips.flatMap((clip) => clip.occurrence_id ?? []) ?? []);
-  const destinations = kinds.map((kind) => {
-    if (kind === primaryKind) return { kind, id: primary };
-    const peers = byKind(kind);
-    const paired =
-      peers.find((track) => track.id === pairs?.get(primary)) ??
-      peers.find((track) => track.clips.some((clip) => clip.occurrence_id && occurrences.has(clip.occurrence_id)));
-    return { kind, id: paired?.id ?? peers[ordinal]?.id ?? create(kind) };
-  });
+  let destinations: { kind: MediaKind; id: string }[];
+  if (editTargets) {
+    const start = parseRational(at === "end" ? project.duration.t : at, true);
+    const end = add(start, parseRational(range.duration, true));
+    destinations = kinds.map((kind) => {
+      const peers = byKind(kind);
+      const base = peers.find((track) => track.id === editTargets[kind]) ?? peers[0];
+      if (!connect) return { kind, id: base?.id ?? create(kind) };
+      const index = base ? tracks.indexOf(base) + 1 : tracks.length;
+      const empty = tracks
+        .slice(index)
+        .find(
+          (track) =>
+            track.kind === kind &&
+            !track.locked &&
+            track.clips.every(
+              (clip) =>
+                compare(parseRational(clip.timeline_out.t, true), start) <= 0 ||
+                compare(parseRational(clip.timeline_in.t, true), end) >= 0,
+            ),
+        );
+      return { kind, id: empty?.id ?? create(kind, index) };
+    });
+  } else {
+    const primary =
+      clicked?.id ??
+      (target && "index" in target
+        ? create(primaryKind, target.index)
+        : (byKind(primaryKind)[0]?.id ?? create(primaryKind)));
+    const primaryTracks = byKind(primaryKind);
+    const ordinal = primaryTracks.findIndex((track) => track.id === primary);
+    const occurrences = new Set(primaryTracks[ordinal]?.clips.flatMap((clip) => clip.occurrence_id ?? []) ?? []);
+    destinations = kinds.map((kind) => {
+      if (kind === primaryKind) return { kind, id: primary };
+      const peers = byKind(kind);
+      const paired =
+        peers.find((track) => track.id === pairs?.get(primary)) ??
+        peers.find((track) => track.clips.some((clip) => clip.occurrence_id && occurrences.has(clip.occurrence_id)));
+      return { kind, id: paired?.id ?? peers[ordinal]?.id ?? create(kind) };
+    });
+  }
   const video = destinations.find(({ kind }) => kind === "video");
   const audio = destinations.find(({ kind }) => kind === "audio");
   const op = {
@@ -112,6 +148,42 @@ export function placeMedia(
   };
   return { op, added, destinations, tracks };
 }
+export const placementLabels = {
+  insert_edit: "插入素材",
+  overwrite_edit: "覆盖放置素材",
+  append_edit: "追加素材",
+  connect_edit: "连接素材",
+};
+export type PlacementAction = keyof typeof placementLabels;
+
+export function isPlacementAction(action: string): action is PlacementAction {
+  return Object.hasOwn(placementLabels, action);
+}
+
+export function threePointEdit(
+  action: PlacementAction,
+  project: ProjectView,
+  media: MediaView,
+  state: UiState,
+  playhead: string,
+  placement: Placement,
+  editTargets: Partial<Record<MediaKind, string>> = {},
+) {
+  if (media.kind === "audio" && placement === "video") return { error: "素材没有可放入的画面" } as const;
+  const connect = action === "connect_edit";
+  const insert = action === "insert_edit" || action === "append_edit";
+  const at =
+    action === "append_edit"
+      ? "end"
+      : frameTime(frameAt((!connect && state.timelineMarks?.in) || playhead, project.edit_rate), project.edit_rate);
+  return placeMedia(project, media, state, at, {
+    placement,
+    mode: insert ? "insert" : "overwrite",
+    editTargets,
+    connect,
+  });
+}
+
 export function sourceProject(project: ProjectView, media: MediaView): ProjectView {
   const duration = mediaDuration(media);
   return {

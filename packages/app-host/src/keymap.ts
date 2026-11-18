@@ -35,6 +35,23 @@ export const premiere = {
   redo: "⇧⌘Z",
   toggle_history: "⌥⌘H",
   open_settings: "⌘,",
+  insert_edit: ",",
+  overwrite_edit: ".",
+  append_edit: "⇧E",
+  connect_edit: "⇧,",
+  clear_in_out: "⌃⇧X",
+  select_edit_in: "[",
+  select_edit_out: "]",
+  select_edit_both: "⇧\\",
+  nudge_edit_back10: "⌥⇧Left",
+  nudge_edit_fwd10: "⌥⇧Right",
+  tool_slip: "Y",
+  tool_slide: "U",
+  copy: "⌘C",
+  cut: "⌘X",
+  paste: "⌘V",
+  close_all_gaps: "⌥⌘G",
+  command_palette: "⇧⌘P",
 } as const;
 export type Action = keyof typeof premiere;
 export const fcp: Record<Action, string> = {
@@ -59,6 +76,14 @@ export const fcp: Record<Action, string> = {
   toggle_snap: "N",
   toggle_magnetic: "P",
   toggle_skimming: "S",
+  insert_edit: "W",
+  overwrite_edit: "D",
+  append_edit: "E",
+  connect_edit: "Q",
+  clear_in_out: "⌥X",
+  select_edit_both: "\\",
+  nudge_edit_back10: "⇧,",
+  nudge_edit_fwd10: "⇧.",
 };
 export const presets = { premiere, fcp };
 export const actions = Object.keys(premiere) as Action[];

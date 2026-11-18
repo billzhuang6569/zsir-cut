@@ -125,6 +125,7 @@ export interface MediaTrack {
   kind: "video" | "audio";
   name: string;
   enabled: boolean;
+  locked?: boolean;
   clips: Clip[];
   transitions: Transition[];
   ext?: Extension;
@@ -152,6 +153,7 @@ export interface SubtitleTrack {
   kind: "subtitle";
   name: string;
   enabled: boolean;
+  locked?: boolean;
   language: string;
   carrier_tracks: string[];
   default_style_id: string;

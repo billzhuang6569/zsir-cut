@@ -20,6 +20,7 @@ export interface UiState {
   playing: boolean;
   range: { start: string; duration: string } | null;
   loop: boolean;
+  timelineMarks?: { in: string | null; out: string | null } | null;
   history?:
     | {
         open: boolean;

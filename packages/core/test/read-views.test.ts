@@ -90,6 +90,16 @@ describe("read views", () => {
     expect(history).toEqual({ entries: [] });
   });
 
+  it("exposes locked tracks in the timeline view for range edits", async () => {
+    const source = await project();
+    source.timelines[0]!.tracks.find((track) => track.id === "trk_v1")!.locked = true;
+    await writeFile(path, serializeProject(source));
+    const timeline = (await result("inspect", { view: "timeline" })).result;
+    expect(timeline).toMatchObject({
+      tracks: expect.arrayContaining([expect.objectContaining({ id: "trk_v1", locked: true })]),
+    });
+  });
+
   it("uses 29.97 drop-frame sequence timecode", async () => {
     await copyFile(new URL("../../../fixtures/projects/std-2997-df.zcut.json", import.meta.url), path);
     const timeline = (await result("inspect", { view: "timeline" })).result as {

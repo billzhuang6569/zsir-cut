@@ -76,7 +76,13 @@ afterEach(() => {
 });
 const config = { port: 1234, token: "test" };
 const palette = Array.from({ length: 9 }, (_, i) => `#${String(i).repeat(6)}`);
-async function mount(nativeMode = false, preview = false, view = project, withConfig = false) {
+async function mount(
+  nativeMode = false,
+  preview = false,
+  view = project,
+  withConfig = false,
+  preset: "fcp" | "premiere" = "fcp",
+) {
   native.enabled = nativeMode;
   updateMediaCache(config, {
     media: view.media.map((item) => ({
@@ -101,7 +107,10 @@ async function mount(nativeMode = false, preview = false, view = project, withCo
   let refresh: (next: ProjectView) => void = () => {};
   const timelineCall = (verb: string, request: Record<string, unknown>) =>
     verb === "prefs_get"
-      ? Promise.resolve({ prefs: { ui: { snap: true, magnetic: true, track_height: "m" } }, ...mergeKeymap("fcp", {}) })
+      ? Promise.resolve({
+          prefs: { keymap: { preset }, ui: { snap: true, magnetic: true, track_height: "m" } },
+          ...mergeKeymap(preset, {}),
+        })
       : call(verb, request);
   function Harness() {
     const [ui, update] = useState(state);
@@ -116,6 +125,8 @@ async function mount(nativeMode = false, preview = false, view = project, withCo
       update,
       call,
       placement,
+      preset,
+      keymap: mergeKeymap(preset, {}).keymap,
       config: withConfig ? config : undefined,
     });
     const source = preview && ui.preview === "media" && panel.selected ? sourceProject(project, panel.selected) : null;
@@ -125,17 +136,30 @@ async function mount(nativeMode = false, preview = false, view = project, withCo
         {panel.library}
         {panel.parameters}
         <output aria-label="当前状态">{JSON.stringify(ui)}</output>
+        {source && (
+          <TimelinePreview
+            project={source}
+            viewerOnly
+            state={{ ...ui, playhead: { at: ui.media?.at ?? "0s" }, range: null }}
+            update={(next) => {
+              if (ui.media)
+                update({
+                  ...ui,
+                  playing: next.playing,
+                  media: { ...ui.media, at: "at" in next.playhead ? next.playhead.at : "0s" },
+                });
+            }}
+            config={undefined}
+            error={null}
+            dragging={{ current: false }}
+            call={timelineCall}
+          />
+        )}
         <TimelinePreview
-          project={source ?? currentProject}
-          viewerOnly={Boolean(source)}
-          state={source ? { ...ui, playhead: { at: ui.media?.at ?? "0s" } } : ui}
-          update={(next) =>
-            update(
-              source && ui.media
-                ? { ...ui, media: { ...ui.media, at: "at" in next.playhead ? next.playhead.at : "0s" } }
-                : next,
-            )
-          }
+          project={currentProject}
+          hideViewer={Boolean(source)}
+          state={ui}
+          update={update}
           config={undefined}
           error={null}
           dragging={{ current: false }}
@@ -267,40 +291,78 @@ it("sends every organizing field and browser import paths only at submission", a
     await h.close();
   }
 });
-it("sets I/O in source time, Q inserts at the timeline head, and source preview shows the source timecode", async () => {
-  const h = await mount(false, true);
+it.each(["fcp", "premiere"] as const)("routes source range and Q by focus with the %s preset", async (preset) => {
+  const clip = {
+    id: "clip",
+    media_id: media.id,
+    label: null,
+    enabled: true,
+    speed: "1",
+    timeline_in: { t: "0s" },
+    timeline_out: { t: "8s" },
+    source_in: { t: "0s" },
+    source_out: { t: "8s" },
+  };
+  const h = await mount(
+    false,
+    true,
+    { ...project, tracks: project.tracks.map((track, i) => (i === 0 ? { ...track, clips: [clip] } : track)) },
+    false,
+    preset,
+  );
   try {
     await h.select();
     expect(h.container.querySelector('[aria-label="素材预览"]')).not.toBeNull();
-    await h.change({ ...h.state(), media: { id: media.id, at: "2s", in: null, out: null } });
-    await act(async () => {
-      window.dispatchEvent(new KeyboardEvent("keydown", { key: "i" }));
-    });
+    const source = h.container.querySelector<HTMLElement>(".zc-media-card");
+    const timeline = h.container.querySelector<HTMLElement>('[aria-label="时间标尺"]');
+    if (!source || !timeline) throw new Error("Missing editor focus regions");
+    const press = async (target: HTMLElement, key: string, init: KeyboardEventInit = {}, prevented = false) => {
+      target.focus();
+      await act(async () => {
+        const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init });
+        if (prevented) event.preventDefault();
+        target.dispatchEvent(event);
+      });
+    };
+    await h.change({ ...h.state(), selected: ["clip"], media: { id: media.id, at: "2s", in: null, out: null } });
+    await press(source, "i");
     await h.change({ ...h.state(), media: { id: media.id, in: h.state().media?.in ?? null, out: null, at: "5s" } });
-    await act(async () => {
-      window.dispatchEvent(new KeyboardEvent("keydown", { key: "o" }));
-    });
+    await press(source, "o");
     expect(h.container.querySelector('[aria-label="播放时码"]')?.textContent).toBe("01:00:05:00");
-    await act(async () => {
-      window.dispatchEvent(new KeyboardEvent("keydown", { key: "q" }));
-    });
+    expect(h.state().media).toMatchObject({ in: "2s", out: "5s" });
+    await press(source, "q", { metaKey: true });
+    await press(source, "q", {}, true);
+    const field = h.container.querySelector<HTMLInputElement>(".zc-media-info input");
+    if (!field) throw new Error("Missing media input");
+    await press(field, "q");
+    expect(h.call.mock.calls.filter(([verb]) => verb === "edit")).toHaveLength(0);
+
+    await press(source, "q");
+    expect(h.call.mock.calls.filter(([verb]) => verb === "edit")).toHaveLength(preset === "fcp" ? 1 : 0);
+    if (preset === "premiere") await press(source, ",");
     expect(h.call).toHaveBeenLastCalledWith(
       "edit",
       expect.objectContaining({
-        label: "把 镜头.mov 加到时间线",
-        ops: [
-          {
+        ops: expect.arrayContaining([
+          expect.objectContaining({
             op: "place",
             media_id: media.id,
             source_start: "2s",
             duration: "3s",
             at: "4s",
-            mode: "insert",
-            video_track: "video_top",
-            audio_track: "audio_first",
-          },
-        ],
+            mode: preset === "fcp" ? "overwrite" : "insert",
+            video_track: preset === "fcp" ? "video_lower" : "video_top",
+          }),
+        ]),
       }),
+    );
+    await press(timeline, "q");
+    const writes = h.call.mock.calls.filter(([verb]) => verb === "edit");
+    expect(writes).toHaveLength(2);
+    expect(writes[1]?.[1].ops).toEqual(
+      preset === "premiere"
+        ? [{ op: "trim", clip_id: "clip", edge: "in", to: "4s", ripple: true }]
+        : expect.arrayContaining([expect.objectContaining({ op: "place", mode: "overwrite" })]),
     );
   } finally {
     await h.close();
