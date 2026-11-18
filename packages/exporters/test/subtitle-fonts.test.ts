@@ -1,4 +1,5 @@
 import { globSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { createCanvas, GlobalFonts } from "@napi-rs/canvas";
 import { expect, it, vi } from "vitest";
 import { checkSubtitleFont, resolveSubtitleFont } from "../src/subtitle-fonts.ts";
@@ -62,7 +63,14 @@ for (const family of ["PingFang SC", "Missing Zcut Chinese Font"]) {
 }
 
 it("reports truly missing characters and shares the ordered CSS/Canvas chain", () => {
-  expect(checkSubtitleFont("A\n \u{10ffff}\u{10ffff}", { font_family: "sans-serif" }).missing).toEqual(["\u{10ffff}"]);
+  const family = "ZcutTestRoboto";
+  expect(
+    GlobalFonts.registerFromPath(
+      fileURLToPath(new URL("../../../fixtures/fonts/Roboto-Regular.ttf", import.meta.url)),
+      family,
+    ),
+  ).not.toBeNull();
+  expect(checkSubtitleFont("A\n \u{10ffff}\u{10ffff}", { font_family: family }).missing).toEqual(["\u{10ffff}"]);
   expect(subtitleFontFamily("Custom")).toBe(
     '"Custom", "PingFang SC", "Hiragino Sans GB", "Heiti SC", "Heiti TC", "Songti SC", sans-serif',
   );

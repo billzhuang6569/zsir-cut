@@ -88,7 +88,12 @@ it("shares wrapping, explicit breaks, overflow, positioning and box geometry on 
   const rendered = renderSubtitle(
     context,
     "Alpha\n中文 subtitle long text",
-    { ...style, max_lines: 1, position: { anchor: "top", margin_v: 0.1, max_width: 0.3 } },
+    {
+      ...style,
+      font_family: "ZcutTestRoboto",
+      max_lines: 1,
+      position: { anchor: "top", margin_v: 0.1, max_width: 0.3 },
+    },
     320,
     180,
   );
@@ -294,7 +299,7 @@ it("exports the Chinese regression without a false font warning when the family 
 }, 30000);
 
 it("merges missing glyphs into the existing font warning even for a registered family", async () => {
-  project.subtitle_styles[0]!.font_family = GlobalFonts.families[0]!.family;
+  project.subtitle_styles[0]!.font_family = "ZcutTestRoboto";
   const subtitles = timeline().tracks[1]!;
   if (subtitles.kind !== "subtitle") throw new Error("Missing subtitle track");
   subtitles.free_cues[0]!.text = "A\u{10ffff}";
