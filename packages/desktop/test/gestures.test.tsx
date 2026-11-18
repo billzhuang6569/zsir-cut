@@ -2,6 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import dropFixture from "../../../fixtures/regressions/timeline-drop-anchor.zcut.json";
 import { mergeKeymap } from "../../app-host/src/keymap.js";
 import { DESKTOP_AUTHOR, type ProjectView } from "../src/connection.js";
 import { applyUi, initialState } from "../src/state.js";
@@ -46,6 +47,7 @@ const render = () =>
       error={null}
       dragging={dragging}
       hideViewer
+      onPlacementChange={() => {}}
       readOnly={readOnly}
     />,
   );
@@ -402,6 +404,75 @@ it("cancels an active marquee when switching timelines and ignores non-primary s
   expect(get(".zc-selection-box")).toBeNull();
   expect(captures.size).toBe(0);
   expect(call).not.toHaveBeenCalled();
+});
+
+it("drops a long media card grabbed at its center with the ghost and place op at 40 seconds", async () => {
+  const sequence = dropFixture.timelines[0];
+  const track = sequence?.tracks[0];
+  const clip = track?.clips[0];
+  if (!sequence || !track || !clip) throw new Error("drop fixture");
+  project = {
+    ...project,
+    ...sequence,
+    media: dropFixture.media,
+    revision: dropFixture.revision,
+    duration: { t: clip.duration },
+    cues: [],
+    markers: [],
+    tracks: [
+      {
+        ...track,
+        kind: "video",
+        clips: [
+          {
+            ...clip,
+            label: null,
+            enabled: true,
+            speed: "1",
+            timeline_in: { t: clip.timeline_start },
+            timeline_out: { t: clip.duration },
+            source_in: { t: clip.source_start },
+            source_out: { t: clip.duration },
+          },
+        ],
+      },
+    ],
+  };
+  state = { ...state, project: "fixtures/regressions/timeline-drop-anchor.zcut.json" };
+  await magneticOn();
+  await act(render);
+
+  vi.spyOn(get(".zc-ruler-row"), "getBoundingClientRect").mockImplementation(() =>
+    get(".zc-ruler").getBoundingClientRect(),
+  );
+  const card = document.createElement("button");
+  card.dataset.mediaId = "med_a";
+  host.append(card);
+  const rect = card.getBoundingClientRect();
+  await pointer(card, "pointerdown", rect.left + rect.width / 2, rect.top + rect.height / 2);
+  const at40 = pixelAt("40s", scale());
+  timeline().scrollLeft = at40 - 200;
+  // Four pixels beyond the 40s clip end, so the leading edge snaps back to the cut.
+  await pointer(card, "pointermove", 284, 90, { buttons: 1 });
+  expect.soft(get(".zc-drop-preview").style.left).toBe(`${at40}px`);
+  expect.soft(get(".zc-drop-preview").textContent).toBe("00:00:40:00 · 插入");
+  await pointer(card, "pointerup", 284, 90);
+  expect(call).toHaveBeenCalledTimes(1);
+  expect(call).toHaveBeenCalledWith(
+    "edit",
+    expect.objectContaining({
+      ops: [
+        expect.objectContaining({
+          op: "place",
+          media_id: "med_a",
+          video_track: "trk_v1",
+          mode: "insert",
+          at: "40s",
+          duration: "177s",
+        }),
+      ],
+    }),
+  );
 });
 
 it("drags the selected media group from a later clip with grab offset and one labeled edit", async () => {

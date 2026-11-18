@@ -1,7 +1,7 @@
 import type { ProjectView } from "./connection.js";
 import { type DropTarget, type PlaceMode, placementRange } from "./media.js";
 import type { UiState } from "./state.js";
-import { div, type MediaView, mul, parseRational, rational, sub } from "./timeline.js";
+import { div, type MediaView, rational } from "./timeline.js";
 import { snapEdges } from "./timelineMove.js";
 
 export function dropMode(
@@ -36,12 +36,10 @@ export function dropTime(
   snap: boolean,
   playhead: string,
   media?: MediaView,
-  grab = 0,
 ) {
   const { x, left, scroll, label, scale } = geometry;
   const duration = media ? placementRange(project, media, state).duration : "0s";
-  const offset = div(rational(BigInt(Math.round((x - left + scroll - label) * 1000))), rational(BigInt(scale * 1000)));
-  const start = sub(offset, mul(parseRational(duration, true), rational(BigInt(grab), 1000n)));
+  const start = div(rational(BigInt(Math.round((x - left + scroll - label) * 1000))), rational(BigInt(scale * 1000)));
   return snapEdges(
     project,
     [],
