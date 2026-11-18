@@ -783,18 +783,26 @@ process.stdin.on("end", () => {
     }[] = [];
     Object.assign(socket, {
       readyState: WebSocket.OPEN,
-      send: (raw: string) => messages.push(JSON.parse(raw)),
+      send: (raw: string) => {
+        const message = JSON.parse(raw);
+        messages.push(message);
+        socket.emit("outgoing", message);
+      },
       close: () => socket.emit("close"),
     });
     expect(uiServer).toBeDefined();
     uiServer?.emit("connection", socket);
-    const send = async (message: Record<string, unknown>) => {
+    const waitForMessage = async (matches: (item: (typeof messages)[number]) => boolean) => {
+      const existing = messages.find(matches);
+      if (existing) return existing;
+      for await (const [received] of on(socket, "outgoing", { signal: AbortSignal.timeout(15_000) })) {
+        if (matches(received)) return received as (typeof messages)[number];
+      }
+      throw new Error("Missing host message");
+    };
+    const send = (message: Record<string, unknown>) => {
       socket.emit("message", JSON.stringify(message));
-      return vi.waitFor(() => {
-        const response = messages.find((item) => (message.id ? item.id === message.id : item.type === "bootstrap"));
-        expect(response).toBeDefined();
-        return response;
-      });
+      return waitForMessage((item) => (message.id ? item.id === message.id : item.type === "bootstrap"));
     };
     const client = await mcpClient();
     const followUp = vi.spyOn(Agents.prototype, "followUp");
@@ -829,9 +837,9 @@ process.stdin.on("end", () => {
         },
       });
       expect(asked.structuredContent).toMatchObject({ ok: true });
-      await vi.waitFor(() =>
-        expect(messages).toContainEqual({ type: "decisions_changed", pending: 1, changed: ["dec_stale"] }),
-      );
+      const askedPush = { type: "decisions_changed", pending: 1, changed: ["dec_stale"] };
+      await waitForMessage((item) => expect.objectContaining(askedPush).asymmetricMatch(item));
+      expect(messages).toContainEqual(askedPush);
       const decisions = await client.callTool({ name: "zcut_inspect", arguments: { project, view: "decisions" } });
       expect(decisions.structuredContent).toMatchObject({ result: { decisions: [{ turn: { id: turn } }] } });
       const written = await client.callTool({
@@ -845,9 +853,8 @@ process.stdin.on("end", () => {
       });
       const applied = written.structuredContent as unknown as Envelope;
       expect(applied.status).toBe("applied");
-      await vi.waitFor(() =>
-        expect(messages).toContainEqual(expect.objectContaining({ type: "project_changed", turn })),
-      );
+      const changedPush = expect.objectContaining({ type: "project_changed", turn });
+      await waitForMessage((item) => changedPush.asymmetricMatch(item));
       const answered = await send({
         id: "answer",
         verb: "answer",
@@ -866,17 +873,12 @@ process.stdin.on("end", () => {
       expect(followUp).toHaveBeenCalledWith(turn, text, expect.any(Function));
       expect(messages.filter(({ event }) => event?.type === "turn")).toHaveLength(1);
       await writeFile(release, "");
-      await vi.waitFor(
-        () =>
-          expect(messages).toContainEqual(
-            expect.objectContaining({
-              type: "chat_event",
-              chat: sent?.envelope?.result.id,
-              event: { type: "user", text },
-            }),
-          ),
-        { timeout: 10_000 },
-      );
+      const continuedPush = expect.objectContaining({
+        type: "chat_event",
+        chat: sent?.envelope?.result.id,
+        event: { type: "user", text },
+      });
+      await waitForMessage((item) => continuedPush.asymmetricMatch(item));
       const firstEnd = messages.findIndex(({ event }) => event?.type === "end");
       const continued = messages.findIndex(({ event }) => event?.text === text);
       expect(firstEnd).toBeGreaterThanOrEqual(0);
