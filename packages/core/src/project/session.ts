@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import type { Envelope, Verb } from "../dispatch.ts";
 import { startPreviewJob } from "../jobs.ts";
 import { decisionSummary } from "../read-views.ts";
+import { normalizeCommand } from "../schema.ts";
 import { applyEdit } from "./edit.ts";
 import { diffProjectEntities, type EntityChange } from "./entities.ts";
 import { newId } from "./id.ts";
@@ -246,7 +247,7 @@ export function sessionReviewSummary(session: Session, base: Project, current: P
   };
 }
 
-export async function runSession(verb: Verb, input: Input, id: string): Promise<Envelope> {
+export async function runSession(verb: Verb, input: Input, id: string, originalOps?: unknown[]): Promise<Envelope> {
   const projectPath = resolve(input.project as string);
   const main = await readProject(projectPath);
   const root = join(dirname(projectPath), ".zcut", main.id, "sessions");
@@ -305,7 +306,9 @@ export async function runSession(verb: Verb, input: Input, id: string): Promise<
   const sessionId = input.session_id as string;
   const directory = join(root, sessionId);
   try {
-    return await locked(directory, () => runExistingSession(verb, input, id, projectPath, directory, sessionId));
+    return await locked(directory, () =>
+      runExistingSession(verb, input, id, projectPath, directory, sessionId, originalOps),
+    );
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return reject(verb, id, "E_NOT_FOUND", "Session not found");
     throw error;
@@ -319,6 +322,7 @@ async function runExistingSession(
   projectPath: string,
   directory: string,
   sessionId: string,
+  originalOps?: unknown[],
 ): Promise<Envelope> {
   const sessionPath = join(directory, "session.json");
   let session: Session;
@@ -457,7 +461,7 @@ async function runExistingSession(
   if (verb === "edit" || verb === "undo" || verb === "redo") {
     if (session.state === "in_review" && verb !== "edit")
       return reject(verb, id, "E_SESSION_STATE", "Session is in review");
-    const request = writeRequest(verb, id, input, verb === "edit" ? (input.ops as unknown[]) : []);
+    const request = { ...writeRequest(verb, id, input, verb === "edit" ? (input.ops as unknown[]) : []), originalOps };
     let applied: WriteEnvelope;
     if (verb === "edit") {
       const ops = input.ops as ({ op: string } & Record<string, unknown>)[];
@@ -603,35 +607,46 @@ async function approve(
   const times = new Map(entries.map((entry) => [entry.revision, entry.at]));
   const ops = entries.filter((entry) => entry.kind === "write").flatMap((entry) => entry.ops ?? []);
   let failed: Record<string, unknown> | undefined;
+  const editResult: Record<string, unknown> = {};
   const write = await openProject({ projectPath }).commitWrite(
     writeRequest("session_approve", id, input, ops),
     (candidate) => {
+      const expanded = writes.some((entry) => entry.expanded_ops) ? ([] as unknown[]) : undefined;
       if (main.revision.id === session.base_revision) {
         const revision = candidate.revision;
         Object.assign(candidate, structuredClone(current));
         candidate.revision = revision;
+        for (const entry of writes) expanded?.push(...(entry.expanded_ops ?? entry.ops ?? []));
       } else {
         for (const entry of writes) {
           try {
+            const step: Record<string, unknown> = {};
+            const { ops } = normalizeCommand("edit", { ops: entry.ops }) as {
+              ops: ({ op: string } & Record<string, unknown>)[];
+            };
             applyEdit(
               candidate,
-              entry.ops as ({ op: string } & Record<string, unknown>)[],
+              ops,
               {},
               `${entry.parent}:${entry.idempotency_key}`,
               entry.timeline_id,
               session.approval === "manual",
               times.get(entry.parent ?? "") ?? session.base_created_at,
-              {},
+              step,
               entry.author?.name,
               entry.author?.kind,
             );
+            expanded?.push(...((step.expanded_ops as unknown[] | undefined) ?? ops));
           } catch (error) {
             failed = { revision: entry.revision, ops: entry.ops, reason: String(error) };
             throw error;
           }
         }
       }
+      if (expanded) editResult.expanded_ops = expanded;
     },
+    {},
+    editResult,
   );
   if (
     write.status === "rejected" &&

@@ -1370,6 +1370,34 @@
       },
       "additionalProperties": false
     },
+    "macro_scope": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "range"
+          ],
+          "properties": {
+            "range": {
+              "$ref": "#/$defs/range"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "clip_ids"
+          ],
+          "properties": {
+            "clip_ids": {
+              "$ref": "#/$defs/ids"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
     "edit_op": {
       "oneOf": [
         {
@@ -1480,6 +1508,111 @@
             },
             "ripple": {
               "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "op",
+            "max_pause"
+          ],
+          "properties": {
+            "op": {
+              "const": "tighten_pauses"
+            },
+            "scope": {
+              "$ref": "#/$defs/macro_scope"
+            },
+            "max_pause": {
+              "$ref": "#/$defs/seconds"
+            },
+            "min_gap": {
+              "$ref": "#/$defs/seconds"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "op"
+          ],
+          "properties": {
+            "op": {
+              "const": "remove_fillers"
+            },
+            "scope": {
+              "$ref": "#/$defs/macro_scope"
+            },
+            "words": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "pause": {
+              "$ref": "#/$defs/seconds"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "op",
+            "clip_id",
+            "keep"
+          ],
+          "properties": {
+            "op": {
+              "const": "keep_tokens"
+            },
+            "scope": {
+              "$ref": "#/$defs/macro_scope"
+            },
+            "clip_id": {
+              "$ref": "#/$defs/id"
+            },
+            "keep": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": [
+                  "from_token",
+                  "to_token"
+                ],
+                "properties": {
+                  "from_token": {
+                    "$ref": "#/$defs/id"
+                  },
+                  "to_token": {
+                    "$ref": "#/$defs/id"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "pause": {
+              "$ref": "#/$defs/seconds"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "op"
+          ],
+          "properties": {
+            "op": {
+              "const": "close_gaps"
+            },
+            "scope": {
+              "$ref": "#/$defs/macro_scope"
             }
           },
           "additionalProperties": false

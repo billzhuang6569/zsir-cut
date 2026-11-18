@@ -25,6 +25,14 @@ export interface UnprojectedToken {
   token_id: string;
 }
 
+export interface ProjectedToken {
+  clip: Clip;
+  transcript: Transcript;
+  token: Token;
+  start: Rational;
+  end: Rational;
+}
+
 export type CueSourceRange = (cue: Cue, transcript: Transcript) => { start: Rational; end: Rational } | undefined;
 
 const zero = rational(0n);
@@ -89,6 +97,7 @@ export function projectSubtitles(
   timelineId: string,
   sourceRange?: CueSourceRange,
   mergeJumpCuts = true,
+  onToken?: (item: ProjectedToken) => void,
 ): {
   cues: ProjectedCue[];
   unprojected: UnprojectedToken[];
@@ -239,6 +248,7 @@ export function projectSubtitles(
               const mappedStart = add(clip.timeline_start, mapSourceTimeToClip(start, part.first, part.last)!);
               const mappedEnd = add(clip.timeline_start, mapSourceTimeToClip(end, part.first, part.last)!);
               if (group.length && compare(mappedStart, group.at(-1)!.start) < 0) flush();
+              if (!override?.hidden) onToken?.({ clip, transcript, token, start: mappedStart, end: mappedEnd });
               group.push({ token, start: mappedStart, end: mappedEnd, part });
             }
             flush();

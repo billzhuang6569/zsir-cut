@@ -46,6 +46,85 @@ afterEach(async () => {
 });
 
 describe("CLI and MCP", () => {
+  it.each([
+    { op: "tighten_pauses", max_pause: "2/2s" },
+    { op: "remove_fillers" },
+    { op: "keep_tokens", clip_id: "clp_v1", keep: [{ from_token: "tok_pause_0", to_token: "tok_pause_3" }] },
+    { op: "close_gaps" },
+  ])("shares $op execution and history", async (op) => {
+    await copyFile(new URL("../../../fixtures/regressions/c2-macros.zcut.json", import.meta.url), project);
+    const server = createServer();
+    const client = new Client({ name: "macro-parity", version: "1" });
+    const [left, right] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(left), client.connect(right)]);
+    try {
+      const request = {
+        project,
+        base_revision: "rev_example_1",
+        idempotency_key: "macro",
+        author,
+        label: "宏操作",
+        turn: { id: "turn_macro" },
+        ops: [op],
+      };
+      const cliPreview = invokeCli("edit", { ...request, dry_run: true });
+      expect(cliPreview.code, JSON.stringify(cliPreview.envelope)).toBe(0);
+      const mcpPreview = (
+        await client.callTool({
+          name: "zcut_edit",
+          arguments: { ...request, dry_run: true },
+        })
+      ).structuredContent;
+      expect(withoutRequestId(cliPreview.envelope)).toEqual(withoutRequestId(mcpPreview ?? {}));
+      const saved = (await client.callTool({ name: "zcut_edit", arguments: request })).structuredContent;
+      expect(saved).toMatchObject({ status: "applied" });
+      const history = invokeCli("inspect", { view: "history" });
+      expect(history.code).toBe(0);
+      expect(history.envelope.result).toMatchObject({
+        entries: [
+          {
+            ops: [op],
+            turn: request.turn,
+            expanded_op_count: op.op === "remove_fillers" ? 1 : 2,
+            expanded_ops: expect.any(Array),
+          },
+        ],
+      });
+      const mcpHistory = (
+        await client.callTool({
+          name: "zcut_inspect",
+          arguments: { project, view: "history" },
+        })
+      ).structuredContent;
+      expect(withoutRequestId(history.envelope)).toEqual(withoutRequestId(mcpHistory ?? {}));
+      if (op.op === "close_gaps") {
+        const noOp = {
+          ...request,
+          base_revision: (saved?.receipt as { after: string }).after,
+          idempotency_key: "macro-no-op",
+        };
+        const cliNoOp = invokeCli("edit", noOp);
+        expect(cliNoOp.envelope).toMatchObject({ status: "no_op", result: { expanded_ops: [] } });
+        const mcpNoOp = (await client.callTool({ name: "zcut_edit", arguments: noOp })).structuredContent;
+        expect(mcpNoOp).toMatchObject({ status: "no_op", receipt: { replayed: true } });
+        const undone = invokeCli("undo", {
+          author,
+          base_revision: noOp.base_revision,
+          idempotency_key: "macro-undo",
+          turn_id: request.turn.id,
+        });
+        expect(undone.envelope).toMatchObject({ status: "applied" });
+        const afterUndo = invokeCli("inspect", { view: "history" });
+        expect(afterUndo.envelope.result).toMatchObject({
+          entries: [{ turn_id: request.turn.id }, { turn: request.turn, expanded_op_count: 2 }],
+        });
+      }
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
   it.each(["clp_v1", "clp_a1"])("shares token-linked removal via %s, dry-run and replay", async (clip_id) => {
     await copyFile(new URL("../../../fixtures/regressions/token-linked.zcut.json", import.meta.url), project);
     const bytes = await readFile(project, "utf8");
