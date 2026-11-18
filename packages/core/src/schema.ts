@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import Ajv2020Module, { type ErrorObject, type ValidateFunction } from "ajv/dist/2020.js";
 import addFormatsModule from "ajv-formats";
-import { parseRational, printRational } from "./rational.ts";
+import { parseRational, parseSignedSeconds, printRational } from "./rational.ts";
 
 const ajv = new Ajv2020Module.default({ strict: true, allErrors: true });
 addFormatsModule.default(ajv);
@@ -37,9 +37,13 @@ export function normalizeCommand(verb: string, input: unknown): unknown {
     $defs: Record<string, CommandNode> & { requests: Record<string, CommandNode> };
   };
   const visit = (value: unknown, node: CommandNode, key = ""): unknown => {
-    if (typeof value === "string" && (node.$ref === "#/$defs/seconds" || key === "edit_rate")) {
+    const signed = node.$ref === "#/$defs/signed_seconds";
+    if (typeof value === "string" && (signed || node.$ref === "#/$defs/seconds" || key === "edit_rate")) {
       try {
-        return printRational(parseRational(value, key !== "edit_rate", false), key !== "edit_rate");
+        return printRational(
+          signed ? parseSignedSeconds(value) : parseRational(value, key !== "edit_rate", false),
+          key !== "edit_rate",
+        );
       } catch {
         return value; // Let request validation report malformed values.
       }

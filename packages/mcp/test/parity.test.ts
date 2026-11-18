@@ -580,6 +580,15 @@ describe("CLI and MCP", () => {
           [{ op: "replace_text", find: "今天", replace: "现在" }],
           [{ op: "replace_text", find: "先", replace: "首先" }],
           [{ op: "replace_text", find: "never matches", replace: "" }],
+          [{ op: "slip", clip_id: "clp_v1", by: "-2/50s" }],
+          [{ op: "slip", clip_id: "clp_v1", by: "-12s" }],
+          [{ op: "slide", clip_id: "clp_v2", by: "1s", linked: false }],
+          [{ op: "move", clip_ids: ["clp_v1"], to: "13s", mode: "overwrite" }],
+          [{ op: "set_track", track_id: "trk_v1", enabled: false, locked: true }],
+          [
+            { op: "set_track", track_id: "trk_v1", locked: true },
+            { op: "split", clip_id: "clp_a1", at: "1s" },
+          ],
           [{ op: "update_media", media_id: "med_A", tags: ["A", "A", "B"], rating: 4 }],
           [
             { op: "rename_track", track_id: "trk_v1", name: "视频 Z" },
@@ -620,6 +629,25 @@ describe("CLI and MCP", () => {
         const cliResult = invokeCli(verb, input);
         const mcpResult = await client.callTool({ name: `zcut_${verb}`, arguments: request });
         const envelope = mcpResult.structuredContent as Record<string, unknown>;
+        if ("ops" in input) {
+          const first = input.ops[0];
+          if (first?.op === "slip" && "by" in first && first.by === "-12s") {
+            expect(envelope).toMatchObject({
+              status: "rejected",
+              error: { code: "E_VALIDATION", details: { min_by: "-278/25s" } },
+            });
+          } else if (first?.op === "set_track" && input.ops.length > 1) {
+            expect(envelope).toMatchObject({
+              status: "rejected",
+              error: { code: "E_LOCKED", details: { track_id: "trk_v1" } },
+            });
+          } else if (first && ["slip", "slide", "move", "set_track"].includes(first.op)) {
+            expect(envelope).toMatchObject({
+              status: "dry_run",
+              changes: expect.arrayContaining([expect.objectContaining({ op: first.op })]),
+            });
+          }
+        }
         if ("ops" in input && input.ops[0]?.op === "resegment") {
           expect(cliResult.envelope.status).toBe("dry_run");
           expect(cliResult.envelope.changes).toEqual(

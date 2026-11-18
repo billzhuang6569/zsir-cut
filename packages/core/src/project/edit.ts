@@ -1,7 +1,20 @@
 // biome-ignore-all lint/style/noNonNullAssertion: Indexed entries are guarded by schema or local checks.
 
 import { createHash } from "node:crypto";
-import { add, ceil, compare, div, floor, mul, parseRational, type Rational, rational, sub } from "../rational.ts";
+import {
+  add,
+  ceil,
+  compare,
+  div,
+  floor,
+  mul,
+  parseRational,
+  parseSignedSeconds,
+  printRational,
+  type Rational,
+  rational,
+  sub,
+} from "../rational.ts";
 import { diffProjectEntities } from "./entities.ts";
 import { newId } from "./id.ts";
 import { projectSubtitles } from "./projection.ts";
@@ -23,9 +36,11 @@ import type {
 
 export class EditError extends Error {
   readonly code: "E_MIXED_DOMAIN" | "E_VALIDATION" | "E_NOT_FOUND" | "E_UNSUPPORTED" | "E_LOCKED" | "E_SESSION_STATE";
-  constructor(code: EditError["code"], message: string) {
+  readonly details: Record<string, unknown> | undefined;
+  constructor(code: EditError["code"], message: string, details?: Record<string, unknown>) {
     super(message);
     this.code = code;
+    this.details = details;
   }
 }
 
@@ -34,10 +49,11 @@ const zero = rational(0n);
 const lt = (a: Rational, b: Rational) => compare(a, b) < 0;
 const eq = (a: Rational, b: Rational) => compare(a, b) === 0;
 const min = (a: Rational, b: Rational) => (lt(a, b) ? a : b);
+const max = (a: Rational, b: Rational) => (lt(a, b) ? b : a);
 const end = (clip: Clip) => add(clip.timeline_start, clip.duration);
-const time = (value: unknown) => {
+const time = (value: unknown, signed = false) => {
   try {
-    return parseRational(value as string, true);
+    return signed ? parseSignedSeconds(value as string) : parseRational(value as string, true);
   } catch {
     return fail("E_VALIDATION", `Invalid time: ${String(value)}`);
   }
@@ -47,6 +63,18 @@ const id = (value: unknown, prefix: string, generate: (prefix: string) => string
 const fail = (code: EditError["code"], message: string): never => {
   throw new EditError(code, message);
 };
+
+export function requireUnlocked(track: Track): void {
+  if (track.locked) throw new EditError("E_LOCKED", "Track is locked", { track_id: track.id });
+}
+
+function checkOffset(by: Rational, lower: Rational, upper?: Rational): void {
+  if (lt(by, lower) || (upper && lt(upper, by)))
+    throw new EditError("E_VALIDATION", "Offset is outside the available range", {
+      min_by: printRational(lower, true),
+      max_by: upper ? printRational(upper, true) : null,
+    });
+}
 
 function onGrid(value: Rational, timeline: Timeline): void {
   if (mul(value, timeline.edit_rate).denominator !== 1n) fail("E_VALIDATION", "Time is off the video frame grid");
@@ -66,11 +94,13 @@ function clip(timeline: Timeline, value: unknown): { track: MediaTrack; clip: Cl
 }
 function cleanTransitions(timeline: Timeline): void {
   for (const item of mediaTracks(timeline)) {
-    item.transitions = item.transitions.filter((transition) => {
+    const transitions = item.transitions.filter((transition) => {
       const from = item.clips.find((entry) => entry.id === transition.from_clip);
       const to = item.clips.find((entry) => entry.id === transition.to_clip);
       return from && to && eq(end(from), to.timeline_start);
     });
+    if (transitions.length !== item.transitions.length) requireUnlocked(item);
+    item.transitions = transitions;
   }
 }
 function partMap(points: TimeMapPoint[], start: Rational, stop: Rational): TimeMapPoint[] {
@@ -108,6 +138,7 @@ function slice(clip: Clip, start: Rational, stop: Rational, newIdValue?: string)
 }
 function splitOne(item: MediaTrack, target: Clip, at: Rational, rightId: string): Clip {
   if (!lt(target.timeline_start, at) || !lt(at, end(target))) fail("E_VALIDATION", "Split must be inside clip");
+  requireUnlocked(item);
   const right = slice(target, at, end(target), rightId);
   const left = slice(target, target.timeline_start, at);
   Object.assign(target, left);
@@ -163,7 +194,10 @@ function shift(timeline: Timeline, at: Rational, amount: Rational, selected?: Se
   for (const item of mediaTracks(timeline)) {
     if (selected && !selected.has(item.id)) continue;
     for (const target of item.clips)
-      if (compare(target.timeline_start, at) >= 0) target.timeline_start = add(target.timeline_start, amount);
+      if (compare(target.timeline_start, at) >= 0) {
+        requireUnlocked(item);
+        target.timeline_start = add(target.timeline_start, amount);
+      }
   }
   if (!selected) {
     for (const marker of timeline.markers) if (compare(marker.at, at) >= 0) marker.at = add(marker.at, amount);
@@ -223,17 +257,36 @@ function clearSpan(
 ): void {
   for (const item of mediaTracks(timeline)) {
     if (!selected.has(item.id)) continue;
-    for (const target of [...item.clips]) {
-      if (excluded.has(target.id)) continue;
-      if (lt(target.timeline_start, start) && lt(start, end(target))) splitOne(item, target, start, generate("clp_"));
-    }
-    for (const target of [...item.clips]) {
-      if (excluded.has(target.id)) continue;
-      if (lt(target.timeline_start, stop) && lt(stop, end(target))) splitOne(item, target, stop, generate("clp_"));
-    }
-    item.clips = item.clips.filter(
-      (target) => excluded.has(target.id) || lt(target.timeline_start, start) || !lt(target.timeline_start, stop),
-    );
+    const trimmedIn = new Set<string>();
+    const trimmedOut = new Map<string, string | undefined>();
+    item.clips = item.clips.flatMap((target) => {
+      const first = target.timeline_start;
+      const last = end(target);
+      if (excluded.has(target.id) || !lt(first, stop) || !lt(start, last)) return [target];
+      requireUnlocked(item);
+      if (lt(first, start) && lt(stop, last)) {
+        const right = slice(target, stop, last, generate("clp_"));
+        trimmedOut.set(target.id, right.id);
+        return [slice(target, first, start), right];
+      }
+      if (lt(first, start)) {
+        trimmedOut.set(target.id, undefined);
+        return [slice(target, first, start)];
+      }
+      if (lt(stop, last)) {
+        trimmedIn.add(target.id);
+        return [slice(target, stop, last)];
+      }
+      return [];
+    });
+    item.transitions = item.transitions.filter((transition) => {
+      if (trimmedIn.has(transition.to_clip)) return false;
+      if (!trimmedOut.has(transition.from_clip)) return true;
+      const right = trimmedOut.get(transition.from_clip);
+      if (!right) return false;
+      transition.from_clip = right;
+      return true;
+    });
   }
   if (metadata)
     timeline.markers = cutIntervals(
@@ -427,6 +480,7 @@ function applyOne(
           targets.push(item as MediaTrack);
         }
       if (!targets.length) fail("E_VALIDATION", "Place needs a compatible target track");
+      for (const item of targets) requireUnlocked(item);
       if (
         op.source_channels &&
         (!source.audio || (op.source_channels as number[]).some((channel) => channel >= (source.audio?.channels ?? 0)))
@@ -469,7 +523,10 @@ function applyOne(
       const removed = all.filter((item) => ids.has(item.id));
       const start = removed.reduce((value, item) => min(value, item.timeline_start), targets[0]!.timeline_start);
       const stop = removed.reduce((value, item) => (lt(value, end(item)) ? end(item) : value), start);
-      for (const item of mediaTracks(timeline)) item.clips = item.clips.filter((entry) => !ids.has(entry.id));
+      for (const item of mediaTracks(timeline)) {
+        if (item.clips.some((entry) => ids.has(entry.id))) requireUnlocked(item);
+        item.clips = item.clips.filter((entry) => !ids.has(entry.id));
+      }
       if (op.ripple === true) {
         const blocking = all.filter(
           (item) => !ids.has(item.id) && lt(item.timeline_start, stop) && lt(start, end(item)),
@@ -522,6 +579,7 @@ function applyOne(
                   item.occurrence_id === target.occurrence_id &&
                   eq(edge === "in" ? item.timeline_start : end(item), from),
               );
+      if (!eq(delta, zero)) for (const item of targets) requireUnlocked(clip(timeline, item.id).track);
       if (targets.some((item) => item.time_map)) fail("E_UNSUPPORTED", "Trim of time-mapped clip is unsupported");
       if (op.ripple === true && lt(zero, delta)) {
         splitAcross(timeline, rippleAnchor, generate);
@@ -613,6 +671,7 @@ function applyOne(
         fail("E_UNSUPPORTED", "Roll of time-mapped clip is unsupported");
       const delta = sub(to, from);
       for (const [a, b] of pairs) {
+        if (!eq(delta, zero)) requireUnlocked(clip(timeline, a.id).track);
         const stop = end(b);
         if (!lt(a.timeline_start, to) || !lt(to, stop)) fail("E_VALIDATION", "Roll would make an empty clip");
         a.duration = sub(to, a.timeline_start);
@@ -651,9 +710,15 @@ function applyOne(
           fail("E_VALIDATION", "Linked group has multiple clips of this track kind");
         const target = track(timeline, op.track_id);
         if (target.kind !== current.kind) fail("E_VALIDATION", "Destination track kind differs");
-        current.clips = current.clips.filter((item) => item.id !== requested[0]!.id);
-        (target as MediaTrack).clips.push(requested[0]!);
+        if (current !== target) {
+          requireUnlocked(current);
+          requireUnlocked(target);
+          current.clips = current.clips.filter((item) => item.id !== requested[0]!.id);
+          (target as MediaTrack).clips.push(requested[0]!);
+        }
       }
+      if (op.mode === "insert" || !eq(to, earliest))
+        for (const item of moving.values()) requireUnlocked(clip(timeline, item.id).track);
       if (op.mode === "insert") {
         const stop = [...moving.values()].reduce((value, item) => (lt(value, end(item)) ? end(item) : value), earliest);
         const duration = sub(stop, earliest);
@@ -674,12 +739,126 @@ function applyOne(
         for (const item of moving.values()) owners.get(item.id)!.clips.push(item);
       }
       const delta = sub(to, earliest);
+      if (op.mode === "overwrite") {
+        const excluded = new Set(moving.keys());
+        for (const owner of mediaTracks(timeline)) {
+          const landings = owner.clips
+            .filter((item) => moving.has(item.id))
+            .sort((a, b) => compare(a.timeline_start, b.timeline_start));
+          const ranges: { start: Rational; stop: Rational }[] = [];
+          for (const item of landings) {
+            const start = add(item.timeline_start, delta);
+            const stop = add(end(item), delta);
+            const prior = ranges.at(-1);
+            if (prior && compare(start, prior.stop) <= 0) prior.stop = max(prior.stop, stop);
+            else ranges.push({ start, stop });
+          }
+          for (const { start, stop } of ranges)
+            clearSpan(timeline, start, stop, new Set([owner.id]), false, generate, false, excluded);
+        }
+      }
       for (const item of moving.values()) item.timeline_start = add(item.timeline_start, delta);
       cleanTransitions(timeline);
       break;
     }
+    case "slip":
+    case "slide": {
+      const { clip: target } = clip(timeline, op.clip_id);
+      const by = time(op.by, true);
+      const owners = mediaTracks(timeline);
+      const targets = new Set(
+        op.linked === false
+          ? [target]
+          : owners.flatMap((owner) => owner.clips.filter((item) => item.occurrence_id === target.occurrence_id)),
+      );
+      if (!eq(by, zero)) for (const item of targets) requireUnlocked(clip(timeline, item.id).track);
+
+      if (op.op === "slip") {
+        let lower: Rational | undefined;
+        let upper: Rational | undefined;
+        for (const item of targets) {
+          const media = project.media.find((source) => source.id === item.media_id)!;
+          if (item.time_map || media.kind === "image")
+            fail("E_UNSUPPORTED", "Cannot slip a time-mapped clip or still image");
+          const rate = media.video?.rate ?? timeline.edit_rate;
+          if (mul(by, rate).denominator !== 1n) fail("E_VALIDATION", "Slip offset is off the source frame grid");
+          const first = snap(sub(zero, item.source_start), rate, "ceil");
+          const last = snap(sub(media.duration, add(item.source_start, item.duration)), rate, "floor");
+          lower = lower ? max(lower, first) : first;
+          upper = upper ? min(upper, last) : last;
+        }
+        checkOffset(by, lower!, upper!);
+        for (const item of targets) item.source_start = add(item.source_start, by);
+        break;
+      }
+
+      const rate =
+        owners.some((owner) => owner.kind === "video" && owner.clips.some((item) => targets.has(item))) ||
+        mul(by, timeline.edit_rate).denominator === 1n
+          ? timeline.edit_rate
+          : timeline.audio_rate;
+      if (mul(by, rate).denominator !== 1n) fail("E_VALIDATION", "Slide offset is off the timeline grid");
+      if (eq(by, zero)) break;
+      let lower = sub(zero, target.timeline_start);
+      let upper: Rational | undefined;
+      const limitRight = (value: Rational) => {
+        upper = upper ? min(upper, value) : value;
+      };
+      const inEdges = new Set<Clip>();
+      const outEdges = new Set<Clip>();
+      for (const owner of owners) {
+        const ordered = [...owner.clips].sort((a, b) => compare(a.timeline_start, b.timeline_start));
+        for (const [index, item] of ordered.entries()) {
+          if (!targets.has(item)) continue;
+          const left = ordered[index - 1];
+          const right = ordered[index + 1];
+          lower = max(lower, sub(zero, item.timeline_start));
+          if (left && !targets.has(left)) {
+            const gap = sub(end(left), item.timeline_start);
+            if (eq(gap, zero)) outEdges.add(left);
+            else lower = max(lower, gap);
+          }
+          if (right && !targets.has(right)) {
+            const gap = sub(right.timeline_start, end(item));
+            if (eq(gap, zero)) inEdges.add(right);
+            else limitRight(gap);
+          }
+        }
+      }
+      // Keep a trimmed neighbor strictly longer than zero on the edit grid.
+      const maxTrim = (duration: Rational) => div(rational(ceil(mul(duration, rate)) - 1n), rate);
+      const neighbors = new Set([...inEdges, ...outEdges]);
+      for (const item of neighbors) {
+        if (item.time_map) fail("E_UNSUPPORTED", "Cannot slide against a time-mapped neighbor");
+        const media = project.media.find((source) => source.id === item.media_id)!;
+        const movesIn = inEdges.has(item);
+        const movesOut = outEdges.has(item);
+        if (media.kind === "image") {
+          const extension = sub(media.duration, item.duration);
+          if (movesIn && !movesOut) lower = max(lower, sub(zero, extension));
+          if (movesOut && !movesIn) limitRight(extension);
+        } else {
+          if (movesIn) lower = max(lower, sub(zero, item.source_start));
+          if (movesOut) limitRight(sub(media.duration, add(item.source_start, item.duration)));
+        }
+        if (movesIn && !movesOut) limitRight(maxTrim(item.duration));
+        if (movesOut && !movesIn) lower = max(lower, sub(zero, maxTrim(item.duration)));
+      }
+      checkOffset(by, snap(lower, rate, "ceil"), upper && snap(upper, rate, "floor"));
+      for (const item of neighbors) {
+        if (inEdges.has(item)) {
+          item.timeline_start = add(item.timeline_start, by);
+          item.source_start = add(item.source_start, by);
+          item.duration = sub(item.duration, by);
+        }
+        if (outEdges.has(item)) item.duration = add(item.duration, by);
+      }
+      for (const item of targets) item.timeline_start = add(item.timeline_start, by);
+      break;
+    }
     case "set_clip": {
       const { clip: target, track: owner } = clip(timeline, op.clip_id);
+      requireUnlocked(owner);
       const fields = ["label", "enabled", "gain_db", "source_channels", "transform", "time_map", "sync_broken"];
       if (!fields.some((field) => Object.hasOwn(op, field))) fail("E_VALIDATION", "No clip field supplied");
       if ((Object.hasOwn(op, "gain_db") || Object.hasOwn(op, "source_channels")) && owner.kind !== "audio")
@@ -714,6 +893,7 @@ function applyOne(
         to = clip(timeline, op.to_clip);
       if (from.track !== to.track || !eq(end(from.clip), to.clip.timeline_start))
         fail("E_VALIDATION", "Transition clips must meet on one track");
+      requireUnlocked(from.track);
       from.track.transitions.push({
         id: id(op.id, "trn_", generate),
         type: "cross_dissolve",
@@ -728,6 +908,7 @@ function applyOne(
       const owner =
         mediaTracks(timeline).find((item) => item.transitions.some((entry) => entry.id === op.transition_id)) ??
         fail("E_NOT_FOUND", "Transition not found");
+      requireUnlocked(owner);
       owner.transitions = owner.transitions.filter((entry) => entry.id !== op.transition_id);
       break;
     }
@@ -766,6 +947,9 @@ function applyOne(
       timeline.markers = timeline.markers.filter((item) => item.id !== op.marker_id);
       break;
     }
+    case "set_track":
+      setFields(track(timeline, op.track_id), op, ["enabled", "locked"]);
+      break;
     case "rename_track":
       track(timeline, op.track_id).name = op.name as string;
       break;
@@ -833,7 +1017,8 @@ export function applyEdit(
   let subtitleDomain: boolean | undefined;
   for (const op of ops) {
     const isSubtitle =
-      SUBTITLE_OPS.has(op.op) || (op.op === "rename_track" && trackKinds.get(op.track_id as string) === "subtitle");
+      SUBTITLE_OPS.has(op.op) ||
+      (["rename_track", "set_track"].includes(op.op) && trackKinds.get(op.track_id as string) === "subtitle");
     if (subtitleDomain !== undefined && subtitleDomain !== isSubtitle)
       fail("E_MIXED_DOMAIN", "Editing and subtitle operations cannot be mixed");
     subtitleDomain = isSubtitle;

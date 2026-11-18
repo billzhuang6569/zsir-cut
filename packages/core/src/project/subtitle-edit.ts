@@ -2,7 +2,7 @@
 import { statSync } from "node:fs";
 import { dirname, isAbsolute, normalize } from "node:path";
 import { add, compare, div, mul, parseRational, type Rational, rational, sub } from "../rational.ts";
-import { EditError } from "./edit.ts";
+import { EditError, requireUnlocked } from "./edit.ts";
 import { transcriptIds } from "./id.ts";
 import {
   cueBreaks,
@@ -42,6 +42,7 @@ const cueOwner = (project: Project, value: unknown): { transcript: Transcript; c
 const subtitleTrack = (timeline: Timeline, value: unknown): SubtitleTrack => {
   const track = find(timeline.tracks, value, "Track");
   if (track.kind !== "subtitle") fail("E_VALIDATION", "Track is not a subtitle track");
+  requireUnlocked(track);
   return track as SubtitleTrack;
 };
 const span = (item: Transcript, first: unknown, last: unknown): [number, number] => {

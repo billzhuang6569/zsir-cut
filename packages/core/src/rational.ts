@@ -17,6 +17,12 @@ export function parseRational(value: string, seconds = false, canonical = true):
   return result;
 }
 
+export function parseSignedSeconds(value: string): Rational {
+  if (!value.startsWith("-")) return parseRational(value, true, false);
+  const { numerator, denominator } = parseRational(value.slice(1), true, false);
+  return { numerator: -numerator, denominator };
+}
+
 export function printRational(value: Rational, seconds = false): string {
   const reduced = rational(value.numerator, value.denominator);
   return `${reduced.numerator}${reduced.denominator === 1n ? "" : `/${reduced.denominator}`}${seconds ? "s" : ""}`;

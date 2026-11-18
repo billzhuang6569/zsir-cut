@@ -2257,3 +2257,318 @@ describe("U3.2 ripple remove and roll", () => {
     expect(await readFile(path, "utf8")).toBe(before);
   });
 });
+
+describe("C1 slip, slide and overwrite boundaries", () => {
+  beforeEach(async () => {
+    await copyFile(new URL("../../../fixtures/regressions/c1-offsets.zcut.json", import.meta.url), path);
+  });
+
+  const sourceAndRange = (project: Project, trackId: string) =>
+    clips(project, trackId)
+      .toSorted((a, b) => compare(a.timeline_start, b.timeline_start))
+      .map((item) => [
+        item.id,
+        ...[item.timeline_start, item.duration, item.source_start].map((value) => printRational(value, true)),
+      ]);
+
+  it("slips linked source windows by a signed non-reduced offset and keeps transitions", async () => {
+    const before = await read();
+    const output = await edit([{ op: "slip", clip_id: "clp_v2", by: "-2/50s" }]);
+    expect(output.status).toBe("applied");
+    const after = await read();
+    expect(sourceAndRange(after, "trk_v1")[1]).toEqual(["clp_v2", "2s", "2s", "49/25s"]);
+    expect(sourceAndRange(after, "trk_a1")[1]).toEqual(["clp_a2", "2s", "2s", "49/25s"]);
+    expect(after.timelines[0]!.tracks[0]).toMatchObject({ transitions: [{ id: "trn_1" }] });
+    await validateAndUndo(before);
+  });
+
+  it.each([
+    ["slip", "clp_v2", "7s", "-2s", "6s"],
+    ["slip", "clp_v2", "-3s", "-2s", "6s"],
+    ["slide", "clp_v2", "4s", "-49/25s", "99/25s"],
+    ["slide", "clp_v2", "-2s", "-49/25s", "99/25s"],
+    ["slide", "clp_v3", "26/25s", "-49/25s", "1s"],
+    ["slide", "clp_v4", "-26/25s", "-1s", null],
+  ])("rejects %s on %s at %s with usable limits", async (op, clip_id, by, min_by, max_by) => {
+    const bytes = await readFile(path);
+    expect(await edit([{ op, clip_id, by }])).toMatchObject({
+      status: "rejected",
+      error: { code: "E_VALIDATION", details: { min_by, max_by } },
+    });
+    expect(await readFile(path)).toEqual(bytes);
+  });
+
+  it("intersects slide source handles across the linked tracks before changing either track", async () => {
+    const project = await read();
+    const audio = clips(project, "trk_a1");
+    audio[0]!.source_start = rational(7n);
+    audio[2]!.source_start = rational(1n, 25n);
+    const bytes = serializeProject(project);
+    await writeFile(path, bytes);
+    for (const by of ["26/25s", "-2/25s"]) {
+      expect(await edit([{ op: "slide", clip_id: "clp_v2", by }])).toMatchObject({
+        status: "rejected",
+        error: { code: "E_VALIDATION", details: { min_by: "-1/25s", max_by: "1s" } },
+      });
+      expect(await readFile(path, "utf8")).toBe(bytes);
+    }
+  });
+
+  it("rejects an off-grid video slip and slide", async () => {
+    for (const op of ["slip", "slide"]) {
+      expect(await edit([{ op, clip_id: "clp_v2", by: "1/50s" }])).toMatchObject({
+        status: "rejected",
+        error: { code: "E_VALIDATION" },
+      });
+    }
+  });
+
+  it("uses the timeline frame grid for pure audio slip and allows sample-grid audio slide", async () => {
+    await copyFile(fixture, path);
+    expect(await edit([{ op: "slip", clip_id: "clp_ext", by: "1/48000s" }])).toMatchObject({
+      status: "rejected",
+      error: { code: "E_VALIDATION" },
+    });
+    expect(await edit([{ op: "slip", clip_id: "clp_ext", by: "1/25s" }])).toMatchObject({ status: "applied" });
+    expect(await edit([{ op: "slide", clip_id: "clp_ext", by: "1/48000s" }])).toMatchObject({ status: "applied" });
+    expect(sourceAndRange(await read(), "trk_a3")[0]).toEqual(["clp_ext", "1/48000s", "48/5s", "329/25s"]);
+  });
+
+  it("slides linked clips and preserves the adjacent transition", async () => {
+    const before = await read();
+    expect(await edit([{ op: "slide", clip_id: "clp_v2", by: "1s" }])).toMatchObject({ status: "applied" });
+    const after = await read();
+    for (const [trackId, prefix] of [
+      ["trk_v1", "v"],
+      ["trk_a1", "a"],
+    ] as const) {
+      expect(sourceAndRange(after, trackId).slice(0, 3)).toEqual([
+        [`clp_${prefix}1`, "0s", "3s", "0s"],
+        [`clp_${prefix}2`, "3s", "2s", "2s"],
+        [`clp_${prefix}3`, "5s", "3s", "5s"],
+      ]);
+    }
+    expect(after.timelines[0]!.tracks[0]).toMatchObject({ transitions: [{ id: "trn_1" }] });
+    await validateAndUndo(before);
+  });
+
+  it.each([
+    ["clp_v3", "1s", "5s"],
+    ["clp_v4", "-1s", "8s"],
+  ])("slides %s to the edge of a gap", async (clip_id, by, start) => {
+    const before = await read();
+    expect(await edit([{ op: "slide", clip_id, by, linked: false }])).toMatchObject({ status: "applied" });
+    const after = await read();
+    expect(sourceAndRange(after, "trk_v1").find(([id]) => id === clip_id)?.[1]).toBe(start);
+    expect(clips(after, "trk_a1")).toEqual(clips(before, "trk_a1"));
+  });
+
+  it("rejects slip on a time map and slide only when a trimmed neighbor has a time map", async () => {
+    expect(
+      await edit([
+        {
+          op: "set_clip",
+          clip_id: "clp_v2",
+          time_map: [
+            { at: "0s", source: "2s", interp: "linear" },
+            { at: "2s", source: "4s", interp: "linear" },
+          ],
+        },
+      ]),
+    ).toMatchObject({ status: "applied" });
+    for (const [op, clip_id] of [
+      ["slip", "clp_v2"],
+      ["slide", "clp_v1"],
+    ]) {
+      expect(await edit([{ op, clip_id, by: "1/25s" }])).toMatchObject({
+        status: "rejected",
+        error: { code: "E_UNSUPPORTED" },
+      });
+    }
+    expect(await edit([{ op: "slide", clip_id: "clp_v2", by: "1/25s" }])).toMatchObject({ status: "applied" });
+  });
+
+  it("splits destination clips on both linked tracks without closing the source gap", async () => {
+    const before = await read();
+    const output = await edit([{ op: "move", mode: "overwrite", clip_ids: ["clp_v2"], to: "5s" }]);
+    expect(output.status).toBe("applied");
+    const after = await read();
+    for (const [trackId, prefix] of [
+      ["trk_v1", "v"],
+      ["trk_a1", "a"],
+    ] as const) {
+      expect(sourceAndRange(after, trackId)).toEqual([
+        [`clp_${prefix}1`, "0s", "2s", "0s"],
+        [`clp_${prefix}3`, "4s", "1s", "4s"],
+        [`clp_${prefix}2`, "5s", "2s", "2s"],
+        [expect.stringMatching(/^clp_/), "7s", "1s", "7s"],
+        [`clp_${prefix}4`, "9s", "1s", "4s"],
+      ]);
+    }
+    expect(after.timelines[0]!.tracks[0]).toMatchObject({ transitions: [] });
+    await validateAndUndo(before);
+  });
+
+  it("clears covered clips and preserves the ID of a one-sided trim", async () => {
+    const output = await edit([{ op: "move", mode: "overwrite", clip_ids: ["clp_v4"], to: "4s", linked: false }]);
+    expect(output.status).toBe("applied");
+    expect(sourceAndRange(await read(), "trk_v1").slice(2)).toEqual([
+      ["clp_v4", "4s", "1s", "4s"],
+      ["clp_v3", "5s", "3s", "5s"],
+    ]);
+    expect(
+      await edit([{ op: "move", mode: "overwrite", clip_ids: ["clp_v3"], to: "0s", linked: false }]),
+    ).toMatchObject({
+      status: "applied",
+    });
+    expect(sourceAndRange(await read(), "trk_v1")).toEqual([
+      ["clp_v3", "0s", "3s", "5s"],
+      ["clp_v2", "3s", "1s", "3s"],
+      ["clp_v4", "4s", "1s", "4s"],
+    ]);
+  });
+});
+
+describe("C1 track locking", () => {
+  const place = {
+    op: "place",
+    mode: "insert",
+    at: "5s",
+    video_track: "trk_v2",
+    media_id: "med_A",
+    source_start: "0s",
+    duration: "1s",
+  };
+  it.each([
+    ["place insert", place],
+    ["place overwrite", { ...place, mode: "overwrite", video_track: "trk_v1" }],
+    ["remove", { op: "remove", clip_ids: ["clp_v1"] }],
+    ["remove_span intersect", { op: "remove_span", range: { start: "4s", duration: "1s" }, ripple: false }],
+    ["remove_span ripple", { op: "remove_span", range: { start: "32s", duration: "2s" } }],
+    ["trim ripple", { op: "trim", clip_id: "clp_b1", edge: "out", to: "8s", ripple: true }],
+    ["roll", { op: "roll", clip_id: "clp_v1", edge: "out", to: "11s" }],
+    ["split via link", { op: "split", clip_id: "clp_a1", at: "1s" }],
+    ["move insert pushing", { op: "move", mode: "insert", clip_ids: ["clp_b1"], to: "23s" }],
+    [
+      "move overwrite destination",
+      { op: "move", mode: "overwrite", clip_ids: ["clp_b1"], track_id: "trk_v1", to: "2s" },
+    ],
+    [
+      "move overwrite source",
+      { op: "move", mode: "overwrite", clip_ids: ["clp_v1"], track_id: "trk_v2", to: "70s", linked: false },
+    ],
+    ["slip via link", { op: "slip", clip_id: "clp_a1", by: "1s" }],
+    ["slide", { op: "slide", clip_id: "clp_v2", by: "1s", linked: false }],
+    [
+      "add_transition",
+      { op: "add_transition", from_clip: "clp_v1", to_clip: "clp_v2", duration: "1/25s", alignment: "center" },
+    ],
+    ["remove_transition", { op: "remove_transition", transition_id: "trn_1" }],
+    ["set_clip", { op: "set_clip", clip_id: "clp_v1", label: "locked" }],
+  ])("rejects %s atomically with the locked track ID", async (_name, op) => {
+    const bytes = await readFile(path);
+    expect(await edit([{ op: "set_track", track_id: "trk_v1", locked: true }, op])).toMatchObject({
+      status: "rejected",
+      error: { code: "E_LOCKED", details: { track_id: "trk_v1" } },
+    });
+    expect(await readFile(path)).toEqual(bytes);
+  });
+
+  it("rejects closing the old gap even when insertion would push locked content back", async () => {
+    await copyFile(new URL("../../../fixtures/regressions/c1-offsets.zcut.json", import.meta.url), path);
+    expect(
+      await edit([
+        { op: "add_track", id: "trk_other", kind: "video" },
+        { ...place, media_id: "med_a", mode: "overwrite", at: "10s", video_track: "trk_other" },
+        { op: "set_track", track_id: "trk_other", locked: true },
+        { op: "move", mode: "insert", clip_ids: ["clp_v2"], to: "0s" },
+      ]),
+    ).toMatchObject({ status: "rejected", error: { code: "E_LOCKED", details: { track_id: "trk_other" } } });
+  });
+
+  it("persists track fields, reports defaults in brief, and permits renaming and unlocking", async () => {
+    expect(
+      await edit([
+        { op: "set_track", track_id: "trk_v1", locked: true, enabled: false },
+        { op: "rename_track", track_id: "trk_v1", name: "locked V1" },
+        { ...place, at: "end" },
+      ]),
+    ).toMatchObject({ status: "applied" });
+    const brief = await dispatch("inspect", { project: path, view: "brief" });
+    expect(brief.result).toMatchObject({
+      timelines: [
+        {
+          tracks: expect.arrayContaining([
+            expect.objectContaining({ id: "trk_v1", name: "locked V1", locked: true, enabled: false }),
+            expect.objectContaining({ id: "trk_v2", locked: false }),
+          ]),
+        },
+      ],
+    });
+    expect(
+      await edit([
+        { op: "set_track", track_id: "trk_v1", locked: false },
+        { op: "split", clip_id: "clp_v1", at: "1s" },
+      ]),
+    ).toMatchObject({ status: "applied" });
+  });
+
+  it("preserves subtitle-domain separation and protects direct track writes", async () => {
+    const track_id = "trk_sub_zh";
+    const lock = { op: "set_track", track_id, locked: true };
+    const cue = {
+      op: "add_free_cue",
+      track_id,
+      id: "cue_lock",
+      timeline_start: "5s",
+      duration: "1s",
+      text: "subtitle",
+    };
+    expect(await edit([cue, lock, { op: "rename_track", track_id, name: "locked subtitles" }])).toMatchObject({
+      status: "applied",
+    });
+    expect(
+      await edit([{ op: "set_override", track_id, occurrence_id: "occ_1", cue_id: "cue_zh_01", hidden: true }]),
+    ).toMatchObject({ status: "rejected", error: { code: "E_LOCKED", details: { track_id } } });
+    expect(await edit([{ op: "remove_free_cue", track_id, id: "cue_lock" }])).toMatchObject({
+      status: "rejected",
+      error: { code: "E_LOCKED", details: { track_id } },
+    });
+    expect(await edit([lock, place])).toMatchObject({ status: "rejected", error: { code: "E_MIXED_DOMAIN" } });
+    expect(await edit([{ op: "mark_proofread", transcript_id: "trs_A_zh" }])).toMatchObject({ status: "applied" });
+    expect(await edit([{ ...place, at: "4s" }])).toMatchObject({ status: "applied" });
+  });
+
+  it("holds a still neighbor at source zero and reports its maximum extension", async () => {
+    const project = await read();
+    project.media.find((media) => media.id === "med_STILL")!.duration = rational(4n);
+    await writeFile(path, serializeProject(project));
+    expect(
+      await edit([
+        {
+          ...place,
+          mode: "overwrite",
+          at: "19s",
+          video_clip_id: "clp_slide",
+          duration: "2s",
+        },
+      ]),
+    ).toMatchObject({ status: "applied" });
+    expect(await edit([{ op: "slide", clip_id: "clp_slide", by: "26/25s" }])).toMatchObject({
+      status: "rejected",
+      error: { code: "E_VALIDATION", details: { max_by: "1s" } },
+    });
+    expect(await edit([{ op: "slide", clip_id: "clp_slide", by: "1s" }])).toMatchObject({ status: "applied" });
+    expect(clips(await read(), "trk_v2").find((item) => item.id === "clp_still")).toMatchObject({
+      source_start: rational(0n),
+      duration: rational(4n),
+    });
+  });
+
+  it("rejects still-image slip", async () => {
+    expect(await edit([{ op: "slip", clip_id: "clp_still", by: "1/25s" }])).toMatchObject({
+      status: "rejected",
+      error: { code: "E_UNSUPPORTED" },
+    });
+  });
+});
