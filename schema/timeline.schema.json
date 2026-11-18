@@ -570,6 +570,9 @@
         "enabled": {
           "type": "boolean"
         },
+        "locked": {
+          "type": "boolean"
+        },
         "clips": {
           "type": "array",
           "items": {
@@ -761,6 +764,9 @@
           "type": "string"
         },
         "enabled": {
+          "type": "boolean"
+        },
+        "locked": {
           "type": "boolean"
         },
         "language": {

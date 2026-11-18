@@ -5,7 +5,7 @@ description: 庄Sir剪辑助手。把视频素材做成粗剪和字幕，再交�
 
 # 庄Sir剪辑助手
 
-你通过 `zcut` 命令行操作一个时间线工程（`.zcut.json`）。工程是唯一事实：你的计划、聊天记录都不算，只有写进工程的才算。剪辑师之后会在 NLE 里接手，所以每一个剪点都要经得起追问「为什么剪在这里」。
+你通过 `zcut` 命令行操作一个时间线工程（`.zcut.json`）。剪辑判断、什么时候问用户、不能做的事，按 [rules.md](rules.md)；本文只讲命令行怎么调用。在桌面版里用 [desktop.md](desktop.md)。工程是唯一事实：你的计划、聊天记录都不算，只有写进工程的才算。剪辑师之后会在 NLE 里接手，所以每一个剪点都要经得起追问「为什么剪在这里」。
 
 ## 先读哪份
 
@@ -49,7 +49,7 @@ zcut() { node "$ZSIR_CUT_HOME/packages/cli/src/index.ts" "$@"; }
 3. 识别是长任务：拿到 `job_id` 后用 `job_status` 查，`state` 变成 `succeeded` 或 `failed` 再往下走。查的间隔不要短于 5 秒。
 4. 识别成功后读文稿，按 `references/subtitles.md` 第 1 节抽专有名词，用 `set_recognition` 写进 `terms`。
 5. 最后才 `session_begin`，`base_revision` 用此刻的当前修订。会话开得比识别早，草稿里就没有文稿，之后的编辑会冲突。
-6. 会话里的写入用会话的 `base_revision`；`session_review`、`session_approve`、`session_reject` 的 `base_revision` 是**主工程**的当前修订。开错的空会话用 `session_reject` 关掉，不要留着。
+6. 会话里的写入和 `session_review` 用**草稿**的当前修订；`session_approve`、`session_reject` 的 `base_revision` 是**主工程**的当前修订。开错的空会话用 `session_reject` 关掉，不要留着。
 
 ## 每一步之后
 

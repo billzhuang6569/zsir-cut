@@ -26,6 +26,8 @@
 | `preview_cache` | 推送 | 6 |
 | `project_changed` | 推送（改为带内容） | 7 |
 | `chat_event` 的 `suggestion` 类型 | 推送 | 8 |
+| `chat_event` 的 `turn` 类型、`decisions_changed` | 推送 | 4.5（0.2 新增） |
+| `agent_mode_get` / `agent_mode_set` | 动词 | 4.5（0.2 新增） |
 
 这些动词只在本机通道上有，宿主的 MCP 不暴露它们：Agent 不能改用户的偏好、不能自己答许可。
 
@@ -136,6 +138,17 @@
 | `undo` / `redo` | 撤销 / 重做 | `⌘Z` / `⇧⌘Z` | `⌘Z` / `⇧⌘Z` |
 | `toggle_history` ◇ | 历史悬浮窗 | `⌥⌘H` | `⌥⌘H` |
 | `open_settings` | 设置 | `⌘,` | `⌘,` |
+| `insert_edit` | 0.2：把素材的入出点范围插入到播放头（时间线有入点时放到入点） | `,` | `W` |
+| `overwrite_edit` | 0.2：同上，覆盖 | `.` | `D` |
+| `append_edit` | 0.2：追加到时间线末尾 | `⇧E` ◇ | `E` |
+| `connect_edit` | 0.2：放到主轨上方（FCP 的连接） | `⇧,` ◇ | `Q` |
+| `clear_in_out` | 0.2：清除时间线入出点 | `⌃⇧X` | `⌥X` |
+| `select_edit_in` / `select_edit_out` / `select_edit_both` | 0.2：选中播放头处剪点的左边、右边、两边 | `[` / `]` / `⇧\` ◇ | `[` / `]` / `\` |
+| `nudge_edit_back10` / `nudge_edit_fwd10` | 0.2：同 `nudge_edit_*`，一次 10 帧 | `⇧⌥Left` / `⇧⌥Right` | `⇧,` / `⇧.` |
+| `tool_slip` / `tool_slide` | 0.2：滑动内容工具 / 滑动片段工具 | `Y` / `U` | `Y` ◇ / `U` ◇ |
+| `copy` / `cut` / `paste` | 0.2：复制 / 剪切 / 粘贴到播放头 | `⌘C` / `⌘X` / `⌘V` | `⌘C` / `⌘X` / `⌘V` |
+| `close_all_gaps` ◇ | 0.2：合拢时间线上全部空隙 | `⌥⌘G` | `⌥⌘G` |
+| `command_palette` ◇ | 0.2：命令面板，搜索全部动作 | `⇧⌘P` | `⇧⌘P` |
 
 `keymap.ts` 的测试要保证：每个动作在两套里都有值；同一套里没有重复的键。
 
@@ -153,6 +166,16 @@
 | 用滚动工具拖剪点、`nudge_edit_*`（选中剪点时）、`extend_edit` | `roll` | `roll` |
 | `split_at_playhead` | `split` | `split` |
 | `split_all_at_playhead` | 一个 `edit` 里，对所有轨道上横跨播放头的每个片段各一个 `split`，`linked: false` | 同左 |
+| `insert_edit` / `overwrite_edit` | `place`，`mode: insert` / `overwrite`；源范围取素材面板的入出点（没设时整段）；目标轨取轨道头的目标轨（T5），没设时用第一条视频轨和第一条声音轨；放入范围按工具栏「音画 / 仅画面 / 仅声音」 | 同左 |
+| `append_edit` | `place`，`at: "end"`，`mode: insert` | 同左 |
+| `connect_edit` | `place`，`mode: overwrite`，画面放到目标视频轨上方第一条在这一段空着的视频轨，没有就同一个 `edit` 里 `add_track` 新建；声音同理放到空着的声音轨 | 同左 |
+| 有入出点、没有选中片段时的 `ripple_delete` / `lift_delete` | `remove_span`，`range` 是入出点，`ripple: true` / `false`，`tracks` 取没锁定的全部轨道 | 同左 |
+| 选中空隙时的 `ripple_delete` / `lift_delete` | `remove_span`，`range` 是这段空隙，`ripple: true`；`lift_delete` 什么也不做 | 同左 |
+| `close_all_gaps` | `close_gaps`（宏操作），不带 `scope` | 同左 |
+| 用滑动内容 / 滑动片段工具拖片段 | `slip` / `slide`，`by` 是拖动的帧数 | 同左 |
+| `paste` | 每个复制来的使用（`occurrence_id`）一个 `place`（同素材、同源范围，保持彼此的相对位置和轨道），再用 `set_clip` 带上 `label`、`enabled`、`gain_db`、`transform`、`time_map`；`mode: insert` | 同左，`mode: overwrite` |
+| `cut` | 先复制，再按 `ripple_delete` | 先复制，再按 `lift_delete` |
+| 按住 `⌥` 拖片段 | 松手时按 `paste` 的规则在落点放一份副本，原片段不动 | 同左 |
 
 `premiere` 习惯下多一条：拖片段或片段边缘时按住 `⌘`，这一次按磁性开关的反面发（开时发 `place` / `ripple: false`，关时发 `insert` / `ripple: true`），松开 `⌘` 后下一次拖动恢复。`fcp` 习惯没有这个修饰键。
 
@@ -251,6 +274,49 @@ AI 面板对话和字幕整理都按本节启动 Agent。参数的其余部分�
 实测（Codex 0.167.0，没有 `auth.json`）：重连 5 次，每次一条 401 的 `error` 事件，最后一条不带 `Reconnecting` 的 401，然后退出码 1，stderr 只有一行 `ERROR codex_api::endpoint::responses_websocket: failed to connect`。界面应显示：一条 401 原文，再是「Codex 没有登录或登录过期。……」和 stderr 的最后几行。
 
 **没有输出就停止。** Agent 进程连续 10 分钟 stdout 和 stderr 都没有新内容，宿主先发 SIGTERM，5 秒后还在就发 SIGKILL（Mac 结束整个进程组，Windows 用 `taskkill /T /F`），推 `error`「Agent 10 分钟没有响应，已停止。」再推 `end`。等许可闸（第 5 节）回答的时间不算。
+
+### 4.5 剪辑方式、提示词和每轮上下文（0.2 新增）
+
+ADR-0027。本节取代 4.4 之前写死在 `desktopInstructions` 里的「使用 manual 编辑会话，交出草稿用 session_review」。
+
+**剪辑方式**：应用偏好 `agent.edit_mode`，取 `direct`（直接剪，默认）或 `review`（先出方案让我审）。通道动词 `agent_mode_get` / `agent_mode_set` 读写它，写法同第 2 节。`review` 时提示词换成旧的会话流程，其他不变。
+
+**提示词**：宿主按顺序拼三段，作为 Claude 的 `--append-system-prompt-file`、Codex 的提示词开头：
+
+1. `skills/zsir-cut/rules.md`：共享剪辑规则（剪辑判断、什么时候问、锁定和授权边界、写后自查）。命令行 Skill 也引用它。
+2. `skills/zsir-cut/desktop.md`：桌面入口，只讲 MCP 用法和三种用法（下文）。`edit_mode` 为 `review` 时追加 `desktop.md` 里「先出方案」一节。
+3. 原来的语言和 `【下一步】` 约定（第 8 节）。
+
+`references/` 下的粗剪、字幕说明不整段塞进提示词：`desktop.md` 写明「需要时调用 `zcut_inspect` 的 `guide` 视图读取」，宿主的 MCP 加这个视图，参数 `name`（`rough-cut`、`subtitles`、`handoff`），返回对应文件正文。只在桌面宿主的 MCP 上有，内核没有这个视图。
+
+**三种用法**（写进 `desktop.md`，宿主不判断）：
+
+| 用户说的 | Agent 做的 |
+|---|---|
+| 要剪、要改，对象能确定 | 直接 `edit` 主工程，不开会话 |
+| 只问建议（「这段怎么剪好」） | 只读，不写入 |
+| 明确要先看方案、要两版 | 开 `manual` 会话，做完 `session_review`，不能自己批准 |
+
+**每轮上下文**：用户每发一条消息，宿主在消息前加一段，Agent 不用自己调 `ui_state`：
+
+```text
+<界面>
+工程：<名称>，修订 rev_…（第 N 步），时间线 <ID>，总长 <时码>
+播放头：<时码>（<序列时间>）
+入出点：<时码>–<时码> 或 无
+选中：片段 clp_…（视频 A，00:01:02:03–00:01:10:00，素材「<名称>」）；最多 10 个，超过写「等 N 个」
+正在看：<面板>，<子标签>
+待你决定：N 条
+</界面>
+```
+
+各项取自 `ui_state` 和工程视图；界面没连上时写「界面没有打开」，其余照写。整段不超过 1500 字。
+
+**轮次**：用户每发一条消息开始新的一轮，宿主生成 `turn_` 开头的 ID，推 `chat_event` `{type: "turn", id}`。这一轮里 Agent 经宿主 MCP 发的写请求，宿主都把 `turn` 改成这个值（`command-protocol.md` 第 3 节），`ask` 写的决定也带上它。`project_changed`（第 7 节）加 `turn` 字段。
+
+**工程决定的推送**：`ask`、`answer` 成功后，宿主推 `{type: "decisions_changed", pending: N, changed: [决定 ID…]}`。
+
+**答一条就继续**：界面对工程决定点了选项后调 `answer`。执行状态是 `applied` 或 `none` 时，界面只在对话里加一条记录；是 `stale` 或 `failed` 时，宿主立刻给 Agent 发一条消息（Agent 正在回复就排在这一轮之后），内容是「用户回答了：<问题> → <选项>，这一处工程已经变了，请按当前工程重做」。不再等全部决定答完才发。
 
 ## 5. 许可闸
 
@@ -364,6 +430,7 @@ Agent 通过宿主的 MCP 调用会碰到工程外面的动词时，宿主先停
   "reason": null,
   "author": { "kind": "agent", "name": "claude" },
   "batch": { "id": "bat_…", "seq": 2, "count": 5 },
+  "turn": "turn_…",
   "summary": { "clip": { "added": 0, "removed": 2, "changed": 3 } },
   "changes": [ { "key": "clp_…", "entity": "clip", "before": { "track_id": "trk_v1", "start": "…", "end": "…" }, "after": null } ],
   "truncated": false
