@@ -758,3 +758,56 @@
 .zc-activity-section form .zc-q-other-input:focus-visible {
   outline: 2px solid var(--cream);
 }
+
+.zc-ai-progress {
+  color: var(--attention);
+  white-space: nowrap;
+}
+
+.zc-chat-reference-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.zc-chat-reference-tags button {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 0;
+  cursor: pointer;
+}
+
+.zc-chat-refs {
+  position: absolute;
+  z-index: 2;
+  inset-inline: 0;
+  bottom: 100%;
+  max-height: 240px;
+  overflow: auto;
+  padding: var(--space-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--raised);
+}
+
+.zc-chat-refs button {
+  display: block;
+  width: 100%;
+  padding: var(--space-1) var(--space-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.zc-chat-refs button[aria-selected="true"],
+.zc-chat-refs button:hover {
+  background: var(--raised-2);
+}

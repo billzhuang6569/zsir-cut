@@ -89,6 +89,7 @@ export function Clip({
   onContextMenu,
   onKeyDown,
   cueKey,
+  aiLabel,
 }: {
   kind: string;
   label: string;
@@ -99,6 +100,7 @@ export function Clip({
   onClick: React.MouseEventHandler<HTMLButtonElement>;
   selectionId?: string;
   cueKey?: string;
+  aiLabel?: string | undefined;
   onDoubleClick?: React.MouseEventHandler<HTMLButtonElement>;
   onContextMenu?: React.MouseEventHandler<HTMLButtonElement>;
   onKeyDown?: React.KeyboardEventHandler<HTMLButtonElement> | undefined;
@@ -108,7 +110,8 @@ export function Clip({
       type="button"
       data-selection-id={selectionId}
       data-cue-key={cueKey}
-      title={label}
+      data-ai-change={aiLabel}
+      title={aiLabel ? `${label} · ${aiLabel}` : label}
       aria-label={label}
       onClick={onClick}
       onDoubleClick={onDoubleClick}

@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import type { ProjectChanged } from "../../app-host/src/revision-events.js";
 import { type AiNotice, useAiPanel } from "../src/AiPanel.js";
 import type { PermissionRequest, ProjectView } from "../src/connection.js";
+import { initialState } from "../src/state.js";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 const node = document.createElement("div");
@@ -23,8 +24,8 @@ const project: ProjectView = {
   revision: { id: "rev_now", seq: 4 },
   edit_rate: "25",
   duration: { t: "30s" },
-  media: [],
-  markers: [],
+  media: [{ id: "med_a", kind: "video", name: "记者机位", duration: "30s" }],
+  markers: [{ id: "mrk_a", kind: "comment", text: "开始采访", at: { t: "10s" } }],
   transcripts: [
     {
       id: "transcript_a",
@@ -60,6 +61,14 @@ const project: ProjectView = {
   ],
 };
 const turn = { chat: "chat_test", event: { type: "turn", id: "turn_now" } } satisfies AiNotice;
+const end = { chat: "chat_test", event: { type: "end" } } satisfies AiNotice;
+const idle = [turn, end];
+const uiState = {
+  ...initialState(),
+  selected: ["clp_a"],
+  timelineMarks: { in: "10s", out: "14s" },
+  playhead: { at: "11s" },
+};
 const permission: PermissionRequest = {
   type: "permission_request",
   id: "prm_a",
@@ -75,17 +84,20 @@ function Panel({
   changes = [],
   revision = 0,
   permissions = [],
+  notices = idle,
 }: {
   call: Call;
   changes?: ProjectChanged[];
   revision?: number;
   permissions?: PermissionRequest[];
+  notices?: AiNotice[];
 }) {
   const ai = useAiPanel({
     call,
     path,
     project,
-    notices: [turn],
+    notices,
+    uiState,
     revision: 0,
     decisionRevision: revision,
     turnChanges: changes,
@@ -94,6 +106,11 @@ function Panel({
   return (
     <>
       <header>{ai.decisionStatus}</header>
+      <section aria-label="进度">{ai.progress}</section>
+      <div
+        data-clips={[...ai.timelineChanges.clips.keys()].join()}
+        data-removals={[...ai.timelineChanges.removals.keys()].join()}
+      />
       <main>{ai.chat}</main>
       <aside>{ai.parameters}</aside>
     </>
@@ -277,4 +294,98 @@ it("refreshes decisions, auditions a source anchor, and answers each card while 
   expect(node.querySelector("main")?.textContent).not.toContain("已回答：问题 stale");
   expect(node.querySelector("header")?.textContent).toBe("1 件待定");
   expect(call.mock.calls.filter(([verb]) => verb === "chat_send")).toHaveLength(1);
+});
+
+it("shows the current Agent turn, clears highlights on acknowledge, next turn and undo, and reports batch progress", async () => {
+  mount();
+  const call = callHost(async () => ({}));
+  const removed = {
+    ...change,
+    revision: { id: "rev_removed", seq: 4 },
+    batch: { id: "bat_test", seq: 2, count: 5 },
+    changes: [{ key: "clp_removed", entity: "clip" as const, before: change.changes[0]?.after ?? null, after: null }],
+  };
+  const human = {
+    ...change,
+    revision: { id: "rev_human", seq: 5 },
+    author: { kind: "human" as const, name: "剪辑师" },
+    changes: [{ ...change.changes[0], entity: "clip" as const, key: "clp_human" }],
+  };
+  const highlights = () => {
+    const result = node.querySelector<HTMLElement>("[data-clips]")?.dataset;
+    return [result?.clips, result?.removals];
+  };
+  const changes = [change, removed, human];
+  await render({ call, changes: [human], notices: [turn] });
+  expect(highlights()).toEqual(["", ""]);
+  expect(region("进度").textContent).toBe("AI 正在剪… 第 1 步");
+  await render({ call, changes, notices: [turn] });
+  expect(highlights()).toEqual(["clp_a", "clp_removed"]);
+  expect(region("进度").textContent).toBe("AI 正在剪… 第 2 / 5 步");
+  await render({ call, changes, notices: idle });
+  expect(region("进度").textContent).toBe("");
+  await click(button("知道了"));
+  expect(highlights()).toEqual(["", ""]);
+
+  const next: AiNotice = { chat: "chat_test", event: { type: "turn", id: "turn_next" } };
+  const another = { ...change, turn: "turn_next", revision: { id: "rev_next", seq: 6 } };
+  await render({ call, changes, notices: [...idle, next] });
+  expect(highlights()).toEqual(["", ""]);
+  await render({ call, changes: [...changes, another], notices: [...idle, next] });
+  expect(highlights()).toEqual(["clp_a", ""]);
+  const undo = { ...human, verb: "undo" as const, turn: "turn_next", revision: { id: "rev_undo", seq: 7 } };
+  await render({ call, changes: [...changes, another, undo], notices: [...idle, next, end] });
+  expect(highlights()).toEqual(["", ""]);
+  const third: AiNotice = { chat: "chat_test", event: { type: "turn", id: "turn_third" } };
+  await render({ call, changes: [...changes, another], notices: [...idle, next, end, third] });
+  expect(highlights()).toEqual(["", ""]);
+});
+
+it("searches and inserts references with the keyboard and sends names, timecodes and IDs in place", async () => {
+  mount();
+  const call = callHost(async () => ({}));
+  await render({ call });
+  const input = node.querySelector("textarea");
+  if (!input) throw new Error("缺少对话输入框");
+  const type = async (value: string) =>
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  const key = async (key: string) =>
+    act(async () => {
+      input.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+    });
+  const options = () => [...node.querySelectorAll('[role="option"]')].map((item) => item.textContent);
+  await type("剪短@");
+  expect(options()).toEqual([
+    "选中的片段",
+    "入出点区间",
+    "播放头处",
+    "字幕条 · 字幕已改字",
+    "标记 · 开始采访",
+    "素材 · 记者机位",
+  ]);
+  await key("ArrowDown");
+  expect(node.querySelector('[aria-selected="true"]')?.textContent).toBe("入出点区间");
+  await key("ArrowUp");
+  await key("Enter");
+  expect(button("移除引用：选中的片段")).toBeDefined();
+  expect(call.mock.calls.some(([verb]) => verb === "chat_send")).toBe(false);
+  await type("剪短，核对@改字");
+  expect(options()).toEqual(["字幕条 · 字幕已改字"]);
+  await key("Tab");
+  await type("剪短，核对，参考@记者");
+  expect(options()).toEqual(["素材 · 记者机位"]);
+  await key("Escape");
+  expect(options()).toEqual([]);
+  await type("剪短，核对，参考@机位");
+  await key("Enter");
+  await key("Enter");
+  expect(call).toHaveBeenCalledWith(
+    "chat_send",
+    expect.objectContaining({
+      text: "剪短 @片段 clp_a（视频 A，00:00:10:00–00:00:14:00） ，核对 @字幕条 cue_a（字幕已改字，00:00:10:00–00:00:12:00） ，参考 @素材 med_a（记者机位）",
+    }),
+  );
 });

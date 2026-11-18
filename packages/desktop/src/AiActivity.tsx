@@ -418,7 +418,12 @@ function historyStep(entry: HistoryEntry): ActivityStep[] {
 }
 
 function liveStep(event: ProjectChanged): ActivityStep[] {
-  if (!event.turn || event.target !== "main") return [];
+  if (
+    !event.turn ||
+    event.target !== "main" ||
+    (event.author?.kind !== "agent" && ["undo", "redo"].includes(event.verb ?? ""))
+  )
+    return [];
   return [
     {
       id: event.revision.id,
@@ -445,12 +450,14 @@ export function TurnActivity({
   project,
   turn,
   changes,
+  acknowledge,
 }: {
   call: Call;
   path: string;
   project: ProjectView | null;
   turn: string | undefined;
   changes: ProjectChanged[];
+  acknowledge?: (() => void) | undefined;
 }) {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [more, setMore] = useState(false);
@@ -497,10 +504,14 @@ export function TurnActivity({
   const current = turn ?? steps.at(-1)?.turn;
   const currentSteps = current ? (groups.get(current) ?? []) : [];
   const latestToggle = history.find((entry) => entry.turn_id === current && ["undo", "redo"].includes(entry.kind));
+  const liveToggle = changes.findLast(
+    (event) =>
+      event.turn === current && event.author?.kind !== "agent" && (event.verb === "undo" || event.verb === "redo"),
+  );
   const undoSeq = Math.max(
     -1,
     ...undone.filter((item) => item.turn === current).map(({ seq }) => seq),
-    latestToggle?.kind === "undo" ? latestToggle.seq : -1,
+    liveToggle?.verb === "undo" ? liveToggle.revision.seq : latestToggle?.kind === "undo" ? latestToggle.seq : -1,
   );
   const withdrawn = undoSeq >= 0 && undoSeq >= (currentSteps.at(-1)?.seq ?? 0);
   const undo = async () => {
@@ -577,6 +588,7 @@ export function TurnActivity({
     <section className="zc-activity-section" aria-label="本轮改动">
       <div className="zc-activity-heading">
         <h3>本轮改动</h3>
+        {acknowledge && !withdrawn && <Button onClick={acknowledge}>知道了</Button>}
         {currentSteps.length > 0 &&
           (withdrawn ? (
             <output>已撤回</output>

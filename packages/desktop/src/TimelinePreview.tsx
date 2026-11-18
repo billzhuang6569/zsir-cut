@@ -217,8 +217,10 @@ export function TimelinePreview({
   onEditSubtitle,
   subtitlePreview,
   onSubtitleStyle,
+  aiChanges,
 }: {
   preferences: ReturnType<typeof useTimelinePreferences>;
+  aiChanges?: ReturnType<typeof import("./aiTimeline.js").aiTimelineChanges> | undefined;
   onEditSubtitle?: (cue: CueView) => void;
   subtitlePreview?: { fields: Partial<import("./timeline.js").StyleView>; cue_ids?: string[] | undefined } | undefined;
   onSubtitleStyle?: (
@@ -1582,6 +1584,7 @@ export function TimelinePreview({
     ? Math.max(
         800,
         pixelAt(project.duration.t, scale) + 100,
+        ...Array.from(aiChanges?.removals.values() ?? [], ({ at }) => pixelAt(at, scale) + 100),
         ...(copyPreview && "targets" in copyPreview
           ? copyPreview.targets.map((item) => pixelAt(item.timeline_out.t, scale) + 100)
           : []),
@@ -2171,6 +2174,15 @@ export function TimelinePreview({
                         point(event.clientX, ruler);
                     }}
                   >
+                    {aiChanges &&
+                      [...aiChanges.removals].map(([id, removal]) => (
+                        <span
+                          className="zc-ai-removal-tick"
+                          key={id}
+                          title={removal.label}
+                          style={{ left: pixelAt(removal.at, scale) }}
+                        />
+                      ))}
                     {markedRange && (
                       <span
                         className="zc-timeline-range"
@@ -2325,6 +2337,17 @@ export function TimelinePreview({
                           {bladeTracks[0]?.id === track.id && <output>{timecode(bladeTarget.to, project)}</output>}
                         </span>
                       )}
+                      {aiChanges &&
+                        [...aiChanges.removals]
+                          .filter(([, removal]) => removal.track === track.id)
+                          .map(([id, removal]) => (
+                            <span
+                              className="zc-ai-removal-line"
+                              key={id}
+                              title={removal.label}
+                              style={{ left: pixelAt(removal.at, scale) }}
+                            />
+                          ))}
                       <DropGhost preview={drop.preview} project={project} scale={scale} track={track.id} />
                       {copyPreview &&
                         "targets" in copyPreview &&
@@ -2430,6 +2453,7 @@ export function TimelinePreview({
                           <Clip
                             key={item.id}
                             selectionId={item.id}
+                            aiLabel={aiChanges?.clips.get(item.id)}
                             kind={track.kind}
                             label={
                               item.label ??

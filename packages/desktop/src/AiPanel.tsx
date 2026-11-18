@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { AgentKind, ChatEvent } from "../../app-host/src/agent-events.js";
 import type { ProjectChanged } from "../../app-host/src/revision-events.js";
 import { ProjectDecisions, TurnActivity, useProjectDecisions } from "./AiActivity.js";
@@ -12,10 +12,20 @@ import {
   StepRow,
   toolVerb,
 } from "./ai-components.js";
+import { aiProgress, aiTimelineChanges, aiTurnSteps } from "./aiTimeline.js";
+import {
+  type ChatReference,
+  chatReferences,
+  type DraftReference,
+  expandChatReferences,
+  moveReferences,
+  referenceQuery,
+} from "./chatReferences.js";
 import { Icon, IconButton } from "./components.js";
 import type { PermissionRequest, ProjectView } from "./connection.js";
 import { DESKTOP_AUTHOR } from "./connection.js";
 import { openReview } from "./ReviewView.js";
+import { initialState, type UiState } from "./state.js";
 import "./ai.css";
 
 function toolResultFailed(value: unknown): boolean {
@@ -98,6 +108,7 @@ export function useAiPanel({
   connectionEpoch = 0,
   decisionRevision = 0,
   turnChanges = [],
+  uiState,
   permissions = [],
   permissionAnswered,
 }: {
@@ -109,6 +120,7 @@ export function useAiPanel({
   connectionEpoch?: number;
   decisionRevision?: number;
   turnChanges?: ProjectChanged[];
+  uiState?: UiState;
   permissions?: PermissionRequest[];
   permissionAnswered?: (id: string) => void;
 }) {
@@ -118,14 +130,28 @@ export function useAiPanel({
   const currentChat = useRef<string>();
   const [events, setEvents] = useState<ChatEvent[]>([]);
   const [generating, setGenerating] = useState(false);
+  const [acknowledged, setAcknowledged] = useState<string>();
   const [input, setInput] = useState("");
+  const [references, setReferences] = useState<DraftReference[]>([]);
+  const [query, setQuery] = useState<ReturnType<typeof referenceQuery>>();
+  const [activeReference, setActiveReference] = useState(0);
+  const referenceList = useId();
+  const candidates = project && query ? chatReferences(project, uiState ?? initialState(), query.query) : [];
+  const activeCandidate = Math.min(activeReference, candidates.length - 1);
+  const updateQuery = (value: string, caret: number) => {
+    setQuery(referenceQuery(value, caret));
+    setActiveReference(0);
+  };
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const focusInput = useRef(false);
+  const focusCaret = useRef<number>();
   useEffect(() => {
     if (!focusInput.current || !agents.length || !inputRef.current) return;
     focusInput.current = false;
     inputRef.current.focus();
-    inputRef.current.setSelectionRange(input.length, input.length);
+    const caret = focusCaret.current ?? input.length;
+    focusCaret.current = undefined;
+    inputRef.current.setSelectionRange(caret, caret);
   }, [input, agents.length]);
   const [suggestion, setSuggestion] = useState("");
   const permissionCards = useRef<HTMLDivElement>(null);
@@ -174,6 +200,9 @@ export function useAiPanel({
   useEffect(() => {
     setGenerating(false);
     setAnswerLog([]);
+    setAcknowledged(undefined);
+    setReferences([]);
+    setQuery(undefined);
     setInput("");
     setSuggestion("");
     setError("");
@@ -251,6 +280,7 @@ export function useAiPanel({
         setEvents((old) => [...old, notice.event]);
         if (notice.event.type === "suggestion") setSuggestion(notice.event.text?.trim() ?? "");
         if (notice.event.type === "user") setSuggestion("");
+        if (notice.event.type === "turn") setGenerating(true);
         if (notice.event.type === "end") {
           setGenerating(false);
           void refresh().catch((e: Error) => setError(e.message));
@@ -279,10 +309,27 @@ export function useAiPanel({
       return next;
     });
   }, [events]);
-  const send = async (text: string) => {
+  const chooseReference = (reference: ChatReference) => {
+    if (!query) return;
+    const next = input.slice(0, query.start) + input.slice(query.end);
+    setReferences((old) => [
+      ...moveReferences(
+        old.filter(({ text }) => text !== reference.text),
+        input,
+        next,
+      ),
+      { ...reference, at: query.start },
+    ]);
+    setInput(next);
+    focusInput.current = true;
+    focusCaret.current = query.start;
+    setQuery(undefined);
+  };
+  const send = async (draft: string, refs: DraftReference[] = []) => {
+    const text = refs.length ? expandChatReferences(draft, refs) : draft;
     if (generating || !text.trim()) return;
     if (!agents.some((item) => item.agent === agent && item.available)) {
-      setInput(text);
+      setInput(draft);
       setError("未检测到所选 Agent，决定回答已保存。");
       return;
     }
@@ -291,6 +338,8 @@ export function useAiPanel({
     setGenerating(true);
     setSuggestion("");
     setInput("");
+    setReferences([]);
+    setQuery(undefined);
     try {
       const result = (await call("chat_send", {
         agent,
@@ -302,7 +351,8 @@ export function useAiPanel({
     } catch (e) {
       setError(String(e));
       setGenerating(false);
-      setInput(text);
+      setInput(draft);
+      setReferences(refs);
     }
   };
   const write = (verb: string, session: Session, extra: Record<string, unknown>) =>
@@ -680,61 +730,116 @@ export function useAiPanel({
             </output>
           )}
           <div className="zc-chat-input">
+            {references.length > 0 && (
+              <div className="zc-chat-reference-tags">
+                {references.map((reference) => (
+                  <button
+                    type="button"
+                    key={reference.text}
+                    className="zc-chat-ref"
+                    title={reference.text}
+                    aria-label={`移除引用：${reference.label}`}
+                    onClick={() => setReferences((old) => old.filter((item) => item !== reference))}
+                  >
+                    {reference.label} ×
+                  </button>
+                ))}
+              </div>
+            )}
             <textarea
               ref={inputRef}
               aria-label="发给 AI"
+              aria-autocomplete="list"
+              aria-controls={query ? referenceList : undefined}
+              aria-activedescendant={activeCandidate >= 0 ? `${referenceList}-${activeCandidate}` : undefined}
               rows={3}
               value={input}
-              placeholder={suggestion ? "" : "描述你想怎么剪，@ 引用素材"}
+              placeholder={suggestion ? "" : "描述你想怎么剪，输入 @ 添加引用"}
               onChange={(e) => {
+                if (references.length) setReferences(moveReferences(references, input, e.target.value));
                 setInput(e.target.value);
+                updateQuery(e.target.value, e.target.selectionStart);
                 setSuggestion("");
               }}
+              onClick={(e) => updateQuery(e.currentTarget.value, e.currentTarget.selectionStart)}
+              onKeyUp={(e) => {
+                if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key))
+                  updateQuery(e.currentTarget.value, e.currentTarget.selectionStart);
+              }}
+              onBlur={() => setQuery(undefined)}
               onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing) return;
+                if (query && e.key === "Escape") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setQuery(undefined);
+                  return;
+                }
+                if (activeCandidate >= 0 && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+                  e.preventDefault();
+                  const next =
+                    (activeCandidate + (e.key === "ArrowDown" ? 1 : candidates.length - 1)) % candidates.length;
+                  setActiveReference(next);
+                  document.getElementById(`${referenceList}-${next}`)?.scrollIntoView?.({ block: "nearest" });
+                  return;
+                }
+                const candidate = candidates[activeCandidate];
+                if (candidate && !e.shiftKey && (e.key === "Enter" || e.key === "Tab")) {
+                  e.preventDefault();
+                  chooseReference(candidate);
+                  return;
+                }
                 if (e.key === "Escape" && generating) {
                   e.preventDefault();
                   void call("chat_stop", {}).catch((error: Error) => setError(error.message));
                 }
-                if (e.nativeEvent.isComposing) return;
-                if (e.key === "Tab" && !e.shiftKey && suggestion && !input) {
+                if (e.key === "Tab" && !e.shiftKey && suggestion && !input && !references.length) {
                   e.preventDefault();
                   setInput(suggestion);
                   setSuggestion("");
                 }
                 if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                   e.preventDefault();
-                  void send(input || suggestion);
+                  void send(input || (references.length ? "" : suggestion), references);
                 }
               }}
             />
-            {suggestion && !input && (
+            {suggestion && !input && !references.length && (
               <div className="zc-ghost" aria-hidden="true">
                 <span>{suggestion}</span>
                 <kbd>Tab</kbd>
               </div>
             )}
-            {/@[^\s]*$/.test(input) && (
-              <fieldset className="zc-chat-refs">
-                <legend>引用素材</legend>
-                {project?.media.map((media) => (
-                  <Button
-                    key={media.id}
-                    onClick={() => setInput(input.replace(/@[^\s]*$/, `@[${media.name}](${media.id}) `))}
-                  >
-                    {media.name}
-                  </Button>
-                ))}
-              </fieldset>
+            {query && (
+              <div className="zc-chat-refs">
+                <div id={referenceList} role="listbox" aria-label="选择引用">
+                  {candidates.map((candidate, index) => (
+                    <button
+                      type="button"
+                      role="option"
+                      id={`${referenceList}-${index}`}
+                      aria-selected={index === activeCandidate}
+                      tabIndex={-1}
+                      key={candidate.text}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => chooseReference(candidate)}
+                    >
+                      {candidate.label}
+                    </button>
+                  ))}
+                </div>
+                {!candidates.length && <output>没有匹配的引用</output>}
+              </div>
             )}
             <div className="zc-chat-actions">
               <span className="zc-grow" />
               <IconButton
                 icon={generating ? "stop" : "send"}
                 label={generating ? "停止" : "发送"}
-                disabled={!generating && !input.trim() && !suggestion}
+                disabled={!generating && !input.trim() && !suggestion && !references.length}
                 onClick={() => {
                   if (generating) void call("chat_stop", {}).catch((e: Error) => setError(e.message));
-                  else void send(input || suggestion);
+                  else void send(input || (references.length ? "" : suggestion), references);
                 }}
               />
             </div>
@@ -744,6 +849,17 @@ export function useAiPanel({
       {error && <p role="alert">{error}</p>}
     </div>
   );
+  const liveTurn = notices.findLast(({ event }) => event.type === "turn")?.event.id;
+  const activeTurn = notices.findLast(({ event }) => event.type === "turn" || event.type === "end")?.event.id;
+  const turn = liveTurn ?? turnChanges.findLast((event) => event.author?.kind === "agent")?.turn;
+  const turnSteps = aiTurnSteps(turnChanges, turn);
+  const cleared =
+    turn === acknowledged ||
+    turnChanges.some((event) => event.turn === turn && event.verb === "undo" && event.author?.kind !== "agent");
+  const timelineChanges = aiTimelineChanges(
+    turnSteps.filter((event) => event.target === "main"),
+    cleared,
+  );
   const parameters = (
     <>
       {path && (
@@ -752,11 +868,13 @@ export function useAiPanel({
           call={call}
           path={path}
           project={project}
-          turn={
-            notices.findLast(({ event }) => event.type === "turn")?.event.id ??
-            events.findLast((event) => event.type === "turn")?.id
-          }
+          turn={turn ?? events.findLast((event) => event.type === "turn")?.id}
           changes={turnChanges}
+          acknowledge={
+            timelineChanges.clips.size || timelineChanges.removals.size
+              ? () => setAcknowledged(turn ?? undefined)
+              : undefined
+          }
         />
       )}
       {runningBatch && (
@@ -904,6 +1022,10 @@ export function useAiPanel({
     </>
   );
   return {
+    timelineChanges,
+    progress: generating ? (
+      <output className="zc-ai-progress">{aiProgress(activeTurn === turn ? turnSteps : [])}</output>
+    ) : null,
     chat,
     header,
     decisionStatus: pendingCount > 0 ? <span className="zc-chip is-sm is-attention">{pendingCount} 件待定</span> : null,
