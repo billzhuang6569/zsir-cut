@@ -399,3 +399,22 @@ describe("FCPXML", () => {
     }
   });
 });
+
+it.each(["fcp-11-fcpxml-1.13", "resolve-18.5-otio", "premiere-25-xmeml-5"] as const)(
+  "%s emits identical bytes and losses when tracks are locked",
+  async (profile) => {
+    const path = "fixtures/projects/std-25.zcut.json";
+    const parsed = parseProject(await readFile(path, "utf8"));
+    if (!parsed.ok) throw new Error("Invalid fixture");
+    const { project } = parsed;
+    const [timeline] = project.timelines;
+    if (!timeline) throw new Error("Missing timeline");
+    const paths = new Map(project.media.map((media) => [media.id, resolve(dirname(path), media.path)]));
+    const before = await exporter.generate(project, timeline, profile, paths);
+    const losses = exporter.losses(project, timeline, profile);
+    for (const track of timeline.tracks) track.locked = true;
+    const after = await exporter.generate(project, timeline, profile, paths);
+    expect(after.data).toEqual(before.data);
+    expect(exporter.losses(project, timeline, profile)).toEqual(losses);
+  },
+);

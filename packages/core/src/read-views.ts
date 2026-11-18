@@ -309,6 +309,7 @@ export async function inspect(
         kind: track.kind,
         name: track.name,
         enabled: track.enabled,
+        locked: track.locked ?? false,
         clip_count: track.kind === "subtitle" ? 0 : track.clips.length,
       })),
       review_markers: reviews.slice(0, 50).map((marker) => ({

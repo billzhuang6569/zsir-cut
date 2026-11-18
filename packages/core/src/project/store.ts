@@ -652,7 +652,7 @@ export function openProject(options: OpenProjectOptions) {
         if (error instanceof HistoryError) return fail("rejected", before, error.code, error.message);
         if (error instanceof UndoConflict)
           return fail("rejected", before, "E_UNDO_CONFLICT", error.message, { keys: error.keys });
-        if (error instanceof EditError) return fail("rejected", before, error.code, error.message);
+        if (error instanceof EditError) return fail("rejected", before, error.code, error.message, error.details);
         throw error;
       }
       let serialized: string;
@@ -838,7 +838,7 @@ export function openProject(options: OpenProjectOptions) {
         output.error = { code: "E_IO", message: String(error), retryable: false };
         return output;
       }
-      if (error instanceof EditError) return fail("rejected", "", error.code, error.message);
+      if (error instanceof EditError) return fail("rejected", "", error.code, error.message, error.details);
       if (create && (error as NodeJS.ErrnoException).code === "EEXIST")
         return fail("rejected", "", "E_VALIDATION", "工程文件已存在");
       return fail(
@@ -997,10 +997,10 @@ export function openProject(options: OpenProjectOptions) {
       result,
       error: null,
     };
-    const reject = (code: ErrorCode, message: string) => {
+    const reject = (code: ErrorCode, message: string, details?: Record<string, unknown>) => {
       output.ok = false;
       output.status = "rejected";
-      output.error = { code, message, retryable: false };
+      output.error = { code, message, retryable: false, ...(details ? { details } : {}) };
       return output;
     };
     if (request.reason !== undefined && (typeof request.reason !== "string" || [...request.reason].length > 200))
@@ -1018,12 +1018,8 @@ export function openProject(options: OpenProjectOptions) {
       await mutator(candidate);
     } catch (error) {
       if (error instanceof HistoryError) return reject(error.code, error.message);
-      if (error instanceof UndoConflict) {
-        const result = reject("E_UNDO_CONFLICT", error.message);
-        if (result.error) result.error.details = { keys: error.keys };
-        return result;
-      }
-      if (error instanceof EditError) return reject(error.code, error.message);
+      if (error instanceof UndoConflict) return reject("E_UNDO_CONFLICT", error.message, { keys: error.keys });
+      if (error instanceof EditError) return reject(error.code, error.message, error.details);
       throw error;
     }
     let serialized: string;

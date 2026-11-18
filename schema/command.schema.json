@@ -1074,6 +1074,10 @@
         "unevaluatedProperties": false
       }
     },
+    "signed_seconds": {
+      "type": "string",
+      "pattern": "^-?(0|[1-9][0-9]*)(/[1-9][0-9]*)?s$"
+    },
     "seconds": {
       "type": "string",
       "pattern": "^(0|[1-9][0-9]*)(/[1-9][0-9]*)?s$"
@@ -1439,10 +1443,33 @@
               "type": "boolean"
             },
             "mode": {
-              "enum": ["place", "insert"],
+              "enum": ["place", "insert", "overwrite"],
               "default": "place"
             }
           },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["op", "clip_id", "by"],
+          "properties": {
+            "op": { "enum": ["slip", "slide"] },
+            "clip_id": { "$ref": "#/$defs/id" },
+            "by": { "$ref": "#/$defs/signed_seconds" },
+            "linked": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["op", "track_id"],
+          "properties": {
+            "op": { "const": "set_track" },
+            "track_id": { "$ref": "#/$defs/id" },
+            "enabled": { "type": "boolean" },
+            "locked": { "type": "boolean" }
+          },
+          "minProperties": 3,
           "additionalProperties": false
         },
         {
