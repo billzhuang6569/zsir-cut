@@ -364,7 +364,8 @@ ADR-0027：桌面版 AI 默认直接写主工程，拿不准的事也要能问�
 3. 返回的信封：执行了就是那次 `edit` 的结果（`applied` 或 `rejected`），`result.decision` 是更新后的决定；没执行就是 `no_op`。
 4. 第 1 步成功、第 2 步之前进程退出：下次任何写请求加锁时，内核找到 `answered` 但没有 `execution` 的决定，按第 2 步补做。同一条决定只执行一次。
 5. 改答：已经 `applied` 的决定改答时，先按 `execution.revision` 撤销那次执行（规则同 `undo`，冲突返回 `E_UNDO_CONFLICT`，不改答），再按新选项执行。
-6. 一个工程最多 50 条 `pending` 的工程决定，超过返回 `E_VALIDATION`。`answered`、`skipped` 的保留 200 条，更早的删掉。
+6. 选项的 `ops` 不带 `timeline_id`：工程只有一条时间线时用它；有多条时按 `ops` 引用的实体和决定的 `refs` 定位唯一一条，定位不了按 `edit` 的规则返回 `E_VALIDATION`（2026-11-18 按 C3 实现补）。选项执行结果是 `no_op` 时记 `execution.state: none`，没有可供改答撤销的修订。
+7. 一个工程最多 50 条 `pending` 的工程决定，超过返回 `E_VALIDATION`。`answered`、`skipped` 的保留 200 条，更早的删掉。
 
 `ask`、`answer` 不能带 `session_id`，带了返回 `rejected`、`E_SESSION_STATE`；会话里继续用 `session_ask`、`session_answer`。
 

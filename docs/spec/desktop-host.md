@@ -144,7 +144,7 @@
 | `connect_edit` | 0.2：放到主轨上方（FCP 的连接） | `⇧,` ◇ | `Q` |
 | `clear_in_out` | 0.2：清除时间线入出点 | `⌃⇧X` | `⌥X` |
 | `select_edit_in` / `select_edit_out` / `select_edit_both` | 0.2：选中播放头处剪点的左边、右边、两边 | `[` / `]` / `⇧\` ◇ | `[` / `]` / `\` |
-| `nudge_edit_back10` / `nudge_edit_fwd10` | 0.2：同 `nudge_edit_*`，一次 10 帧 | `⇧⌥Left` / `⇧⌥Right` | `⇧,` / `⇧.` |
+| `nudge_edit_back10` / `nudge_edit_fwd10` | 0.2：同 `nudge_edit_*`，一次 10 帧 | `⌥⇧Left` / `⌥⇧Right` | `⇧,` / `⇧.` |
 | `tool_slip` / `tool_slide` | 0.2：滑动内容工具 / 滑动片段工具 | `Y` / `U` | `Y` ◇ / `U` ◇ |
 | `copy` / `cut` / `paste` | 0.2：复制 / 剪切 / 粘贴到播放头 | `⌘C` / `⌘X` / `⌘V` | `⌘C` / `⌘X` / `⌘V` |
 | `close_all_gaps` ◇ | 0.2：合拢时间线上全部空隙 | `⌥⌘G` | `⌥⌘G` |
