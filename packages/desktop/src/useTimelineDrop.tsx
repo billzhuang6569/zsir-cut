@@ -3,7 +3,7 @@ import { type DragEvent, type RefObject, useEffect, useRef, useState } from "rea
 import { DESKTOP_AUTHOR, type ProjectView } from "./connection.js";
 import { type MediaKind, type Placement, placeMedia, placementKinds, placementRange } from "./media.js";
 import type { UiState } from "./state.js";
-import { pixelAt, timecode } from "./timeline.js";
+import { pixelAt, scrollTimelineEdge, timecode } from "./timeline.js";
 import { dropMode, dropPosition, dropTime, dropTrack, fileName, MEDIA_DRAG } from "./timelineDrop.js";
 import { importAndPlace, listenFileDrop, type TimelineLanding } from "./useFileDrop.js";
 
@@ -150,16 +150,7 @@ export function useTimelineDrop(options: Options) {
     const element = latest.current.scroller.current;
     const point = pointer.current;
     if (!element || !point || !valid(active.current)) return;
-    const viewport = element.getBoundingClientRect();
-    if (!inside(viewport, point.x, point.y)) return;
-    const label = element.querySelector(".zc-ruler-row > .zc-track-name")?.getBoundingClientRect().width ?? 0;
-    const left = point.x - viewport.left - label;
-    const right = viewport.right - point.x;
-    const delta = right < 36 ? (36 - right) / 3 : left < 36 ? -(36 - left) / 3 : 0;
-    if (!delta) return;
-    const previous = element.scrollLeft;
-    element.scrollLeft += delta;
-    if (previous !== element.scrollLeft) {
+    if (scrollTimelineEdge(element, point.x, point.y)) {
       refresh();
       animation.current = requestAnimationFrame(scroll);
     }

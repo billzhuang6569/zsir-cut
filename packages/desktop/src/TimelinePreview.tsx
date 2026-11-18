@@ -50,7 +50,15 @@ import {
 } from "./timeline.js";
 import { editPoints, markedTimelineRange, splitAllAt, timelineEdit, timelineMarks } from "./timelineActions.js";
 import { copyClips, pasteOps, planPaste } from "./timelineClipboard.js";
-import { moveClipPreview, moveGroup, moveInsert, moveTarget, snapEdges } from "./timelineMove.js";
+import {
+  moveBlockReason,
+  moveClipPreview,
+  moveCoverage,
+  moveGroup,
+  moveInsert,
+  moveTarget,
+  snapEdges,
+} from "./timelineMove.js";
 import { cueTrimTarget, rollTarget, type TrimEdge, trimTarget } from "./timelineTrim.js";
 import { useClipGain } from "./useClipGain.js";
 import { DropGhost, useTimelineDrop } from "./useTimelineDrop.js";
@@ -217,10 +225,12 @@ export function TimelinePreview({
 }) {
   const [subtitleDraft, setSubtitleDraft] = useState<Partial<import("./timeline.js").StyleView> | null>(null);
   const [scale, setScale] = useState(48);
+  const positionTap = useRef(false);
   const [movePreview, setMovePreview] = useState<{
     ids: string[];
     anchor: string;
-    blocked: boolean;
+    reason: string | null;
+    coverage: ReturnType<typeof moveCoverage>;
     y: number;
     target: ReturnType<typeof moveTarget> & { insert?: NonNullable<ReturnType<typeof moveInsert>>["insert"] };
   } | null>(null);
@@ -402,11 +412,13 @@ export function TimelinePreview({
       const group = moveGroup(project, state.selected, id);
       if (project.tracks.some((track) => track.locked && track.clips.some((clip) => group.moving.includes(clip))))
         return;
+      positionTap.current = false;
       const origin = Math.round(event.clientX);
       const scroll = gestures.scroller.current?.scrollLeft ?? 0;
       const lane = element.closest<HTMLElement>(".zc-track-lane");
       const calculate = (event: { clientX: number; clientY: number; metaKey: boolean; altKey: boolean }) => {
-        const magnetic = !event.altKey && dragMagnetic(event.metaKey);
+        const magnetic =
+          !event.altKey && dragMagnetic(event.metaKey) && !(preset === "fcp" && gestures.positionKey.current);
         const targetLane = [...(gestures.scroller.current?.querySelectorAll<HTMLElement>(".zc-track-lane") ?? [])].find(
           (lane) => {
             const rect = lane.getBoundingClientRect();
@@ -427,15 +439,15 @@ export function TimelinePreview({
           rational(BigInt(scale)),
         );
         const insertion = magnetic ? moveInsert(project, group, target, id, trackId, pointer) : null;
-        const locked = !!project.tracks.find((item) => item.id === trackId)?.locked;
-        const blocked =
-          locked || (magnetic && new Set(group.moving.map((clip) => clip.occurrence_id ?? clip.id)).size !== 1);
+        const coverage = magnetic || event.altKey ? [] : moveCoverage(project, group, target.delta, id, trackId);
+        const mode = magnetic ? "insert" : coverage.length ? "overwrite" : "place";
+        const reason = event.altKey ? null : moveBlockReason(project, group, insertion ?? target, id, trackId, mode);
 
         return {
-          target: blocked ? target : (insertion ?? target),
-          blocked,
-          locked,
-          insert: !!insertion && !blocked,
+          target: reason ? target : (insertion ?? target),
+          reason,
+          mode,
+          coverage: reason ? [] : coverage,
           trackId,
           y: targetLane && lane ? targetLane.getBoundingClientRect().top - lane.getBoundingClientRect().top : 0,
         };
@@ -449,6 +461,7 @@ export function TimelinePreview({
         return planPaste(project, copies, result.target.to, magnetic, { drag: { anchor: id, track: result.trackId } });
       };
       return {
+        edgeScroll: true,
         move: (event) => {
           const preview = calculate(event);
           const copy = event.altKey ? duplicate(preview) : null;
@@ -459,9 +472,9 @@ export function TimelinePreview({
               event,
               sub(parseRational(preview.target.to, true), group.earliest),
               [sub(parseRational(anchor.timeline_out.t, true), parseRational(anchor.timeline_in.t, true))],
-              preview.locked || copy?.error
+              preview.reason || copy?.error
                 ? "not-allowed"
-                : event.altKey || dragMagnetic(event.metaKey)
+                : event.altKey || preview.mode === "insert"
                   ? "copy"
                   : "grabbing",
             );
@@ -471,7 +484,8 @@ export function TimelinePreview({
               : {
                   ids: group.moving.map((clip) => clip.id),
                   anchor: id,
-                  blocked: preview.blocked,
+                  reason: preview.reason,
+                  coverage: preview.coverage,
                   y: preview.y,
                   target: preview.target,
                 },
@@ -487,8 +501,8 @@ export function TimelinePreview({
             paste(duplicate(result));
             return;
           }
-          if (result.blocked) {
-            setWriteError(result.locked ? "请解锁目标轨道后再移动片段" : "一次只能插入一组片段");
+          if (result.reason) {
+            setWriteError(result.reason);
             setWriteErrorDetail(undefined);
             return;
           }
@@ -497,7 +511,7 @@ export function TimelinePreview({
               op: "move",
               clip_ids: group.requested.map((clip) => clip.id),
               to: result.target.to,
-              mode: dragMagnetic(event.metaKey) ? "insert" : "place",
+              mode: result.mode,
               ...(result.trackId !== track.id ? { track_id: result.trackId } : {}),
             },
           ]);
@@ -1308,6 +1322,13 @@ export function TimelinePreview({
       return true;
     }
     if (action === "toggle_magnetic") {
+      if (preset === "fcp" && event.key.toLowerCase() === "p") {
+        if (!event.repeat && !dragging.current) {
+          gestures.positionKey.current = true;
+          positionTap.current = true;
+        }
+        return true;
+      }
       void setUi({ magnetic: !magnetic });
       return true;
     }
@@ -1428,6 +1449,11 @@ export function TimelinePreview({
     };
     const keyup = (event: KeyboardEvent) => {
       modifiers(event);
+      if (event.key.toLowerCase() === "p") {
+        gestures.positionKey.current = false;
+        if (positionTap.current) void setUi({ magnetic: !magnetic });
+        positionTap.current = false;
+      }
       const held = temporaryTool.current;
       if (!held || held.key !== (event.code || event.key.toLowerCase())) return;
       temporaryTool.current = null;
@@ -1437,6 +1463,8 @@ export function TimelinePreview({
       }
     };
     const blur = () => {
+      gestures.positionKey.current = false;
+      positionTap.current = false;
       if (temporaryTool.current) setTool(temporaryTool.current.previous);
       temporaryTool.current = null;
       setBladeHover(null);
@@ -1622,7 +1650,7 @@ export function TimelinePreview({
   }
   const viewer = (
     <section aria-label="预览" className="zc-viewer zc-panel" data-editor-region={viewerOnly ? "media" : "timeline"}>
-      {(error || writeError) && (
+      {(error || ((viewerOnly || hideTimeline) && writeError)) && (
         <p role="alert" title={error ? errorDetail : writeErrorDetail}>
           {error || writeError}
         </p>
@@ -2032,9 +2060,9 @@ export function TimelinePreview({
                 {drop.error}
               </p>
             )}
-            {hideViewer && (error || writeError) && (
-              <p role="alert" title={error ? errorDetail : writeErrorDetail}>
-                {error || writeError}
+            {hideViewer && error && (
+              <p role="alert" title={errorDetail}>
+                {error}
               </p>
             )}
             {dragFeedback &&
@@ -2048,6 +2076,7 @@ export function TimelinePreview({
                   >
                     <span>{dragFeedback.delta}</span>
                     <span>时长 {dragFeedback.durations.join(" / ")}</span>
+                    {movePreview?.reason && <span>{movePreview.reason}</span>}
                     {copyPreview && (copyPreview.error || copyPreview.warning) && (
                       <span>{copyPreview.error ?? copyPreview.warning}</span>
                     )}
@@ -2374,8 +2403,9 @@ export function TimelinePreview({
                               ...(movePreview?.ids.includes(item.id)
                                 ? {
                                     opacity: 0.5,
-                                    outline: movePreview.blocked ? "2px solid var(--attention)" : undefined,
-                                    cursor: movePreview.blocked ? "not-allowed" : undefined,
+                                    outline: movePreview.reason ? "2px solid var(--danger)" : undefined,
+                                    background: movePreview.reason ? "var(--danger)" : undefined,
+                                    cursor: movePreview.reason ? "not-allowed" : undefined,
                                     zIndex: 4,
                                     transform:
                                       item.id === movePreview.anchor ? `translateY(${movePreview.y}px)` : undefined,
@@ -2427,6 +2457,16 @@ export function TimelinePreview({
                               );
                             }}
                           >
+                            {movePreview?.coverage
+                              .filter(({ clipId }) => clipId === item.id)
+                              .map(({ offset, duration }) => (
+                                <span
+                                  key={offset}
+                                  className="zc-move-overwrite"
+                                  aria-hidden="true"
+                                  style={{ left: pixelAt(offset, scale), width: pixelAt(duration, scale) }}
+                                />
+                              ))}
                             {!track.locked && original.time_map && tool !== "blade" && (
                               <>
                                 <span
@@ -2602,7 +2642,9 @@ export function TimelinePreview({
               </div>
             )}
           </section>
-          <output className="zc-meta">{clipboardStatus}</output>
+          <output className="zc-meta zc-move-status" role={writeError ? "alert" : undefined} title={writeErrorDetail}>
+            {writeError ?? clipboardStatus}
+          </output>
         </section>
       )}
     </>

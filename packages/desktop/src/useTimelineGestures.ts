@@ -16,7 +16,7 @@ import {
 } from "react";
 import type { UiState } from "../../app-host/src/ui.js";
 import type { ProjectView } from "./connection.js";
-import { pixelAt, seekTarget } from "./timeline.js";
+import { pixelAt, scrollTimelineEdge, seekTarget } from "./timeline.js";
 
 type Position = { x: number; y: number };
 type Rectangle = { left: number; top: number; width: number; height: number };
@@ -26,6 +26,7 @@ type Session = {
   element: HTMLElement;
   origin: Position;
   moved: boolean;
+  edgeScroll?: boolean;
   last: { clientX: number; clientY: number; altKey: boolean; metaKey: boolean };
   move?: (event: { clientX: number; clientY: number; altKey: boolean; metaKey: boolean }) => void;
   end?: (event: PointerEvent<HTMLElement>, moved: boolean) => void;
@@ -58,10 +59,12 @@ export function useTimelineGestures({
   clipDrag?: (
     event: PointerEvent<HTMLElement>,
     element: HTMLElement,
-  ) => Pick<Session, "move" | "end" | "cancel"> | undefined;
+  ) => Pick<Session, "move" | "end" | "cancel" | "edgeScroll"> | undefined;
 }) {
   const scroller = useRef<HTMLElement>(null);
   const session = useRef<Session | null>(null);
+  const edgeFrame = useRef<number | null>(null);
+  const positionKey = useRef(false);
   const suppressClick = useRef(false);
   const pointer = useRef<Position | null>(null);
   const pendingScroll = useRef<number | null>(null);
@@ -69,17 +72,34 @@ export function useTimelineGestures({
   const latest = useRef({ project, state, update, scale });
   latest.current = { project, state, update, scale };
 
+  const stopEdgeScroll = () => {
+    if (edgeFrame.current !== null) cancelAnimationFrame(edgeFrame.current);
+    edgeFrame.current = null;
+  };
+  const scrollAtEdge = () => {
+    edgeFrame.current = null;
+    const active = session.current;
+    const element = scroller.current;
+    if (!active?.edgeScroll || !element || element.scrollWidth <= element.clientWidth) return;
+    if (scrollTimelineEdge(element, active.last.clientX, active.last.clientY)) {
+      active.move?.(active.last);
+      edgeFrame.current = requestAnimationFrame(scrollAtEdge);
+    }
+  };
+
   const finish = (cancelled: boolean, event?: PointerEvent<HTMLElement>) => {
     const active = session.current;
     if (!active || (event && event.pointerId !== active.pointerId)) return;
     if (!cancelled && event && Math.hypot(event.clientX - active.origin.x, event.clientY - active.origin.y) >= 4)
       active.moved = true;
     session.current = null;
+    stopEdgeScroll();
     dragging.current = false;
     suppressClick.current = cancelled || active.moved;
     setBox(null);
     if (cancelled) active.cancel?.();
     else if (event) active.end?.(event, active.moved);
+    positionKey.current = false;
     if (active.element.hasPointerCapture?.(active.pointerId)) active.element.releasePointerCapture(active.pointerId);
   };
   useEffect(() => {
@@ -91,14 +111,24 @@ export function useTimelineGestures({
     };
     const modifiers = (event: KeyboardEvent) => {
       const active = session.current;
-      if (!active || !["Meta", "Alt"].includes(event.key)) return;
+      if (!active) return;
+      if (
+        event.key.toLowerCase() === "p" &&
+        active.edgeScroll &&
+        (event.type === "keyup" || (!event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey))
+      ) {
+        positionKey.current = event.type === "keydown";
+      } else if (!["Meta", "Alt"].includes(event.key)) return;
       active.last = { ...active.last, altKey: event.altKey, metaKey: event.metaKey };
       if (active.moved) active.move?.(active.last);
     };
+    const blur = () => finish(true);
+    window.addEventListener("blur", blur);
     window.addEventListener("keydown", keydown);
     window.addEventListener("keydown", modifiers);
     window.addEventListener("keyup", modifiers);
     return () => {
+      window.removeEventListener("blur", blur);
       window.removeEventListener("keydown", keydown);
       window.removeEventListener("keydown", modifiers);
       window.removeEventListener("keyup", modifiers);
@@ -106,7 +136,7 @@ export function useTimelineGestures({
   });
   const start = (
     event: PointerEvent<HTMLElement>,
-    callbacks: Pick<Session, "move" | "end" | "cancel"> = {},
+    callbacks: Pick<Session, "move" | "end" | "cancel" | "edgeScroll"> = {},
     element = event.currentTarget,
   ) => {
     if (event.button !== 0 || session.current) return false;
@@ -128,6 +158,8 @@ export function useTimelineGestures({
     () => () => {
       const active = session.current;
       session.current = null;
+      stopEdgeScroll();
+      positionKey.current = false;
       if (!active) return;
       setBox(null);
       dragging.current = false;
@@ -241,6 +273,7 @@ export function useTimelineGestures({
   }, [zoom]);
   return {
     scroller,
+    positionKey,
     box,
     start,
     zoom,
@@ -288,7 +321,10 @@ export function useTimelineGestures({
         if (!active || active.pointerId !== event.pointerId) return;
         if (Math.hypot(event.clientX - active.origin.x, event.clientY - active.origin.y) >= 4) active.moved = true;
         active.last = { clientX: event.clientX, clientY: event.clientY, altKey: event.altKey, metaKey: event.metaKey };
-        if (active.moved) active.move?.(event);
+        if (active.moved) {
+          active.move?.(event);
+          if (active.edgeScroll && edgeFrame.current === null) edgeFrame.current = requestAnimationFrame(scrollAtEdge);
+        }
       },
       onScroll() {
         const active = session.current;

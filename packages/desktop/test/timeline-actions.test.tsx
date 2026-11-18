@@ -337,6 +337,7 @@ describe.each(["fcp", "premiere"] as const)("%s merged actions", (value) => {
     await action("toggle_snap");
     expect(ui.snap).toBe(true);
     await action("toggle_magnetic");
+    await act(() => window.dispatchEvent(new KeyboardEvent("keyup", { key: "p" })));
     expect(ui.magnetic).toBe(false);
     await action("toggle_history");
     expect(state.history?.open).toBe(true);
@@ -391,7 +392,7 @@ it.each([true, false])(
     await pointer(clip, "pointerdown", 20);
     await pointer(clip, "pointermove", 68);
     await pointer(clip, "pointerup", 68);
-    expect(lastOps()).toMatchObject([{ op: "move", mode: magnetic ? "insert" : "place" }]);
+    expect(lastOps()).toMatchObject([{ op: "move", mode: magnetic ? "insert" : "overwrite" }]);
   },
 );
 
