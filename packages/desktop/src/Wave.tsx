@@ -82,12 +82,16 @@ export const Wave = memo(function Wave({
   scale,
   config,
   hasAudio = true,
+  firstPixel,
+  lastPixel,
 }: {
   clip: ClipView;
   width: number;
   scale: number | ReturnType<typeof rational>;
   config: Config | undefined;
   hasAudio?: boolean;
+  firstPixel?: number;
+  lastPixel?: number;
 }) {
   const container = useRef<HTMLSpanElement>(null);
   const [peaks, setPeaks] = useState<Uint8Array>(new Uint8Array());
@@ -116,6 +120,13 @@ export const Wave = memo(function Wave({
       active = false;
     };
   }, [config, clip.media_id, media?.key, media?.peaks, media?.fallback, hasAudio]);
+  const tileWindow = useRef({ firstPixel, lastPixel });
+  const redraw = useRef<() => void>();
+  useEffect(() => {
+    tileWindow.current = { firstPixel, lastPixel };
+    redraw.current?.();
+  }, [firstPixel, lastPixel]);
+  const windowed = firstPixel !== undefined;
   // Primitive dependencies also survive fresh project snapshots and rational scale objects.
   const mapping = JSON.stringify([clip.timeline_in, clip.timeline_out, clip.source_in, clip.source_out, clip.time_map]);
   const scaleKey = typeof scale === "number" ? `${scale}` : printRational(scale);
@@ -125,20 +136,29 @@ export const Wave = memo(function Wave({
     if (!element) return;
     const scroller = element.closest(".zc-timeline, .zc-media-library");
     let signature = "";
+    const canvases = new Map<string, HTMLCanvasElement>();
     const draw = () => {
       const rect = element.getBoundingClientRect();
       const viewport = scroller?.getBoundingClientRect();
       const labelRight = scroller?.querySelector(".zc-track-name")?.getBoundingClientRect().right;
-      const left = Math.max(0, (labelRight ?? viewport?.left ?? 0) - rect.left);
-      const right = Math.min(width, (viewport?.right ?? window.innerWidth) - rect.left);
+      const { firstPixel, lastPixel } = tileWindow.current;
+      const left = firstPixel ?? Math.max(0, (labelRight ?? viewport?.left ?? 0) - rect.left);
+      const right = lastPixel ?? Math.min(width, (viewport?.right ?? window.innerWidth) - rect.left);
       const dpr = window.devicePixelRatio || 1;
       const visible = rect.bottom > (viewport?.top ?? 0) && rect.top < (viewport?.bottom ?? window.innerHeight);
       const slots = visible && right > left && peaks.length ? waveChunks(width, left, right) : [];
       const next = JSON.stringify([slots, dpr]);
       if (signature === next) return;
       signature = next;
-      element.replaceChildren();
+      const keys = new Set(slots.map((slot) => `${slot.left}:${slot.width}:${dpr}`));
+      for (const [key, canvas] of canvases) {
+        if (keys.has(key)) continue;
+        canvas.remove();
+        canvases.delete(key);
+      }
       for (const slot of slots) {
+        const key = `${slot.left}:${slot.width}:${dpr}`;
+        if (canvases.has(key)) continue;
         const canvas = document.createElement("canvas");
         canvas.width = Math.ceil(slot.width * dpr);
         canvas.height = Math.ceil(48 * dpr);
@@ -156,22 +176,33 @@ export const Wave = memo(function Wave({
           const height = Math.max(1, wavePeak(clip, peaks, x, Math.min(x + 3, width), scale) * 26);
           context.fillRect(x - slot.left, 30 - height / 2, Math.min(2, width - x), height);
         }
+        canvases.set(key, canvas);
         element.append(canvas);
       }
     };
+    let scrollTop = scroller?.scrollTop;
+    const drawVertical = () => {
+      if (scrollTop === scroller?.scrollTop) return;
+      scrollTop = scroller?.scrollTop;
+      draw();
+    };
+    redraw.current = draw;
     draw();
-    scroller?.addEventListener("scroll", draw, { passive: true });
+    if (!windowed) scroller?.addEventListener("scroll", draw, { passive: true });
+    else scroller?.addEventListener("scroll", drawVertical, { passive: true });
     window.addEventListener("resize", draw);
     const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(draw);
     observer?.observe(element);
     if (scroller) observer?.observe(scroller);
     return () => {
+      redraw.current = undefined;
       observer?.disconnect();
       scroller?.removeEventListener("scroll", draw);
+      scroller?.removeEventListener("scroll", drawVertical);
       window.removeEventListener("resize", draw);
       element.replaceChildren();
     };
-  }, [peaks, mapping, scaleKey, width]);
+  }, [peaks, mapping, scaleKey, width, windowed]);
   return (
     <span
       ref={container}

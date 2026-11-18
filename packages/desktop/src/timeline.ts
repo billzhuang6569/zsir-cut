@@ -186,7 +186,7 @@ export function timecode(at: string, timeline: TimelineView) {
     timeline.start_timecode,
   );
 }
-export function rulerTicks(width: number, scale: number, rate: string) {
+export function rulerTicks(width: number, scale: number, rate: string, left = 0, right = width) {
   const fps = parseRational(rate);
   const seconds = [1n, 2n, 5n, 10n].find((step) => step * BigInt(scale) >= 96n);
   const frames =
@@ -194,7 +194,10 @@ export function rulerTicks(width: number, scale: number, rate: string) {
       ? ceil(mul(rational(seconds), fps))
       : ceil(div(mul(rational(96n), fps), rational(BigInt(scale) * 5n))) * 5n;
   const spacing = numberOf(div(mul(rational(frames), rational(BigInt(scale))), fps));
-  return Array.from({ length: Math.ceil(width / spacing) * 5 }, (_, index) => {
+  const first = Math.max(0, Math.floor(left / spacing)) * 5;
+  const end = Math.min(Math.ceil(width / spacing), Math.ceil(right / spacing)) * 5;
+  return Array.from({ length: Math.max(0, end - first) }, (_, offset) => {
+    const index = first + offset;
     const frame = (BigInt(index) * frames) / 5n;
     const at = frameTime(frame, rate);
     const seconds = floor(parseRational(at, true));

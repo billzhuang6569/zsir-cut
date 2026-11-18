@@ -3,6 +3,7 @@
 // Copyright 2025-2026 OpenCut. See THIRD_PARTY_NOTICES.md.
 // Also adapted from xzdarcy/react-timeline-editor (MIT), 4148f4a837dd767ea66807560d05bc7b65c7e578:
 // components/row_rnd/row_rnd.tsx (both-edge snapping). Copyright (c) 2021 zdarcy.
+
 import type { ProjectView } from "./connection.js";
 import {
   add,
@@ -19,6 +20,7 @@ import {
   sourceAt,
   sub,
 } from "./timeline.js";
+import { intervalIndex, visibleIntervals } from "./timelineViewport.js";
 
 export const SNAP_DISTANCE = 8;
 
@@ -63,6 +65,51 @@ export function moveTarget(
   );
 }
 
+type SnapPoint = { at: string; clipId?: string };
+const snapIndexes = new WeakMap<
+  ProjectView,
+  {
+    tracks: ProjectView["tracks"];
+    markers: ProjectView["markers"];
+    length: number;
+    clips: { items: ClipView[]; length: number }[];
+    index: ReturnType<typeof intervalIndex<SnapPoint>>;
+  }
+>();
+function snapIndex(project: ProjectView) {
+  const cached = snapIndexes.get(project);
+  if (
+    cached?.tracks === project.tracks &&
+    cached.markers === project.markers &&
+    cached.length === project.markers.length &&
+    cached.clips.length === project.tracks.length &&
+    project.tracks.every((track, i) => {
+      const entry = cached.clips[i];
+      return entry?.items === track.clips && entry.length === track.clips.length;
+    })
+  )
+    return cached.index;
+  const points: SnapPoint[] = project.markers.map((marker) => ({ at: marker.at.t }));
+  for (const track of project.tracks) {
+    if (track.kind === "subtitle") continue;
+    for (const clip of track.clips) {
+      points.push({ at: clip.timeline_in.t, clipId: clip.id }, { at: clip.timeline_out.t, clipId: clip.id });
+    }
+  }
+  const index = intervalIndex(points, ({ at }) => {
+    const time = pixelAt(at, 1);
+    return [time, time];
+  });
+  snapIndexes.set(project, {
+    tracks: project.tracks,
+    markers: project.markers,
+    length: project.markers.length,
+    clips: project.tracks.map((track) => ({ items: track.clips, length: track.clips.length })),
+    index,
+  });
+  return index;
+}
+
 export function snapEdges(
   project: ProjectView,
   excluded: string[],
@@ -80,22 +127,22 @@ export function snapEdges(
   let nearest = Number.POSITIVE_INFINITY;
   let line: string | null = null;
   let snapped = to;
-  const points = [
-    playhead,
-    ...project.markers.map((marker) => marker.at.t),
-    ...project.tracks
-      .filter((track) => track.kind !== "subtitle")
-      .flatMap((track) => track.clips)
-      .filter((clip) => !excluded.includes(clip.id))
-      .flatMap((clip) => [clip.timeline_in.t, clip.timeline_out.t]),
-  ];
   if (snap) {
+    const index = snapIndex(project);
+    const ignored = new Set(excluded);
     for (const edge of edges) {
       const offset = sub(parseRational(edge, true), origin);
-      for (const point of points) {
+      const edgeAt = pixelAt(printRational(add(to, offset), true), scale);
+      const points = visibleIntervals(
+        index,
+        (edgeAt - SNAP_DISTANCE - 1) / scale,
+        (edgeAt + SNAP_DISTANCE + 1) / scale,
+      );
+      for (const { at: point, clipId } of [{ at: playhead, clipId: undefined }, ...points]) {
+        if (clipId && ignored.has(clipId)) continue;
         const candidate = sub(parseRational(point, true), offset);
         if (candidate.numerator < 0n) continue;
-        const distance = Math.abs(pixelAt(printRational(add(to, offset), true), scale) - pixelAt(point, scale));
+        const distance = Math.abs(edgeAt - pixelAt(point, scale));
         if (distance <= SNAP_DISTANCE && distance < nearest) {
           nearest = distance;
           line = point;
@@ -301,6 +348,8 @@ export function moveClipPreview(
   delta: ReturnType<typeof rational>,
   insert?: NonNullable<ReturnType<typeof moveInsert>>["insert"],
 ): ClipView[] {
+  const moving = ids.includes(clip.id);
+  if (!moving && !insert) return [clip];
   let start = parseRational(clip.timeline_in.t, true);
   let end = parseRational(clip.timeline_out.t, true);
   const originalStart = start;
@@ -323,7 +372,7 @@ export function moveClipPreview(
         }
       : {}),
   });
-  if (ids.includes(clip.id)) return [piece(start, end, delta)];
+  if (moving) return [piece(start, end, delta)];
   if (!insert) return [clip];
   if (insert.close && compare(start, insert.stop) >= 0) {
     start = sub(start, insert.duration);

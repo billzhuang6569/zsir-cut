@@ -1,6 +1,6 @@
 import type { UiState } from "../../app-host/src/ui.js";
 import type { ProjectView } from "./connection.js";
-import { add, compare, frameAt, frameTime, parseRational, printRational, sub } from "./timeline.js";
+import { add, type ClipView, compare, frameAt, frameTime, parseRational, printRational, sub } from "./timeline.js";
 import { moveGroup } from "./timelineMove.js";
 import { trimGroup } from "./timelineTrim.js";
 
@@ -69,16 +69,19 @@ export function markedTimelineRange(marks: NonNullable<UiState["timelineMarks"]>
 export function editPoints(project: ProjectView) {
   return project.tracks
     .filter((track) => track.kind !== "subtitle")
-    .flatMap((track) =>
-      track.clips.flatMap((left) => {
-        const right = track.clips.find(
-          (right) =>
-            right.id !== left.id &&
-            compare(parseRational(left.timeline_out.t, true), parseRational(right.timeline_in.t, true)) === 0,
-        );
-        return right ? [{ track_id: track.id, at: left.timeline_out.t, clip_id: left.id, right_id: right.id }] : [];
-      }),
-    );
+    .flatMap((track) => {
+      const starts = new Map<string, ClipView>();
+      for (const clip of track.clips) {
+        const start = printRational(parseRational(clip.timeline_in.t, true), true);
+        if (!starts.has(start)) starts.set(start, clip);
+      }
+      return track.clips.flatMap((left) => {
+        const right = starts.get(printRational(parseRational(left.timeline_out.t, true), true));
+        return right && right.id !== left.id
+          ? [{ track_id: track.id, at: left.timeline_out.t, clip_id: left.id, right_id: right.id }]
+          : [];
+      });
+    });
 }
 
 function crossingAt(project: ProjectView, cut: string) {
