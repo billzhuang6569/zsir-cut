@@ -20,9 +20,9 @@ export interface UiState {
   playing: boolean;
   range: { start: string; duration: string } | null;
   loop: boolean;
-  editTargets?: Partial<Record<"video" | "audio", string>>;
-  soloAudioTrackIds?: string[];
-  timelineMarks?: { in: string | null; out: string | null } | null;
+  editTargets?: Partial<Record<"video" | "audio", string>> | undefined;
+  soloAudioTrackIds?: string[] | undefined;
+  timelineMarks?: { in: string | null; out: string | null } | null | undefined;
   history?:
     | {
         open: boolean;

@@ -535,3 +535,23 @@ it("merges individual track heights and restores them across preference reloads"
   await reloaded.load();
   expect(reloaded.get().prefs.ui).toMatchObject({ track_height: "m", track_heights: { [video]: 72, [audio]: 48 } });
 });
+
+it("resets an invalid stored Agent mode without dropping adjacent settings", async () => {
+  await writeFile(
+    join(home, "desktop.json"),
+    JSON.stringify({
+      version: 3,
+      agent: { edit_mode: 1, future: true },
+      ui: { snap: false },
+    }),
+  );
+  const prefs = new DesktopPreferences(home);
+  await prefs.load();
+  expect(prefs.get().prefs).toMatchObject({ agent: { edit_mode: "direct" }, ui: { snap: false } });
+  expect(prefs.warning).toMatchObject({ code: "W_PREFS_RESET", message: expect.stringContaining("agent.edit_mode") });
+  await prefs.set({ agent: { edit_mode: "review" } });
+  expect(JSON.parse(await readFile(join(home, "desktop.json"), "utf8"))).toMatchObject({
+    version: 3,
+    agent: { edit_mode: "review", future: true },
+  });
+});

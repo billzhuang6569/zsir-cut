@@ -49,10 +49,13 @@ const previewCache = z.strictObject({
 });
 const asr = z.strictObject({ mode: z.enum(["local", "api"]), model: z.enum(["1.7b", "0.6b"]) });
 const network = z.strictObject({ proxy: z.string().trim().refine(validProxy, proxyFormatMessage) });
+export const agentEditMode = z.enum(["direct", "review"]);
+const agent = z.strictObject({ edit_mode: agentEditMode });
 const preferences = z.strictObject({
   schema: z.literal("zsir-cut/desktop"),
   version: z.number().int().min(2),
   asr,
+  agent,
   network,
   default_agent: z.enum(["claude", "codex"]).nullable(),
   keymap,
@@ -72,6 +75,7 @@ export const defaultPreferences: Preferences = {
   schema: "zsir-cut/desktop",
   version: 2,
   default_agent: null,
+  agent: { edit_mode: "direct" },
   network: { proxy: "" },
   asr: { mode: "local", model: recommendedAsrModel() },
   keymap: { preset: "fcp", overrides: {} },

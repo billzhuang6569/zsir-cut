@@ -4,7 +4,6 @@ import { appendFile, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } fr
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
-import { fileURLToPath } from "node:url";
 import { type AgentKind, agentParser, type ChatEvent } from "./agent-events.js";
 import { codexEnvironment, findProgram, programVersion, spawnProgram } from "./agent-management.js";
 import { proxyEnvironment } from "./proxy.js";
@@ -94,7 +93,7 @@ export interface Chat {
   agent: AgentKind;
   events: ChatEvent[];
 }
-const skill = fileURLToPath(new URL("../../../skills/zsir-cut/SKILL.md", import.meta.url));
+const skill = new URL("../../../skills/zsir-cut/", import.meta.url);
 export class Agents {
   private active: { chat: string; turn: string; child: ChildProcess; done: Promise<void> } | undefined;
   get activeChat() {
@@ -149,6 +148,8 @@ export class Agents {
       commands?: Record<AgentKind, string>;
       directories?: string[];
       proxy?: () => string;
+      editMode?: () => "direct" | "review";
+      context?: () => Promise<string>;
       waitingPermission?: (chat: string) => boolean;
     },
   ) {}
@@ -245,8 +246,6 @@ export class Agents {
         }),
         { mode: 0o600 },
       );
-      const desktopInstructions = `所有输出都必须使用用户使用的语言，包括调用工具前后的说明、过渡句、进度说明和最终回复；用户用中文时全部用中文，不夹用英文过渡句；未明确语言时默认中文。桌面模式下，应用会在 transcribe 完成后自动整理字幕，Agent 必须等待整理完成，不得自行再跑语义断句。桌面模式：只通过 mcp__zsir-cut__* 工具操作工程，不使用 CLI、shell 或文件写入。当前工程：${this.options.project}。写入 author.kind=agent，edit 必须带 label；使用 manual 编辑会话，交出草稿用 session_review，不能自行批准。\n每次回复的最后一行，如果你有把握用户下一句最可能说什么，写成 \`【下一步】\` 加一句话（不超过 30 个字，用用户的口吻）。没把握就不写。`;
-      const instructions = `${await readFile(skill, "utf8")}\n${desktopInstructions}`;
       let ended = false;
       const emit = (event: ChatEvent) => {
         if (event.type === "end") {
@@ -276,6 +275,18 @@ export class Agents {
         settleIdle();
         return { id };
       }
+      const [rules, desktop] = await Promise.all([
+        readFile(new URL("rules.md", skill), "utf8"),
+        readFile(new URL("desktop.md", skill), "utf8"),
+      ]);
+      const mode =
+        this.options.editMode?.() === "review"
+          ? "将本轮所有剪辑放进 manual 会话，做完调用 session_review，不能自己批准。这条要求优先于上面的「直接剪」和「只在用户明确要先看方案时用」。"
+          : "用户没要求先看方案时不要开会话。";
+      const instructions = `${rules.trimEnd()}\n\n${desktop.trimEnd()}\n\n当前工程路径：${this.options.project}。\n${mode}\n\n所有输出都必须使用用户使用的语言，包括调用工具前后的说明、过渡句、进度说明和最终回复；用户用中文时全部用中文，不夹用英文过渡句；未明确语言时默认中文。\n每次回复的最后一行，如果你有把握用户下一句最可能说什么，写成 \`【下一步】\` 加一句话（不超过 30 个字，用用户的口吻）。没把握就不写。`;
+      const promptFile = join(directory, "desktop-prompt.md");
+      if (agent === "claude") await writeFile(promptFile, instructions, { mode: 0o600 });
+      const message = `${(await this.options.context?.()) ?? "<界面>\n界面没有打开\n</界面>"}\n\n${text}`;
       const args =
         agent === "claude"
           ? [
@@ -293,7 +304,7 @@ export class Agents {
               "mcp__zsir-cut__*",
               ...(help === null || hasOption(help, "--tools") ? ["--tools", ""] : []),
               "--append-system-prompt-file",
-              skill,
+              promptFile,
               ...(resume ? ["--resume", resume] : []),
             ]
           : [
@@ -417,8 +428,8 @@ export class Agents {
       child.stdin.on("error", () => {});
       child.stdin.end(
         agent === "claude"
-          ? `${JSON.stringify({ type: "user", message: { role: "user", content: `${desktopInstructions}\n用户消息：${text}` } })}\n`
-          : `${instructions}\n\n${text}\n`,
+          ? `${JSON.stringify({ type: "user", message: { role: "user", content: message } })}\n`
+          : `${instructions}\n\n${message}\n`,
       );
       return { id };
     } catch (error) {

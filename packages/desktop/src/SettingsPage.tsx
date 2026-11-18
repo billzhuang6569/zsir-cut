@@ -78,6 +78,7 @@ export function SettingsPage({
   const dialog = useRef<HTMLDialogElement>(null);
   const [page, setPage] = useState<string>(initialPage);
   const [prefs, setPrefs] = useState<PrefsResult | null>(null);
+  const [editMode, setEditMode] = useState<"direct" | "review" | null>(null);
   const [agentsLoading, setAgentsLoading] = useState(true);
   const [agents, setAgents] = useState<AgentList | null>(null);
   const [cache, setCache] = useState<CacheStatus | null>(null);
@@ -151,6 +152,13 @@ export function SettingsPage({
       .catch(() => {})
       .finally(() => {
         if (!disposed) setAgentsLoading(false);
+      });
+    void call("agent_mode_get", {})
+      .then((value) => {
+        if (!disposed) setEditMode((value as { edit_mode: "direct" | "review" }).edit_mode);
+      })
+      .catch(() => {
+        if (!disposed) setError("暂时无法读取 AI 剪辑方式");
       });
     void refreshCache();
     return () => {
@@ -313,6 +321,25 @@ export function SettingsPage({
         <div className="zc-settings-body">
           {page === "Agent" && (
             <>
+              <label className="zc-settings-row">
+                <span>AI 剪辑方式</span>
+                <select
+                  className="zc-input"
+                  aria-label="AI 剪辑方式"
+                  disabled={busy || editMode === null}
+                  value={editMode ?? "direct"}
+                  onChange={(event) => {
+                    const edit_mode = event.currentTarget.value;
+                    void run(async () => {
+                      const saved = (await call("agent_mode_set", { edit_mode })) as { edit_mode: "direct" | "review" };
+                      setEditMode(saved.edit_mode);
+                    });
+                  }}
+                >
+                  <option value="direct">直接剪（推荐）</option>
+                  <option value="review">先出方案让我审</option>
+                </select>
+              </label>
               <div className="zc-settings-row">
                 <p className="zc-muted">在这里安装、更新或选择默认 Agent。</p>
                 <button

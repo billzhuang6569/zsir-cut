@@ -51,7 +51,7 @@ const requestedRange = (input: Input): Range | undefined => {
   return value ? { start: parseRational(value.start, true), duration: parseRational(value.duration, true) } : undefined;
 };
 
-function timelineEnd(timeline: Timeline): Rational {
+export function timelineEnd(timeline: Timeline): Rational {
   let end = zero;
   for (const track of timeline.tracks) {
     if (track.kind === "subtitle") {

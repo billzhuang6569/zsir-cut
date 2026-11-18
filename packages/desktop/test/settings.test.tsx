@@ -128,6 +128,8 @@ async function mount(
       if (options.failSave) throw new Error("unavailable");
       return (await prefs.set(request.patch)).result;
     }
+    if (verb === "agent_mode_get") return prefs.get().prefs.agent;
+    if (verb === "agent_mode_set") return (await prefs.set({ agent: request })).result.prefs.agent;
     if (verb === "agents_list") return structuredClone(agents);
     if (verb === "agents_set_default") {
       for (const agent of agents.agents) agent.default = agent.id === request.id;
@@ -238,6 +240,20 @@ async function mount(
   };
   return { call, container, click, input, find, push, prefs, onPrefs, close, openRecognition, settle, handlers };
 }
+it("loads and switches the AI editing mode both ways", async () => {
+  const h = await mount();
+  const select = h.find("AI 剪辑方式") as HTMLSelectElement;
+  expect(h.call).toHaveBeenCalledWith("agent_mode_get", {});
+  expect(select.value).toBe("direct");
+  expect([...select.options].map((option) => option.text)).toEqual(["直接剪（推荐）", "先出方案让我审"]);
+  for (const edit_mode of ["review", "direct"]) {
+    await h.input("AI 剪辑方式", edit_mode);
+    expect(h.call).toHaveBeenLastCalledWith("agent_mode_set", { edit_mode });
+    expect(select.value).toBe(edit_mode);
+    expect(h.prefs.get().prefs.agent).toEqual({ edit_mode });
+  }
+});
+
 it("shows missing Codex, installs with streamed output and reacts to agent changes", async () => {
   const h = await mount({ earlyOutput: true });
   expect(h.container.textContent).toContain("没有找到");
@@ -691,8 +707,20 @@ it("queues settings reads until bootstrap and renders the exact captured agents_
   socket.onopen?.();
   expect(socket.send.mock.calls.map(([raw]) => JSON.parse(raw))).toEqual([{ type: "ui_ready" }]);
   socket.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ type: "bootstrap", project: null }) }));
-  expect(JSON.parse(socket.send.mock.calls[1]?.[0] as string)).toEqual({ id: "1", verb: "agents_list", request: {} });
-  await act(async () => socket?.onmessage?.(new MessageEvent("message", { data: frame })));
+  expect(socket.send.mock.calls.slice(1).map(([raw]) => JSON.parse(raw))).toEqual([
+    { id: "1", verb: "agents_list", request: {} },
+    { id: "2", verb: "agent_mode_get", request: {} },
+    { id: "3", verb: "preview_cache_status", request: {} },
+  ]);
+  await act(async () => {
+    socket?.onmessage?.(new MessageEvent("message", { data: frame }));
+    socket?.onmessage?.(
+      new MessageEvent("message", {
+        data: JSON.stringify({ type: "result", id: "2", envelope: { ok: true, result: { edit_mode: "review" } } }),
+      }),
+    );
+  });
+  expect(container.querySelector<HTMLSelectElement>('select[aria-label="AI 剪辑方式"]')?.value).toBe("review");
   expect(container.textContent).not.toContain("暂时无法读取 Agent");
   expect(container.textContent).toContain("已找到 · 2.1.318");
   expect(container.textContent).toContain("已找到 · 0.167.0");

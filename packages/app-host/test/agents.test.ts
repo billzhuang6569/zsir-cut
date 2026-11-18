@@ -37,7 +37,7 @@ writeFileSync(${JSON.stringify(capture)},JSON.stringify({args,cwd:process.cwd(),
 let input='';process.stdin.on('data',chunk=>input+=chunk);
 process.stdin.resume();
 process.stdin.on('end',()=> {
-const captured=JSON.parse(readFileSync(${JSON.stringify(capture)},'utf8'));captured.input=input;writeFileSync(${JSON.stringify(capture)},JSON.stringify(captured));
+const captured=JSON.parse(readFileSync(${JSON.stringify(capture)},'utf8'));captured.input=input;captured.instructions=args.includes("--append-system-prompt-file") ? readFileSync(args[args.indexOf("--append-system-prompt-file")+1],"utf8") : input;writeFileSync(${JSON.stringify(capture)},JSON.stringify(captured));
 const events=${JSON.stringify(
       agent === "claude"
         ? [
@@ -94,6 +94,8 @@ if (${JSON.stringify(mode)} === 'stop') setInterval(()=>{},1000);
     { mode: 0o700 },
   );
   const events: ChatEvent[] = [];
+  let editMode: "direct" | "review" = "direct";
+  let context = "<界面>\n界面没有打开\n</界面>";
   const manager = new Agents({
     project: join(directory, "project.zcut.json"),
     projectId: "prj_test",
@@ -101,6 +103,8 @@ if (${JSON.stringify(mode)} === 'stop') setInterval(()=>{},1000);
     token: "test-token",
     commands: { claude: script, codex: script },
     proxy: () => "http://localhost:7890",
+    editMode: () => editMode,
+    context: async () => context,
     emit: (chat, event) => {
       if (event.type === "end")
         expect(
@@ -115,13 +119,22 @@ if (${JSON.stringify(mode)} === 'stop') setInterval(()=>{},1000);
     },
   });
   managers.push(manager);
-  return { directory, manager, events, capture };
+  return {
+    directory,
+    manager,
+    events,
+    capture,
+    review() {
+      editMode = "review";
+      context = "<界面>\n播放头：00:00:03:00（3s）\n</界面>";
+    },
+  };
 }
 
 describe("local agent conversations with fake executables", () => {
   for (const agent of ["claude", "codex"] as const)
     it(`${agent}: streams text and tools, persists history and resumes`, async () => {
-      const { directory, manager, events, capture } = await fixture(agent);
+      const { directory, manager, events, capture, review } = await fixture(agent);
       expect((await manager.detect())[0]).toMatchObject({
         available: true,
         version: expect.stringContaining("1.2.3"),
@@ -146,14 +159,22 @@ describe("local agent conversations with fake executables", () => {
       const details = JSON.parse(await readFile(capture, "utf8"));
       expect(details.env).toMatchObject({ HTTPS_PROXY: "http://localhost:7890", http_proxy: "http://localhost:7890" });
       expect(details.env.NO_PROXY).toContain("127.0.0.1");
-      expect(details.input).toContain("所有输出都必须使用用户使用的语言");
-      expect(details.input).toContain("包括调用工具前后的说明、过渡句、进度说明和最终回复");
-      expect(details.input).toContain("用户用中文时全部用中文");
-      expect(details.input).toContain(
+      expect(details.instructions).toContain("所有输出都必须使用用户使用的语言");
+      expect(details.instructions).toContain("包括调用工具前后的说明、过渡句、进度说明和最终回复");
+      expect(details.instructions).toContain("用户用中文时全部用中文");
+      expect(details.instructions).toContain(
         "每次回复的最后一行，如果你有把握用户下一句最可能说什么，写成 `【下一步】` 加一句话（不超过 30 个字，用用户的口吻）。没把握就不写。",
       );
+      const rules = (await readFile("skills/zsir-cut/rules.md", "utf8")).trimEnd();
+      const desktop = (await readFile("skills/zsir-cut/desktop.md", "utf8")).trimEnd();
+      const context = "<界面>\n界面没有打开\n</界面>\n\n做粗剪";
+      expect(details.instructions.startsWith(`${rules}\n\n${desktop}\n\n`)).toBe(true);
+      expect(details.instructions).toContain(`\n当前工程路径：${join(directory, "project.zcut.json")}。\n`);
+      expect(details.instructions).toContain("用户没要求先看方案时不要开会话。");
+      expect(details.instructions).not.toContain("使用 manual 编辑会话，交出草稿用 session_review");
       expect(details.cwd).toBe(await realpath(directory));
       if (agent === "claude") {
+        expect(JSON.parse(details.input).message.content).toBe(context);
         expect(details.mode).toBe(0o600);
         expect(details.body.mcpServers["zsir-cut"].headers.Authorization).toBe("Bearer test-token");
         await expect(stat(details.config)).rejects.toMatchObject({ code: "ENOENT" });
@@ -161,6 +182,7 @@ describe("local agent conversations with fake executables", () => {
           expect.arrayContaining(["--strict-mcp-config", "--tools", "", "--allowedTools", "mcp__zsir-cut__*"]),
         );
       } else {
+        expect(details.input.endsWith(`${context}\n`)).toBe(true);
         expect(details.args).toEqual(expect.arrayContaining(["--sandbox", "read-only", "--skip-git-repo-check", "-c"]));
         const approval = details.args.indexOf('mcp_servers.zsir-cut.default_tools_approval_mode="approve"');
         expect(approval).toBeGreaterThan(0);
@@ -169,9 +191,17 @@ describe("local agent conversations with fake executables", () => {
         expect(details.args).not.toContain("resume");
       }
       events.length = 0;
+      review();
       await manager.send(agent, "继续", chat.id);
       await vi.waitFor(() => expect(events.at(-1)?.type).toBe("end"), { timeout: 15000, interval: 10 });
       const resumed = JSON.parse(await readFile(capture, "utf8"));
+      expect(resumed.instructions.startsWith(`${rules}\n\n${desktop}\n\n`)).toBe(true);
+      expect(resumed.instructions).toContain(`\n当前工程路径：${join(directory, "project.zcut.json")}。\n`);
+      expect(resumed.instructions).toContain("本轮所有剪辑放进 manual 会话，做完调用 session_review，不能自己批准");
+      expect(resumed.instructions).not.toContain("使用 manual 编辑会话，交出草稿用 session_review");
+      const next = "<界面>\n播放头：00:00:03:00（3s）\n</界面>\n\n继续";
+      if (agent === "claude") expect(JSON.parse(resumed.input).message.content).toBe(next);
+      else expect(resumed.input.endsWith(`${next}\n`)).toBe(true);
       expect(resumed.args).toEqual(
         expect.arrayContaining([agent === "claude" ? "--resume" : "resume", "native-session"]),
       );

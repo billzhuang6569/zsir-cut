@@ -15,6 +15,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import { WebSocket, WebSocketServer } from "ws";
 import { z } from "zod";
 import type { DispatchOptions, Envelope, SubtitleStyle, Verb } from "../../core/dist/index.js";
+import { agentContext } from "./agent-context.js";
 import { AgentManagement, type AgentManagementOptions } from "./agent-management.js";
 import { Agents } from "./agents.js";
 import { ASR_VERBS, AsrSettings } from "./asr.js";
@@ -23,7 +24,7 @@ import { exportPreferences } from "./export-preferences.js";
 import { mediaChannel, runFfmpeg } from "./media.js";
 import { networkTest } from "./network-test.js";
 import { type HostEnvelope, Permissions, permissionDenied } from "./permissions.js";
-import { DesktopPreferences } from "./preferences.js";
+import { agentEditMode, DesktopPreferences } from "./preferences.js";
 import { PreviewCache } from "./preview-cache.js";
 import { RecentProjects } from "./recent.js";
 import { projectChanged } from "./revision-events.js";
@@ -47,6 +48,7 @@ const {
   openProject,
   printRational,
   parseRational,
+  readProjectDecisions,
 }: typeof import("../../core/dist/index.js") = await import(
   new URL(import.meta.url.endsWith(".ts") ? "../../core/src/index.ts" : "../../core/dist/index.js", import.meta.url)
     .href
@@ -184,6 +186,9 @@ const uiStateSchema = z.strictObject({
   playing: z.boolean(),
   range: z.strictObject({ start: time, duration }).nullable(),
   loop: z.boolean(),
+  editTargets: z.partialRecord(z.enum(["video", "audio"]), id).optional(),
+  soloAudioTrackIds: z.array(id).optional(),
+  timelineMarks: z.strictObject({ in: time.nullable(), out: time.nullable() }).nullable().optional(),
   history: z
     .strictObject({
       open: z.boolean(),
@@ -715,6 +720,8 @@ export async function startHost(
             "network_test",
             "prefs_get",
             "prefs_set",
+            "agent_mode_get",
+            "agent_mode_set",
             "permission_answer",
             "preview_cache_status",
             "preview_cache_clear",
@@ -762,6 +769,13 @@ export async function startHost(
                 status: ["preview_cache_clear", "preview_cache_move"].includes(message.verb) ? "applied" : "no_op",
                 result: await cache.status(),
               };
+            } else if (message.verb === "agent_mode_get") {
+              z.strictObject({}).parse(message.request ?? {});
+              reply = { status: "no_op", result: prefs.get().prefs.agent };
+            } else if (message.verb === "agent_mode_set") {
+              const agent = z.strictObject({ edit_mode: agentEditMode }).parse(message.request);
+              const saved = await prefs.set({ agent });
+              reply = { status: saved.status, result: saved.result.prefs.agent };
             } else if (message.verb === "permission_answer") {
               reply = await permissions.answer(message.request);
             } else {
@@ -1086,13 +1100,25 @@ export async function startHost(
       cacheFile,
       cache.media,
     );
-    if (options.project && next)
+    if (options.project && next) {
+      const nextPath = options.project;
       agents = new Agents({
-        project: options.project,
+        project: nextPath,
         projectId: next.id,
         ...(options.agentOptions?.directories ? { directories: options.agentOptions.directories } : {}),
         waitingPermission: (chat) => permissions.waitingForChat(chat),
         proxy: () => prefs.get().prefs.network.proxy,
+        editMode: () => prefs.get().prefs.agent.edit_mode,
+        context: async () => {
+          const { result } = await callUi("ui_state", {});
+          const project = await loadPath(nextPath);
+          const decisions = await readProjectDecisions(nextPath, project);
+          return agentContext(
+            project,
+            result && "project" in result && result.project === nextPath ? result : null,
+            decisions.filter(({ state }) => state === "pending").length,
+          );
+        },
         url: `http://127.0.0.1:${address.port}/mcp`,
         token,
         emit: (chat, event) => {
@@ -1100,6 +1126,7 @@ export async function startHost(
           if (event.type === "end") notify("ai_changed");
         },
       });
+    }
     if (options.project && agents) {
       const currentAgents = agents;
       currentAgents.selected =

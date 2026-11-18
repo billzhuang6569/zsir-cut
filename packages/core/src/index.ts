@@ -6,6 +6,7 @@ export * from "./export-framework.ts";
 export * from "./fingerprint.ts";
 export * from "./fish-audio.ts";
 export * from "./preview.ts";
+export { readProjectDecisions } from "./project/decisions.ts";
 export * from "./project/entities.ts";
 export * from "./project/id.ts";
 export * from "./project/io.ts";
@@ -18,6 +19,7 @@ export * from "./project/subtitle-rules.ts";
 export * from "./project/time-map.ts";
 export * from "./project/types.ts";
 export * from "./rational.ts";
+export { timelineEnd } from "./read-views.ts";
 export {
   commandSchemaForVerb,
   flattenMcpSchema,
