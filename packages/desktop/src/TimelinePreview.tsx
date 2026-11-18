@@ -49,6 +49,7 @@ import {
   timecode,
 } from "./timeline.js";
 import { editPoints, markedTimelineRange, splitAllAt, timelineEdit, timelineMarks } from "./timelineActions.js";
+import { copyClips, pasteOps, planPaste } from "./timelineClipboard.js";
 import { moveClipPreview, moveGroup, moveInsert, moveTarget, snapEdges } from "./timelineMove.js";
 import { cueTrimTarget, rollTarget, type TrimEdge, trimTarget } from "./timelineTrim.js";
 import { useClipGain } from "./useClipGain.js";
@@ -223,6 +224,15 @@ export function TimelinePreview({
     y: number;
     target: ReturnType<typeof moveTarget> & { insert?: NonNullable<ReturnType<typeof moveInsert>>["insert"] };
   } | null>(null);
+  const clipboard = useRef<ReturnType<typeof copyClips>>([]);
+  const [clipboardStatus, setClipboardStatus] = useState<string | null>(null);
+  const [copyPreview, setCopyPreview] = useState<ReturnType<typeof planPaste> | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: The clipboard belongs to the open project path.
+  useEffect(() => {
+    clipboard.current = [];
+    setClipboardStatus(null);
+    setCopyPreview(null);
+  }, [state.project]);
   const [trimPreview, setTrimPreview] = useState<
     (ReturnType<typeof trimTarget> & { edge: TrimEdge; following?: ClipView[] }) | null
   >(null);
@@ -395,8 +405,8 @@ export function TimelinePreview({
       const origin = Math.round(event.clientX);
       const scroll = gestures.scroller.current?.scrollLeft ?? 0;
       const lane = element.closest<HTMLElement>(".zc-track-lane");
-      const calculate = (event: { clientX: number; clientY: number; metaKey: boolean }) => {
-        const magnetic = dragMagnetic(event.metaKey);
+      const calculate = (event: { clientX: number; clientY: number; metaKey: boolean; altKey: boolean }) => {
+        const magnetic = !event.altKey && dragMagnetic(event.metaKey);
         const targetLane = [...(gestures.scroller.current?.querySelectorAll<HTMLElement>(".zc-track-lane") ?? [])].find(
           (lane) => {
             const rect = lane.getBoundingClientRect();
@@ -430,30 +440,53 @@ export function TimelinePreview({
           y: targetLane && lane ? targetLane.getBoundingClientRect().top - lane.getBoundingClientRect().top : 0,
         };
       };
+      let copies: ReturnType<typeof copyClips> | undefined;
+      const duplicate = (result: ReturnType<typeof calculate>) => {
+        copies ??= copyClips(
+          project,
+          group.moving.map((clip) => clip.id),
+        );
+        return planPaste(project, copies, result.target.to, magnetic, { drag: { anchor: id, track: result.trackId } });
+      };
       return {
         move: (event) => {
           const preview = calculate(event);
+          const copy = event.altKey ? duplicate(preview) : null;
+          setCopyPreview(copy);
           const anchor = group.moving.find((clip) => clip.id === id);
           if (anchor)
             feedback(
               event,
               sub(parseRational(preview.target.to, true), group.earliest),
               [sub(parseRational(anchor.timeline_out.t, true), parseRational(anchor.timeline_in.t, true))],
-              preview.locked ? "not-allowed" : dragMagnetic(event.metaKey) ? "copy" : "grabbing",
+              preview.locked || copy?.error
+                ? "not-allowed"
+                : event.altKey || dragMagnetic(event.metaKey)
+                  ? "copy"
+                  : "grabbing",
             );
-          setMovePreview({
-            ids: group.moving.map((clip) => clip.id),
-            anchor: id,
-            blocked: preview.blocked,
-            y: preview.y,
-            target: preview.target,
-          });
+          setMovePreview(
+            event.altKey
+              ? null
+              : {
+                  ids: group.moving.map((clip) => clip.id),
+                  anchor: id,
+                  blocked: preview.blocked,
+                  y: preview.y,
+                  target: preview.target,
+                },
+          );
         },
         end: (event, moved) => {
           setMovePreview(null);
+          setCopyPreview(null);
           setDragFeedback(null);
-          if (!moved) return;
+          if (!moved || latest.current.state.project !== state.project) return;
           const result = calculate(event);
+          if (event.altKey) {
+            paste(duplicate(result));
+            return;
+          }
           if (result.blocked) {
             setWriteError(result.locked ? "请解锁目标轨道后再移动片段" : "一次只能插入一组片段");
             setWriteErrorDetail(undefined);
@@ -470,6 +503,7 @@ export function TimelinePreview({
           ]);
         },
         cancel: () => {
+          setCopyPreview(null);
           setMovePreview(null);
           setDragFeedback(null);
         },
@@ -1153,6 +1187,16 @@ export function TimelinePreview({
       setBusy(false);
     }
   };
+  const paste = (plan: ReturnType<typeof planPaste>) => {
+    if (writing.current) return;
+    if ("error" in plan) {
+      setClipboardStatus(plan.error);
+      return;
+    }
+    const ops = pasteOps(plan);
+    setClipboardStatus(plan.warning);
+    void write("edit", `粘贴 ${plan.placements.length} 个片段`, ops);
+  };
   const editClips = (label: string, ops: unknown[]) => {
     void write("edit", label, ops);
   };
@@ -1237,9 +1281,6 @@ export function TimelinePreview({
         "nudge_edit_fwd10",
         "tool_slip",
         "tool_slide",
-        "copy",
-        "cut",
-        "paste",
         "close_all_gaps",
         "command_palette",
       ].includes(action)
@@ -1291,6 +1332,20 @@ export function TimelinePreview({
       return true;
     }
     if (!project || dragging.current) return;
+    if (action === "copy" || action === "cut" || action === "paste") {
+      if (event.repeat || (action !== "copy" && (readOnly || writing.current))) return true;
+      if (action === "paste") {
+        paste(planPaste(project, clipboard.current, previewAt, magnetic, { editTargets: state.editTargets }));
+      } else {
+        const copied = copyClips(project, state.selected);
+        if (copied.length) {
+          clipboard.current = copied;
+          setClipboardStatus(null);
+          if (action === "cut") editAction(magnetic ? "ripple_delete" : "lift_delete");
+        }
+      }
+      return true;
+    }
     if (action.startsWith("tool_")) {
       if (event.repeat) return true;
       temporaryTool.current = {
@@ -1442,7 +1497,15 @@ export function TimelinePreview({
       update({ ...latest.current.state, preview: "timeline", playing: false, playhead: { at: target } });
     }
   };
-  const width = project ? Math.max(800, pixelAt(project.duration.t, scale) + 100) : 800;
+  const width = project
+    ? Math.max(
+        800,
+        pixelAt(project.duration.t, scale) + 100,
+        ...(copyPreview && "targets" in copyPreview
+          ? copyPreview.targets.map((item) => pixelAt(item.timeline_out.t, scale) + 100)
+          : []),
+      )
+    : 800;
   const cueEndpoints = useMemo(() => {
     const endpoints = new Map<string, { in: string | undefined; out: string | undefined }>();
     for (const transcript of project?.transcripts ?? []) {
@@ -1985,6 +2048,9 @@ export function TimelinePreview({
                   >
                     <span>{dragFeedback.delta}</span>
                     <span>时长 {dragFeedback.durations.join(" / ")}</span>
+                    {copyPreview && (copyPreview.error || copyPreview.warning) && (
+                      <span>{copyPreview.error ?? copyPreview.warning}</span>
+                    )}
                   </output>
                 </>,
                 document.body,
@@ -2178,6 +2244,23 @@ export function TimelinePreview({
                         </span>
                       )}
                       <DropGhost preview={drop.preview} project={project} scale={scale} track={track.id} />
+                      {copyPreview &&
+                        "targets" in copyPreview &&
+                        copyPreview.targets
+                          .filter((item) => item.track === track.id)
+                          .map((item) => (
+                            <span
+                              key={item.timeline_in.t}
+                              aria-hidden="true"
+                              className="zc-drop-preview"
+                              style={{
+                                left: pixelAt(item.timeline_in.t, scale),
+                                width: pixelAt(item.timeline_out.t, scale) - pixelAt(item.timeline_in.t, scale),
+                              }}
+                            >
+                              <span>+</span>
+                            </span>
+                          ))}
                       {points
                         .filter((point) => point.track_id === track.id)
                         .map((point) => (
@@ -2519,6 +2602,7 @@ export function TimelinePreview({
               </div>
             )}
           </section>
+          <output className="zc-meta">{clipboardStatus}</output>
         </section>
       )}
     </>

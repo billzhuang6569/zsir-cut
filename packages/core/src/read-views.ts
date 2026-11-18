@@ -420,6 +420,9 @@ function clipView(clip: Clip, timeline: Timeline, media?: Media) {
         }
       : {}),
     gain_db: clip.gain_db ?? null,
+    ...(clip.transform ? { transform: clip.transform } : {}),
+    ...(clip.source_channels ? { source_channels: clip.source_channels } : {}),
+    ...(clip.sync_broken ? { sync_broken: true } : {}),
   };
 }
 

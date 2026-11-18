@@ -140,7 +140,11 @@ export function moveOverlaps(
   );
 }
 
-export function clipsOverlap(start: ReturnType<typeof rational>, end: ReturnType<typeof rational>, other: ClipView) {
+export function clipsOverlap(
+  start: ReturnType<typeof rational>,
+  end: ReturnType<typeof rational>,
+  other: Pick<ClipView, "timeline_in" | "timeline_out">,
+) {
   return (
     compare(start, parseRational(other.timeline_out.t, true)) < 0 &&
     compare(parseRational(other.timeline_in.t, true), end) < 0

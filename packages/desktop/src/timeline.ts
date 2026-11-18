@@ -30,6 +30,9 @@ export interface ClipView {
   speed: string;
   time_map?: { at: Time; source: Time; interp: string }[];
   gain_db?: number | null;
+  transform?: import("../../core/src/project/types.js").Transform;
+  source_channels?: number[];
+  sync_broken?: boolean;
 }
 export interface TrackView {
   id: string;

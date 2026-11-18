@@ -1268,3 +1268,185 @@ describe("track heads", () => {
     expect(ui.track_height).toBe("m");
   });
 });
+
+describe("timeline clipboard", () => {
+  it.each([true, false])("pastes linked and cross-track copies in one edit (magnetic %s)", async (magnetic) => {
+    ui.magnetic = magnetic;
+    project.edit_rate = "30000/1001";
+    const [video, audio, otherAudio] = project.tracks;
+    if (!video || !audio || !otherAudio) throw new Error("Missing fixture tracks");
+    const [picture] = video.clips;
+    const [sound] = audio.clips;
+    const [, later] = otherAudio.clips;
+    if (!picture || !sound || !later) throw new Error("Missing fixture clips");
+    Object.assign(picture, {
+      label: "画面",
+      enabled: false,
+      transform: { scale: 1.25 },
+      time_map: [
+        { at: { t: "0s" }, source: { t: "2s" }, interp: "linear" },
+        { at: { t: "1001/500s" }, source: { t: "3s" }, interp: "linear" },
+      ],
+    });
+    sound.gain_db = -6;
+    sound.sync_broken = true;
+    picture.timeline_out = sound.timeline_out = { t: "1001/500s" };
+    later.timeline_in = { t: "1001/250s" };
+    later.timeline_out = { t: "3003/500s" };
+    state = { ...state, selected: [later.id, sound.id, picture.id], playhead: { at: "1001/1000s" } };
+    await act(async () => render());
+    await refresh();
+    await action("copy");
+    expect(writes()).toHaveLength(0);
+    await action("paste");
+    expect(writes()).toHaveLength(1);
+    expect(writes()[0]?.[1].label).toBe("粘贴 2 个片段");
+    const ops = lastOps() as Record<string, unknown>[];
+    expect(ops).toEqual([
+      expect.objectContaining({
+        op: "place",
+        mode: magnetic ? "insert" : "overwrite",
+        at: "1001/1000s",
+        duration: "1001/500s",
+        source_start: "2s",
+        media_id: "media",
+        video_track: "t0",
+        audio_track: "t1",
+      }),
+      expect.objectContaining({
+        op: "set_clip",
+        clip_id: ops[0]?.video_clip_id,
+        label: "画面",
+        enabled: false,
+        transform: { scale: 1.25 },
+        time_map: [
+          { at: "0s", source: "2s", interp: "linear" },
+          { at: "1001/500s", source: "3s", interp: "linear" },
+        ],
+      }),
+      expect.objectContaining({ op: "set_clip", clip_id: ops[0]?.audio_clip_id, gain_db: -6 }),
+      expect.objectContaining({
+        op: "place",
+        mode: magnetic ? "insert" : "overwrite",
+        at: "1001/200s",
+        audio_track: "t2",
+      }),
+      expect.objectContaining({ op: "set_clip", clip_id: ops[3]?.audio_clip_id }),
+    ]);
+    if (!magnetic) expect(get("output.zc-meta").textContent).toContain("将覆盖：画面");
+  });
+
+  it.each([true, false])("cuts using the matching delete and keeps a copy (magnetic %s)", async (magnetic) => {
+    ui.magnetic = magnetic;
+    state = { ...state, selected: ["c00"] };
+    await act(async () => render());
+    await refresh();
+    await action("cut");
+    expect(lastOps()).toEqual([{ op: "remove", clip_ids: ["c00"], ...(magnetic ? { ripple: true } : {}) }]);
+    await action("paste");
+    expect(lastOps()).toEqual(expect.arrayContaining([expect.objectContaining({ op: "place", video_track: "t0" })]));
+  });
+
+  it.each([true, false])(
+    "uses explicit same-kind targets and rejects locked destinations (magnetic %s)",
+    async (magnetic) => {
+      ui.magnetic = magnetic;
+      const target = project.tracks.find((track) => track.id === "t2");
+      if (!target) throw new Error("Missing destination track");
+      state = { ...state, selected: ["c00", "c10"] };
+      await act(async () => render());
+      await refresh();
+      await action("copy");
+      const head = get('[data-track-id="t2"]').parentElement;
+      const targetButton = head?.querySelector<HTMLElement>('[aria-label="设为目标轨"]');
+      if (!targetButton) throw new Error("Missing track target control");
+      await click(targetButton);
+      expect(state.editTargets).toMatchObject({ audio: "t2" });
+      target.locked = true;
+      await act(async () => render());
+      await action("paste");
+      expect(writes()).toHaveLength(0);
+      expect(get("output.zc-meta").textContent).toBe(`轨道「${target.name}」已锁定`);
+      target.locked = false;
+      await act(async () => render());
+      await action("paste");
+      expect(writes()).toHaveLength(1);
+      expect(lastOps()).toEqual(
+        expect.arrayContaining([expect.objectContaining({ op: "place", video_track: "t0", audio_track: "t2" })]),
+      );
+    },
+  );
+
+  it("uses the active skimmer, falls back to the first track, and clears on a project switch", async () => {
+    ui.skimming = true;
+    state = { ...state, selected: ["c21"], editTargets: { audio: "t2" } };
+    await act(async () => render());
+    await refresh();
+    await action("copy");
+    project = { ...project, tracks: project.tracks.filter((track) => track.id !== "t2") };
+    await act(async () => render());
+    await pointer(get('[data-selection-id="c00"]'), "pointermove", 49);
+    await action("paste");
+    expect(lastOps()).toEqual(
+      expect.arrayContaining([expect.objectContaining({ op: "place", at: "1s", audio_track: "t1" })]),
+    );
+    state = { ...state, project: "/other.zcut.json" };
+    await act(async () => render());
+    await action("paste");
+    expect(writes()).toHaveLength(1);
+    expect(get("output.zc-meta").textContent).toBe("剪贴板为空");
+  });
+
+  it("shows a copy ghost and follows Option at release without applying Premiere's Command reversal", async () => {
+    preset = "premiere";
+    ui.magnetic = false;
+    project.tracks = project.tracks.slice(0, 2);
+    await act(async () => render());
+    await refresh();
+    const clip = get('[data-selection-id="c00"]');
+    await pointer(clip, "pointerdown", 10);
+    await pointer(clip, "pointermove", 394, 40, { altKey: true, metaKey: true });
+    expect(get(".zc-drop-preview").textContent).toBe("+");
+    expect(clip.style.left).toBe("0px");
+    await pointer(clip, "pointerup", 394, 40, { altKey: true, metaKey: true });
+    expect(lastOps()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ op: "place", mode: "overwrite", at: "8s", video_track: "t0", audio_track: "t1" }),
+      ]),
+    );
+    await pointer(clip, "pointerdown", 10);
+    await pointer(clip, "pointermove", 394, 40, { altKey: true });
+    await act(async () => window.dispatchEvent(new KeyboardEvent("keyup", { key: "Alt" })));
+    expect(get(".zc-drop-preview")).toBeNull();
+    await pointer(clip, "pointerup", 394);
+    expect(lastOps()).toEqual([{ op: "move", mode: "place", to: "8s", clip_ids: ["c00"] }]);
+  });
+
+  it.each([true, false])("protects the original from an overlapping Option drop (magnetic %s)", async (magnetic) => {
+    ui.magnetic = magnetic;
+    project.tracks = project.tracks.slice(0, 2);
+    await act(async () => render());
+    await refresh();
+    const clip = get('[data-selection-id="c00"]');
+    await pointer(clip, "pointerdown", 10);
+    await pointer(clip, "pointermove", 58, 40, { altKey: true });
+    await pointer(clip, "pointerup", 58, 40, { altKey: true });
+    expect(writes()).toHaveLength(0);
+    expect(get("output.zc-meta").textContent).toBe(magnetic ? "插入会切开原片段" : "副本会覆盖原片段");
+  });
+
+  it("inserts overlapping cross-track copies without splitting a previously placed copy", async () => {
+    const source = project.tracks[2]?.clips[1];
+    if (!source) throw new Error("Missing fixture clip");
+    source.timeline_in = { t: "1s" };
+    source.timeline_out = { t: "5s" };
+    state = { ...state, selected: ["c00", source.id] };
+    await act(async () => render());
+    await action("copy");
+    await action("paste");
+    const ops = lastOps() as Record<string, unknown>[];
+    expect(ops[0]).toMatchObject({ op: "place", mode: "insert", at: "2s" });
+    expect(ops[2]).toMatchObject({ op: "place", mode: "insert", at: "6s" });
+    expect(ops[4]).toEqual({ op: "move", mode: "place", to: "3s", clip_ids: [ops[2]?.audio_clip_id] });
+  });
+});
