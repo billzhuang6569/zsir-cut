@@ -73,7 +73,7 @@ import { cueTrimTarget, rollTarget, type TrimEdge, trimTarget } from "./timeline
 import { intervalIndex, useTimelineViewport, visibleIntervals } from "./timelineViewport.js";
 import { timelineVisual } from "./timelineVisual.js";
 import { useClipGain } from "./useClipGain.js";
-import { DropGhost, useTimelineDrop } from "./useTimelineDrop.js";
+import { DropCardPreview, DropGhost, useTimelineDrop } from "./useTimelineDrop.js";
 import { useTimelineGestures } from "./useTimelineGestures.js";
 import { Wave } from "./Wave.js";
 
@@ -891,6 +891,7 @@ export function TimelinePreview({
   const drop = useTimelineDrop({
     enabled: !!onPlacementChange && !viewerOnly && !hideTimeline,
     readOnly,
+    dragging,
     scroller: gestures.scroller,
     project,
     state,
@@ -2706,6 +2707,7 @@ export function TimelinePreview({
                 update({ ...state, preview: "timeline", playing: false });
             }}
           >
+            <DropCardPreview visual={drop.cardPreview} />
             {drop.error && (
               <p role="alert" className="zc-drop-error">
                 {drop.error}

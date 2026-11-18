@@ -1,16 +1,18 @@
 import { isTauri } from "@tauri-apps/api/core";
 import { type DragEvent, type RefObject, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import { DESKTOP_AUTHOR, type ProjectView } from "./connection.js";
 import { type MediaKind, type Placement, placeMedia, placementKinds, placementRange } from "./media.js";
 import type { UiState } from "./state.js";
 import { pixelAt, scrollTimelineEdge, timecode } from "./timeline.js";
-import { dropMode, dropPosition, dropTime, dropTrack, fileName, MEDIA_DRAG } from "./timelineDrop.js";
+import { dropMode, dropPosition, dropTime, dropTrack, fileName } from "./timelineDrop.js";
 import { timelineVisual } from "./timelineVisual.js";
 import { importAndPlace, listenFileDrop, type TimelineLanding } from "./useFileDrop.js";
 
 type Options = {
   enabled: boolean;
   readOnly: boolean;
+  dragging: { current: boolean };
   scroller: RefObject<HTMLElement | null>;
   project: ProjectView | null;
   state: UiState;
@@ -24,6 +26,15 @@ type Options = {
 };
 
 type Point = { x: number; y: number; altKey: boolean; metaKey: boolean };
+type CardPointer = {
+  origin: Pick<Point, "x" | "y">;
+  pointerId: number;
+  element: Element;
+  id: string;
+  grab: number;
+  name: string | undefined;
+};
+type CardPreview = { x: number; y: number; name: string; duration: string };
 type Drag =
   | { generation: number; source: "files"; firstPath: string | undefined }
   | { generation: number; source: "card"; id: string; grab: number };
@@ -39,6 +50,13 @@ type Preview = {
 
 const inside = (rect: DOMRect, x: number, y: number) =>
   x >= rect.left && y >= rect.top && x < rect.right && y < rect.bottom;
+
+const eventPoint = (event: Pick<PointerEvent, "clientX" | "clientY" | "altKey" | "metaKey">): Point => ({
+  x: event.clientX,
+  y: event.clientY,
+  altKey: event.altKey,
+  metaKey: event.metaKey,
+});
 
 function resolveDrop(options: Options, drag: Drag, point: Point, commit = false) {
   const { project, state, scroller, scale, snap, playhead, placement, magnetic, preset } = options;
@@ -124,9 +142,11 @@ export function useTimelineDrop(options: Options) {
       ? `${options.state.project}\0${options.project.id}`
       : null;
   const [preview] = useState(timelineVisual<Preview>);
+  const [cardPreview] = useState(timelineVisual<CardPreview>);
   const [error, setError] = useState<string | null>(null);
   const generation = useRef(0);
   const active = useRef<Drag | null>(null);
+  const cardPointer = useRef<CardPointer | null>(null);
   const pointer = useRef<Point | null>(null);
   const keys = useRef({ altKey: false, metaKey: false });
   const animation = useRef(0);
@@ -139,7 +159,15 @@ export function useTimelineDrop(options: Options) {
     preview.set(null);
   };
   const cancel = () => {
+    const card = cardPointer.current;
+    const wasCard = active.current?.source === "card";
     active.current = null;
+    cardPointer.current = null;
+    if (wasCard) {
+      latest.current.dragging.current = false;
+      cardPreview.set(null);
+      if (card?.element.hasPointerCapture?.(card.pointerId)) card.element.releasePointerCapture(card.pointerId);
+    }
     stopHover();
   };
   const refresh = () => {
@@ -151,7 +179,7 @@ export function useTimelineDrop(options: Options) {
     animation.current = 0;
     const element = latest.current.scroller.current;
     const point = pointer.current;
-    if (!element || !point || !valid(active.current)) return;
+    if (!element || !point || !valid(active.current) || !preview.read()) return;
     if (scrollTimelineEdge(element, point.x, point.y)) {
       refresh();
       animation.current = requestAnimationFrame(scroll);
@@ -161,9 +189,9 @@ export function useTimelineDrop(options: Options) {
     if (!valid(active.current)) return;
     pointer.current = point;
     refresh();
-    if (!animation.current) animation.current = requestAnimationFrame(scroll);
+    if (preview.read() && !animation.current) animation.current = requestAnimationFrame(scroll);
   };
-  const drop = async (point: Point, payload: string | string[]) => {
+  const drop = async (point: Point, paths?: string[]) => {
     const drag = active.current;
     cancel();
     const context = latest.current;
@@ -175,9 +203,9 @@ export function useTimelineDrop(options: Options) {
     writing.current = true;
     setError(null);
     try {
-      if (drag.source === "files" && Array.isArray(payload)) {
-        await importAndPlace(payload, project, state, hit.preview.landing, placement, call, current, setError);
-      } else if (drag.source === "card" && drag.id === payload && hit.ops) {
+      if (drag.source === "files" && paths) {
+        await importAndPlace(paths, project, state, hit.preview.landing, placement, call, current, setError);
+      } else if (drag.source === "card" && hit.ops) {
         await call("edit", {
           project: state.project,
           timeline_id: project.id,
@@ -200,17 +228,84 @@ export function useTimelineDrop(options: Options) {
   useEffect(() => {
     setError(null);
     if (!identity) return;
-    const start = (event: globalThis.DragEvent) => {
-      const card = (event.target as Element | null)?.closest<HTMLElement>("[data-media-id].zc-media-card");
-      if (!card?.dataset.mediaId || !event.dataTransfer?.types?.includes(MEDIA_DRAG)) return;
+    let suppressClick = false;
+    const start = (event: PointerEvent) => {
+      if (event.button !== 0 || cardPointer.current || active.current) return;
+      suppressClick = false;
+      if (latest.current.dragging.current || writing.current || !(event.target instanceof Element)) return;
+      const element = event.target;
+      const card = element.closest<HTMLElement>("[data-media-id]");
+      const id = card?.dataset.mediaId;
+      if (!card || !id || (element.closest("button,input,select,textarea,a") ?? card) !== card) return;
       const { left, width } = card.getBoundingClientRect();
       const grab = width ? Math.round(1000 * Math.max(0, Math.min(1, (event.clientX - left) / width))) : 0;
-      active.current = { source: "card", id: card.dataset.mediaId, generation: generation.current, grab };
+      cardPointer.current = {
+        origin: eventPoint(event),
+        pointerId: event.pointerId,
+        element,
+        id,
+        grab,
+        name: card.dataset.mediaName,
+      };
+    };
+    const move = (event: PointerEvent) => {
+      const card = cardPointer.current;
+      if (!card || event.pointerId !== card.pointerId) return;
+      if (!(event.buttons & 1)) {
+        cancel();
+        return;
+      }
+      const point = eventPoint(event);
+      if (!active.current && Math.hypot(point.x - card.origin.x, point.y - card.origin.y) <= 4) return;
+      const { project, state, dragging } = latest.current;
+      const media = project?.media.find((item) => item.id === card.id);
+      if (!project || !media || !card.element.isConnected) {
+        cancel();
+        return;
+      }
+      if (!active.current) {
+        try {
+          card.element.setPointerCapture?.(event.pointerId);
+        } catch (error) {
+          // The dev performance probe uses synthetic pointer events without a native active pointer.
+          if (event.isTrusted || !(error instanceof DOMException) || error.name !== "NotFoundError") throw error;
+        }
+        suppressClick = true;
+        dragging.current = true;
+        active.current = { source: "card", id: card.id, generation: generation.current, grab: card.grab };
+      }
+      event.preventDefault();
+      cardPreview.set({
+        x: point.x,
+        y: point.y,
+        name: card.name ?? media.name ?? "未命名素材",
+        duration: timecode(placementRange(project, media, state).duration, {
+          ...project,
+          start_timecode: project.drop_frame ? "00:00:00;00" : "00:00:00:00",
+        }),
+      });
+      hover(point);
+    };
+    const end = (event: PointerEvent) => {
+      if (cardPointer.current?.pointerId !== event.pointerId) return;
+      if (active.current?.source === "card" && cardPointer.current.element.isConnected) void drop(eventPoint(event));
+      else cancel();
+    };
+    const cancelPointer = (event: PointerEvent) => {
+      if (cardPointer.current?.pointerId === event.pointerId) cancel();
+    };
+    const click = (event: MouseEvent) => {
+      if (!suppressClick || event.detail === 0) return;
+      suppressClick = false;
+      event.preventDefault();
+      event.stopPropagation();
     };
     const modifiers = (event: KeyboardEvent) => {
-      if (active.current) {
-        if (event.key === "Escape") cancel();
-        else event.preventDefault();
+      if (event.key === "Escape" && (active.current || cardPointer.current)) {
+        event.preventDefault();
+        cancel();
+      } else if (active.current) {
+        event.preventDefault();
       }
       keys.current = { altKey: event.altKey, metaKey: event.metaKey };
       if (pointer.current) {
@@ -220,9 +315,14 @@ export function useTimelineDrop(options: Options) {
     };
     const blur = () => {
       keys.current = { altKey: false, metaKey: false };
+      if (cardPointer.current) cancel();
     };
-    window.addEventListener("dragstart", start);
-    window.addEventListener("dragend", cancel);
+    window.addEventListener("pointerdown", start, true);
+    window.addEventListener("pointermove", move, true);
+    window.addEventListener("pointerup", end, true);
+    window.addEventListener("pointercancel", cancelPointer, true);
+    window.addEventListener("lostpointercapture", cancelPointer, true);
+    window.addEventListener("click", click, true);
     window.addEventListener("keydown", modifiers, true);
     window.addEventListener("keyup", modifiers, true);
     window.addEventListener("blur", blur);
@@ -233,8 +333,10 @@ export function useTimelineDrop(options: Options) {
           return;
         }
         const point = { ...dropPosition(payload.position, window.devicePixelRatio), ...keys.current };
-        if (payload.type === "enter")
+        if (payload.type === "enter") {
+          if (cardPointer.current) cancel();
           active.current = { source: "files", generation: generation.current, firstPath: payload.paths[0] };
+        }
         if (active.current?.source !== "files") return;
         if (payload.type === "drop") void drop(point, payload.paths);
         else hover(point);
@@ -245,54 +347,54 @@ export function useTimelineDrop(options: Options) {
       generation.current++;
       cancel();
       stop();
-      window.removeEventListener("dragstart", start);
-      window.removeEventListener("dragend", cancel);
+      window.removeEventListener("pointerdown", start, true);
+      window.removeEventListener("pointermove", move, true);
+      window.removeEventListener("pointerup", end, true);
+      window.removeEventListener("pointercancel", cancelPointer, true);
+      window.removeEventListener("lostpointercapture", cancelPointer, true);
+      window.removeEventListener("click", click, true);
       window.removeEventListener("keydown", modifiers, true);
       window.removeEventListener("keyup", modifiers, true);
       window.removeEventListener("blur", blur);
     };
   }, [identity]);
 
-  const eventPoint = (event: DragEvent<HTMLElement>) => ({
-    x: event.clientX,
-    y: event.clientY,
-    altKey: event.altKey,
-    metaKey: event.metaKey,
-  });
   return {
     preview,
+    cardPreview,
     error: identity ? error : null,
     handlers: {
       onDragOver: (event: DragEvent<HTMLElement>) => {
-        if (!identity) return;
-        if (active.current?.source === "card" && event.dataTransfer.types.includes(MEDIA_DRAG)) {
-          event.preventDefault();
-          event.dataTransfer.dropEffect = "copy";
-          hover(eventPoint(event));
-        } else if (event.dataTransfer.types.includes("Files")) {
-          event.preventDefault();
-        }
-      },
-      onDragLeave: (event: DragEvent<HTMLElement>) => {
-        if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
-        if (
-          active.current?.source === "card" &&
-          !inside(event.currentTarget.getBoundingClientRect(), event.clientX, event.clientY)
-        )
-          stopHover();
+        if (identity && event.dataTransfer.types.includes("Files")) event.preventDefault();
       },
       onDrop: (event: DragEvent<HTMLElement>) => {
-        if (!identity) return;
-        if (event.dataTransfer.types.includes(MEDIA_DRAG)) {
-          event.preventDefault();
-          void drop(eventPoint(event), event.dataTransfer.getData(MEDIA_DRAG));
-        } else if (event.dataTransfer.types.includes("Files")) {
+        if (identity && event.dataTransfer.types.includes("Files")) {
           event.preventDefault();
           if (!isTauri()) setError("请在桌面应用中把文件拖到时间线");
         }
       },
     },
   };
+}
+
+export function DropCardPreview({ visual }: { visual: ReturnType<typeof timelineVisual<CardPreview>> }) {
+  const preview = useSyncExternalStore(visual.subscribe, visual.read);
+  if (!preview) return null;
+  const { x, y } = preview;
+  return createPortal(
+    <div
+      className="zc-drag-feedback zc-drop-card-preview"
+      aria-hidden="true"
+      style={{
+        ...(x + 232 > window.innerWidth ? { right: window.innerWidth - x + 12 } : { left: x + 12 }),
+        ...(y + 64 > window.innerHeight ? { bottom: window.innerHeight - y + 12 } : { top: y + 12 }),
+      }}
+    >
+      <span>{preview.name}</span>
+      <span>{preview.duration}</span>
+    </div>,
+    document.body,
+  );
 }
 
 export function DropGhost({
@@ -324,13 +426,18 @@ export function DropGhost({
       </div>
     );
   const rows = preview.added.length ? preview.added : preview.tracks.length ? [] : [{ top: preview.top, kind: null }];
-  return rows.map(({ top, kind }) => (
-    <div key={kind ?? "drop"} className="zc-drop-new-track" style={{ top }}>
-      <span className={className} style={style}>
-        <span>
-          {error ?? (kind ? `新建${kind === "video" ? "视频" : "声音"}轨 · ${label}` : `新建轨道 · ${label}`)}
-        </span>
-      </span>
-    </div>
-  ));
+  return (
+    <>
+      <div className="zc-snap-line zc-drop-line" style={{ left: `calc(var(--track-label-w) + ${style.left}px)` }} />
+      {rows.map(({ top, kind }) => (
+        <div key={kind ?? "drop"} className="zc-drop-new-track" style={{ top }}>
+          <span className={className} style={style}>
+            <span>
+              {error ?? (kind ? `新建${kind === "video" ? "视频" : "声音"}轨 · ${label}` : `新建轨道 · ${label}`)}
+            </span>
+          </span>
+        </div>
+      ))}
+    </>
+  );
 }

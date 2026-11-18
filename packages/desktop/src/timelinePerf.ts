@@ -1,5 +1,3 @@
-import { MEDIA_DRAG } from "./timelineDrop.js";
-
 const frame = () => new Promise<number>((resolve) => requestAnimationFrame(resolve));
 const p95 = (samples: number[]) => [...samples].sort((a, b) => a - b)[Math.ceil(samples.length * 0.95) - 1];
 
@@ -47,7 +45,7 @@ export async function runTimelinePerf({ drops = 0 }: { drops?: number } = {}) {
       }),
     );
   };
-  const pointer = (target: Element, type: string, x: number, y: number) => {
+  const pointer = (target: Element, type: string, x: number, y: number, altKey = false) => {
     target.dispatchEvent(
       new PointerEvent(type, {
         bubbles: true,
@@ -57,6 +55,8 @@ export async function runTimelinePerf({ drops = 0 }: { drops?: number } = {}) {
         clientX: x,
         clientY: y,
         button: 0,
+        buttons: type === "pointerup" || type === "pointercancel" ? 0 : 1,
+        altKey,
       }),
     );
   };
@@ -115,23 +115,16 @@ export async function runTimelinePerf({ drops = 0 }: { drops?: number } = {}) {
 
     if (drops > 0) {
       const card = document.querySelector<HTMLElement>(".zc-media-card[data-media-id]");
-      const id = card?.dataset.mediaId;
       const lane = timeline.querySelector(".zc-track-video .zc-track-lane");
-      if (!card || !id || !lane) throw new Error("Open the media library beside a video lane");
+      if (!card || !lane) throw new Error("Open the media library beside a video lane");
+      const cardBox = card.getBoundingClientRect();
       const box = lane.getBoundingClientRect();
       const samples: number[] = [];
       for (let i = 0; i < drops; i++) {
-        const transfer = new DataTransfer();
-        transfer.setData(MEDIA_DRAG, id);
-        const point = {
-          bubbles: true,
-          cancelable: true,
-          dataTransfer: transfer,
-          clientX: x + (i % 8) * 8,
-          clientY: box.top + 12,
-          altKey: true,
-        };
-        card.dispatchEvent(new DragEvent("dragstart", point));
+        const dropX = x + (i % 8) * 8;
+        const dropY = box.top + 12;
+        pointer(card, "pointerdown", cardBox.left + 1, cardBox.top + 1, true);
+        pointer(card, "pointermove", dropX, dropY, true);
         const ids = new Set(
           [...lane.querySelectorAll<HTMLElement>("[data-selection-id]")].map((item) => item.dataset.selectionId),
         );
@@ -141,10 +134,9 @@ export async function runTimelinePerf({ drops = 0 }: { drops?: number } = {}) {
               [...lane.querySelectorAll<HTMLElement>("[data-selection-id]")].some(
                 (item) => !ids.has(item.dataset.selectionId),
               ),
-            () => lane.dispatchEvent(new DragEvent("drop", point)),
+            () => pointer(card, "pointerup", dropX, dropY, true),
           ),
         );
-        card.dispatchEvent(new DragEvent("dragend", point));
         await frame();
       }
       record("media release to visible clip", samples);

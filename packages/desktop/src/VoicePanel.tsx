@@ -750,11 +750,8 @@ export function useVoicePanel({
               aria-label={name}
               className="zc-card zc-voice-card"
               key={media.id}
-              draggable
-              onDragStart={(event) => {
-                event.dataTransfer.setData("application/x-zcut-media", media.id);
-                event.dataTransfer.effectAllowed = "copy";
-              }}
+              data-media-id={media.id}
+              data-media-name={name}
             >
               <div className="zc-voice-row">
                 <IconButton

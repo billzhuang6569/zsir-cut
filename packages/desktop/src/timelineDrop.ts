@@ -4,8 +4,6 @@ import type { UiState } from "./state.js";
 import { div, type MediaView, mul, parseRational, rational, sub } from "./timeline.js";
 import { snapEdges } from "./timelineMove.js";
 
-export const MEDIA_DRAG = "application/x-zcut-media";
-
 export function dropMode(
   magnetic: boolean,
   preset: "fcp" | "premiere",

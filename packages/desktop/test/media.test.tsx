@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, useState } from "react";
+import { act, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import { mergeKeymap } from "../../app-host/src/keymap.js";
@@ -9,7 +9,7 @@ import { useMediaPanel } from "../src/MediaPanel.js";
 import { middle, type Placement, placeMedia, sourceProject } from "../src/media.js";
 import { updateMediaCache } from "../src/media-cache.js";
 import { initialState } from "../src/state.js";
-import { MEDIA_DRAG } from "../src/timelineDrop.js";
+import { useVoicePanel } from "../src/VoicePanel.js";
 import { recordingCanvas } from "./canvas.js";
 import { TimelinePreview } from "./timeline-preview.js";
 
@@ -116,6 +116,7 @@ async function mount(
     const [ui, update] = useState(state);
     const [placement, setPlacement] = useState<Placement>("av");
     const [currentProject, setProject] = useState(view);
+    const dragging = useRef(false);
     refresh = setProject;
     state = ui;
     change = update;
@@ -129,12 +130,14 @@ async function mount(
       keymap: mergeKeymap(preset, {}).keymap,
       config: withConfig ? config : undefined,
     });
+    const voice = useVoicePanel({ call, state: ui, update, project: currentProject });
     const source = preview && ui.preview === "media" && panel.selected ? sourceProject(project, panel.selected) : null;
     return (
       <>
         {panel.header}
         {panel.library}
         {panel.parameters}
+        {ui.panel === "voice" && voice.parameters}
         <output aria-label="当前状态">{JSON.stringify(ui)}</output>
         {source && (
           <TimelinePreview
@@ -162,7 +165,7 @@ async function mount(
           update={update}
           config={undefined}
           error={null}
-          dragging={{ current: false }}
+          dragging={dragging}
           call={timelineCall}
           placement={placement}
           onPlacementChange={setPlacement}
@@ -386,25 +389,47 @@ function dropGeometry(container: HTMLElement) {
   return timeline;
 }
 
-async function dragEvent(target: Element, type: string, at: MouseEventInit, mediaId = media.id) {
-  const event = new MouseEvent(type, { bubbles: true, cancelable: true, ...at });
-  Object.defineProperty(event, "dataTransfer", {
-    value: { types: [MEDIA_DRAG], getData: () => mediaId, setData: vi.fn(), dropEffect: "" },
+async function pointer(target: Element, type: string, at: MouseEventInit = {}) {
+  const event = new MouseEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    buttons: type === "pointerup" || type === "pointercancel" ? 0 : 1,
+    ...at,
   });
+  Object.defineProperty(event, "pointerId", { value: 1 });
   await act(async () => target.dispatchEvent(event));
 }
 
 it("shows both source-range ghosts and drops one linked overwrite at the snapped frame", async () => {
-  const h = await mount();
+  const h = await mount(true);
   try {
     await h.select();
     await h.change({ ...h.state(), media: { id: media.id, at: "0s", in: "1s", out: "4s" } });
     const timeline = dropGeometry(h.container);
     const card = h.container.querySelector(".zc-media-card");
     if (!card) throw new Error("missing card");
+    const capture = vi.fn();
+    const release = vi.fn();
+    Object.assign(card, {
+      setPointerCapture: capture,
+      hasPointerCapture: () => capture.mock.calls.length > release.mock.calls.length,
+      releasePointerCapture: release,
+    });
+    const floating = () => document.querySelector<HTMLElement>(".zc-drop-card-preview");
     const point = { clientX: 240, clientY: 249, altKey: true };
-    await dragEvent(card, "dragstart", {});
-    await dragEvent(timeline, "dragover", point);
+    await pointer(card, "pointerdown");
+    await pointer(card, "pointermove", { clientX: 4 });
+    expect(capture).not.toHaveBeenCalled();
+    expect(floating()).toBeNull();
+    expect(timeline.querySelector(".zc-drop-line")).toBeNull();
+    await pointer(card, "pointermove", { clientX: 5 });
+    expect(capture).toHaveBeenCalledWith(1);
+    expect(floating()?.textContent).toContain("镜头.mov");
+    expect(floating()?.textContent).toContain("00:00:03:00");
+    expect(floating()?.style.left).toBe("17px");
+    await pointer(card, "pointermove", point);
+    expect(floating()?.style.left).toBe("252px");
+    expect(timeline.querySelector<HTMLElement>(".zc-drop-line")?.style.left).toContain("96px");
     const ghosts = [...timeline.querySelectorAll<HTMLElement>(".zc-track-lane .zc-drop-preview")];
     expect(ghosts).toHaveLength(2);
     for (const ghost of ghosts) {
@@ -413,8 +438,8 @@ it("shows both source-range ghosts and drops one linked overwrite at the snapped
       expect(ghost.textContent).toBe("00:00:02:00 · 覆盖");
     }
     expect(h.call).not.toHaveBeenCalled();
-    await dragEvent(timeline, "drop", point);
-    await dragEvent(timeline, "drop", point);
+    await pointer(card, "pointerup", point);
+    await pointer(card, "pointerup", point);
     expect(h.call).toHaveBeenCalledTimes(1);
     expect(h.call).toHaveBeenLastCalledWith(
       "edit",
@@ -433,7 +458,42 @@ it("shows both source-range ghosts and drops one linked overwrite at the snapped
         ],
       }),
     );
+    expect(release).toHaveBeenCalledExactlyOnceWith(1);
+    expect(floating()).toBeNull();
+    expect(timeline.querySelector(".zc-drop-line")).toBeNull();
     expect(timeline.querySelector(".zc-drop-preview")).toBeNull();
+  } finally {
+    await h.close();
+  }
+});
+
+it("preserves clicks below the threshold and cancels when released outside the timeline", async () => {
+  const h = await mount();
+  try {
+    const timeline = dropGeometry(h.container);
+    const card = h.container.querySelector(".zc-media-card");
+    if (!card) throw new Error("missing card");
+    const click = () =>
+      act(async () => card.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1 })));
+    const point = { clientX: 240, clientY: 249 };
+    const outside = { clientX: 240, clientY: 199 };
+    await pointer(card, "pointerdown");
+    await pointer(card, "pointermove", point);
+    expect(timeline.querySelector(".zc-drop-preview")).not.toBeNull();
+    await pointer(card, "pointermove", outside);
+    expect(timeline.querySelector(".zc-drop-preview")).toBeNull();
+    expect(timeline.querySelector(".zc-drop-line")).toBeNull();
+    expect(document.querySelector(".zc-drop-card-preview")).not.toBeNull();
+    await pointer(card, "pointerup", outside);
+    await click();
+    expect(document.querySelector(".zc-drop-card-preview")).toBeNull();
+    expect(h.call).not.toHaveBeenCalled();
+    expect(h.state().selected).toEqual([]);
+    await pointer(card, "pointerdown");
+    await pointer(card, "pointermove", { clientX: 3 });
+    await pointer(card, "pointerup", { clientX: 3 });
+    await click();
+    expect(h.state().selected).toEqual([media.id]);
   } finally {
     await h.close();
   }
@@ -451,22 +511,25 @@ it("rejects an incompatible lane, then cancels a new-track preview with Escape",
     });
     const card = h.container.querySelector(".zc-media-card");
     if (!card) throw new Error("missing card");
-    await dragEvent(card, "dragstart", {});
+    await pointer(card, "pointerdown");
     const point = { clientX: 240, clientY: 249 };
-    await dragEvent(timeline, "dragover", point);
+    await pointer(card, "pointermove", point);
     expect(timeline.querySelector(".zc-drop-preview.is-invalid")?.textContent).toContain("请把声音放到声音轨");
-    await dragEvent(timeline, "drop", point);
+    await pointer(card, "pointerup", point);
     expect(h.call).not.toHaveBeenCalled();
-    await dragEvent(card, "dragstart", {});
+    await pointer(card, "pointerdown");
     const gap = { ...point, clientY: 270 };
-    await dragEvent(timeline, "dragover", gap);
+    await pointer(card, "pointermove", gap);
     expect(timeline.querySelector(".zc-drop-new-track")?.textContent).toContain("新建声音轨");
     await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true })));
     expect(timeline.querySelector(".zc-drop-preview")).toBeNull();
-    await dragEvent(timeline, "drop", gap);
+    expect(timeline.querySelector(".zc-drop-line")).toBeNull();
+    expect(document.querySelector(".zc-drop-card-preview")).toBeNull();
+    await pointer(card, "pointerup", gap);
     expect(h.call).not.toHaveBeenCalled();
-    await dragEvent(card, "dragstart", {});
-    await dragEvent(timeline, "drop", gap);
+    await pointer(card, "pointerdown");
+    await pointer(card, "pointermove", gap);
+    await pointer(card, "pointerup", gap);
     const [, request] = h.call.mock.calls[0] ?? [];
     const [addTrack, place] = request?.ops as Record<string, unknown>[];
     expect(addTrack).toMatchObject({ op: "add_track", kind: "audio", index: 1 });
@@ -477,7 +540,7 @@ it("rejects an incompatible lane, then cancels a new-track preview with Escape",
   }
 });
 
-it("scrolls at the right edge and recomputes the landing under the pointer", async () => {
+it("scrolls at both timeline edges and recomputes the landing under the pointer", async () => {
   const h = await mount();
   try {
     const timeline = dropGeometry(h.container);
@@ -490,17 +553,59 @@ it("scrolls at the right edge and recomputes the landing under the pointer", asy
       frame = callback;
       return 123;
     });
-    await dragEvent(card, "dragstart", {});
+    await pointer(card, "pointerdown");
     const edge = { clientX: 699, clientY: 250 };
-    await dragEvent(timeline, "dragover", edge);
+    await pointer(card, "pointermove", edge);
     const ghost = () => timeline.querySelector<HTMLElement>('[data-track-id="video_top"] .zc-drop-preview')?.style.left;
     const before = ghost();
     await act(async () => frame?.(0));
     expect(timeline.scrollLeft).toBeGreaterThan(0);
     expect(ghost()).not.toBe(before);
+    const rightScroll = timeline.scrollLeft;
+    const leftEdge = { ...edge, clientX: 141 };
+    await pointer(card, "pointermove", leftEdge);
+    await act(async () => frame?.(0));
+    expect(timeline.scrollLeft).toBeLessThan(rightScroll);
     expect(h.call).not.toHaveBeenCalled();
-    await dragEvent(timeline, "drop", edge);
+    await pointer(card, "pointerup", edge);
     expect(h.call).toHaveBeenCalledTimes(1);
+  } finally {
+    await h.close();
+  }
+});
+
+it("drags an actual voice result to the audio lane while keeping its buttons independent", async () => {
+  const take = { id: "take", kind: "audio", duration: "6s", audio: { sample_rate: "48000", channels: 1 } };
+  const h = await mount(true, false, { ...project, media: [media, take] });
+  try {
+    const timeline = dropGeometry(h.container);
+    h.call.mockImplementation(async (verb) => {
+      if (verb === "voice_list") return { voices: [] };
+      if (verb === "inspect") return { entity: { ext: { "zsir.voice": { text: "配音文本" } } } };
+      return {};
+    });
+    await h.change({ ...h.state(), panel: "voice", sub: "generate" });
+    const card = h.container.querySelector(".zc-voice-results [data-media-id='take']");
+    const button = card?.querySelector("button");
+    const title = card?.querySelector("strong");
+    if (!card || !button || !title) throw new Error("missing voice result");
+    const point = { clientX: 236, clientY: 330 };
+    await pointer(button, "pointerdown");
+    await pointer(button, "pointermove", point);
+    await pointer(button, "pointerup", point);
+    expect(timeline.querySelector(".zc-drop-preview")).toBeNull();
+    expect(h.call.mock.calls.some(([verb]) => verb === "edit")).toBe(false);
+    await pointer(title, "pointerdown");
+    await pointer(title, "pointermove", point);
+    expect(document.querySelector(".zc-drop-card-preview")?.textContent).toContain("配音 01");
+    expect(timeline.querySelector('[data-track-id="audio_first"] .zc-drop-preview')).not.toBeNull();
+    await pointer(title, "pointerup", point);
+    expect(h.call).toHaveBeenLastCalledWith(
+      "edit",
+      expect.objectContaining({
+        ops: [expect.objectContaining({ op: "place", media_id: "take", audio_track: "audio_first", duration: "6s" })],
+      }),
+    );
   } finally {
     await h.close();
   }
@@ -545,11 +650,18 @@ it("imports Finder paths in payload order on the AI tab and commits one edit aft
     });
     const position = { x: 384, y: 760 };
     const paths = ["/10.mov", "/离线.mov", "/2.mov"];
-    await act(async () => {
-      nativeDrop({ type: "enter", position, paths });
-      nativeDrop({ type: "over", position });
-    });
+    await act(async () => nativeDrop({ type: "enter", position: { x: 70, y: 70 }, paths }));
+    expect(timeline.querySelector(".zc-drop-preview")).toBeNull();
+    await act(async () => nativeDrop({ type: "over", position: { ...position, y: 500 } }));
+    expect(timeline.querySelector('[data-track-id="video_top"] .zc-drop-preview')).not.toBeNull();
+    expect(timeline.querySelector<HTMLElement>(".zc-drop-line")?.style.left).toContain("96px");
+    await act(async () => nativeDrop({ type: "over", position }));
     expect(timeline.querySelector(".zc-drop-new-track")?.textContent).toContain("00:00:02:00");
+    await act(async () => nativeDrop({ type: "leave" }));
+    expect(timeline.querySelector(".zc-drop-line")).toBeNull();
+    await act(async () => nativeDrop({ type: "enter", position, paths }));
+    expect(timeline.querySelector(".zc-drop-new-track .zc-drop-preview")).not.toBeNull();
+    expect(timeline.querySelector(".zc-drop-line")).not.toBeNull();
     expect(h.call).not.toHaveBeenCalled();
     await act(async () => {
       nativeDrop({ type: "drop", position, paths });
@@ -1123,7 +1235,7 @@ it("throttles, dedupes frames, discards stale loads, keeps cover on failure and 
     vi.useRealTimers();
   }
 });
-it("does not scrub list, image or audio cards and preserves drag payload", async () => {
+it("does not scrub list, image or audio cards and clears skimming on pointer capture", async () => {
   const images = skimImages();
   const h = await mount(
     false,
@@ -1139,12 +1251,18 @@ it("does not scrub list, image or audio cards and preserves drag payload", async
     });
     expect(images).toHaveLength(0);
     await moveSkim(h.container, 100);
-    const setData = vi.fn();
-    const event = new Event("dragstart", { bubbles: true });
-    Object.defineProperty(event, "dataTransfer", { value: { setData, effectAllowed: "" } });
-    await act(async () => films[0]?.dispatchEvent(event));
-    expect(setData).toHaveBeenCalledWith("application/x-zcut-media", media.id);
+    const film = films[0];
+    if (!film) throw new Error("missing film");
+    expect(h.container.querySelector(".zc-media-skim-line")).not.toBeNull();
+    await pointer(film, "pointerdown", { clientX: 100 });
+    await pointer(film, "pointermove", { clientX: 104 });
+    expect(h.container.querySelector(".zc-media-skim-line")).not.toBeNull();
+    Object.assign(film, {
+      setPointerCapture: () => film.dispatchEvent(new Event("gotpointercapture", { bubbles: true })),
+    });
+    await pointer(film, "pointermove", { clientX: 105 });
     expect(h.container.querySelector(".zc-media-skim-line")).toBeNull();
+    await pointer(film, "pointercancel");
     await h.click("列表");
     expect(h.container.querySelector(".zc-media-film")).toBeNull();
     expect(images).toHaveLength(1);

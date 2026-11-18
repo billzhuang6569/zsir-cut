@@ -12,7 +12,7 @@ import { mediaDuration, mediaRange, middle, type Placement, sourceProject, three
 import { displayKey } from "./settings-keymap.js";
 import { mediaUrl, Wave } from "./TimelinePreview.js";
 import { ceil, compare, floor, frameTime, type MediaView, parseRational, seekTarget, timecode } from "./timeline.js";
-import { dropPosition, MEDIA_DRAG } from "./timelineDrop.js";
+import { dropPosition } from "./timelineDrop.js";
 import { listenFileDrop } from "./useFileDrop.js";
 import "./media.css";
 
@@ -207,7 +207,7 @@ function MediaFilm({ media, config, children }: { media: MediaView; config: Conf
       }}
       onPointerLeave={reset}
       onPointerCancel={reset}
-      onDragStart={reset}
+      onGotPointerCapture={reset}
     >
       {children}
       {frame && <img className="zc-media-skim-frame" alt="" src={frame} draggable={false} />}
@@ -569,17 +569,12 @@ export function useMediaPanel({
           <button
             type="button"
             key={m.id}
-            draggable
             data-media-id={m.id}
             aria-pressed={selectedMedia.some((item) => item.id === m.id)}
             className="zc-media-card"
             onClick={(e) => {
               e.currentTarget.focus({ preventScroll: true });
               choose(m, e.metaKey || e.ctrlKey);
-            }}
-            onDragStart={(e) => {
-              e.dataTransfer.setData(MEDIA_DRAG, m.id);
-              e.dataTransfer.effectAllowed = "copy";
             }}
           >
             {list ? (
@@ -612,6 +607,7 @@ export function useMediaPanel({
                         key={n}
                         alt=""
                         src={mediaUrl(config, "thumb", m.id, m.kind === "image" ? "0s" : middle(m))}
+                        draggable={false}
                       />
                     ))
                   ) : (
