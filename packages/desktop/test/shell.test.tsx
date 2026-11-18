@@ -6,7 +6,7 @@ import { URL as NodeURL } from "node:url";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mergeKeymap } from "../../app-host/src/keymap.js";
+import { actions, mergeKeymap } from "../../app-host/src/keymap.js";
 import type { ProjectChanged } from "../../app-host/src/revision-events.js";
 import type { UiState } from "../../app-host/src/ui.js";
 import { App } from "../src/App.js";
@@ -275,8 +275,72 @@ it("opens the project through inspect and receives UI commands", async () => {
     expect(historyButton?.parentElement?.nextElementSibling?.textContent).toBe("导出");
     expect(
       [...container.querySelectorAll(".zc-menubar .zc-ibtn")].map((node) => node.getAttribute("aria-label")),
-    ).toEqual(["撤销", "重做", "命令面板 ⌘K", "历史 ⌥⌘H"]);
+    ).toEqual(["撤销", "重做", "命令面板 ⇧⌘P", "历史 ⌥⌘H"]);
     expect(container.querySelector('[aria-label="工具栏"] [aria-label^="历史"]')).toBeNull();
+    Object.defineProperties(HTMLDialogElement.prototype, {
+      showModal: {
+        configurable: true,
+        value(this: HTMLDialogElement) {
+          this.open = true;
+        },
+      },
+      close: {
+        configurable: true,
+        value(this: HTMLDialogElement) {
+          this.open = false;
+        },
+      },
+    });
+    const paletteButton = container.querySelector<HTMLButtonElement>('[aria-label="命令面板 ⇧⌘P"]');
+    const search = () => container.querySelector<HTMLInputElement>('[aria-label="搜索动作"]');
+    const rows = () => [...container.querySelectorAll<HTMLButtonElement>('.zc-command-palette [role="option"]')];
+    const press = async (key: string, options: KeyboardEventInit = {}) =>
+      act(() => {
+        (search() ?? paletteButton)?.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key,
+            bubbles: true,
+            cancelable: true,
+            ...options,
+          }),
+        );
+      });
+    const searchFor = async (value: string) =>
+      act(() => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(search(), value);
+        search()?.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    await press("P", { shiftKey: true, metaKey: true });
+    expect(document.activeElement).toBe(search());
+    expect(rows()).toHaveLength(actions.length + 5);
+    expect(rows().find((row) => row.textContent?.startsWith("删除留空隙"))).toMatchObject({
+      ariaDisabled: "true",
+      textContent: expect.stringContaining("请选择片段或标记入出点"),
+    });
+    await searchFor("删除留空隙");
+    await press("Enter");
+    expect(search()).not.toBeNull();
+    expect(writes.some((message) => message.verb === "edit")).toBe(false);
+    await searchFor("step");
+    expect(rows().map((row) => row.textContent)).toEqual(["前一帧←", "后一帧→"]);
+    await press("ArrowDown");
+    expect(rows()[1]?.getAttribute("aria-selected")).toBe("true");
+    await press("ArrowUp");
+    expect(rows()[0]?.getAttribute("aria-selected")).toBe("true");
+    await press("Escape", { isComposing: true });
+    expect(search()).not.toBeNull();
+    await press("Escape");
+    expect(search()).toBeNull();
+    await act(() => paletteButton?.click());
+    await searchFor("章节");
+    await press("Enter");
+    expect(search()).toBeNull();
+    expect(rail?.querySelector('[aria-selected="true"]')?.textContent).toBe("章节");
+    await act(() => paletteButton?.click());
+    expect(rows()[0]?.textContent).toBe("切换到章节");
+    await searchFor("panel_ai");
+    await act(() => rows()[0]?.click());
+    expect(rail?.querySelector('[aria-selected="true"]')?.textContent).toBe("AI");
     const parametersBefore = container.querySelector('[aria-label="参数区"]')?.innerHTML;
     await act(async () => historyButton?.click());
     expect(document.body.querySelector('[role="dialog"][aria-label="历史"]')).not.toBeNull();

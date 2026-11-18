@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { premiere } from "../../app-host/src/keymap.js";
 import type { Layout } from "../../app-host/src/preferences.js";
 import type { ProjectChanged } from "../../app-host/src/revision-events.js";
 import { UI_VERBS, type UiState, type UiVerb } from "../../app-host/src/ui.js";
@@ -347,7 +348,7 @@ export function useTimelinePreferences(
     }
   };
   return {
-    keymap: preferences?.keymap ?? { open_settings: "⌘," },
+    keymap: preferences?.keymap ?? { open_settings: premiere.open_settings, command_palette: premiere.command_palette },
     acceptPrefs,
     preset: preferences?.prefs.keymap?.preset ?? "fcp",
     snap: state.snap ?? true,
