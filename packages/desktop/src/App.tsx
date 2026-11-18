@@ -31,12 +31,15 @@ import "./panels.css";
 
 const labels: Record<Panel, string> = { ai: "AI", media: "素材", chapters: "章节", subtitles: "字幕", voice: "语音" };
 const parameters: Record<Panel, string> = {
-  ai: "决定",
+  ai: "AI 动态",
   media: "素材信息",
   chapters: "章节大纲",
   subtitles: "字幕",
   voice: "配音",
 };
+const parameterSelection = (state: UiState) =>
+  JSON.stringify([state.project, state.panel, state.history?.revision ?? null, state.selected]);
+
 export function App({ config }: { config?: { port: number; token: string } }) {
   const uniqueId = useId();
   const [placement, setPlacement] = useState<Placement>("av");
@@ -50,6 +53,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
   const [reviewTarget, setReviewTarget] = useState<HTMLElement | null>(null);
   const [projectChange, setProjectChange] = useState<ProjectChanged | null>(null);
   const [state, setState] = useState<UiState>(initialState);
+  const [functionParameters, setFunctionParameters] = useState<string | null>(null);
   const current = useRef(state);
   const [project, setProject] = useState<ProjectView | null>(null);
   const connection = useRef<ReturnType<typeof connectHost> | null>(null);
@@ -58,6 +62,8 @@ export function App({ config }: { config?: { port: number; token: string } }) {
   projectRef.current = project;
   const [notices, setNotices] = useState<AiNotice[]>([]);
   const [permissions, setPermissions] = useState<PermissionRequest[]>([]);
+  const [turnChanges, setTurnChanges] = useState<ProjectChanged[]>([]);
+  const [decisionRevision, setDecisionRevision] = useState(0);
   const [aiRevision, setAiRevision] = useState(0);
   const [connectionEpoch, setConnectionEpoch] = useState(0);
   const rawCall = useCallback(
@@ -82,6 +88,8 @@ export function App({ config }: { config?: { port: number; token: string } }) {
     project,
     notices,
     revision: aiRevision,
+    decisionRevision,
+    turnChanges,
     connectionEpoch,
     permissions,
     permissionAnswered: (id) => setPermissions((old) => old.filter((item) => item.id !== id)),
@@ -103,6 +111,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
         const view = projectRef.current;
         const next = applyUi(current.current, verb, request);
         if (view && verb === "ui_select") {
+          if (request.keepParameters === true) setFunctionParameters(parameterSelection(next));
           const cueIds = [...new Set(next.selected.filter((id) => view.cues.some((cue) => cue.cue_id === id)))];
           next.subtitle_selection = {
             cue_ids: cueIds,
@@ -130,6 +139,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
       project: (path, view) => {
         if (firstProject || path !== current.current.project) {
           setNotices([]);
+          setTurnChanges([]);
           setPermissions([]);
           setReviewSession(null);
           setProjectChange(null);
@@ -147,7 +157,9 @@ export function App({ config }: { config?: { port: number; token: string } }) {
       permission: (request) =>
         setPermissions((old) => (old.some((item) => item.id === request.id) ? old : [...old, request])),
       aiChanged: () => setAiRevision((value) => value + 1),
+      decisionsChanged: () => setDecisionRevision((value) => value + 1),
       projectChanged: (event) => {
+        if (event.target === "main" && event.turn) setTurnChanges((old) => [...old, event]);
         if (event.target === "session" && event.session_id === reviewSessionRef.current) setProjectChange(event);
       },
       icon: setFcpIcon,
@@ -246,10 +258,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
     },
   });
   const hasClipSelection = !reviewSession && !!history.view && selectedClips(history.view, state.selected).length > 0;
-  const clipSelection = hasClipSelection
-    ? JSON.stringify([state.project, state.panel, history.viewing, state.selected])
-    : null;
-  const [functionParameters, setFunctionParameters] = useState<string | null>(null);
+  const clipSelection = hasClipSelection ? parameterSelection(state) : null;
   const showClipInspector = clipSelection !== null && clipSelection !== functionParameters;
   const [clipInspectorTarget, setClipInspectorTarget] = useState<HTMLDivElement | null>(null);
   useEffect(() => setFunctionParameters((previous) => (previous === clipSelection ? previous : null)), [clipSelection]);
@@ -315,6 +324,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
               if (media) update({ ...current.current, panel: "media" });
             }}
           />
+          {ai.decisionStatus}
           {ai.draftStatus}
           {history.banner}
           <span className="zc-grow" />
@@ -475,8 +485,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
                     <>
                       {state.panel === "ai" ? (
                         <div className="zc-decision-heading">
-                          <h2>决定</h2>
-                          {ai.decisionStatus}
+                          <h2>AI 动态</h2>
                         </div>
                       ) : (
                         state.panel !== "chapters" && state.panel !== "subtitles" && <h2>{parameters[state.panel]}</h2>
