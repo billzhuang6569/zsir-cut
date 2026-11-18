@@ -33,6 +33,9 @@ import { DESKTOP_VERBS, type DesktopVerb, PANELS, SUBTITLE_VERBS, type SubtitleV
 
 const {
   dispatch,
+  errorEnvelope,
+  TOOL_DOCS,
+  summarizeToolResult,
   commandSchemaForVerb,
   flattenMcpSchema,
   newId,
@@ -128,6 +131,44 @@ const uiSchemas = {
   ui_pause: z.strictObject({}),
 };
 
+const guideSchema = z.strictObject({
+  view: z.literal("guide"),
+  name: z.enum(["rough-cut", "subtitles", "handoff"]),
+  project: z.string().min(1).optional(),
+});
+
+async function readGuide(input: unknown): Promise<Envelope> {
+  const requestId = newId("req_");
+  const parsed = guideSchema.safeParse(input);
+  if (!parsed.success)
+    return errorEnvelope(
+      "inspect",
+      requestId,
+      "rejected",
+      "E_VALIDATION",
+      "guide 需要 name：rough-cut、subtitles 或 handoff",
+    );
+  try {
+    const text = await readFile(
+      new URL(`../../../skills/zsir-cut/references/${parsed.data.name}.md`, import.meta.url),
+      "utf8",
+    );
+    return {
+      ok: true,
+      status: "no_op",
+      verb: "inspect",
+      request_id: requestId,
+      receipt: null,
+      changes: [],
+      verification: { level: "none", passed: true, issues: [] },
+      result: { text },
+      error: null,
+    };
+  } catch {
+    return errorEnvelope("inspect", requestId, "failed", "E_IO", "无法读取工作指南");
+  }
+}
+
 const uiStateSchema = z.strictObject({
   project: z.string().nullable(),
   panel: z.enum(PANELS),
@@ -193,6 +234,25 @@ function uiEnvelope(verb: DesktopVerb, code?: string, message = "", retryable = 
   };
 }
 
+function mcpInputSchema(verb: Verb): { type: "object" } {
+  const schema = flattenMcpSchema(commandSchemaForVerb(verb)) as {
+    type: "object";
+    properties: Record<string, unknown>;
+  };
+  if (verb !== "inspect") return schema;
+  const guide = z.toJSONSchema(guideSchema);
+  const inspect = {
+    type: "object" as const,
+    properties: {
+      ...schema.properties,
+      name: guide.properties?.name,
+      view: { anyOf: [schema.properties.view, guide.properties?.view] },
+    },
+    oneOf: [schema, guide],
+  };
+  return inspect;
+}
+
 export function createMcpServer(
   callUi: (verb: DesktopVerb, input: unknown) => Promise<UiEnvelope> = async (verb) =>
     uiEnvelope(verb, "E_APP_NOT_RUNNING", "桌面界面未连接", true),
@@ -203,10 +263,12 @@ export function createMcpServer(
     tools: [
       ...VERBS.map((verb) => ({
         name: `zcut_${verb}`,
-        inputSchema: flattenMcpSchema(commandSchemaForVerb(verb)) as { type: "object" },
+        description: TOOL_DOCS[verb],
+        inputSchema: mcpInputSchema(verb),
       })),
       ...DESKTOP_VERBS.map((verb) => ({
         name: `zcut_${verb}`,
+        description: TOOL_DOCS[verb],
         inputSchema: { ...flattenMcpSchema(z.toJSONSchema(uiSchemas[verb])), type: "object" as const },
       })),
     ],
@@ -214,15 +276,17 @@ export function createMcpServer(
   mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (!request.params.name.startsWith("zcut_")) throw new Error(`Unknown tool: ${request.params.name}`);
     const verb = request.params.name.slice("zcut_".length);
+    const input = request.params.arguments ?? {};
     let envelope: HostEnvelope | UiEnvelope;
     if (DESKTOP_VERBS.includes(verb as DesktopVerb)) {
-      const parsed = uiSchemas[verb as DesktopVerb].safeParse(request.params.arguments ?? {});
+      const parsed = uiSchemas[verb as DesktopVerb].safeParse(input);
       envelope = parsed.success
         ? await callUi(verb as DesktopVerb, parsed.data)
         : uiEnvelope(verb as DesktopVerb, "E_VALIDATION", parsed.error.message);
-    } else if (VERBS.includes(verb as Verb)) envelope = await kernel(verb as Verb, request.params.arguments ?? {});
+    } else if (verb === "inspect" && input.view === "guide") envelope = await readGuide(input);
+    else if (VERBS.includes(verb as Verb)) envelope = await kernel(verb as Verb, input);
     else throw new Error(`Unknown tool: ${request.params.name}`);
-    return { content: [], structuredContent: envelope };
+    return { content: [{ type: "text", text: summarizeToolResult(envelope, input) }], structuredContent: envelope };
   });
   return mcp;
 }

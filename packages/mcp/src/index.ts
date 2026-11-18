@@ -6,25 +6,33 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { DispatchOptions, Verb } from "../../core/dist/index.js";
 
-const { commandSchemaForVerb, flattenMcpSchema, dispatch, VERBS }: typeof import("../../core/dist/index.js") =
-  await import(
-    new URL(import.meta.url.endsWith(".ts") ? "../../core/src/index.ts" : "../../core/dist/index.js", import.meta.url)
-      .href
-  );
+const {
+  commandSchemaForVerb,
+  flattenMcpSchema,
+  dispatch,
+  VERBS,
+  TOOL_DOCS,
+  summarizeToolResult,
+}: typeof import("../../core/dist/index.js") = await import(
+  new URL(import.meta.url.endsWith(".ts") ? "../../core/src/index.ts" : "../../core/dist/index.js", import.meta.url)
+    .href
+);
 
 export function createServer(options: DispatchOptions = {}): Server {
   const server = new Server({ name: "zsir-cut", version: "0.1.0" }, { capabilities: { tools: {} } });
   server.setRequestHandler(ListToolsRequestSchema, () => ({
     tools: VERBS.map((verb) => ({
       name: `zcut_${verb}`,
+      description: TOOL_DOCS[verb],
       inputSchema: flattenMcpSchema(commandSchemaForVerb(verb)) as { type: "object" },
     })),
   }));
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const verb = request.params.name.slice("zcut_".length) as Verb;
     if (!VERBS.includes(verb)) throw new Error(`Unknown tool: ${request.params.name}`);
-    const envelope = await dispatch(verb, request.params.arguments ?? {}, options);
-    return { content: [], structuredContent: envelope };
+    const input = request.params.arguments ?? {};
+    const envelope = await dispatch(verb, input, options);
+    return { content: [{ type: "text", text: summarizeToolResult(envelope, input) }], structuredContent: envelope };
   });
   return server;
 }

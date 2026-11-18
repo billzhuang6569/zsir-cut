@@ -3,10 +3,11 @@ import { readFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import type { Verb } from "../../core/dist/index.js";
 
-const { dispatch, errorEnvelope, newId, parseProject, VERBS }: typeof import("../../core/dist/index.js") = await import(
-  new URL(import.meta.url.endsWith(".ts") ? "../../core/src/index.ts" : "../../core/dist/index.js", import.meta.url)
-    .href
-);
+const { dispatch, errorEnvelope, newId, parseProject, VERBS, TOOL_DOCS }: typeof import("../../core/dist/index.js") =
+  await import(
+    new URL(import.meta.url.endsWith(".ts") ? "../../core/src/index.ts" : "../../core/dist/index.js", import.meta.url)
+      .href
+  );
 
 const { voiceJobPath }: typeof import("../../core/dist/voice-jobs.js") = await import(
   new URL(
@@ -58,6 +59,12 @@ async function main(): Promise<void> {
   )
     positionals = [`${positionals[0]}_${positionals[1]}`, ...positionals.slice(2)];
   const [verb, positionalProject] = positionals;
+  if (verb === "help") {
+    if (!positionalProject || positionals.length !== 2 || !VERBS.includes(positionalProject as Verb))
+      throw new Error("用法：zcut help <动词>");
+    process.stdout.write(`${TOOL_DOCS[positionalProject]}\n`);
+    return;
+  }
   const globalCommand =
     ["terms_list", "terms_edit", "settings_get", "settings_set", "voice_list", "voice_edit", "voice_clone"].includes(
       verb ?? "",

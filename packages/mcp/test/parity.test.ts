@@ -12,6 +12,7 @@ import {
   flattenMcpSchema,
   openProject,
   parseProject,
+  TOOL_DOCS,
   VERBS,
   validateCommand,
   validateEnvelope,
@@ -497,7 +498,11 @@ describe("CLI and MCP", () => {
       await client.connect(transport);
       const listed = await client.listTools();
       expect(listed.tools).toEqual(
-        VERBS.map((verb) => ({ name: `zcut_${verb}`, inputSchema: flattenMcpSchema(commandSchemaForVerb(verb)) })),
+        VERBS.map((verb) => ({
+          name: `zcut_${verb}`,
+          description: TOOL_DOCS[verb],
+          inputSchema: flattenMcpSchema(commandSchemaForVerb(verb)),
+        })),
       );
       const result = await client.callTool({ name: "zcut_validate", arguments: { project } });
       expect(validateEnvelope(result.structuredContent).valid).toBe(true);
@@ -1307,6 +1312,54 @@ it("exposes split_token through CLI and MCP with identical replay envelopes", as
     expect(validateEnvelope(mcp).valid).toBe(true);
     expect(withoutRequestId(mcp)).toEqual(withoutRequestId(cli));
     expect(mcp.receipt).toMatchObject({ replayed: true });
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+it("publishes shared descriptions and an MCP-only summary, and CLI help prints the same description", async () => {
+  const server = createServer();
+  const client = new Client({ name: "tool-docs", version: "1" });
+  const [left, right] = InMemoryTransport.createLinkedPair();
+  try {
+    await server.connect(left);
+    await client.connect(right);
+    const { tools } = await client.listTools();
+    expect(tools).toHaveLength(VERBS.length);
+    for (const verb of VERBS)
+      expect(tools.find((tool) => tool.name === `zcut_${verb}`)?.description).toBe(TOOL_DOCS[verb]);
+    const help = spawnSync(process.execPath, [cli, "help", "edit"], { encoding: "utf8" });
+    expect(help.status).toBe(0);
+    expect(help.stdout).toBe(`${TOOL_DOCS.edit}\n`);
+    const read = await client.callTool({ name: "zcut_inspect", arguments: { project, view: "brief" } });
+    expect(read.content).toEqual([{ type: "text", text: "no_op inspect rev_fixture_1" }]);
+    const edited = await client.callTool({
+      name: "zcut_edit",
+      arguments: {
+        project,
+        base_revision: "rev_fixture_1",
+        idempotency_key: "summary-marker",
+        author,
+        label: "标记开场",
+        ops: [{ op: "add_marker", at: "0s", duration: "0s", kind: "note", text: "开场" }],
+      },
+    });
+    const envelope = edited.structuredContent as { status: string; receipt: { after: string } };
+    expect(envelope.status).toBe("applied");
+    expect(edited.content).toEqual([
+      {
+        type: "text",
+        text: expect.stringContaining(
+          `applied edit ${envelope.receipt.after}\nlabel 标记开场\nmarker 新增 1，删除 0，修改 0\nW_VFR Variable frame rate media`,
+        ),
+      },
+    ]);
+    const guide = await client.callTool({
+      name: "zcut_inspect",
+      arguments: { project, view: "guide", name: "rough-cut" },
+    });
+    expect(guide.structuredContent).toMatchObject({ status: "rejected" });
   } finally {
     await client.close();
     await server.close();

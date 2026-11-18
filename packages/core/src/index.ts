@@ -29,6 +29,8 @@ export {
 } from "./schema.ts";
 export * from "./term-library.ts";
 export * from "./timecode.ts";
+export * from "./tool-docs.ts";
+export * from "./tool-summary.ts";
 export { AsrError, runAsrWorker } from "./transcribe.ts";
 export * from "./voice.ts";
 export * from "./voice-generate.ts";

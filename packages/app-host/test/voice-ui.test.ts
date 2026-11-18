@@ -2,10 +2,22 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { expect, it, vi } from "vitest";
 import { createMcpServer } from "../src/index.js";
-import type { UiEnvelope } from "../src/ui.js";
+import type { UiEnvelope, UiState } from "../src/ui.js";
 
 it("advertises and dispatches the voice panel and its sub-pages over in-memory MCP", async () => {
-  const call = vi.fn(async (verb, input) => ({ ok: true, status: "no_op", verb, result: input }) as UiEnvelope);
+  const call = vi.fn(
+    async (verb, input): Promise<UiEnvelope> => ({
+      ok: true,
+      status: "no_op",
+      verb,
+      request_id: "req_test",
+      receipt: null,
+      changes: [],
+      verification: { level: "none", passed: true, issues: [] },
+      result: input as UiState,
+      error: null,
+    }),
+  );
   const server = createMcpServer(call);
   const client = new Client({ name: "voice-ui-test", version: "1" });
   const [left, right] = InMemoryTransport.createLinkedPair();
