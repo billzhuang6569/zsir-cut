@@ -995,7 +995,15 @@ export async function startHost(
                   recognition: project.recognition,
                   recognized: project.transcripts.some((item) => item.raw_runs.some((run) => run.kind === "asr")),
                   recognitionRevision: lastRecognition?.seq,
-                  format: timeline ? { width: timeline.format.width, height: timeline.format.height } : undefined,
+                  format: timeline
+                    ? {
+                        width: timeline.format.width,
+                        height: timeline.format.height,
+                        ...(timeline.format.pixel_aspect && {
+                          pixel_aspect: printRational(timeline.format.pixel_aspect),
+                        }),
+                      }
+                    : undefined,
                   subtitleWarnings: [
                     ...validateProjectSemantics(project).filter((issue) => issue.code.startsWith("W_SUB_")),
                     ...project.transcripts.flatMap((transcript) =>

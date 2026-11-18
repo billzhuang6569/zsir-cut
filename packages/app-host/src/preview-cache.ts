@@ -30,6 +30,9 @@ const {
   rational,
   compare,
   floor,
+  ceil,
+  clipTimeMap,
+  mapClipTimeToSource,
   printRational,
   parseRational,
   ffprobe,
@@ -167,7 +170,212 @@ interface Index {
   last_opened: string;
   segments: Record<string, { bytes: number; duration?: string }>;
 }
-type Segment = { clip: Clip; media: Media; key: string };
+type Layer = { clip: Clip; media: Media };
+type Segment = {
+  clip: Clip;
+  key: string;
+  quality: string;
+  layers: Layer[];
+  audio: boolean;
+  canvas?: { width: number; height: number; rate: Rational };
+};
+
+export function previewSegments(project: Project, quality: string): Segment[] {
+  const timeline = project.timelines[0];
+  if (!timeline) return [];
+  const mediaById = new Map(project.media.map((media) => [media.id, media]));
+  const cuts = new Map<string, { at: Rational; starts: Layer[]; ends: Layer[] }>();
+  const layerOrder = new Map<Layer, number>();
+  function cut(at: Rational) {
+    const key = printRational(at, true);
+    const entry = cuts.get(key) ?? { at, starts: [], ends: [] };
+    cuts.set(key, entry);
+    return entry;
+  }
+  for (const track of timeline.tracks) {
+    if (track.kind !== "video" || !track.enabled) continue;
+    for (const clip of track.clips) {
+      const media = mediaById.get(clip.media_id);
+      if (clip.enabled === false || (media?.kind !== "video" && media?.kind !== "image")) continue;
+      const layer = { clip, media };
+      layerOrder.set(layer, layerOrder.size);
+      cut(clip.timeline_start).starts.push(layer);
+      cut(add(clip.timeline_start, clip.duration)).ends.push(layer);
+    }
+  }
+  const ordered = [...cuts.values()].sort((a, b) => compare(a.at, b.at));
+  const active = new Set<Layer>();
+  const result: Segment[] = [];
+  const short = Number(quality.slice(0, -1));
+  const { width, height, pixel_aspect } = timeline.format;
+  const aspect = (width * Number(pixel_aspect?.numerator ?? 1n)) / (height * Number(pixel_aspect?.denominator ?? 1n));
+  const canvas = {
+    width: Math.round((short * Math.max(1, aspect)) / 2) * 2,
+    height: Math.round((short * Math.max(1, 1 / aspect)) / 2) * 2,
+    rate: timeline.edit_rate,
+  };
+  for (const [index, { at, starts, ends }] of ordered.entries()) {
+    for (const id of ends) active.delete(id);
+    for (const id of starts) active.add(id);
+    const next = ordered[index + 1]?.at;
+    if (!active.size || !next) continue;
+    const visible = [...active].sort((a, b) => (layerOrder.get(a) ?? 0) - (layerOrder.get(b) ?? 0));
+    const top = visible.at(-1);
+    if (!top) continue;
+    const duration = sub(next, at);
+    const audio = visible[0]?.media.audio !== undefined;
+    const t = top.clip.transform;
+    const transformed =
+      (t?.scale ?? 1) !== 1 ||
+      !!t?.rotation_deg ||
+      !!t?.position?.some(Boolean) ||
+      Object.values(t?.crop ?? {}).some(Boolean);
+    if (
+      visible.length === 1 &&
+      !transformed &&
+      compare(at, top.clip.timeline_start) === 0 &&
+      compare(duration, top.clip.duration) === 0
+    ) {
+      if (top.media.kind === "video")
+        result.push({ clip: top.clip, layers: visible, quality, audio, key: segmentKey(top.clip, top.media, quality) });
+      continue;
+    }
+    const key = createHash("sha256")
+      .update(
+        canonical({
+          version: "layers-v1",
+          quality,
+          audio,
+          canvas: [canvas.width, canvas.height, printRational(canvas.rate)],
+          duration: printRational(duration, true),
+          layers: visible.map(({ clip, media }) => [
+            media.kind,
+            media.video && printRational(media.video.rate),
+            segmentKey(clip, media, quality),
+            printRational(sub(at, clip.timeline_start), true),
+            clip.transform ?? {},
+          ]),
+        }),
+      )
+      .digest("hex")
+      .slice(0, 32);
+    result.push({ clip: { ...top.clip, timeline_start: at, duration }, key, quality, layers: visible, audio, canvas });
+  }
+  return result;
+}
+
+export function previewSegmentArgs(segment: Segment, projectPath: string, output: string, hardware = true) {
+  const { audio, canvas, clip, layers, quality } = segment;
+  const path = (media: Media) => resolve(dirname(projectPath), media.path);
+  if (!canvas) {
+    const layer = layers[0];
+    return layer ? segmentArgs(clip, layer.media, quality, path(layer.media), output, hardware) : null;
+  }
+  const { width, height, rate } = canvas;
+  const fps = printRational(rate);
+  const duration = decimal(clip.duration);
+  const inputs: string[] = [];
+  const frames = ceil(mul(clip.duration, rate));
+  const filters = [`color=black:s=${width}x${height}:r=${fps},trim=end_frame=${frames},format=yuv444p[base0]`];
+  let input = 0;
+  for (const [index, layer] of layers.entries()) {
+    const { clip: item, media } = layer;
+    const t = item.transform;
+    const crop = t?.crop;
+    const left = crop?.left ?? 0,
+      right = crop?.right ?? 0,
+      top = crop?.top ?? 0,
+      bottom = crop?.bottom ?? 0;
+    if (left + right >= 1 || top + bottom >= 1) {
+      filters.push(`[base${index}]null[base${index + 1}]`);
+      continue;
+    }
+    const offset = sub(clip.timeline_start, item.timeline_start);
+    const end = add(offset, clip.duration);
+    const map = clipTimeMap(item);
+    const parts: string[] = [];
+    for (const [part, first] of map.entries()) {
+      const last = map[part + 1];
+      if (!last) break;
+      const from = compare(offset, first.at) > 0 ? offset : first.at;
+      const to = compare(end, last.at) < 0 ? end : last.at;
+      if (compare(from, to) >= 0) continue;
+      const source = mapClipTimeToSource(item, from);
+      const out = first.interp === "hold" ? source : mapClipTimeToSource(item, to);
+      const sign = compare(out, source);
+      const frame = media.video ? div(rational(1n), media.video.rate) : div(rational(1n), rate);
+      const length = sub(to, from);
+      const speed = sign === 0 ? rational(1n) : div(length, sign < 0 ? sub(source, out) : sub(out, source));
+      // On a mixed-rate cut, include the source frame already covering the in-point.
+      const lower = sign < 0 ? out : source;
+      const upper = sign < 0 ? source : out;
+      const sourceIn = mul(rational(floor(div(lower, frame))), frame);
+      const sourceOut = sign === 0 ? add(sourceIn, frame) : mul(rational(ceil(div(upper, frame))), frame);
+      const firstFrame = ceil(mul(sub(from, offset), rate));
+      const frameCount = ceil(mul(sub(to, offset), rate)) - firstFrame;
+      if (frameCount <= 0n) continue;
+      if (media.kind === "image") inputs.push("-framerate", fps, "-i", path(media));
+      else inputs.push("-ss", decimal(sourceIn), "-t", decimal(sub(sourceOut, sourceIn)), "-i", path(media));
+      const label = `part${input}`;
+      filters.push(
+        `[${input++}:v:0]${sign < 0 ? "reverse," : ""}setpts=(PTS-STARTPTS)*${speed.numerator}/${speed.denominator},` +
+          `tpad=stop_mode=clone:stop_duration=${decimal(add(length, div(rational(1n), rate)))},fps=fps=${fps}:start_time=0,` +
+          `trim=end_frame=${frameCount},setpts=PTS+${firstFrame}[${label}]`,
+      );
+      parts.push(`[${label}]`);
+    }
+    const scale = t?.scale ?? 1;
+    const angle = (t?.rotation_deg ?? 0) % 360;
+    const [x, y] = t?.position ?? [0, 0];
+    const prefix = parts.length > 1 ? `interleave=n=${parts.length},settb=expr=1/(${fps}),setpts=N,` : "";
+    // Crop in source coordinates while retaining the original centre of rotation.
+    filters.push(
+      `${parts.join("")}${prefix}scale=w='max(1,round(min(${width},${height}*dar)*${scale}))':` +
+        `h='max(1,round(min(${height},${width}/dar)*${scale}))',setsar=1,format=yuva444p,` +
+        `crop=w='max(1,iw*${1 - left - right})':h='max(1,ih*${1 - top - bottom})':x='iw*${left}':y='ih*${top}',` +
+        `pad=w='iw/(1-${left}-${right})':h='ih/(1-${top}-${bottom})':x='ow*${left}':y='oh*${top}':color=black@0,` +
+        `rotate=${-angle}*PI/180:ow=rotw(${-angle}*PI/180):oh=roth(${-angle}*PI/180):c=black@0[layer${index}]`,
+      `[base${index}][layer${index}]overlay=x='(W-w)/2+${x}*W':y='(H-h)/2-${y}*H':format=yuv444[base${index + 1}]`,
+    );
+  }
+  return [
+    "-y",
+    ...inputs,
+    ...(audio ? ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono"] : []),
+    "-filter_complex_threads",
+    "1",
+    "-filter_complex",
+    filters.join(";"),
+    "-map",
+    `[base${layers.length}]`,
+    ...(audio ? ["-map", `${input}:a:0`] : []),
+    "-c:v",
+    hardware ? "h264_videotoolbox" : "libx264",
+    ...(hardware ? [] : ["-preset", "veryfast"]),
+    "-pix_fmt",
+    "yuv420p",
+    "-bf",
+    "0",
+    "-g",
+    String(floor(add(div(rate, rational(2n)), rational(1n, 2n)))),
+    // Offset AAC priming so MP4 muxing does not stretch the first video packet.
+    ...(audio ? ["-c:a", "aac", "-af", "asetpts=PTS+1024/SR/TB", "-flags:a", "+bitexact"] : []),
+    "-movflags",
+    "+frag_keyframe+empty_moov+default_base_moof",
+    "-map_metadata",
+    "-1",
+    "-fflags",
+    "+bitexact",
+    "-flags:v",
+    "+bitexact",
+    "-t",
+    duration,
+    "-f",
+    "mp4",
+    output,
+  ];
+}
+
 export class PreviewCache {
   readonly media: MediaCache;
   private project: Project | undefined;
@@ -337,18 +545,7 @@ export class PreviewCache {
   async refresh(project = this.project) {
     this.project = project;
     this.media.refresh(project);
-    const quality = this.settings().quality;
-    this.needed =
-      project?.timelines[0]?.tracks.flatMap((track) =>
-        track.kind !== "video" || !track.enabled
-          ? []
-          : track.clips.flatMap((clip) => {
-              const media = project.media.find((media) => media.id === clip.media_id);
-              return clip.enabled === false || media?.kind !== "video"
-                ? []
-                : [{ clip, media, key: segmentKey(clip, media, quality) }];
-            }),
-      ) ?? [];
+    this.needed = project ? previewSegments(project, this.settings().quality) : [];
     if (this.building && !this.needed.some((segment) => segment.key === this.building)) this.controller?.abort();
     this.rerun = true;
     this.kick();
@@ -421,10 +618,10 @@ export class PreviewCache {
         }
       }
       if (!next) break;
-      const { clip, media, key } = next;
+      const { key } = next;
       const dir = await this.projectDir(project.id);
       const temp = join(dir, `${key}.tmp`);
-      const args = segmentArgs(clip, media, this.settings().quality, resolve(dirname(this.path), media.path), temp);
+      const args = previewSegmentArgs(next, this.path, temp);
       if (!args) {
         this.failed.add(key);
         continue;
@@ -440,18 +637,7 @@ export class PreviewCache {
         } catch {
           controller.signal.throwIfAborted();
           await thumbnailTask(
-            () =>
-              this.encode(
-                segmentArgs(
-                  clip,
-                  media,
-                  this.settings().quality,
-                  resolve(dirname(this.path), media.path),
-                  temp,
-                  false,
-                ) ?? [],
-                controller.signal,
-              ),
+            () => this.encode(previewSegmentArgs(next, this.path, temp, false) ?? [], controller.signal),
             controller.signal,
           );
         }
@@ -579,21 +765,33 @@ export class PreviewCache {
     if (directory_ok) this.kick();
     const projects = directory_ok ? await this.projects() : [];
     const fs = directory_ok ? await statfs(this.settings().directory).catch(() => null) : null;
-    const index = directory_ok && this.project ? await this.index(this.project.id).catch(() => null) : null;
+    const project = this.project;
+    const needed = this.needed;
+    const index = directory_ok && project ? await this.index(project.id).catch(() => null) : null;
+    const revision = project?.revision.id;
     const segments = await Promise.all(
-      this.needed.map(async ({ clip, key }) => {
+      needed.map(async ({ clip, key, canvas, audio }) => {
         let state = "missing";
         let duration: string | undefined;
         if (directory_ok) {
           if (this.building === key) state = "building";
           else
             try {
-              await stat(join(await this.projectDir(this.project?.id ?? ""), `${key}.mp4`));
+              await stat(join(await this.projectDir(project?.id ?? ""), `${key}.mp4`));
               state = "ready";
               duration = index?.segments[key]?.duration;
             } catch {}
         }
-        return { clip_id: clip.id, key, state, ...(duration ? { duration } : {}) };
+        return {
+          clip_id: clip.id,
+          key,
+          state,
+          start: printRational(clip.timeline_start, true),
+          end: printRational(add(clip.timeline_start, clip.duration), true),
+          composite: !!canvas,
+          audio,
+          ...(duration ? { duration } : {}),
+        };
       }),
     );
     const mediaEntries = directory_ok ? await this.media.entries() : [];
@@ -604,6 +802,7 @@ export class PreviewCache {
       media: await this.media.status(directory_ok),
       media_bytes,
       segments,
+      revision,
       directory: this.settings().directory,
       directory_ok,
       free_bytes: fs ? fs.bavail * fs.bsize : 0,

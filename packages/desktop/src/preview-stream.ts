@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ProjectView } from "./connection.js";
 import {
   add,
@@ -16,7 +16,17 @@ import {
 } from "./timeline.js";
 
 export interface CacheStatus {
-  segments: { clip_id: string; key: string; state: "ready" | "building" | "missing"; duration?: string }[];
+  revision?: string;
+  segments: {
+    clip_id: string;
+    key: string;
+    state: "ready" | "building" | "missing";
+    duration?: string;
+    start?: string;
+    end?: string;
+    composite?: boolean;
+    audio?: boolean;
+  }[];
   projects: { project_id: string; path: string }[];
   directory_ok: boolean;
   paused?: "battery";
@@ -25,10 +35,12 @@ export interface StreamSegment {
   clip: ClipView;
   url: string;
   duration: string;
+  audio?: boolean;
 }
 const seconds = (value: number) => rational(BigInt(Math.round(value * 1_000_000)), 1_000_000n);
-const mime = 'video/mp4; codecs="avc1.64001f, mp4a.40.2"';
-export const streamSupported = () => globalThis.MediaSource?.isTypeSupported(mime) ?? false;
+const mime = (audio = true) =>
+  audio ? 'video/mp4; codecs="avc1.64001f, mp4a.40.2"' : 'video/mp4; codecs="avc1.64001f"';
+export const streamSupported = (audio?: boolean) => globalThis.MediaSource?.isTypeSupported(mime(audio)) ?? false;
 
 /** One append queue owns the SourceBuffer, including eviction. */
 export class PreviewStream {
@@ -63,7 +75,7 @@ export class PreviewStream {
   };
   private open = () => {
     try {
-      this.buffer = this.media.addSourceBuffer(mime);
+      this.buffer = this.media.addSourceBuffer(mime(this.first.audio));
       this.buffer.mode = "segments";
       void this.pump();
     } catch {
@@ -107,7 +119,8 @@ export class PreviewStream {
       while (!this.disposed && this.table.length < wanted) {
         const previous = this.table.at(-1);
         const segment = previous ? this.next(previous.segment.clip) : this.first;
-        if (!segment || segment.url === this.unavailable) break;
+        if (!segment || segment.url === this.unavailable || (segment.audio ?? true) !== (this.first.audio ?? true))
+          break;
         let bytes: ArrayBuffer;
         try {
           const response = await fetch(segment.url, { signal: this.abort.signal });
@@ -295,6 +308,10 @@ export function usePreviewStream({
     attempted.current = undefined;
     return stop;
   }, [project, top, config, stop]);
+  const clips = useMemo(
+    () => new Map(project?.tracks.flatMap((track) => track.clips.map((clip) => [clip.id, clip] as const))),
+    [project],
+  );
   const sample = useCallback(
     (target: string) => {
       latestAt.current = target;
@@ -305,20 +322,42 @@ export function usePreviewStream({
         stop();
         target = mapped.at;
       }
-      const clip = top?.clips.find((clip) => clip.enabled && contains(clip.timeline_in.t, clip.timeline_out.t, target));
-      if (!engine.current && clip && attempted.current !== clip.id && config && streamSupported() && video.current) {
-        attempted.current = clip.id;
+      if (engine.current || !config || !video.current) return mapped?.ended ? mapped.at : null;
+      const status = cache.current;
+      const current = status?.revision === undefined || status.revision === project?.revision?.id ? status : undefined;
+      if (!current) return mapped?.ended ? mapped.at : null;
+      const ranges = current.segments ?? [];
+      const ranged = current.revision !== undefined || ranges[0]?.start !== undefined;
+      const row = (at: string) =>
+        ranges?.find(
+          (item) => item.start !== undefined && item.end !== undefined && contains(item.start, item.end, at),
+        );
+      const range = ranged ? row(target) : undefined;
+      const rangeClip = (item: NonNullable<typeof range>) => {
+        const original = clips.get(item.clip_id);
+        if (!original || !item.start || !item.end) return;
+        return { ...original, timeline_in: { t: item.start }, timeline_out: { t: item.end } };
+      };
+      const clip = ranged
+        ? range && rangeClip(range)
+        : top?.clips.find((clip) => clip.enabled && contains(clip.timeline_in.t, clip.timeline_out.t, target));
+      const attempt = range?.start ?? clip?.id;
+      if (clip && attempted.current !== attempt) {
+        if (ranged && (range?.state !== "ready" || !range.duration)) return mapped?.ended ? mapped.at : null;
+        attempted.current = attempt;
         const segment = (clip: ClipView): StreamSegment | undefined => {
           const status = cache.current;
-          const item = status?.segments?.find((item) => item.clip_id === clip.id && item.state === "ready");
+          if (status?.revision !== undefined && status.revision !== project?.revision?.id) return;
+          const item = ranged
+            ? status?.segments?.find((item) => item.start === clip.timeline_in.t && item.state === "ready")
+            : status?.segments?.find((item) => item.clip_id === clip.id && item.state === "ready");
           const projectId = status?.projects?.find((item) => item.path === path)?.project_id;
+          if (!status?.directory_ok || !item?.duration || !projectId) return;
           if (
-            !status?.directory_ok ||
-            !item?.duration ||
-            !projectId ||
-            clip.speed === "map" ||
-            compare(parseRational(clip.speed), rational(0n)) <= 0 ||
-            project?.media.find((item) => item.id === clip.media_id)?.kind !== "video"
+            !item.composite &&
+            (clip.speed === "map" ||
+              compare(parseRational(clip.speed), rational(0n)) <= 0 ||
+              project?.media.find((media) => media.id === clip.media_id)?.kind !== "video")
           )
             return;
           try {
@@ -326,35 +365,41 @@ export function usePreviewStream({
           } catch {
             return;
           }
-          const rate = parseRational(clip.speed);
-          if (
-            clip.time_map?.some(
-              (point, index, points) =>
-                (index < points.length - 1 && point.interp !== "linear") ||
-                compare(
-                  parseRational(point.source.t, true),
-                  add(
-                    parseRational(clip.source_in.t, true),
-                    mul(sub(parseRational(point.at.t, true), parseRational(clip.timeline_in.t, true)), rate),
-                  ),
-                ) !== 0,
+          if (!item.composite) {
+            const rate = parseRational(clip.speed);
+            if (
+              clip.time_map?.some(
+                (point, index, points) =>
+                  (index < points.length - 1 && point.interp !== "linear") ||
+                  compare(
+                    parseRational(point.source.t, true),
+                    add(
+                      parseRational(clip.source_in.t, true),
+                      mul(sub(parseRational(point.at.t, true), parseRational(clip.timeline_in.t, true)), rate),
+                    ),
+                  ) !== 0,
+              )
             )
-          )
-            return;
+              return;
+          }
           return {
             clip,
             duration: item.duration,
+            ...(item.audio === undefined ? {} : { audio: item.audio }),
             url: `http://127.0.0.1:${config.port}/cache/${encodeURIComponent(projectId)}/${encodeURIComponent(item.key)}.mp4?token=${encodeURIComponent(config.token)}`,
           };
         };
         const next = (clip: ClipView) => {
-          const incoming = top?.clips.find(
-            (item) => item.enabled && item.id !== clip.id && item.timeline_in.t === clip.timeline_out.t,
-          );
+          const incomingRange = cache.current?.segments?.find((item) => item.start === clip.timeline_out.t);
+          const incoming = ranged
+            ? incomingRange && rangeClip(incomingRange)
+            : top?.clips.find(
+                (item) => item.enabled && item.id !== clip.id && item.timeline_in.t === clip.timeline_out.t,
+              );
           return incoming ? segment(incoming) : undefined;
         };
         const first = segment(clip);
-        if (first) {
+        if (first && streamSupported(first.audio)) {
           prepare?.();
           active.current = true;
           setPreparing(true);
@@ -375,7 +420,7 @@ export function usePreviewStream({
       }
       return mapped?.ended ? mapped.at : null;
     },
-    [enabled, top, config, path, project, stop, prepare],
+    [enabled, top, config, path, project, clips, stop, prepare],
   );
   return { video, visible, preparing, active, sample, cacheStatus };
 }
