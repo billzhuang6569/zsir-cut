@@ -395,3 +395,71 @@ it("falls back on demand when the configured directory cannot be used and leaves
   expect((await stat(file ?? "")).isFile()).toBe(true);
   expect(await readFile(join(root, "not-directory"), "utf8")).toBe("source");
 });
+
+it("generates only requested bounded audio blocks, deduplicates and counts them in media cache", async () => {
+  const item = { ...first(), duration: rational(1202n) };
+  project.media = [item];
+  const encode = vi.fn(async (_args: string[]) => Buffer.alloc(768_000));
+  const media = new MediaCache(
+    () => join(root, "cache"),
+    async () => true,
+    run,
+    () => {},
+    encode,
+  );
+  await media.open(project, path());
+  const serve = mediaChannel(path(), "secret", async () => project, run, undefined, media);
+  const endpoint = `/media-audio?media_id=${item.id}&chunk=`;
+  async function request(chunk: string, token = "secret") {
+    const response = new Response();
+    const finished = new Promise((resolve) => response.on("finish", resolve));
+    await serve(
+      { url: `${endpoint}${chunk}&token=${token}`, method: "GET", headers: {} } as IncomingMessage,
+      response as unknown as ServerResponse,
+    );
+    await finished;
+    return response;
+  }
+  expect((await request("299", "wrong")).status).toBe(401);
+  expect((await request("-1")).status).toBe(400);
+  expect((await request("301")).status).toBe(404);
+  expect(encode).not.toHaveBeenCalled();
+  const blocks = await Promise.all([request("299"), request("299"), request("300")]);
+  expect(blocks.map((response) => response.status)).toEqual([200, 200, 200]);
+  expect(blocks.map((response) => Buffer.concat(response.chunks).length)).toEqual([768_000, 768_000, 768_000]);
+  expect(encode.mock.calls.map((args) => args[0]?.slice(0, 2)).sort()).toEqual([
+    ["-ss", "1195"],
+    ["-ss", "1199"],
+  ]);
+  expect(await readdir(directory())).toEqual(["audio-v1-299.pcm", "audio-v1-300.pcm", "meta.json"]);
+  expect((await media.entries())[0]?.bytes).toBeGreaterThan(2 * 768_000);
+  expect((await request("299")).status).toBe(200);
+  expect(encode).toHaveBeenCalledTimes(2);
+  await media.clear();
+  await expect(stat(directory())).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+it("cancels an abandoned audio seek and lets a new seek generate immediately", async () => {
+  const encode = vi.fn(
+    (_args: string[], signal: AbortSignal) =>
+      new Promise<Buffer>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      }),
+  );
+  const media = new MediaCache(
+    () => join(root, "cache"),
+    async () => true,
+    run,
+    () => {},
+    encode,
+  );
+  await media.open(project, path());
+  const seek = new AbortController();
+  const abandoned = expect(media.audioFile(first(), 0n, seek.signal)).rejects.toMatchObject({ name: "AbortError" });
+  await vi.waitFor(() => expect(encode).toHaveBeenCalledTimes(1));
+  seek.abort();
+  await abandoned;
+  expect(await readdir(directory())).toEqual([]);
+  encode.mockResolvedValueOnce(Buffer.alloc(768_000));
+  await expect(media.audioFile(first(), 1n, new AbortController().signal)).resolves.toContain("audio-v1-1.pcm");
+});

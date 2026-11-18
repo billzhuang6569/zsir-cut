@@ -93,17 +93,23 @@ async function saveMeta(dir: string, meta: Meta) {
   }
   await atomic(file, json);
 }
+type AudioJob = { work: Promise<void>; controller: AbortController; users: number };
+
 export class MediaCache {
   private project: Project | undefined;
   private path = "";
   readonly building = new Set<string>();
   readonly failed = new Set<string>();
   private pending = new Map<string, Promise<unknown>>();
+  private audioQueue = new Map<string, Map<string, AudioJob>>();
+  private metaWrites = new Map<string, Promise<void>>();
   constructor(
     private directory: () => string,
     private available: () => Promise<boolean>,
     private run: (args: string[]) => Promise<Buffer>,
     private changed: (media: Media) => void,
+    private runAudio: (args: string[], signal: AbortSignal) => Promise<Buffer> = run,
+    private audioWritten: () => void = () => {},
   ) {}
   async open(project: Project | undefined, path: string) {
     this.project = project;
@@ -184,9 +190,123 @@ export class MediaCache {
       throw new Error("Invalid media cache file");
     return path;
   }
+  private updateMeta(dir: string, update: () => Promise<Meta | undefined>) {
+    const write = (this.metaWrites.get(dir) ?? Promise.resolve())
+      .catch(() => {})
+      .then(async () => {
+        const meta = await update();
+        if (meta) await saveMeta(dir, { ...meta, last_used: new Date().toISOString() });
+      });
+    this.metaWrites.set(dir, write);
+    return write.finally(() => {
+      if (this.metaWrites.get(dir) === write) this.metaWrites.delete(dir);
+    });
+  }
+  async audioFile(media: Media, chunk: bigint, signal: AbortSignal): Promise<string | undefined> {
+    signal.throwIfAborted();
+    const start = chunk * 4n;
+    const key = mediaKey(media);
+    if (!media.audio || chunk < 0n || compare(rational(start), media.duration) >= 0) return;
+    const frames = ceil(mul(sub(media.duration, rational(start)), rational(48_000n)));
+    const validFrames = frames < 192_000n ? frames : 192_000n;
+    // Decode a second of preroll so independent AAC seeks agree at the PCM boundary.
+    const seek = start > 0n ? start - 1n : 0n;
+    const preroll = (start - seek) * 48_000n;
+    const source = resolve(dirname(this.path), media.path);
+    const fallback = !(await this.available());
+    const dir = await this.dir(key, fallback, true);
+    const name = `audio-v1-${chunk}.pcm`;
+    const file = join(dir, name);
+    const cached = await this.safeFile(dir, name).catch(() => undefined);
+    if (cached && (await stat(cached)).size === 768_000) {
+      await this.touch(key, fallback);
+      return cached;
+    }
+    let queue = this.audioQueue.get(dir);
+    if (!queue) {
+      queue = new Map();
+      this.audioQueue.set(dir, queue);
+    }
+    let job = queue.get(name);
+    if (!job) {
+      if (queue.size >= 6) return;
+      const jobs = queue;
+      const previous = [...jobs.values()].at(-1)?.work;
+      const controller = new AbortController();
+      const work = (previous ?? Promise.resolve())
+        .catch(() => {})
+        .then(async () => {
+          controller.signal.throwIfAborted();
+          const bytes = await this.runAudio(
+            [
+              "-ss",
+              String(seek),
+              "-threads",
+              "1",
+              "-i",
+              source,
+              "-map",
+              "0:a:0",
+              "-vn",
+              "-sn",
+              "-dn",
+              "-af",
+              `aresample=48000:async=1:first_pts=0,atrim=start_sample=${preroll}:end_sample=${preroll + validFrames},asetpts=PTS-STARTPTS,apad=whole_len=192000`,
+              "-t",
+              "4",
+              "-ac",
+              "2",
+              "-ar",
+              "48000",
+              "-f",
+              "s16le",
+              "pipe:1",
+            ],
+            controller.signal,
+          );
+          controller.signal.throwIfAborted();
+          if (bytes.length !== 768_000) throw new Error("Invalid preview audio chunk size");
+          await atomic(file, bytes);
+          await this.updateMeta(
+            dir,
+            async () =>
+              (await this.meta(key, fallback)) ?? {
+                media_key: key,
+                fingerprint: media.fingerprint.value,
+                duration: printRational(media.duration, true),
+                bytes: 0,
+                last_used: "",
+                peaks: "missing",
+                thumbs: "missing",
+              },
+          );
+          if (!fallback) this.audioWritten();
+        })
+        .finally(() => {
+          jobs.delete(name);
+          if (!jobs.size) this.audioQueue.delete(dir);
+        });
+      job = { work, controller, users: 0 };
+      jobs.set(name, job);
+    }
+    const active = job;
+    active.users++;
+    const release = () => {
+      if (--active.users === 0) active.controller.abort();
+    };
+    if (signal.aborted) release();
+    else signal.addEventListener("abort", release, { once: true });
+    try {
+      await active.work;
+      return this.safeFile(dir, name);
+    } finally {
+      signal.removeEventListener("abort", release);
+      if (!signal.aborted) release();
+    }
+  }
   async touch(key: string, fallback = false) {
-    const meta = await this.meta(key, fallback);
-    if (meta) await saveMeta(await this.dir(key, fallback), { ...meta, last_used: new Date().toISOString() });
+    if (await this.meta(key, fallback))
+      await this.updateMeta(await this.dir(key, fallback), () => this.meta(key, fallback));
   }
   private complete(media: Media, meta: Meta | undefined) {
     return Boolean(
@@ -270,7 +390,7 @@ export class MediaCache {
         }
       }
       dir ??= await this.dir(key, fallback, true);
-      await saveMeta(dir, meta);
+      await this.updateMeta(dir, async () => meta);
       this.changed(media);
     })()
       .catch(async () => {
@@ -360,7 +480,7 @@ export class MediaCache {
           if ((await lstat(frames)).isSymbolicLink() || dirname(await realpath(frames)) !== dir)
             throw new Error("Invalid media cache directory");
           await atomic(file, bytes);
-          await saveMeta(dir, { ...meta, last_used: new Date().toISOString() });
+          await this.touch(key, fallback);
           this.changed(media);
         })().finally(async () => {
           this.pending.delete(file);
@@ -393,6 +513,9 @@ export class MediaCache {
     }
   }
   async idle() {
-    await Promise.allSettled(this.pending.values());
+    await Promise.allSettled([
+      ...this.pending.values(),
+      ...[...this.audioQueue.values()].flatMap((jobs) => [...jobs.values()].map(({ work }) => work)),
+    ]);
   }
 }

@@ -50,10 +50,8 @@ export class PreviewStream {
     private activate: () => void,
     private fail: () => void,
     private timelineEnd?: string,
-    private setGain = (element: HTMLVideoElement, clip: ClipView, _at: string) => {
-      element.volume = Math.min(1, 10 ** ((clip.gain_db ?? 0) / 20));
-    },
   ) {
+    video.muted = true;
     video.src = this.url;
     this.media.addEventListener("sourceopen", this.open, { once: true });
     video.addEventListener("error", this.error);
@@ -155,7 +153,6 @@ export class PreviewStream {
               ),
             ),
           );
-          this.setGain(this.video, row.segment.clip, at);
           this.video.playbackRate = 1;
           this.started = true;
           void this.video.play().then(() => {
@@ -201,7 +198,6 @@ export class PreviewStream {
           ),
           true,
         );
-    this.setGain(this.video, clip, at);
     return { at, ended };
   }
   dispose() {
@@ -227,7 +223,6 @@ export function usePreviewStream({
   at,
   playbackAt,
   prepare,
-  setGain,
 }: {
   project: ProjectView | null;
   top: TrackView | undefined;
@@ -238,7 +233,6 @@ export function usePreviewStream({
   at: string;
   playbackAt: React.MutableRefObject<string | null>;
   prepare?: () => void;
-  setGain?: (element: HTMLVideoElement, clip: ClipView, at: string) => void;
 }) {
   const video = useRef<HTMLVideoElement>(null);
   const engine = useRef<PreviewStream>();
@@ -376,13 +370,12 @@ export function usePreviewStream({
             },
             stop,
             project?.duration.t,
-            setGain,
           );
         }
       }
       return mapped?.ended ? mapped.at : null;
     },
-    [enabled, top, config, path, project, stop, prepare, setGain],
+    [enabled, top, config, path, project, stop, prepare],
   );
   return { video, visible, preparing, active, sample, cacheStatus };
 }

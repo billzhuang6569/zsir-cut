@@ -199,8 +199,10 @@ export function mediaChannel(
       } else {
         if (
           !projectPath ||
-          !["/media", "/thumb", "/peaks", "/palette"].includes(url.pathname) ||
-          [...url.searchParams.keys()].some((key) => !["token", "media_id", "at"].includes(key))
+          !["/media", "/thumb", "/peaks", "/palette", "/media-audio"].includes(url.pathname) ||
+          [...url.searchParams.keys()].some(
+            (key) => !["token", "media_id", url.pathname === "/media-audio" ? "chunk" : "at"].includes(key),
+          )
         ) {
           response.writeHead(404).end();
           return;
@@ -212,16 +214,32 @@ export function mediaChannel(
           response.writeHead(404).end();
           return;
         }
-        source = resolve(dirname(projectPath), media.path);
-        fingerprint = media.fingerprint.value;
-        if (media.proxy) {
-          const proxy = resolve(dirname(projectPath), media.proxy.path);
-          try {
-            await stat(proxy);
-            source = proxy;
-            fingerprint = media.proxy.fingerprint.value;
-          } catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        if (url.pathname === "/media-audio") {
+          const chunk = url.searchParams.get("chunk") ?? "";
+          if (!/^(0|[1-9]\d{0,11})$/.test(chunk)) {
+            response.writeHead(400).end();
+            return;
+          }
+          const file = await mediaCache?.audioFile(media, BigInt(chunk), controller.signal);
+          if (!file) {
+            response.writeHead(404).end();
+            return;
+          }
+          if (controller.signal.aborted) return;
+          source = file;
+          media = undefined;
+        } else {
+          source = resolve(dirname(projectPath), media.path);
+          fingerprint = media.fingerprint.value;
+          if (media.proxy) {
+            const proxy = resolve(dirname(projectPath), media.proxy.path);
+            try {
+              await stat(proxy);
+              source = proxy;
+              fingerprint = media.proxy.fingerprint.value;
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+            }
           }
         }
       }

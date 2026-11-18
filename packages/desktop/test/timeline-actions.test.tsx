@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type Action, mergeKeymap, type presets } from "../../app-host/src/keymap.js";
 import { connectHost, DESKTOP_AUTHOR, type ProjectView } from "../src/connection.js";
 import { type Placement, threePointEdit } from "../src/media.js";
+import { PreviewMix } from "../src/preview-mix.js";
 import { applyUi, initialState } from "../src/state.js";
 import { add, compare, frameTime, parseRational, sub } from "../src/timeline.js";
 import { recordingCanvas } from "./canvas.js";
@@ -21,6 +22,7 @@ let ui: { snap: boolean; magnetic: boolean; skimming: boolean; track_height: "s"
 let readOnly = false;
 let sourceViewer = false;
 let showViewer = false;
+let previewConfig: { port: number; token: string } | undefined;
 let inspectorTarget: HTMLDivElement | null = null;
 const dragging = { current: false };
 const settings = vi.fn();
@@ -43,7 +45,7 @@ const render = () =>
         render();
       }}
       call={call}
-      config={undefined}
+      config={previewConfig}
       error={null}
       dragging={dragging}
       hideViewer={!sourceViewer && !showViewer}
@@ -154,6 +156,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await act(() => root.unmount());
   host.remove();
+  previewConfig = undefined;
   inspectorTarget?.remove();
   inspectorTarget = null;
   vi.restoreAllMocks();
@@ -196,7 +199,7 @@ it("opens the clip menu for the timeline selection and sends a revisioned edit",
   expect(document.querySelector('[aria-label="片段操作"]')).not.toBeNull();
 });
 
-it("previews the selected audio gain through the current viewer and writes on release", async () => {
+it("keeps the selected audio gain local while dragging and writes on release", async () => {
   showViewer = true;
   state = { ...state, selected: ["c10"] };
   inspectorTarget = document.createElement("div");
@@ -209,7 +212,7 @@ it("previews the selected audio gain through the current viewer and writes on re
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(slider, "-6");
     slider.dispatchEvent(new Event("input", { bubbles: true }));
   });
-  expect(video.volume).toBeCloseTo(10 ** (-6 / 20));
+  expect(video.muted).toBe(true);
   expect(writes()).toEqual([]);
   await pointer(slider, "pointerup", 0);
   expect(lastOps()).toEqual([{ op: "set_clip", clip_id: "c10", gain_db: -6 }]);
@@ -1232,6 +1235,20 @@ describe("track heads", () => {
     expect(state.soloAudioTrackIds).toEqual([]);
     await action("insert_edit");
     expect(lastOps()).toEqual([expect.objectContaining({ op: "place", audio_track: "t1" })]);
+  });
+
+  it("updates the preview mix when solo changes in the track header", async () => {
+    showViewer = true;
+    previewConfig = { port: 1234, token: "test" };
+    const warm = vi.spyOn(PreviewMix.prototype, "warm").mockImplementation(() => {});
+    const mixedClips = () => warm.mock.lastCall?.[0].map(({ clip }) => clip.id);
+
+    await act(async () => render());
+    expect(mixedClips()).toEqual(["c10", "c11", "c20", "c21"]);
+    await click(control("t1", "独奏"));
+    expect(mixedClips()).toEqual(["c10", "c11"]);
+    await click(control("t1", "取消独奏"));
+    expect(mixedClips()).toEqual(["c10", "c11", "c20", "c21"]);
   });
 
   it("resizes one track and saves its height in the UI preferences", async () => {
