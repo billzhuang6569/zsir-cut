@@ -779,13 +779,13 @@ export function useVoicePanel({
                     disabled={busy}
                     onClick={() => {
                       if (!project || !state.project) return;
-                      const op = placeMedia(
+                      const plan = placeMedia(
                         project,
                         media,
                         { ...state, media: { id: media.id, at: "0s", in: null, out: null } },
                         seekTarget(project, project.cues, state.playhead),
                       );
-                      if (!("audio_track" in op)) {
+                      if ("error" in plan || plan.added.length) {
                         setError("没有可用的目标轨道");
                         return;
                       }
@@ -798,7 +798,7 @@ export function useVoicePanel({
                           idempotency_key: crypto.randomUUID(),
                           author: DESKTOP_AUTHOR,
                           label: `把${name}加到时间线`,
-                          ops: [op],
+                          ops: [plan.op],
                         },
                         "配音已加入时间线",
                       );

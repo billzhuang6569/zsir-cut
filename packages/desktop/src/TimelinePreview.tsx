@@ -10,6 +10,7 @@ import { ClipMenu, type ClipMenuAnchor } from "./ClipMenu.js";
 import { type GainPreview, timelineGain } from "./clipProperties.js";
 import { Clip, Icon, IconButton } from "./components.js";
 import { DESKTOP_AUTHOR, type ProjectView, type useTimelinePreferences } from "./connection.js";
+import type { Placement } from "./media.js";
 import { loadMediaResource, type Thumbs, thumbnailStyle, useMediaCache } from "./media-cache.js";
 import { usePreviewStream } from "./preview-stream.js";
 import { useReverseAudio } from "./reverse-audio.js";
@@ -47,6 +48,7 @@ import { editPoints, keyboardKey, splitAllAt, timelineEdit } from "./timelineAct
 import { moveClipPreview, moveGroup, moveInsert, moveTarget, snapEdges } from "./timelineMove.js";
 import { cueTrimTarget, rollTarget, type TrimEdge, trimTarget } from "./timelineTrim.js";
 import { useClipGain } from "./useClipGain.js";
+import { DropGhost, useTimelineDrop } from "./useTimelineDrop.js";
 import { useTimelineGestures } from "./useTimelineGestures.js";
 import { Wave } from "./Wave.js";
 
@@ -174,7 +176,8 @@ export function TimelinePreview({
   hideTimeline = false,
   hideViewer = false,
   onOpenSettings,
-  onMediaDrop,
+  placement = "av",
+  onPlacementChange,
   onEditSubtitle,
   subtitlePreview,
   onSubtitleStyle,
@@ -196,7 +199,8 @@ export function TimelinePreview({
   hideTimeline?: boolean;
   hideViewer?: boolean;
   onOpenSettings?: (page?: "预览与缓存") => void;
-  onMediaDrop?: (id: string, at: string, track: string) => void;
+  placement?: Placement;
+  onPlacementChange?: (value: Placement) => void;
   project: ProjectView | null;
   state: UiState;
   update: (state: UiState) => void;
@@ -207,7 +211,6 @@ export function TimelinePreview({
   dragging: React.MutableRefObject<boolean>;
 }) {
   const [subtitleDraft, setSubtitleDraft] = useState<Partial<import("./timeline.js").StyleView> | null>(null);
-  const [drop, setDrop] = useState<{ track: string; at: string } | null>(null);
   const [scale, setScale] = useState(48);
   const [movePreview, setMovePreview] = useState<{
     ids: string[];
@@ -601,6 +604,20 @@ export function TimelinePreview({
   const latest = useRef({ state, project });
   latest.current = { state, project };
   const at = project ? seekTarget(project, project.cues, state.playhead) : "0s";
+  const drop = useTimelineDrop({
+    enabled: !!onPlacementChange && !viewerOnly && !hideTimeline,
+    readOnly,
+    scroller: gestures.scroller,
+    project,
+    state,
+    placement,
+    scale,
+    playhead: at,
+    snap,
+    magnetic,
+    preset,
+    call,
+  });
   const skimTarget =
     skimming && hoverX !== null && !state.playing && !dragging.current && !viewerOnly ? timelinePoint(hoverX) : null;
   const previewAt = skimTarget?.to ?? at;
@@ -1750,6 +1767,16 @@ export function TimelinePreview({
               <Icon name="subtitle" />
               {project?.cues.length ?? 0}
             </span>
+            {onPlacementChange && !readOnly && (
+              <label className="zc-placement">
+                放入
+                <select value={placement} onChange={(event) => onPlacementChange(event.target.value as Placement)}>
+                  <option value="av">音画</option>
+                  <option value="video">仅画面</option>
+                  <option value="audio">仅声音</option>
+                </select>
+              </label>
+            )}
             <IconButton icon="search" label="缩放" onClick={() => gestures.zoom(48)} />
             <input
               aria-label="时间线缩放"
@@ -1767,6 +1794,7 @@ export function TimelinePreview({
             className={`zc-timeline zc-track-height-${trackHeight}${tool === "blade" ? " is-blade" : ""}`}
             ref={gestures.scroller}
             {...gestures.handlers}
+            {...drop.handlers}
             onPointerDown={(event) => {
               if (tool !== "blade" || (event.target as Element).closest(".zc-clip-video,.zc-clip-audio"))
                 gestures.handlers.onPointerDown(event);
@@ -1809,6 +1837,11 @@ export function TimelinePreview({
                 update({ ...state, preview: "timeline", playing: false });
             }}
           >
+            {drop.error && (
+              <p role="alert" className="zc-drop-error">
+                {drop.error}
+              </p>
+            )}
             {hideViewer && (error || writeError) && (
               <p role="alert" title={error ? errorDetail : writeErrorDetail}>
                 {error || writeError}
@@ -1831,6 +1864,7 @@ export function TimelinePreview({
               )}
             {project && (
               <div className="zc-timeline-content" style={{ width: `calc(var(--track-label-w) + ${width}px)` }}>
+                <DropGhost preview={drop.preview} project={project} scale={scale} />
                 {movePreview?.target.insert && (
                   <div
                     role="img"
@@ -1997,26 +2031,6 @@ export function TimelinePreview({
                       className="zc-track-lane"
                       data-track-id={track.id}
                       style={{ width }}
-                      onDragOver={(event) => {
-                        if (
-                          readOnly ||
-                          track.kind === "subtitle" ||
-                          !event.dataTransfer.types.includes("application/x-zcut-media")
-                        )
-                          return;
-                        event.preventDefault();
-                        event.dataTransfer.dropEffect = "copy";
-                        const at = dropPoint(event.clientX, event.currentTarget);
-                        if (at) setDrop({ track: track.id, at });
-                      }}
-                      onDragLeave={() => setDrop(null)}
-                      onDrop={(event) => {
-                        event.preventDefault();
-                        const at = dropPoint(event.clientX, event.currentTarget);
-                        const id = event.dataTransfer.getData("application/x-zcut-media");
-                        if (id && at && !readOnly) onMediaDrop?.(id, at, track.id);
-                        setDrop(null);
-                      }}
                     >
                       {bladeTarget && bladeTracks.some((item) => item.id === track.id) && (
                         <span
@@ -2027,9 +2041,7 @@ export function TimelinePreview({
                           {bladeTracks[0]?.id === track.id && <output>{timecode(bladeTarget.to, project)}</output>}
                         </span>
                       )}
-                      {drop?.track === track.id && (
-                        <span className="zc-drop-preview" style={{ left: pixelAt(drop.at, scale) }} />
-                      )}
+                      <DropGhost preview={drop.preview} project={project} scale={scale} track={track.id} />
                       {points
                         .filter((point) => point.track_id === track.id)
                         .map((point) => (

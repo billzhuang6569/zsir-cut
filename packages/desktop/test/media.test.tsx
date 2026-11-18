@@ -6,29 +6,35 @@ import { mergeKeymap } from "../../app-host/src/keymap.js";
 import type { UiState } from "../../app-host/src/ui.js";
 import type { ProjectView } from "../src/connection.js";
 import { useMediaPanel } from "../src/MediaPanel.js";
-import { middle, placeMedia, sourceProject } from "../src/media.js";
+import { middle, type Placement, placeMedia, sourceProject } from "../src/media.js";
 import { updateMediaCache } from "../src/media-cache.js";
 import { initialState } from "../src/state.js";
+import { MEDIA_DRAG } from "../src/timelineDrop.js";
 import { recordingCanvas } from "./canvas.js";
 import { TimelinePreview } from "./timeline-preview.js";
 
+type NativePayload = {
+  type: "enter" | "over" | "drop" | "leave";
+  paths?: string[];
+  position?: { x: number; y: number };
+};
 const native = vi.hoisted(() => ({
   enabled: false,
   open: vi.fn(),
   reveal: vi.fn(),
-  drop: undefined as
-    | ((event: { payload: { type: string; paths: string[]; position: { x: number; y: number } } }) => void)
-    | undefined,
-  stop: vi.fn(),
+  listeners: new Set<(event: { payload: NativePayload }) => void>(),
 }));
+const nativeDrop = (payload: NativePayload) => {
+  for (const listener of native.listeners) listener({ payload });
+};
 vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => native.enabled }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: native.open }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ revealItemInDir: native.reveal }));
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({
-    onDragDropEvent: async (handler: typeof native.drop) => {
-      native.drop = handler;
-      return native.stop;
+    onDragDropEvent: async (handler: (event: { payload: NativePayload }) => void) => {
+      native.listeners.add(handler);
+      return () => native.listeners.delete(handler);
     },
   }),
 }));
@@ -99,6 +105,7 @@ async function mount(nativeMode = false, preview = false, view = project, withCo
       : call(verb, request);
   function Harness() {
     const [ui, update] = useState(state);
+    const [placement, setPlacement] = useState<Placement>("av");
     const [currentProject, setProject] = useState(view);
     refresh = setProject;
     state = ui;
@@ -108,6 +115,7 @@ async function mount(nativeMode = false, preview = false, view = project, withCo
       state: ui,
       update,
       call,
+      placement,
       config: withConfig ? config : undefined,
     });
     const source = preview && ui.preview === "media" && panel.selected ? sourceProject(project, panel.selected) : null;
@@ -118,7 +126,7 @@ async function mount(nativeMode = false, preview = false, view = project, withCo
         {panel.parameters}
         <output aria-label="当前状态">{JSON.stringify(ui)}</output>
         <TimelinePreview
-          project={source ?? project}
+          project={source ?? currentProject}
           viewerOnly={Boolean(source)}
           state={source ? { ...ui, playhead: { at: ui.media?.at ?? "0s" } } : ui}
           update={(next) =>
@@ -132,13 +140,8 @@ async function mount(nativeMode = false, preview = false, view = project, withCo
           error={null}
           dragging={{ current: false }}
           call={timelineCall}
-          onMediaDrop={(id, at, track) =>
-            panel.place(
-              project.media.find((m) => m.id === id),
-              at,
-              track,
-            )
-          }
+          placement={placement}
+          onPlacementChange={setPlacement}
         />
       </>
     );
@@ -303,27 +306,254 @@ it("sets I/O in source time, Q inserts at the timeline head, and source preview 
     await h.close();
   }
 });
-it("drops overwrite on the requested track with the existing 8px snap", async () => {
+function dropGeometry(container: HTMLElement) {
+  const mockRect = (selector: string, rect: Partial<DOMRect>) => {
+    const node = container.querySelector<HTMLElement>(selector);
+    if (!node) throw new Error(selector);
+    vi.spyOn(node, "getBoundingClientRect").mockReturnValue(rect as DOMRect);
+    return node;
+  };
+  const timeline = mockRect(".zc-timeline", { left: 100, right: 700, top: 200, bottom: 430 });
+  mockRect(".zc-timeline-content", { top: 200 });
+  mockRect(".zc-ruler-row", { bottom: 228 });
+  mockRect(".zc-ruler-row > .zc-track-name", { width: 40 });
+  mockRect(".zc-ruler", { left: 140 });
+  mockRect('[data-track-id="video_top"]', { top: 228, bottom: 268 });
+  mockRect('[data-track-id="video_lower"]', { top: 274, bottom: 314 });
+  mockRect('[data-track-id="audio_first"]', { top: 320, bottom: 350 });
+  return timeline;
+}
+
+async function dragEvent(target: Element, type: string, at: MouseEventInit, mediaId = media.id) {
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true, ...at });
+  Object.defineProperty(event, "dataTransfer", {
+    value: { types: [MEDIA_DRAG], getData: () => mediaId, setData: vi.fn(), dropEffect: "" },
+  });
+  await act(async () => target.dispatchEvent(event));
+}
+
+it("shows both source-range ghosts and drops one linked overwrite at the snapped frame", async () => {
   const h = await mount();
   try {
     await h.select();
-    const lane = h.container.querySelector<HTMLElement>('[aria-label="视频 B 放置区域"]');
-    if (!lane) throw new Error("lane");
-    const dataTransfer = { types: ["application/x-zcut-media"], getData: () => media.id, dropEffect: "" };
-    for (const type of ["dragover", "drop"]) {
-      const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: 100 });
-      Object.defineProperty(event, "dataTransfer", { value: dataTransfer });
-      await act(async () => {
-        lane.dispatchEvent(event);
-      });
-      if (type === "dragover") expect(lane.querySelector<HTMLElement>(".zc-drop-preview")?.style.left).toBe("96px");
+    await h.change({ ...h.state(), media: { id: media.id, at: "0s", in: "1s", out: "4s" } });
+    const timeline = dropGeometry(h.container);
+    const card = h.container.querySelector(".zc-media-card");
+    if (!card) throw new Error("missing card");
+    const point = { clientX: 240, clientY: 249, altKey: true };
+    await dragEvent(card, "dragstart", {});
+    await dragEvent(timeline, "dragover", point);
+    const ghosts = [...timeline.querySelectorAll<HTMLElement>(".zc-track-lane .zc-drop-preview")];
+    expect(ghosts).toHaveLength(2);
+    for (const ghost of ghosts) {
+      expect(ghost.style.left).toBe("96px");
+      expect(ghost.style.width).toBe("144px");
+      expect(ghost.textContent).toBe("00:00:02:00 · 覆盖");
     }
+    expect(h.call).not.toHaveBeenCalled();
+    await dragEvent(timeline, "drop", point);
+    await dragEvent(timeline, "drop", point);
+    expect(h.call).toHaveBeenCalledTimes(1);
     expect(h.call).toHaveBeenLastCalledWith(
       "edit",
       expect.objectContaining({
-        ops: [expect.objectContaining({ mode: "overwrite", at: "2s", video_track: "video_lower" })],
+        ops: [
+          {
+            op: "place",
+            media_id: media.id,
+            source_start: "1s",
+            duration: "3s",
+            mode: "overwrite",
+            at: "2s",
+            video_track: "video_top",
+            audio_track: "audio_first",
+          },
+        ],
       }),
     );
+    expect(timeline.querySelector(".zc-drop-preview")).toBeNull();
+  } finally {
+    await h.close();
+  }
+});
+
+it("rejects an incompatible lane, then cancels a new-track preview with Escape", async () => {
+  const h = await mount();
+  try {
+    const timeline = dropGeometry(h.container);
+    const placement = h.container.querySelector<HTMLSelectElement>(".zc-placement select");
+    if (!placement) throw new Error("missing placement");
+    await act(async () => {
+      placement.value = "audio";
+      placement.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    const card = h.container.querySelector(".zc-media-card");
+    if (!card) throw new Error("missing card");
+    await dragEvent(card, "dragstart", {});
+    const point = { clientX: 240, clientY: 249 };
+    await dragEvent(timeline, "dragover", point);
+    expect(timeline.querySelector(".zc-drop-preview.is-invalid")?.textContent).toContain("请把声音放到声音轨");
+    await dragEvent(timeline, "drop", point);
+    expect(h.call).not.toHaveBeenCalled();
+    await dragEvent(card, "dragstart", {});
+    const gap = { ...point, clientY: 270 };
+    await dragEvent(timeline, "dragover", gap);
+    expect(timeline.querySelector(".zc-drop-new-track")?.textContent).toContain("新建声音轨");
+    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true })));
+    expect(timeline.querySelector(".zc-drop-preview")).toBeNull();
+    await dragEvent(timeline, "drop", gap);
+    expect(h.call).not.toHaveBeenCalled();
+    await dragEvent(card, "dragstart", {});
+    await dragEvent(timeline, "drop", gap);
+    const [, request] = h.call.mock.calls[0] ?? [];
+    const [addTrack, place] = request?.ops as Record<string, unknown>[];
+    expect(addTrack).toMatchObject({ op: "add_track", kind: "audio", index: 1 });
+    expect(place).toMatchObject({ op: "place", audio_track: addTrack?.id, mode: "insert" });
+    expect(place).not.toHaveProperty("video_track");
+  } finally {
+    await h.close();
+  }
+});
+
+it("scrolls at the right edge and recomputes the landing under the pointer", async () => {
+  const h = await mount();
+  try {
+    const timeline = dropGeometry(h.container);
+    const card = h.container.querySelector(".zc-media-card");
+    const ruler = timeline.querySelector(".zc-ruler");
+    if (!card || !ruler) throw new Error("missing drag geometry");
+    vi.mocked(ruler.getBoundingClientRect).mockImplementation(() => ({ left: 140 - timeline.scrollLeft }) as DOMRect);
+    let frame: FrameRequestCallback | undefined;
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frame = callback;
+      return 123;
+    });
+    await dragEvent(card, "dragstart", {});
+    const edge = { clientX: 699, clientY: 250 };
+    await dragEvent(timeline, "dragover", edge);
+    const ghost = () => timeline.querySelector<HTMLElement>('[data-track-id="video_top"] .zc-drop-preview')?.style.left;
+    const before = ghost();
+    await act(async () => frame?.(0));
+    expect(timeline.scrollLeft).toBeGreaterThan(0);
+    expect(ghost()).not.toBe(before);
+    expect(h.call).not.toHaveBeenCalled();
+    await dragEvent(timeline, "drop", edge);
+    expect(h.call).toHaveBeenCalledTimes(1);
+  } finally {
+    await h.close();
+  }
+});
+
+it("offers the desktop drop hint for browser files without importing them", async () => {
+  const h = await mount();
+  try {
+    const timeline = dropGeometry(h.container);
+    const event = new MouseEvent("drop", { bubbles: true, cancelable: true, clientX: 240, clientY: 249 });
+    Object.defineProperty(event, "dataTransfer", { value: { types: ["Files"] } });
+    await act(async () => timeline.dispatchEvent(event));
+    expect(timeline.querySelector('[role="alert"]')?.textContent).toBe("请在桌面应用中把文件拖到时间线");
+    expect(h.call).not.toHaveBeenCalled();
+  } finally {
+    await h.close();
+  }
+});
+
+it("imports Finder paths in payload order on the AI tab and commits one edit after partial failure", async () => {
+  const h = await mount(true);
+  try {
+    const timeline = dropGeometry(h.container);
+    await h.change({ ...h.state(), panel: "ai" });
+    vi.stubGlobal("devicePixelRatio", 2);
+    timeline.scrollLeft = 48;
+    const ruler = timeline.querySelector(".zc-ruler");
+    if (!ruler) throw new Error("missing ruler");
+    vi.mocked(ruler.getBoundingClientRect).mockReturnValue({ left: 92 } as DOMRect);
+    h.call.mockImplementation(async (verb, request) => {
+      if (verb === "import_media") {
+        const [path] = request.paths as string[];
+        if (path === "/离线.mov") throw new Error("文件无法读取");
+        const first = path === "/10.mov";
+        return {
+          imported: [{ media_id: first ? "med_ten" : "med_two" }],
+          receipt: { before: request.base_revision, after: first ? "rev_two" : "rev_three" },
+        };
+      }
+      if (verb === "inspect") return { entity: { ...media, id: request.id, duration: "3s" } };
+      return {};
+    });
+    const position = { x: 384, y: 760 };
+    const paths = ["/10.mov", "/离线.mov", "/2.mov"];
+    await act(async () => {
+      nativeDrop({ type: "enter", position, paths });
+      nativeDrop({ type: "over", position });
+    });
+    expect(timeline.querySelector(".zc-drop-new-track")?.textContent).toContain("00:00:02:00");
+    expect(h.call).not.toHaveBeenCalled();
+    await act(async () => {
+      nativeDrop({ type: "drop", position, paths });
+      nativeDrop({ type: "drop", position, paths });
+    });
+    expect(h.call.mock.calls.filter(([verb]) => verb === "import_media").map(([, request]) => request.paths)).toEqual(
+      paths.map((path) => [path]),
+    );
+    expect(h.call.mock.calls.filter(([verb]) => verb === "edit")).toHaveLength(1);
+    const request = h.call.mock.lastCall?.[1];
+    expect(request?.base_revision).toBe("rev_three");
+    const [video, audio, first, second] = request?.ops as Record<string, unknown>[];
+    expect(video).toMatchObject({ op: "add_track", kind: "video", index: 3 });
+    expect(audio).toMatchObject({ op: "add_track", kind: "audio", index: 4 });
+    expect(first).toMatchObject({
+      op: "place",
+      media_id: "med_ten",
+      at: "2s",
+      video_track: video?.id,
+      audio_track: audio?.id,
+    });
+    expect(second).toMatchObject({
+      op: "place",
+      media_id: "med_two",
+      at: "5s",
+      video_track: video?.id,
+      audio_track: audio?.id,
+    });
+    expect(timeline.querySelector('[role="alert"]')?.textContent).toBe("离线.mov：文件无法读取");
+  } finally {
+    await h.close();
+  }
+});
+
+it("cancels a Finder landing when the project changes while importing", async () => {
+  const h = await mount(true);
+  try {
+    dropGeometry(h.container);
+    let complete: (value: unknown) => void = () => {};
+    h.call.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+    );
+    const drop = { position: { x: 236, y: 250 }, paths: ["/镜头.mov"] };
+    await act(async () => {
+      nativeDrop({ type: "enter", ...drop });
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
+      nativeDrop({ type: "drop", ...drop });
+    });
+    expect(h.call).not.toHaveBeenCalled();
+    await act(async () => {
+      nativeDrop({ type: "enter", ...drop });
+      nativeDrop({ type: "leave" });
+      nativeDrop({ type: "drop", ...drop });
+    });
+    expect(h.call).not.toHaveBeenCalled();
+    await act(async () => {
+      nativeDrop({ type: "enter", ...drop });
+      nativeDrop({ type: "drop", ...drop });
+    });
+    expect(h.call).toHaveBeenCalledTimes(1);
+    await h.change({ ...h.state(), project: "/另一个工程.zcut.json" });
+    await act(async () => complete({ imported: [{ media_id: "med_imported" }] }));
+    expect(h.call).toHaveBeenCalledTimes(1);
   } finally {
     await h.close();
   }
@@ -365,11 +595,11 @@ it("uses native multiple-file dialog, Finder reveal, and bounded file drops", as
     vi.spyOn(area, "getBoundingClientRect").mockReturnValue({ left: 0, top: 0, right: 200, bottom: 200 } as DOMRect);
     const count = h.call.mock.calls.length;
     await act(async () => {
-      native.drop?.({ payload: { type: "drop", paths: ["/外.mov"], position: { x: 500, y: 500 } } });
+      nativeDrop({ type: "drop", paths: ["/外.mov"], position: { x: 500, y: 500 } });
     });
     expect(h.call).toHaveBeenCalledTimes(count);
     await act(async () => {
-      native.drop?.({ payload: { type: "drop", paths: ["/拖入.mov"], position: { x: 10, y: 10 } } });
+      nativeDrop({ type: "drop", paths: ["/拖入.mov"], position: { x: 10, y: 10 } });
     });
     expect(h.call).toHaveBeenLastCalledWith("import_media", expect.objectContaining({ paths: ["/拖入.mov"] }));
   } finally {
@@ -378,15 +608,13 @@ it("uses native multiple-file dialog, Finder reveal, and bounded file drops", as
 });
 it("keeps audio-only and image placement exact and uses a five second image default", () => {
   const state = initialState();
-  const audio = placeMedia(project, { ...media, kind: "audio", duration: "1001/30000s" }, state, "1s");
-  expect(audio).toMatchObject({ duration: "1001/30000s", audio_track: "audio_first" });
-  expect(audio).not.toHaveProperty("video_track");
+  const audio = placeMedia(project, { ...media, kind: "audio", duration: "1001/300s" }, state, "1s");
+  expect(audio).toMatchObject({ op: { duration: "83/25s", audio_track: "audio_first" } });
+  expect(audio).not.toHaveProperty("op.video_track");
   const { audio: _audio, ...silent } = media;
   const image = { ...silent, kind: "image", duration: "3600s" };
   expect(placeMedia(project, image, state, "0s")).toMatchObject({
-    duration: "5s",
-    source_start: "0s",
-    video_track: "video_top",
+    op: { duration: "5s", source_start: "0s", video_track: "video_top" },
   });
   expect(middle(image)).toBe("0s");
 });
