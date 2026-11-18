@@ -114,6 +114,10 @@ export interface OverlayView {
   last_export: { created_at: string; revision_id: string; size_bytes: number } | null;
 }
 export interface PreviewData {
+  clipProperties?: Record<
+    string,
+    { transform?: import("../../core/src/project/types.js").Transform; sync_broken?: boolean }
+  >;
   transcripts?: TranscriptView[];
   subtitle_pass?: import("../../app-host/src/subtitle-pass.js").SubtitlePassState | null;
   unprocessedTranscripts?: string[];

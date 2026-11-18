@@ -87,6 +87,7 @@ export function Clip({
   selectionId,
   onDoubleClick,
   onContextMenu,
+  onKeyDown,
   cueKey,
 }: {
   kind: string;
@@ -100,6 +101,7 @@ export function Clip({
   cueKey?: string;
   onDoubleClick?: React.MouseEventHandler<HTMLButtonElement>;
   onContextMenu?: React.MouseEventHandler<HTMLButtonElement>;
+  onKeyDown?: React.KeyboardEventHandler<HTMLButtonElement> | undefined;
 }) {
   return (
     <button
@@ -111,6 +113,7 @@ export function Clip({
       onClick={onClick}
       onDoubleClick={onDoubleClick}
       onContextMenu={onContextMenu}
+      onKeyDown={onKeyDown}
       className={`zc-clip zc-clip-${kind} is-${kind}${selected ? " is-selected" : ""}${dimmed ? " is-dimmed" : ""}`}
       style={style}
     >

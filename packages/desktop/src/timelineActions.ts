@@ -116,6 +116,10 @@ export function timelineEdit(action: string, project: ProjectView, state: UiStat
   if (action === "trim_start_to_playhead" || action === "trim_end_to_playhead") {
     const edge = action === "trim_start_to_playhead" ? "in" : "out";
     const targets = selected.filter((clip) => crossing.includes(clip));
+    if (
+      targets.some((clip) => trimGroup(project, clip, edge, true).some((item) => item.time_map || item.speed === "map"))
+    )
+      return { ops: [], label: "", reason: "变速片段无法修剪" };
     return {
       label: edge === "in" ? "剪掉播放头前段" : "剪掉播放头后段",
       ops: targets

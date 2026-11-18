@@ -4,6 +4,7 @@ import type { ProjectChanged } from "../../app-host/src/revision-events.js";
 import { PANELS, type Panel } from "../../app-host/src/ui.js";
 import { type AiNotice, useAiPanel } from "./AiPanel.js";
 import { useChapterPanel } from "./ChapterPanel.js";
+import { selectedClips } from "./clipProperties.js";
 import { Icon, IconButton } from "./components.js";
 import {
   connectHost,
@@ -264,6 +265,15 @@ export function App({ config }: { config?: { port: number; token: string } }) {
       void ai.send(text);
     },
   });
+  const hasClipSelection = !reviewSession && !!history.view && selectedClips(history.view, state.selected).length > 0;
+  const clipSelection = hasClipSelection
+    ? JSON.stringify([state.project, state.panel, history.viewing, state.selected])
+    : null;
+  const [functionParameters, setFunctionParameters] = useState<string | null>(null);
+  const showClipInspector = clipSelection !== null && clipSelection !== functionParameters;
+  const [clipInspectorTarget, setClipInspectorTarget] = useState<HTMLDivElement | null>(null);
+  useEffect(() => setFunctionParameters((previous) => (previous === clipSelection ? previous : null)), [clipSelection]);
+
   const subtitles = useSubtitlePanel({
     project,
     state,
@@ -458,9 +468,28 @@ export function App({ config }: { config?: { port: number; token: string } }) {
                   ref={setReviewTarget}
                   aria-label="参数区"
                   className="zc-parameters zc-panel zc-pad"
-                  data-panel={history.viewing ? "history" : state.panel}
+                  data-panel={showClipInspector ? "clip" : history.viewing ? "history" : state.panel}
                 >
-                  {reviewSession ? null : history.viewing ? (
+                  {hasClipSelection && (
+                    <fieldset className="zc-clip-parameter-switch" aria-label="参数切换">
+                      <button
+                        type="button"
+                        aria-pressed={showClipInspector}
+                        onClick={() => setFunctionParameters(null)}
+                      >
+                        片段
+                      </button>
+                      <button
+                        type="button"
+                        aria-pressed={!showClipInspector}
+                        onClick={() => setFunctionParameters(clipSelection)}
+                      >
+                        {history.viewing ? "历史决定" : parameters[state.panel]}
+                      </button>
+                    </fieldset>
+                  )}
+                  <div ref={setClipInspectorTarget} hidden={!showClipInspector} />
+                  {reviewSession || showClipInspector ? null : history.viewing ? (
                     history.decisions
                   ) : (
                     <>
@@ -506,6 +535,13 @@ export function App({ config }: { config?: { port: number; token: string } }) {
                   onOpenSettings={(page) => setSettingsOpen(page ?? "通用")}
                   viewerTarget={viewerTarget}
                   revisionControlsTarget={revisionControls}
+                  clipInspectorTarget={showClipInspector ? clipInspectorTarget : null}
+                  onOpenClipInspector={() => {
+                    setFunctionParameters(null);
+                    requestAnimationFrame(() =>
+                      clipInspectorTarget?.querySelector<HTMLElement>(".zc-clip-inspector")?.focus(),
+                    );
+                  }}
                   hideViewer={Boolean(source)}
                   onMediaDrop={(id, at, track) => {
                     const item = project?.media.find((m) => m.id === id);

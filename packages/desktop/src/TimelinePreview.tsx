@@ -5,6 +5,9 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { ClipInspector } from "./ClipInspector.js";
+import { ClipMenu, type ClipMenuAnchor } from "./ClipMenu.js";
+import { type GainPreview, timelineGain } from "./clipProperties.js";
 import { Clip, Icon, IconButton } from "./components.js";
 import { DESKTOP_AUTHOR, type ProjectView, type useTimelinePreferences } from "./connection.js";
 import { loadMediaResource, type Thumbs, thumbnailStyle, useMediaCache } from "./media-cache.js";
@@ -43,6 +46,7 @@ import {
 import { editPoints, keyboardKey, splitAllAt, timelineEdit } from "./timelineActions.js";
 import { moveClipPreview, moveGroup, moveInsert, moveTarget, snapEdges } from "./timelineMove.js";
 import { cueTrimTarget, rollTarget, type TrimEdge, trimTarget } from "./timelineTrim.js";
+import { useClipGain } from "./useClipGain.js";
 import { useTimelineGestures } from "./useTimelineGestures.js";
 import { Wave } from "./Wave.js";
 
@@ -163,6 +167,8 @@ export function TimelinePreview({
   dragging,
   readOnly = false,
   revisionControlsTarget,
+  clipInspectorTarget,
+  onOpenClipInspector,
   viewerTarget,
   viewerOnly = false,
   hideTimeline = false,
@@ -183,6 +189,8 @@ export function TimelinePreview({
   ) => void;
   readOnly?: boolean;
   revisionControlsTarget?: HTMLElement | null;
+  clipInspectorTarget?: HTMLElement | null;
+  onOpenClipInspector?: () => void;
   viewerTarget?: HTMLElement | null;
   viewerOnly?: boolean;
   hideTimeline?: boolean;
@@ -266,6 +274,7 @@ export function TimelinePreview({
     setScale,
     clipDrag: (event, element) => {
       if (!project || busy || readOnly || (tool !== "select" && tool !== "roll")) return;
+      if ((event.target as Element).closest(".zc-clip-trim-disabled")) return;
       const id = element.dataset.selectionId;
       const edge = (event.target as Element).closest<HTMLElement>("[data-trim-edge]")?.dataset.trimEdge as
         | TrimEdge
@@ -461,6 +470,12 @@ export function TimelinePreview({
   const [writeError, setWriteError] = useState<string | null>(null);
   const [writeErrorDetail, setWriteErrorDetail] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
+  const writing = useRef(false);
+  const [clipMenu, setClipMenu] = useState<(ClipMenuAnchor & { path: string | null; ids: string[] }) | null>(null);
+  const applyGain = useClipGain();
+  const [gainPreview, setGainPreview] = useState<GainPreview | null>(null);
+  const clipBlocked = readOnly ? "返回当前工程后编辑片段" : busy ? "等待当前编辑完成" : undefined;
+
   const { keymap, preset, snap, magnetic, skimming, trackHeight, setUi } = preferences;
   const snapRef = useRef(snap);
   snapRef.current = snap;
@@ -607,6 +622,15 @@ export function TimelinePreview({
     ].map((time) => ceil(mul(parseRational(time, true), parseRational(project.edit_rate))));
   }, [project, top]);
   const media = project?.media.find((item) => item.id === clip?.media_id);
+  const activeGainPreview = gainPreview?.ids.every((id) => state.selected.includes(id)) ? gainPreview : null;
+  const gain = timelineGain(project, clip, previewAt, activeGainPreview);
+  const latestGainPreview = useRef(activeGainPreview);
+  latestGainPreview.current = activeGainPreview;
+  const applyTimelineGain = useCallback(
+    (element: HTMLVideoElement, clip: ClipView, at: string) =>
+      applyGain(element, timelineGain(latest.current.project, clip, at, latestGainPreview.current)),
+    [applyGain],
+  );
   const speed = clip ? sourceSpeed(clip, previewAt) : 0;
   const source = clip ? sourceAt(clip, previewAt) : rational(0n);
   const src = config && clip ? mediaUrl(config, "media", clip.media_id) : undefined;
@@ -627,6 +651,7 @@ export function TimelinePreview({
     at,
     playbackAt,
     prepare: pauseOriginal,
+    setGain: applyTimelineGain,
   });
   useReverseAudio(
     media?.kind === "image" ? undefined : src,
@@ -634,7 +659,7 @@ export function TimelinePreview({
     numberOf(source),
     speed * Number(direction),
     state.playing && !hideViewer,
-    clip?.gain_db ?? 0,
+    gain,
     setWriteError,
   );
   const seek = (target: string) => {
@@ -880,7 +905,7 @@ export function TimelinePreview({
             element.style.zIndex = "0";
             element.setAttribute("data-preroll", "");
             element.dataset.prerollState = "idle";
-            incoming.volume = Math.min(1, 10 ** ((prepared.clip.gain_db ?? 0) / 20));
+            applyTimelineGain(incoming, prepared.clip, active.timeline_out.t);
             incoming.muted = false;
             incoming.style.zIndex = "1";
             incoming.removeAttribute("data-preroll");
@@ -965,6 +990,7 @@ export function TimelinePreview({
     dragging,
     discardPreroll,
     sampleStream,
+    applyTimelineGain,
     streamActive,
     pauseOriginal,
   ]);
@@ -998,7 +1024,7 @@ export function TimelinePreview({
         topPlayback.current = { time: seconds, steady: false };
       }
       lastClip.current = clip.id;
-      element.volume = Math.min(1, 10 ** ((clip.gain_db ?? 0) / 20));
+      applyGain(element, gain);
       const rate = speed * Number(direction);
       const playable = rate >= 0.0625 && rate <= 16;
       if (playable) {
@@ -1017,6 +1043,8 @@ export function TimelinePreview({
     return () => element.removeEventListener("loadedmetadata", sync);
   }, [
     clip,
+    gain,
+    applyGain,
     source,
     speed,
     state.playing,
@@ -1032,26 +1060,40 @@ export function TimelinePreview({
     pauseOriginal,
   ]);
   const write = async (verb: string, label: string, ops?: unknown[]) => {
-    if (!project || busy || readOnly) return;
+    if (!project || writing.current || readOnly) return;
+    writing.current = true;
     setBusy(true);
     setWriteError(null);
     setWriteErrorDetail(undefined);
     try {
-      await call(verb, {
+      const result = (await call(verb, {
         project: state.project,
         base_revision: project.revision.id,
         idempotency_key: crypto.randomUUID(),
         author: DESKTOP_AUTHOR,
         label,
         ...(ops ? { timeline_id: project.id, ops } : {}),
-      });
+      })) as { warnings?: { code: string }[] } | undefined;
+      if (result?.warnings?.some(({ code }) => code === "W_RIPPLE_SKIPPED"))
+        setWriteError("已删除片段。其他片段占用了这段时间，空隙已保留");
       return true;
     } catch (error) {
       setWriteError(error instanceof Error ? error.message : "操作失败，请重试");
       setWriteErrorDetail(error instanceof Error ? String(error.cause ?? error.message) : undefined);
     } finally {
+      writing.current = false;
       setBusy(false);
     }
+  };
+  const editClips = (label: string, ops: unknown[]) => {
+    void write("edit", label, ops);
+  };
+  const openClipMenu = (id: string, element: HTMLButtonElement, x: number, y: number) => {
+    const current = latest.current.state;
+    const ids = current.selected.includes(id) ? current.selected : [id];
+    update({ ...current, selected: ids, edit_point: null, preview: "timeline" });
+    setCueMenu(null);
+    setClipMenu({ path: current.project, ids, element, x, y });
   };
   const updateRollSelection = (point: { track_id: string; at: string }, to: string) => {
     const current = latest.current.state;
@@ -1070,6 +1112,7 @@ export function TimelinePreview({
       ? previewAt
       : at;
     const edit = timelineEdit(action, project, state, target, magnetic);
+    if (edit && "reason" in edit) setWriteError(edit.reason);
     if (edit?.ops.length)
       void write("edit", edit.label, edit.ops).then((ok) => {
         const op = edit.ops[0];
@@ -1430,6 +1473,7 @@ export function TimelinePreview({
               }}
               data-preview-mode="preroll"
               playsInline
+              crossOrigin="anonymous"
               preload="auto"
               muted={!!skimTarget || index !== visibleVideo || streamVisible || streamPreparing}
               data-preroll={streamVisible || index !== visibleVideo ? "" : undefined}
@@ -1585,6 +1629,33 @@ export function TimelinePreview({
   );
   return (
     <>
+      {project && clipMenu?.path === state.project && clipMenu.element.isConnected && (
+        <ClipMenu
+          anchor={clipMenu}
+          project={project}
+          ids={clipMenu.ids}
+          keymap={keymap}
+          blocked={clipBlocked}
+          edit={editClips}
+          inspect={onOpenClipInspector}
+          close={() => setClipMenu(null)}
+          copyError={() => setWriteError("复制时码失败")}
+        />
+      )}
+      {project &&
+        clipInspectorTarget &&
+        createPortal(
+          <ClipInspector
+            key={JSON.stringify([state.project, project.id, state.selected])}
+            project={project}
+            ids={state.selected}
+            blocked={clipBlocked}
+            gainPreview={activeGainPreview}
+            previewGain={setGainPreview}
+            edit={editClips}
+          />,
+          clipInspectorTarget,
+        )}
       {cueMenu && (
         <div
           ref={cueMenuRef}
@@ -2048,8 +2119,8 @@ export function TimelinePreview({
                             selectionId={item.id}
                             kind={track.kind}
                             label={
-                              project.media.find((media) => media.id === item.media_id)?.name ??
                               item.label ??
+                              project.media.find((media) => media.id === item.media_id)?.name ??
                               item.media_id
                             }
                             selected={state.selected.includes(item.id)}
@@ -2080,6 +2151,22 @@ export function TimelinePreview({
                                   }
                                 : {}),
                             }}
+                            onContextMenu={(event) => {
+                              if (track.kind === "subtitle") return;
+                              event.preventDefault();
+                              event.stopPropagation();
+                              openClipMenu(item.id, event.currentTarget, event.clientX, event.clientY);
+                            }}
+                            onKeyDown={(event) => {
+                              if (
+                                track.kind === "subtitle" ||
+                                !(event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))
+                              )
+                                return;
+                              event.preventDefault();
+                              const { left, bottom } = event.currentTarget.getBoundingClientRect();
+                              openClipMenu(item.id, event.currentTarget, left, bottom);
+                            }}
                             onClick={(event) => {
                               if (tool !== "blade") {
                                 gestures.select([item.id], event);
@@ -2109,6 +2196,20 @@ export function TimelinePreview({
                               );
                             }}
                           >
+                            {original.time_map && tool !== "blade" && (
+                              <>
+                                <span
+                                  className="zc-trim-in zc-clip-trim-disabled"
+                                  title="变速片段无法修剪"
+                                  aria-hidden="true"
+                                />
+                                <span
+                                  className="zc-trim-out zc-clip-trim-disabled"
+                                  title="变速片段无法修剪"
+                                  aria-hidden="true"
+                                />
+                              </>
+                            )}
                             {track.kind !== "subtitle" &&
                               (tool === "select" || tool === "roll") &&
                               !readOnly &&

@@ -20,6 +20,7 @@ let ui: { snap: boolean; magnetic: boolean; skimming: boolean; track_height: "s"
 let readOnly = false;
 let sourceViewer = false;
 let showViewer = false;
+let inspectorTarget: HTMLDivElement | null = null;
 const dragging = { current: false };
 const settings = vi.fn();
 const reply = () => ({ prefs: { ui, keymap: { preset } }, ...mergeKeymap(preset, overrides) });
@@ -45,6 +46,7 @@ const render = () =>
       error={null}
       dragging={dragging}
       hideViewer={!sourceViewer && !showViewer}
+      clipInspectorTarget={inspectorTarget}
       viewerOnly={sourceViewer}
       readOnly={readOnly}
       onOpenSettings={settings}
@@ -151,7 +153,66 @@ beforeEach(async () => {
 afterEach(async () => {
   await act(() => root.unmount());
   host.remove();
+  inspectorTarget?.remove();
+  inspectorTarget = null;
   vi.restoreAllMocks();
+});
+
+it("opens the clip menu for the timeline selection and sends a revisioned edit", async () => {
+  state = { ...state, selected: ["c00", "c10"] };
+  await act(async () => render());
+  await act(async () => {
+    get('[data-selection-id="c00"]').dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        button: 2,
+        clientX: 50,
+        clientY: 50,
+      }),
+    );
+  });
+  const menu = document.querySelector('[aria-label="片段操作"]');
+  expect(menu).not.toBeNull();
+  expect(state.selected).toEqual(["c00", "c10"]);
+  await click(menu?.querySelector("button") as HTMLElement);
+  expect(writes()).toEqual([
+    [
+      "edit",
+      expect.objectContaining({
+        project: state.project,
+        base_revision: project.revision.id,
+        timeline_id: project.id,
+        idempotency_key: expect.any(String),
+        author: DESKTOP_AUTHOR,
+        label: "删除留空隙",
+        ops: [{ op: "remove", clip_ids: ["c00", "c10"] }],
+      }),
+    ],
+  ]);
+  await key("⇧F10", get('[data-selection-id="c01"]'));
+  expect(state.selected).toEqual(["c01"]);
+  expect(document.querySelector('[aria-label="片段操作"]')).not.toBeNull();
+});
+
+it("previews the selected audio gain through the current viewer and writes on release", async () => {
+  showViewer = true;
+  state = { ...state, selected: ["c10"] };
+  inspectorTarget = document.createElement("div");
+  document.body.append(inspectorTarget);
+  await act(async () => render());
+  const video = host.querySelector<HTMLVideoElement>('video[aria-label="时间线预览"]') as HTMLVideoElement;
+  Object.defineProperty(video, "readyState", { value: 1 });
+  const slider = inspectorTarget.querySelector<HTMLInputElement>('input[type="range"]') as HTMLInputElement;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(slider, "-6");
+    slider.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  expect(video.volume).toBeCloseTo(10 ** (-6 / 20));
+  expect(writes()).toEqual([]);
+  await pointer(slider, "pointerup", 0);
+  expect(lastOps()).toEqual([{ op: "set_clip", clip_id: "c10", gain_db: -6 }]);
+  expect(writes()).toHaveLength(1);
 });
 
 describe.each(["fcp", "premiere"] as const)("%s merged actions", (value) => {
