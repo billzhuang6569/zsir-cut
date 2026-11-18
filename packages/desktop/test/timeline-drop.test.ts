@@ -48,10 +48,10 @@ it("converts DPR and horizontal scroll into the sequence grid with a non-zero DF
   expect(timecode(at, project)).toBe("01:00:02;00");
 });
 
-it("preserves the grab offset and snaps the trailing edge to an existing edit point", () => {
-  const geometry = { x: 705, left: 100, label: 40, scroll: 0, scale: 80 };
+it("snaps the trailing edge to an existing edit point when dropping from the pointer", () => {
+  const geometry = { x: 304, left: 100, label: 40, scroll: 0, scale: 80 };
   const cut = "3003/250s";
-  expect(dropTime(project, initialState(), geometry, true, cut, video, 500)).toBe("1001/500s");
+  expect(dropTime(project, initialState(), geometry, true, cut, video)).toBe("1001/500s");
 });
 
 it("distinguishes the ruler, existing lanes, gaps and the region under the last lane", () => {

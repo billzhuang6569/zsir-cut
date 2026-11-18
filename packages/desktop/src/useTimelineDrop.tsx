@@ -31,13 +31,12 @@ type CardPointer = {
   pointerId: number;
   element: Element;
   id: string;
-  grab: number;
   name: string | undefined;
 };
 type CardPreview = { x: number; y: number; name: string; duration: string };
 type Drag =
   | { generation: number; source: "files"; firstPath: string | undefined }
-  | { generation: number; source: "card"; id: string; grab: number };
+  | { generation: number; source: "card"; id: string };
 
 type Preview = {
   landing: TimelineLanding;
@@ -87,7 +86,6 @@ function resolveDrop(options: Options, drag: Drag, point: Point, commit = false)
     snap,
     playhead,
     media,
-    drag.source === "card" ? drag.grab : 0,
   );
   const landing = { target: spot.target, at, mode: dropMode(magnetic, preset, point) };
   const contentTop = content.getBoundingClientRect().top;
@@ -237,14 +235,11 @@ export function useTimelineDrop(options: Options) {
       const card = element.closest<HTMLElement>("[data-media-id]");
       const id = card?.dataset.mediaId;
       if (!card || !id || (element.closest("button,input,select,textarea,a") ?? card) !== card) return;
-      const { left, width } = card.getBoundingClientRect();
-      const grab = width ? Math.round(1000 * Math.max(0, Math.min(1, (event.clientX - left) / width))) : 0;
       cardPointer.current = {
         origin: eventPoint(event),
         pointerId: event.pointerId,
         element,
         id,
-        grab,
         name: card.dataset.mediaName,
       };
     };
@@ -272,7 +267,7 @@ export function useTimelineDrop(options: Options) {
         }
         suppressClick = true;
         dragging.current = true;
-        active.current = { source: "card", id: card.id, generation: generation.current, grab: card.grab };
+        active.current = { source: "card", id: card.id, generation: generation.current };
       }
       event.preventDefault();
       cardPreview.set({
