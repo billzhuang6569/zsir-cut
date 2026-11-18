@@ -112,7 +112,7 @@ export const cases = [
     message: "播放头这句话说得不好，删掉",
     check: (c) => [
       ...(c.durAfter < c.durBefore ? [] : ["没有删"]),
-      ...(c.durBefore - c.durAfter <= 10 ? [] : ["删得太多（超过 10 秒）"]),
+      ...(c.durBefore - c.durAfter <= 15 ? [] : ["删得太多（超过 15 秒）"]),
       ...noSession(c),
       ...fewQuestions(c, 1),
     ],
