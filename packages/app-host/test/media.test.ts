@@ -150,6 +150,7 @@ describe("read-only media channel", () => {
 
 it("caps thumbnails globally, merges queued keys, cancels disconnected waiters and recovers after failure", async () => {
   const directory = await mkdtemp(join(tmpdir(), "zcut-skim-"));
+  const abortListeners = vi.spyOn(AbortSignal.prototype, "addEventListener");
   const jobs: { resolve: (value: Buffer) => void; reject: (error: Error) => void }[] = [];
   let active = 0;
   let maximum = 0;
@@ -184,11 +185,12 @@ it("caps thumbnails globally, merges queued keys, cancels disconnected waiters a
     await vi.waitFor(() => expect(jobs).toHaveLength(1));
     const b = request(second, "2s");
     await vi.waitFor(() => expect(jobs).toHaveLength(2));
+    abortListeners.mockClear();
     const c = request(first, "3s");
     const duplicate = request(first, "3s");
     const cancelled = request(second, "4s");
-    // Give cache misses time to enter the queue before disconnecting.
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    // Each unique miss registers a queue listener, and each request registers a shared-work release listener.
+    await vi.waitFor(() => expect(abortListeners.mock.calls.filter(([type]) => type === "abort")).toHaveLength(5));
     expect(run).toHaveBeenCalledTimes(2);
     c.response.destroy();
     cancelled.response.destroy();
@@ -218,6 +220,7 @@ it("caps thumbnails globally, merges queued keys, cancels disconnected waiters a
     await retry.done;
     expect(retry.response.bytes.toString()).toBe("retry");
   } finally {
+    abortListeners.mockRestore();
     for (const job of jobs) job.resolve(Buffer.from("cleanup"));
     await rm(directory, { recursive: true, force: true });
   }

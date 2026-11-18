@@ -211,13 +211,17 @@ it("runs at most two media tasks, timeline media first, before preview segments 
   let active = 0,
     maximum = 0;
   const order: string[] = [];
+  let releaseFirstPair!: () => void;
+  const firstPair = new Promise<void>((resolve) => {
+    releaseFirstPair = resolve;
+  });
   await cache.close();
   const encode = async (args: string[]) => {
     const isSegment = args.includes("mp4");
     if (isSegment) expect(order.filter((item) => item === "sheet")).toHaveLength(3);
     order.push(isSegment ? "segment" : args.includes("image2") ? "sheet" : "peaks");
     maximum = Math.max(maximum, ++active);
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    if (order.length <= 2) await firstPair;
     try {
       return await run(args);
     } finally {
@@ -240,6 +244,11 @@ it("runs at most two media tasks, timeline media first, before preview segments 
   project.media.push({ ...base, id: "med_other", fingerprint: { ...base.fingerprint, value: "other" } });
   await prefs.set({ preview_cache: { auto: true } });
   await cache.open(project, path());
+  try {
+    await vi.waitFor(() => expect(active).toBe(2));
+  } finally {
+    releaseFirstPair();
+  }
   await cache.idle();
   expect(maximum).toBe(2);
   expect((await cache.status()).segments[0]).toMatchObject({ state: "ready", duration: "2/25s" });

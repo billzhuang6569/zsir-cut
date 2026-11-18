@@ -615,13 +615,13 @@ export class PreviewCache {
   private async push() {
     this.statusVersion++;
     if (this.stopped || this.timer) return;
-    this.timer = setTimeout(
+    const timer = setTimeout(
       () => {
         const version = this.statusVersion;
         void this.status()
           .then((status) => {
             const value = JSON.stringify(status);
-            if (value !== this.lastStatus && !this.stopped) {
+            if (this.timer === timer && value !== this.lastStatus && !this.stopped) {
               this.lastStatus = value;
               this.lastPush = Date.now();
               const previous = this.lastMedia;
@@ -640,13 +640,15 @@ export class PreviewCache {
           })
           .catch(() => {})
           .finally(() => {
+            if (this.timer !== timer) return;
             this.timer = undefined;
             if (version !== this.statusVersion) void this.push();
           });
       },
       Math.max(0, this.lastPush + 500 - Date.now()),
     );
-    this.timer.unref();
+    this.timer = timer;
+    timer.unref();
   }
   async file(id: string, key: string) {
     if (!keyPattern.test(key)) return undefined;
