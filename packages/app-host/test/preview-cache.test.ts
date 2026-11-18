@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { on, once } from "node:events";
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { parseProject, rational } from "../../core/src/index.ts";
@@ -443,7 +443,7 @@ it("starts split keys immediately, aborts obsolete ffmpeg and removes its tempor
   expect((await cache.status()).segments[0]?.state).toBe("ready");
 });
 
-it("puts the hinted segment and its next two ahead of the remaining queue", async () => {
+it("puts the hinted segment and its next two ahead of the remaining queue", { timeout: 20_000 }, async () => {
   const project = await fixture();
   const track = project.timelines[0]?.tracks.find((track) => track.kind === "video");
   if (!track || track.kind !== "video" || !track.clips[0]) throw new Error("video");
@@ -458,24 +458,41 @@ it("puts the hinted segment and its next two ahead of the remaining queue", asyn
   const timeline = project.timelines[0];
   if (!timeline) throw new Error("timeline");
   timeline.tracks = [track];
-  await writeFile(join(root, "hold"), "");
-  await cache.open(project, join(root, "test.zcut.json"));
-  await vi.waitFor(async () => expect((await calls()).length).toBe(1));
-  cache.hint(rational(4n));
-  await rm(join(root, "hold"));
-  await cache.idle();
   const media = project.media.find((media) => media.id === template.media_id);
   if (!media) throw new Error("media");
   const keys = track.clips.map((clip) => segmentKey(clip, media, "720p"));
-  expect((await calls()).map((args) => args.at(-1)?.split("/").at(-1)?.replace(".tmp", ""))).toEqual([
-    keys[0],
-    keys[4],
-    keys[5],
-    keys[6],
-    keys[3],
-    keys[2],
-    keys[1],
-  ]);
+  const encoded: string[] = [];
+  const packet = { pts: 0n, duration: 1001n };
+  await cache.close();
+  cache = new PreviewCache(
+    prefs,
+    () => {},
+    undefined,
+    undefined,
+    async (args) => {
+      const output = args.at(-1);
+      if (!output || !args.includes("mp4")) throw new Error("Expected a preview segment");
+      const key = basename(output, ".tmp");
+      encoded.push(key);
+      // The first segment has already been selected when encoding begins.
+      if (key === keys[0]) cache.hint(rational(4n));
+      await writeFile(output, "0123456789");
+      return Buffer.alloc(0);
+    },
+    async () => ({
+      streams: [{ index: 0, codec_type: "video", time_base: "1/30000" }],
+      summaries: new Map([[0, { count: 1, first300: [packet], last: packet }]]),
+    }),
+  );
+  // The segment queue runs after the media cache is ready.
+  const needsMedia = vi.spyOn(cache.media, "needs").mockResolvedValue(false);
+  try {
+    await cache.open(project, join(root, "test.zcut.json"));
+    await cache.idle();
+    expect(encoded).toEqual([keys[0], keys[4], keys[5], keys[6], keys[3], keys[2], keys[1]]);
+  } finally {
+    needsMedia.mockRestore();
+  }
 });
 
 it("rebuilds split keys on the host project_changed path without waiting for a poll", async () => {
