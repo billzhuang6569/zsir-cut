@@ -32,6 +32,7 @@ export interface WriteRequest {
   verb: WriteVerb;
   request_id: string;
   ops: unknown[];
+  originalOps?: unknown[] | undefined;
   timeline_id?: string;
   target?: string;
   label?: string;
@@ -123,6 +124,7 @@ export interface JournalEntry {
   request_id?: string;
   idempotency_key?: string;
   ops?: unknown[];
+  expanded_ops?: unknown[];
   timeline_id?: string;
   changes?: EntityChange[];
   target?: string;
@@ -224,7 +226,7 @@ async function readLines<T>(path: string): Promise<T[]> {
 }
 
 const requestHash = (request: WriteRequest) => {
-  const { request_id: _requestId, ...hashInput } = request;
+  const { request_id: _requestId, originalOps: _originalOps, ...hashInput } = request;
   return createHash("sha256").update(canonical(hashInput)).digest("hex");
 };
 
@@ -843,7 +845,8 @@ export function openProject(options: OpenProjectOptions) {
         verb: request.verb,
         request_id: request.request_id,
         idempotency_key: request.idempotency_key,
-        ops: request.ops,
+        ops: Array.isArray(result?.expanded_ops) ? (request.originalOps ?? request.ops) : request.ops,
+        ...(Array.isArray(result?.expanded_ops) ? { expanded_ops: result.expanded_ops } : {}),
         ...(request.timeline_id ? { timeline_id: request.timeline_id } : {}),
         changes,
         ...((request.target ?? target) ? { target: (request.target ?? target) as string } : {}),

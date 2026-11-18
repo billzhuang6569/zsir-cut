@@ -17,7 +17,7 @@ import {
 } from "../rational.ts";
 import { diffProjectEntities } from "./entities.ts";
 import { newId } from "./id.ts";
-import { projectSubtitles } from "./projection.ts";
+import { type ProjectedToken, projectSubtitles } from "./projection.ts";
 import { applySubtitleEdit } from "./subtitle-edit.ts";
 import { clipTimeMap, mapClipTimeToSource, mapSourceTimeToClip } from "./time-map.ts";
 import { automaticTrackName } from "./track-name.ts";
@@ -334,9 +334,11 @@ function tokenRange(project: Project, timeline: Timeline, op: Op): [Rational, Ra
   )
     fail("E_NOT_FOUND", "Token not found");
   const selected = selection.clip_id ? clip(timeline, selection.clip_id).clip : undefined;
-  const cues = projectSubtitles(project, timeline.id, undefined, false).cues;
-  const starts = new Set(cues.filter((cue) => cue.token_ids.includes(selection.from_token)).map((cue) => cue.clip_id));
-  const ends = new Set(cues.filter((cue) => cue.token_ids.includes(selection.to_token)).map((cue) => cue.clip_id));
+  const projected = projectedTokens(project, timeline).filter((item) => item.transcript.id === transcript.id);
+  const starts = new Set(
+    projected.filter((item) => item.token.id === selection.from_token).map((item) => item.clip.id),
+  );
+  const ends = new Set(projected.filter((item) => item.token.id === selection.to_token).map((item) => item.clip.id));
   const linked = (a: Clip, b: Clip) =>
     a.occurrence_id === b.occurrence_id && lt(a.timeline_start, end(b)) && lt(b.timeline_start, end(a));
   const carriers = [...starts]
@@ -386,7 +388,7 @@ function tokenRange(project: Project, timeline: Timeline, op: Op): [Rational, Ra
   let start = projectEndpoint(first, "start");
   let stop = projectEndpoint(last, "end");
   if (selection.pause !== undefined) {
-    const shown = new Set(cues.filter((cue) => cue.clip_id === target.id).flatMap((cue) => cue.token_ids));
+    const shown = new Set(projected.filter((item) => item.clip.id === target.id).map((item) => item.token.id));
     const previous = transcript.tokens.slice(0, firstIndex).findLast((token) => token.text && shown.has(token.id));
     const following = transcript.tokens.slice(lastIndex + 1).find((token) => token.text && shown.has(token.id));
     const p = previous ? projectEndpoint(previous, "end") : target.timeline_start;
@@ -558,6 +560,23 @@ function applyOne(
           : new Set(op.tracks as string[]);
       for (const value of selected)
         if (track(timeline, value).kind === "subtitle") fail("E_VALIDATION", "Subtitle track is not a media track");
+      if (project.transcripts.some((item) => item.tokens.some((token) => token.state === "approved"))) {
+        const selectedClips = new Set(
+          mediaTracks(timeline)
+            .filter((item) => selected.has(item.id))
+            .flatMap((item) => item.clips.map((clip) => clip.id)),
+        );
+        if (
+          projectedTokens(project, timeline).some(
+            (item) =>
+              selectedClips.has(item.clip.id) &&
+              item.token.state === "approved" &&
+              lt(start, item.end) &&
+              lt(item.start, stop),
+          )
+        )
+          fail("E_LOCKED", "Approved token cannot be removed");
+      }
       clearSpan(timeline, start, stop, selected, op.ripple !== false, generate);
       break;
     }
@@ -1004,6 +1023,228 @@ export function assertEditDomain(ops: Op[], tracks: Timeline["tracks"]): void {
   }
 }
 
+const MACROS = new Set(["tighten_pauses", "remove_fillers", "keep_tokens", "close_gaps"]);
+
+function projectedTokens(project: Project, timeline: Timeline): ProjectedToken[] {
+  const tokens = new Map<string, ProjectedToken>();
+  projectSubtitles(project, timeline.id, undefined, false, (item) => {
+    tokens.set(`${item.clip.id}:${item.token.id}`, item);
+  });
+  return [...tokens.values()];
+}
+
+function expandMacro(project: Project, timeline: Timeline, op: Op): Op[] {
+  const tracks = mediaTracks(timeline);
+  const clips = tracks.flatMap((item) => item.clips);
+  const scope = op.scope as { range?: { start: string; duration: string }; clip_ids?: string[] } | undefined;
+  const scopeClips = scope?.clip_ids?.map((id) => clip(timeline, id).clip);
+  const rangeStart = scope?.range ? time(scope.range.start) : zero;
+  const scopeRanges = (
+    scopeClips
+      ? scopeClips.map((item) => ({ start: item.timeline_start, stop: end(item) }))
+      : [
+          {
+            start: rangeStart,
+            stop: scope?.range
+              ? add(rangeStart, time(scope.range.duration))
+              : clips.reduce((last, item) => max(last, end(item)), zero),
+          },
+        ]
+  ).sort((a, b) => compare(a.start, b.start));
+  const ranges: typeof scopeRanges = [];
+  for (const range of scopeRanges) {
+    const previous = ranges.at(-1);
+    if (previous && !lt(previous.stop, range.start)) previous.stop = max(previous.stop, range.stop);
+    else ranges.push(range);
+  }
+  const contains = (start: Rational, stop: Rational) =>
+    ranges.some((range) => !lt(start, range.start) && !lt(range.stop, stop));
+  const cuts: { start: Rational; operation: Op }[] = [];
+  const cut = (
+    start: Rational,
+    stop: Rational,
+    selected: string[] | "all" = "all",
+    mode: "nearest" | "out" | "in" = "nearest",
+  ) => {
+    if (!lt(start, stop)) return;
+    const rate = timeline.edit_rate;
+    if (mode === "nearest" && eq(snap(start, rate, mode), snap(stop, rate, mode))) return;
+    if (mode === "in" && !lt(snap(start, rate, "ceil"), snap(stop, rate, "floor"))) return;
+    cuts.push({
+      start,
+      operation: {
+        op: "remove_span",
+        range: { start: printRational(start, true), duration: printRational(sub(stop, start), true) },
+        tracks: selected,
+        ripple: true,
+        snap: mode,
+      },
+    });
+  };
+  if (op.op === "close_gaps") {
+    clips.sort((a, b) => compare(a.timeline_start, b.timeline_start));
+    const gap = (start: Rational, stop: Rational) => {
+      const rate = timeline.edit_rate;
+      const onFrames = eq(start, snap(start, rate, "floor")) && eq(stop, snap(stop, rate, "floor"));
+      cut(start, stop, "all", onFrames ? "out" : "in");
+    };
+    for (const range of ranges) {
+      let cursor = range.start;
+      for (const item of clips) {
+        if (!lt(item.timeline_start, range.stop)) break;
+        if (!lt(cursor, end(item))) continue;
+        gap(cursor, item.timeline_start);
+        cursor = end(item);
+      }
+      gap(cursor, range.stop);
+    }
+  } else {
+    const projected = projectedTokens(project, timeline);
+    const groups = new Map<string, ProjectedToken[]>();
+    for (const item of projected) {
+      const key = `${item.clip.id}:${item.transcript.id}`;
+      const group = groups.get(key);
+      if (group) group.push(item);
+      else groups.set(key, [item]);
+    }
+    if (op.op === "keep_tokens") {
+      const target = clip(timeline, op.clip_id).clip;
+      const selection = op.keep as { from_token: string; to_token: string }[];
+      const linked = clips.filter(
+        (item) =>
+          item.occurrence_id === target.occurrence_id &&
+          lt(item.timeline_start, end(target)) &&
+          lt(target.timeline_start, end(item)),
+      );
+      const available = new Set(project.transcripts.flatMap((item) => item.tokens.map((token) => token.id)));
+      if (selection.some(({ from_token, to_token }) => !available.has(from_token) || !available.has(to_token)))
+        fail("E_NOT_FOUND", "Token not found");
+      const candidates = [...groups.values()].filter(
+        (items) =>
+          linked.includes(items[0]!.clip) &&
+          selection.every(
+            ({ from_token, to_token }) =>
+              items.some((item) => item.token.id === from_token) && items.some((item) => item.token.id === to_token),
+          ),
+      );
+      const words = candidates.find((items) => items[0]!.clip.id === target.id) ?? candidates[0];
+      if (!words) return fail("E_VALIDATION", "Keep tokens must project onto the same clip and transcript");
+      const selected = tracks
+        .filter((item) => item.clips.some((entry) => linked.includes(entry)))
+        .map((item) => item.id);
+      const first = linked.reduce((value, item) => min(value, item.timeline_start), target.timeline_start);
+      const last = linked.reduce((value, item) => max(value, end(item)), end(target));
+      const half = div(time(op.pause ?? "0s"), rational(2n));
+      const cutScoped = (start: Rational, stop: Rational) => {
+        for (const range of ranges) cut(max(start, range.start), min(stop, range.stop), selected, "in");
+      };
+      let cursor = first;
+      let previous = -1;
+      let previousEnd = first;
+      for (const { from_token, to_token } of selection) {
+        const a = words.findIndex((item) => item.token.id === from_token);
+        const b = words.findIndex((item) => item.token.id === to_token);
+        const start = words[a]!.start;
+        const stop = words[b]!.end;
+        if (a <= previous || b < a || lt(start, previousEnd) || !lt(start, stop))
+          fail("E_VALIDATION", "Keep token ranges must be ordered and non-overlapping");
+        const before = words.slice(0, a).findLast((item) => item.token.text)?.end ?? first;
+        const after = words.slice(b + 1).find((item) => item.token.text)?.start ?? last;
+        cutScoped(cursor, max(before, sub(start, half)));
+        cursor = max(cursor, min(after, add(stop, half)));
+        previous = b;
+        previousEnd = stop;
+      }
+      cutScoped(cursor, last);
+    } else if (op.op === "tighten_pauses") {
+      const limit = time(op.max_pause);
+      const threshold = max(limit, time(op.min_gap ?? op.max_pause));
+      const half = div(limit, rational(2n));
+      for (const items of groups.values()) {
+        const words = items.filter((item) => item.token.text);
+        for (let i = 1; i < words.length; i++) {
+          const { end: left } = words[i - 1]!;
+          const { start: right } = words[i]!;
+          if (lt(threshold, sub(right, left)) && contains(left, right)) cut(add(left, half), sub(right, half));
+        }
+      }
+    } else {
+      const words = new Set(
+        (op.words as string[] | undefined) ??
+          project.recognition?.filler_words ?? ["嗯", "啊", "呃", "额", "哦", "唉", "哎", "诶"],
+      );
+      const pause = printRational(time(op.pause ?? "1/5s"), true);
+      for (const items of groups.values()) {
+        let first: ProjectedToken | undefined;
+        let last: ProjectedToken | undefined;
+        const flush = () => {
+          if (!first || !last) return;
+          cuts.push({
+            start: first.start,
+            operation: {
+              op: "remove_span",
+              tokens: {
+                transcript_id: first.transcript.id,
+                from_token: first.token.id,
+                to_token: last.token.id,
+                clip_id: first.clip.id,
+                pause,
+              },
+              ripple: true,
+            },
+          });
+          first = last = undefined;
+        };
+        for (const item of items) {
+          const match = [item.token.heard, item.token.text].some(
+            (value) => value !== undefined && words.has(value.trim().replace(/^\p{P}+|\p{P}+$/gu, "")),
+          );
+          if (!match || !contains(item.start, item.end)) {
+            flush();
+            continue;
+          }
+          if (last && item.transcript.tokens.indexOf(item.token) !== item.transcript.tokens.indexOf(last.token) + 1)
+            flush();
+          first ??= item;
+          last = item;
+        }
+        flush();
+      }
+    }
+  }
+  // Overlapping carrier pauses describe the same timeline interval. Cut the union
+  // before rippling so that an earlier cut cannot consume material shifted in by a later one.
+  if (op.op === "tighten_pauses") {
+    const rate = timeline.edit_rate;
+    const pauses = cuts.splice(0).sort((a, b) => compare(a.start, b.start));
+    let pending: { start: Rational; stop: Rational } | undefined;
+    for (const { start, operation } of pauses) {
+      const stop = add(start, time((operation.range as { duration: string }).duration));
+      if (pending && lt(snap(start, rate, "nearest"), snap(pending.stop, rate, "nearest"))) {
+        pending.stop = max(pending.stop, stop);
+      } else {
+        if (pending) cut(pending.start, pending.stop);
+        pending = { start, stop };
+      }
+    }
+    if (pending) cut(pending.start, pending.stop);
+  }
+  const unique = new Set<string>();
+  // Later cuts leave the positions of independent earlier cuts intact.
+  return cuts
+    .sort((a, b) => compare(b.start, a.start))
+    .flatMap(({ operation }) => {
+      const key = JSON.stringify(
+        operation.tokens
+          ? tokenRange(project, timeline, operation).map((value) => printRational(value, true))
+          : operation,
+      );
+      if (unique.has(key)) return [];
+      unique.add(key);
+      return [operation];
+    });
+}
+
 export function applyEdit(
   project: Project,
   ops: Op[],
@@ -1030,7 +1271,9 @@ export function applyEdit(
     fail("E_NOT_FOUND", `Timeline ${timelineId} does not exist`);
   const imageIds = new Set(project.media.filter((media) => media.kind === "image").map((media) => media.id));
   assertEditDomain(ops, timeline.tracks);
-  for (const op of ops) {
+  const expanded = ops.some((op) => MACROS.has(op.op)) ? ([] as Op[]) : undefined;
+  const execute = (op: Op) => {
+    expanded?.push(op);
     const before = structuredClone(project);
     if (SUBTITLE_OPS.has(op.op)) applySubtitleEdit(project, timeline, op, generate, allowForce, warnings, authorName);
     else applyOne(project, timeline, op, generate, authorKind, warnings);
@@ -1060,7 +1303,13 @@ export function applyEdit(
             );
     }
     for (const change of diffProjectEntities(before, project)) entityOps[change.key] = op.op;
+  };
+  for (const op of ops) {
+    if (MACROS.has(op.op)) {
+      for (const basic of expandMacro(project, timeline, op)) execute(basic);
+    } else execute(op);
   }
+  if (expanded) result.expanded_ops = expanded;
   if (warnings.length) result.warnings = warnings;
 }
 

@@ -252,6 +252,7 @@ export async function inspect(
         .slice(0, (input.limit as number | undefined) ?? 20)
         .map((entry) => ({
           ...entry,
+          ...(entry.expanded_ops ? { expanded_op_count: entry.expanded_ops.length } : {}),
           label: entry.label ?? null,
           reason: entry.reason ?? null,
           session_id: entry.session_id ?? null,

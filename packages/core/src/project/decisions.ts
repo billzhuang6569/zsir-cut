@@ -143,8 +143,9 @@ function references(ops: Op[]): Set<string> {
     for (const [field, ref] of Object.entries(value)) {
       if (/_ids?$/.test(field) || idFields.has(field))
         for (const id of Array.isArray(ref) ? ref : [ref]) if (typeof id === "string") keys.add(id);
-      if (["tokens", "range"].includes(field) && ref && typeof ref === "object" && !Array.isArray(ref))
+      if (["tokens", "range", "scope"].includes(field) && ref && typeof ref === "object" && !Array.isArray(ref))
         collect(ref as Input);
+      if (field === "keep" && Array.isArray(ref)) for (const segment of ref) collect(segment as Input);
     }
     if (value.track_id && value.occurrence_id && value.cue_id)
       keys.add(`override:${value.track_id}:${value.occurrence_id}:${value.cue_id}`);

@@ -328,6 +328,10 @@ function limitBrief(output: Envelope): void {
 
 export async function dispatch(verb: Verb, input: unknown, options: DispatchOptions = {}): Promise<Envelope> {
   const requestId = newId("req_");
+  const originalOps =
+    verb === "edit" && input && typeof input === "object" && "ops" in input && Array.isArray(input.ops)
+      ? input.ops
+      : undefined;
   input = normalizeCommand(verb, input);
   if (
     input &&
@@ -959,7 +963,7 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
       return output;
     }
     if (verb.startsWith("session_") || (request.session_id !== undefined && ["edit", "undo", "redo"].includes(verb)))
-      return await runSession(verb, request, requestId);
+      return await runSession(verb, request, requestId, originalOps);
     if (verb === "ask" || verb === "answer")
       return await openProject({ projectPath: request.project as string }).decide(
         writeRequest(verb, requestId, request),
@@ -983,7 +987,7 @@ export async function dispatch(verb: Verb, input: unknown, options: DispatchOpti
           (request.author as Author).name,
           (request.author as Author).kind,
         );
-      const write = writeRequest("edit", requestId, request);
+      const write = { ...writeRequest("edit", requestId, request), originalOps };
       return request.dry_run === true
         ? await store.previewWrite(write, mutator, entityOps, result)
         : await store.commitWrite(write, mutator, entityOps, result);

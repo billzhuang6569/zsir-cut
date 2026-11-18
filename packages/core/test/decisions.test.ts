@@ -224,6 +224,26 @@ describe("project decisions", () => {
     expect((await inspect("decisions", true)).result).toMatchObject({ pending_count: 0 });
   });
 
+  it.each([false, true])("handles a macro decision after a scoped clip change: %s", async (changed) => {
+    await copyFile(new URL("../../../fixtures/regressions/c2-macros.zcut.json", import.meta.url), project);
+    const op = { op: "tighten_pauses", max_pause: "1s", scope: { clip_ids: ["clp_a1"] } };
+    expect(
+      await ask({
+        decisions: [{ id: decision.id, question: "缩短停顿？", options: [choice("first", "缩短", op)] }],
+      }),
+    ).toMatchObject({ ok: true });
+    if (changed) expect(await edit([clipLabel("新标签", "clp_a1")])).toMatchObject({ status: "applied" });
+    const answered = await answer({ option_id: "first" });
+    if (changed) {
+      expect(execution(answered)).toMatchObject({ state: "stale" });
+    } else {
+      expect(answered).toMatchObject({ status: "applied" });
+      expect(await journal()).toMatchObject([
+        { turn, ops: [op], expanded_ops: [{ op: "remove_span" }, { op: "remove_span" }] },
+      ]);
+    }
+  });
+
   it("marks deleted entities missing and returns the underlying edit rejection for invalid operations", async () => {
     await ask();
     const removed = await edit([{ op: "remove", clip_ids: ["clp_v1"], ripple: false, linked: true }]);

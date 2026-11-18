@@ -84,7 +84,7 @@ export const TOOL_DOCS: Record<string, string> = {
     "原子执行一组有序编辑操作。",
     "先读准对象 ID；删一段话用 remove_span 的 tokens。每组只含一个域，范围不确定先 dry_run。",
     `${projectWrite} 批次后续步骤可省略 base_revision。`,
-    `ops、timeline_id、label（Agent 必填）。
+    `ops、timeline_id、label（Agent 必填）、turn（可选，按轮撤回用）。
 
 剪辑域
 place 放置素材：media_id、source_start/duration 或 tokens、at（可为 end）、video_track/audio_track、mode（insert/overwrite）。
@@ -134,16 +134,16 @@ remove_overlay 删叠层配置：overlay_id；已导出的文件保留。
 宏操作（0.2，展开为基础操作；scope 用 range 或 clip_ids，省略为整条时间线）
 tighten_pauses 压短同一片段内的停顿：scope、max_pause、min_gap。
 remove_fillers 剪掉匹配的语气词及声音：scope、words、pause。
-keep_tokens 只留指定字词段并合拢：clip_id、keep（from_token/to_token 列表）、pause。
+keep_tokens 只留指定字词段并合拢：clip_id、keep（from_token/to_token 列表）、pause、scope。
 close_gaps 合拢全部视音频轨都空着的间隙：scope。`,
     { ...write, label: "删重复介绍", ops: [{ op: "remove", clip_ids: ["clp_intro"], ripple: true }] },
     "检查 changes 和警告，再读时间线并用 receipt.after 作为后续写入基准。",
   ),
   undo: describe(
-    "撤销上一步或整批改动。",
+    "撤销上一步、整批改动或整轮 AI 改动。",
     "纠正最近编辑时用；回到任意历史点用 restore。",
     projectWrite,
-    "target、batch_id（二选一或省略）。",
+    "target、batch_id、turn_id（三选一或省略）。",
     write,
     "用 inspect history 确认撤销结果。",
   ),
