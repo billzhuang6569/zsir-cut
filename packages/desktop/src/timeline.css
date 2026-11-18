@@ -383,6 +383,14 @@
   white-space: nowrap;
   pointer-events: none;
 }
+.zc-drop-card-preview {
+  max-width: 220px;
+  font-size: var(--label-size);
+}
+.zc-drop-card-preview > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 .zc-trim-handle {
   position: absolute;
