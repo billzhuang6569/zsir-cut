@@ -176,3 +176,39 @@ it.each(["network", "http", "invalid", "empty", "silent"])("degrades quietly for
     host.remove();
   }
 });
+
+it("keeps waveform canvas tiles bounded and reuses the overlap when the timeline window pans", async () => {
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => recordingCanvas().context);
+  const fetcher = vi.fn(async () => ({ ok: true, arrayBuffer: async () => new Uint8Array(100).buffer }));
+  vi.stubGlobal("fetch", fetcher);
+  const config = { port: 1, token: "wave-window" };
+  updateMediaCache(config, {
+    media: [{ media_id: clip.media_id, key: "b".repeat(32), peaks: "ready", thumbs: "ready" }],
+  });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const render = (firstPixel: number) =>
+    root.render(
+      <Wave
+        clip={clip}
+        width={1_000_000}
+        scale={48}
+        config={config}
+        firstPixel={firstPixel}
+        lastPixel={firstPixel + 1536}
+      />,
+    );
+  try {
+    await act(async () => render(0));
+    expect(host.querySelectorAll("canvas")).toHaveLength(2);
+    const retained = host.querySelectorAll("canvas")[1];
+    await act(async () => render(768));
+    expect([...host.querySelectorAll("canvas")].map((tile) => tile.style.left)).toEqual(["768px", "1536px"]);
+    expect(host.querySelector("canvas")).toBe(retained);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+  }
+});

@@ -1,10 +1,11 @@
 import { isTauri } from "@tauri-apps/api/core";
-import { type DragEvent, type RefObject, useEffect, useRef, useState } from "react";
+import { type DragEvent, type RefObject, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { DESKTOP_AUTHOR, type ProjectView } from "./connection.js";
 import { type MediaKind, type Placement, placeMedia, placementKinds, placementRange } from "./media.js";
 import type { UiState } from "./state.js";
 import { pixelAt, scrollTimelineEdge, timecode } from "./timeline.js";
 import { dropMode, dropPosition, dropTime, dropTrack, fileName, MEDIA_DRAG } from "./timelineDrop.js";
+import { timelineVisual } from "./timelineVisual.js";
 import { importAndPlace, listenFileDrop, type TimelineLanding } from "./useFileDrop.js";
 
 type Options = {
@@ -122,7 +123,7 @@ export function useTimelineDrop(options: Options) {
     options.enabled && !options.readOnly && options.state.project && options.project
       ? `${options.state.project}\0${options.project.id}`
       : null;
-  const [preview, setPreview] = useState<Preview | null>(null);
+  const [preview] = useState(timelineVisual<Preview>);
   const [error, setError] = useState<string | null>(null);
   const generation = useRef(0);
   const active = useRef<Drag | null>(null);
@@ -135,7 +136,7 @@ export function useTimelineDrop(options: Options) {
     cancelAnimationFrame(animation.current);
     animation.current = 0;
     pointer.current = null;
-    setPreview(null);
+    preview.set(null);
   };
   const cancel = () => {
     active.current = null;
@@ -143,7 +144,8 @@ export function useTimelineDrop(options: Options) {
   };
   const refresh = () => {
     const drag = active.current;
-    if (valid(drag) && pointer.current) setPreview(resolveDrop(latest.current, drag, pointer.current)?.preview ?? null);
+    if (valid(drag) && pointer.current)
+      preview.set(resolveDrop(latest.current, drag, pointer.current)?.preview ?? null);
   };
   const scroll = () => {
     animation.current = 0;
@@ -258,7 +260,7 @@ export function useTimelineDrop(options: Options) {
     metaKey: event.metaKey,
   });
   return {
-    preview: identity ? preview : null,
+    preview,
     error: identity ? error : null,
     handlers: {
       onDragOver: (event: DragEvent<HTMLElement>) => {
@@ -294,16 +296,17 @@ export function useTimelineDrop(options: Options) {
 }
 
 export function DropGhost({
-  preview,
+  visual,
   project,
   scale,
   track,
 }: {
-  preview: Preview | null;
+  visual: ReturnType<typeof timelineVisual<Preview>>;
   project: ProjectView;
   scale: number;
   track?: string;
 }) {
+  const preview = useSyncExternalStore(visual.subscribe, visual.read);
   if (!preview || (track && !preview.tracks.includes(track))) return null;
   const { landing, error } = preview;
   const label = `${timecode(landing.at, project)} · ${landing.mode === "insert" ? "插入" : "覆盖"}`;

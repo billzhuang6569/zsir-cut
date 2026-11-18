@@ -12,7 +12,6 @@ import {
   useEffect,
   useLayoutEffect,
   useRef,
-  useState,
 } from "react";
 import type { UiState } from "../../app-host/src/ui.js";
 import type { ProjectView } from "./connection.js";
@@ -68,7 +67,35 @@ export function useTimelineGestures({
   const suppressClick = useRef(false);
   const pointer = useRef<Position | null>(null);
   const pendingScroll = useRef<number | null>(null);
-  const [box, setBox] = useState<Rectangle | null>(null);
+  const box = useRef<HTMLDivElement | null>(null);
+  const setBox = (rect: Rectangle | null) => {
+    if (!rect) {
+      box.current?.remove();
+      box.current = null;
+      return;
+    }
+    if (!box.current) {
+      const content = scroller.current?.querySelector(".zc-timeline-content");
+      if (!content) return;
+      box.current = document.createElement("div");
+      box.current.className = "zc-selection-box";
+      box.current.setAttribute("aria-hidden", "true");
+      content.append(box.current);
+    }
+    for (const [key, value] of Object.entries(rect)) box.current.style.setProperty(key, `${value}px`);
+  };
+  const moveFrame = useRef<number | null>(null);
+  const stopMove = () => {
+    if (moveFrame.current !== null) cancelAnimationFrame(moveFrame.current);
+    moveFrame.current = null;
+  };
+  const scheduleMove = (active: Session) => {
+    if (moveFrame.current !== null) return;
+    moveFrame.current = requestAnimationFrame(() => {
+      moveFrame.current = null;
+      if (session.current === active) active.move?.(active.last);
+    });
+  };
   const latest = useRef({ project, state, update, scale });
   latest.current = { project, state, update, scale };
 
@@ -94,6 +121,7 @@ export function useTimelineGestures({
       active.moved = true;
     session.current = null;
     stopEdgeScroll();
+    stopMove();
     dragging.current = false;
     suppressClick.current = cancelled || active.moved;
     setBox(null);
@@ -150,7 +178,11 @@ export function useTimelineGestures({
       ...callbacks,
     };
     dragging.current = true;
-    element.setPointerCapture?.(event.pointerId);
+    try {
+      element.setPointerCapture?.(event.pointerId);
+    } catch (error) {
+      if (event.isTrusted || !(error instanceof DOMException) || error.name !== "NotFoundError") throw error;
+    }
     return true;
   };
   // biome-ignore lint/correctness/useExhaustiveDependencies: Switching timelines must cancel an active gesture.
@@ -159,6 +191,7 @@ export function useTimelineGestures({
       const active = session.current;
       session.current = null;
       stopEdgeScroll();
+      stopMove();
       positionKey.current = false;
       if (!active) return;
       setBox(null);
@@ -275,7 +308,13 @@ export function useTimelineGestures({
   return {
     scroller,
     positionKey,
-    box,
+    retainedElement: () => {
+      const focused = document.activeElement;
+      return (
+        session.current?.element ??
+        (focused instanceof HTMLElement && scroller.current?.contains(focused) ? focused : undefined)
+      );
+    },
     start,
     zoom,
     select,
@@ -302,18 +341,55 @@ export function useTimelineGestures({
               if (!moved) return;
               const rect = rectangle(origin, event);
               const hits: string[] = [];
+              const mounted = new Map<string, boolean>();
               for (const item of scroller.current?.querySelectorAll<HTMLElement>("[data-selection-id]") ?? []) {
                 const bounds = item.getBoundingClientRect();
                 const position = contentPoint({ clientX: bounds.left, clientY: bounds.top });
-                if (
+                mounted.set(
+                  item.dataset.cueKey ?? (item.dataset.selectionId as string),
                   position.x <= rect.left + rect.width &&
-                  position.x + bounds.width >= rect.left &&
-                  position.y <= rect.top + rect.height &&
-                  position.y + bounds.height >= rect.top
-                )
-                  hits.push(item.dataset.selectionId as string);
+                    position.x + bounds.width >= rect.left &&
+                    position.y <= rect.top + rect.height &&
+                    position.y + bounds.height >= rect.top,
+                );
               }
-              const { state, update } = latest.current;
+              const { project, state, update, scale } = latest.current;
+              // The marquee lives in content coordinates, including clips that scrolled out of the DOM.
+              for (const lane of scroller.current?.querySelectorAll<HTMLElement>(".zc-track-lane") ?? []) {
+                const track = project?.tracks.find(({ id }) => id === lane.dataset.trackId);
+                if (!project || !track) continue;
+                const bounds = lane.getBoundingClientRect();
+                const position = contentPoint({ clientX: bounds.left, clientY: bounds.top });
+                const height =
+                  lane.querySelector(".zc-clip")?.getBoundingClientRect().height ??
+                  (Number.parseInt(getComputedStyle(lane).getPropertyValue(`--track-${track.kind}-h`), 10) ||
+                    bounds.height);
+                const intersectsRow = position.y <= rect.top + rect.height && position.y + height >= rect.top;
+                const items =
+                  track.kind === "subtitle"
+                    ? project.cues
+                        .filter((cue) => cue.track_id === track.id)
+                        .map((cue) => ({
+                          key: `${cue.track_id}:${cue.cue_id}:${cue.piece}:${cue.start}`,
+                          id: cue.cue_id,
+                          start: cue.start,
+                          end: cue.end,
+                        }))
+                    : track.clips.map((clip) => ({
+                        key: clip.id,
+                        id: clip.id,
+                        start: clip.timeline_in.t,
+                        end: clip.timeline_out.t,
+                      }));
+                for (const item of items) {
+                  const hit = mounted.get(item.key);
+                  if (hit) hits.push(item.id);
+                  if (hit !== undefined || !intersectsRow) continue;
+                  const x = position.x + pixelAt(item.start, scale);
+                  const end = position.x + pixelAt(item.end, scale);
+                  if (x <= rect.left + rect.width && Math.max(x + 1, end) >= rect.left) hits.push(item.id);
+                }
+              }
               update({ ...state, edit_point: null, gap: null, selected: selectionIds(previous, hits, keys) });
             },
           },
@@ -327,7 +403,13 @@ export function useTimelineGestures({
         if (Math.hypot(event.clientX - active.origin.x, event.clientY - active.origin.y) >= 4) active.moved = true;
         active.last = { clientX: event.clientX, clientY: event.clientY, altKey: event.altKey, metaKey: event.metaKey };
         if (active.moved) {
-          active.move?.(event);
+          if (
+            typeof window.PointerEvent === "function" &&
+            event.nativeEvent instanceof window.PointerEvent &&
+            active.move
+          )
+            scheduleMove(active);
+          else active.move?.(event);
           if (active.edgeScroll && edgeFrame.current === null) edgeFrame.current = requestAnimationFrame(scrollAtEdge);
         }
       },
