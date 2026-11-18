@@ -4,6 +4,7 @@ import type { ProjectChanged } from "../../app-host/src/revision-events.js";
 import { PANELS, type Panel } from "../../app-host/src/ui.js";
 import { type AiNotice, useAiPanel } from "./AiPanel.js";
 import { useChapterPanel } from "./ChapterPanel.js";
+import { CommandPalette } from "./CommandPalette.js";
 import { selectedClips } from "./clipProperties.js";
 import { Icon, IconButton } from "./components.js";
 import {
@@ -14,7 +15,7 @@ import {
   useTimelinePreferences,
 } from "./connection.js";
 import { ExportPanel } from "./ExportPanel.js";
-import { useEditorShortcut } from "./editorShortcuts.js";
+import { type EditorCommand, useEditorShortcut } from "./editorShortcuts.js";
 import { useHistoryPanel } from "./HistoryPanel.js";
 import { LayoutDivider } from "./LayoutDivider.js";
 import { useMediaPanel } from "./MediaPanel.js";
@@ -46,6 +47,8 @@ export function App({ config }: { config?: { port: number; token: string } }) {
   const [revisionControls, setRevisionControls] = useState<HTMLSpanElement | null>(null);
   const [layoutDraft, setLayoutDraft] = useState<Partial<Layout>>({});
   const [viewerTarget, setViewerTarget] = useState<HTMLDivElement | null>(null);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [recentCommands, setRecentCommands] = useState<EditorCommand[]>([]);
   const [settingsOpen, setSettingsOpen] = useState<false | "通用" | "预览与缓存">(false);
   const [reviewSession, setReviewSession] = useState<string | null>(null);
   const reviewSessionRef = useRef(reviewSession);
@@ -204,18 +207,36 @@ export function App({ config }: { config?: { port: number; token: string } }) {
     />
   );
   const history = useHistoryPanel({ project, state, update, call: rawCall, subscribe });
-  useEditorShortcut("global", (key, event) => {
-    if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "a") return true;
-    if (event.repeat || document.querySelector("dialog[open]")) return;
-    if (key === preferences.keymap.toggle_history && current.current.project) {
-      history.toggle();
-      return true;
-    }
-    if (key === preferences.keymap.open_settings) {
-      setSettingsOpen("通用");
-      return true;
-    }
-  });
+  useEditorShortcut(
+    "global",
+    (key, event, _region, command) => {
+      if (event && (event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "a") return true;
+      if (event && (event.repeat || document.querySelector("dialog[open]"))) return;
+      if (command === "command_palette" || key === preferences.keymap.command_palette) {
+        setPaletteOpen(true);
+        return true;
+      }
+      if ((command === "toggle_history" || key === preferences.keymap.toggle_history) && current.current.project) {
+        history.toggle();
+        return true;
+      }
+      if (command === "open_settings" || key === preferences.keymap.open_settings) {
+        setSettingsOpen("通用");
+        return true;
+      }
+      const panel = PANELS.find((panel) => command === `panel_${panel}`);
+      if (panel && current.current.project) {
+        update(applyUi(current.current, "ui_show_panel", { panel }));
+        return true;
+      }
+    },
+    false,
+    (command) => {
+      if (command === "command_palette" || command === "open_settings") return null;
+      if (command === "toggle_history" || command.startsWith("panel_"))
+        return current.current.project ? null : "请先打开工程";
+    },
+  );
   useEffect(() => {
     const open = (event: Event) => {
       const id = (event as CustomEvent<string>).detail;
@@ -343,7 +364,7 @@ export function App({ config }: { config?: { port: number; token: string } }) {
             )}
           </span>
           {!project && <IconButton icon="settings" label="设置" onClick={() => setSettingsOpen("通用")} />}
-          <IconButton icon="search" label="命令面板 ⌘K" />
+          <IconButton icon="search" label="命令面板 ⇧⌘P" onClick={() => setPaletteOpen(true)} />
           <div className="zc-history-anchor" ref={history.anchor}>
             <IconButton
               icon="history"
@@ -565,6 +586,19 @@ export function App({ config }: { config?: { port: number; token: string } }) {
         )}
         {project && (
           <ExportPanel project={project} state={state} update={update} call={call} config={config} fcpIcon={fcpIcon} />
+        )}
+        {paletteOpen && (
+          <CommandPalette
+            keymap={preferences.keymap}
+            panelLabels={labels}
+            recent={recentCommands}
+            close={() => setPaletteOpen(false)}
+            onRun={(command) => {
+              setRecentCommands((old) => [command, ...old.filter((item) => item !== command)]);
+              if (command === "command_palette") return;
+              setPaletteOpen(false);
+            }}
+          />
         )}
       </main>
     </div>

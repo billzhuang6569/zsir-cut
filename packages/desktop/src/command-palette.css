@@ -1,0 +1,71 @@
+.zc-command-palette {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  box-sizing: border-box;
+  width: min(560px, calc(100% - 32px));
+  padding: 0;
+  overflow: hidden;
+  color: var(--text);
+  background: var(--panel);
+}
+
+.zc-command-palette::backdrop {
+  background: rgb(0 0 0 / 45%);
+}
+
+.zc-command-palette input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 16px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.zc-command-palette [role="listbox"] {
+  max-height: min(400px, 55vh);
+  margin: 0;
+  padding: 6px;
+  overflow: auto;
+}
+
+.zc-command-palette [role="option"] {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+}
+
+.zc-command-palette [aria-selected="true"],
+.zc-command-palette [role="option"]:hover {
+  background: var(--line);
+}
+
+.zc-command-palette [aria-disabled="true"] {
+  color: var(--text-3);
+}
+
+.zc-command-palette small {
+  display: block;
+}
+
+.zc-command-palette kbd {
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+.zc-command-palette output {
+  display: block;
+  padding: 8px 16px 16px;
+}

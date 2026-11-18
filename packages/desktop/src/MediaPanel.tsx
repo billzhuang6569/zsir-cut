@@ -396,7 +396,7 @@ export function useMediaPanel({
   useEditorShortcut(
     "media",
     (key, event) => {
-      if (state.panel !== "media" || state.export?.open) return;
+      if (!event || state.panel !== "media" || state.export?.open) return;
       const action = Object.entries(keymap).find(([, binding]) => binding === key)?.[0];
       if (
         ["⌘=", "⇧⌘=", "⌘-"].includes(key) &&

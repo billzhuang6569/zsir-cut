@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type Action, mergeKeymap, type presets } from "../../app-host/src/keymap.js";
 import { connectHost, DESKTOP_AUTHOR, type ProjectView } from "../src/connection.js";
+import { commandBlockReason, runEditorCommand } from "../src/editorShortcuts.js";
 import { type Placement, threePointEdit } from "../src/media.js";
 import { PreviewMix } from "../src/preview-mix.js";
 import { applyUi, initialState } from "../src/state.js";
@@ -160,6 +161,27 @@ afterEach(async () => {
   inspectorTarget?.remove();
   inspectorTarget = null;
   vi.restoreAllMocks();
+});
+
+it("dispatches palette edits through the same timeline handler, including unbound actions", async () => {
+  expect(commandBlockReason("ripple_delete")).toBe("请选择片段或标记入出点");
+  expect(runEditorCommand("ripple_delete")).toBe(false);
+  expect(writes()).toEqual([]);
+
+  state = { ...state, selected: ["c00"] };
+  await act(() => render());
+  await action("ripple_delete");
+  const keyboardRequest = writes()[0]?.[1];
+  expect(keyboardRequest?.ops).toEqual([{ op: "remove", clip_ids: ["c00"], ripple: true }]);
+
+  overrides = { ripple_delete: null };
+  await refresh();
+  expect(commandBlockReason("ripple_delete")).toBeNull();
+  await act(async () => {
+    expect(runEditorCommand("ripple_delete")).toBe(true);
+  });
+  expect(writes()).toHaveLength(2);
+  expect(writes()[1]).toEqual(["edit", { ...keyboardRequest, idempotency_key: expect.any(String) }]);
 });
 
 it("opens the clip menu for the timeline selection and sends a revisioned edit", async () => {

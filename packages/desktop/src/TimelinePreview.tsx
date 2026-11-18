@@ -10,7 +10,7 @@ import { ClipMenu, type ClipMenuAnchor } from "./ClipMenu.js";
 import { type GainPreview, timelineGain } from "./clipProperties.js";
 import { Clip, Icon, IconButton } from "./components.js";
 import { DESKTOP_AUTHOR, type ProjectView, type useTimelinePreferences } from "./connection.js";
-import { useEditorShortcut } from "./editorShortcuts.js";
+import { type EditorCommand, type EditorShortcutHandler, useEditorShortcut } from "./editorShortcuts.js";
 import { isPlacementAction, type Placement, placementLabels, threePointEdit } from "./media.js";
 import { loadMediaResource, type Thumbs, thumbnailStyle, useMediaCache } from "./media-cache.js";
 import { audioSpans, PreviewMix } from "./preview-mix.js";
@@ -69,6 +69,29 @@ export { Wave } from "./Wave.js";
 import "./timeline.css";
 
 let prerollLead = 0.3;
+
+const unsupportedCommands = [
+  "select_edit_in",
+  "select_edit_out",
+  "select_edit_both",
+  "nudge_edit_back10",
+  "nudge_edit_fwd10",
+  "tool_slip",
+  "tool_slide",
+  "close_all_gaps",
+  "command_palette",
+];
+const editReasons: Partial<Record<EditorCommand, string>> = {
+  split_at_playhead: "请将播放头移到可切割的片段内",
+  split_all_at_playhead: "请将播放头移到可切割的片段内",
+  ripple_delete: "请选择片段或标记入出点",
+  lift_delete: "请选择片段或标记入出点",
+  trim_start_to_playhead: "请选择片段并将播放头移到片段内",
+  trim_end_to_playhead: "请选择片段并将播放头移到片段内",
+  extend_edit: "请选择剪点",
+  nudge_edit_back: "请选择剪点或片段",
+  nudge_edit_fwd: "请选择剪点或片段",
+};
 
 function editCursor(mode: "trim" | "ripple" | "roll", edge: TrimEdge = "out") {
   const bracket = edge === "in" ? "M15 5H10V19H15" : "M9 5H14V19H9";
@@ -1230,14 +1253,17 @@ export function TimelinePreview({
     )
       update({ ...current, edit_point: { track_id: point.track_id, at: to } });
   };
-  const editAction = (action: string) => {
+  const planTimelineEdit = (action: string) => {
     if (!project) return;
     const target = ["split_at_playhead", "trim_start_to_playhead", "trim_end_to_playhead", "extend_edit"].includes(
       action,
     )
       ? previewAt
       : at;
-    const edit = timelineEdit(action, project, state, target, magnetic);
+    return timelineEdit(action, project, state, target, magnetic);
+  };
+  const editAction = (action: string) => {
+    const edit = planTimelineEdit(action);
     if (edit && "reason" in edit) setWriteError(edit.reason);
     if (edit?.ops.length)
       void write("edit", edit.label, edit.ops).then((ok) => {
@@ -1245,7 +1271,7 @@ export function TimelinePreview({
         if (ok && op && op.op === "roll" && "to" in op && typeof op.to === "string" && state.edit_point)
           updateRollSelection(state.edit_point, op.to);
       });
-    return edit !== null;
+    return !!edit;
   };
   const marker = () =>
     project &&
@@ -1263,19 +1289,61 @@ export function TimelinePreview({
   const markRange = (action: "mark_in" | "mark_out" | "clear_in_out") => {
     if (project) update(timelineMarks(action, state, at, project));
   };
-  useEditorShortcut(viewerOnly ? "source" : "timeline", (key, event, region) => {
+  const placementPlan = (action: Parameters<typeof threePointEdit>[0]) => {
+    const media = project?.media.find((item) => item.id === state.media?.id);
+    return project && media ? threePointEdit(action, project, media, state, at, placement) : null;
+  };
+  const pastePlan = (project: ProjectView) =>
+    planPaste(project, clipboard.current, previewAt, magnetic, { editTargets: state.editTargets });
+  const reviewMarker = () =>
+    project?.markers
+      .filter(
+        (marker) => marker.kind === "review" && compare(parseRational(marker.at.t, true), parseRational(at, true)) > 0,
+      )
+      .sort((a, b) => compare(parseRational(a.at.t, true), parseRational(b.at.t, true)))[0];
+  const commandAvailability = (action: EditorCommand) => {
+    if (!project) return "请先打开工程";
+    if (state.export?.open) return "请先关闭导出面板";
+    if (unsupportedCommands.includes(action)) return "当前版本尚未提供此动作";
+    if (dragging.current) return "请先完成拖动";
+
+    const editReason = editReasons[action];
+    if (editReason || isPlacementAction(action) || ["cut", "paste", "undo", "redo", "add_marker"].includes(action)) {
+      if (readOnly) return "请先返回当前工程";
+      if (writing.current) return "请等待当前编辑完成";
+    }
+    if (editReason) {
+      const edit = planTimelineEdit(action);
+      if (edit && "reason" in edit) return edit.reason ?? editReason;
+      return edit?.ops.length ? null : editReason;
+    }
+    if (isPlacementAction(action)) {
+      const plan = placementPlan(action);
+      return plan ? ("error" in plan ? plan.error : null) : "请先选择素材";
+    }
+    if (action === "copy" || action === "cut") return copyClips(project, state.selected).length ? null : "请选择片段";
+    if (action === "paste") {
+      const plan = pastePlan(project);
+      return "error" in plan ? plan.error : null;
+    }
+    if (action === "next_review") return reviewMarker() ? null : "播放头后没有待审标记";
+    if (action === "clear_in_out" && !state.timelineMarks) return "请先标记入点或出点";
+    if ((action === "mark_in" || action === "mark_out") && timelineMarks(action, state, at, project) === state)
+      return "请将播放头移到可标记的位置";
+    return null;
+  };
+  const handleShortcut: EditorShortcutHandler = (key, event, region, command) => {
     if (state.export?.open) return;
-    const action = Object.entries(keymap).find(([, binding]) => binding === key)?.[0];
+    const action = command ?? Object.entries(keymap).find(([, binding]) => binding === key)?.[0];
     if (!action) return;
     const transport = ["play_pause", "shuttle_back", "shuttle_stop", "shuttle_fwd", "step_back", "step_fwd"].includes(
       action,
     );
     if (viewerOnly && !transport) return;
     if (!viewerOnly && isPlacementAction(action)) {
-      if (!project || readOnly || dragging.current || event.repeat) return;
-      const media = project.media.find((item) => item.id === state.media?.id);
-      if (!media) return;
-      const plan = threePointEdit(action, project, media, state, at, placement);
+      if (!project || readOnly || dragging.current || event?.repeat) return;
+      const plan = placementPlan(action);
+      if (!plan) return;
       if ("error" in plan) setWriteError(plan.error);
       else editClips(placementLabels[action], [...plan.added, plan.op]);
       return true;
@@ -1286,20 +1354,7 @@ export function TimelinePreview({
       !(action === "clear_in_out" || action === "open_settings" || action === "toggle_history")
     )
       return;
-    if (
-      [
-        "select_edit_in",
-        "select_edit_out",
-        "select_edit_both",
-        "nudge_edit_back10",
-        "nudge_edit_fwd10",
-        "tool_slip",
-        "tool_slide",
-        "close_all_gaps",
-        "command_palette",
-      ].includes(action)
-    )
-      return;
+    if (unsupportedCommands.includes(action)) return;
     if (action === "open_settings") {
       onOpenSettings?.();
       return true;
@@ -1322,7 +1377,7 @@ export function TimelinePreview({
       return true;
     }
     if (action === "toggle_magnetic") {
-      if (preset === "fcp" && event.key.toLowerCase() === "p") {
+      if (preset === "fcp" && event?.key.toLowerCase() === "p") {
         if (!event.repeat && !dragging.current) {
           gestures.positionKey.current = true;
           positionTap.current = true;
@@ -1354,9 +1409,9 @@ export function TimelinePreview({
     }
     if (!project || dragging.current) return;
     if (action === "copy" || action === "cut" || action === "paste") {
-      if (event.repeat || (action !== "copy" && (readOnly || writing.current))) return true;
+      if (event?.repeat || (action !== "copy" && (readOnly || writing.current))) return true;
       if (action === "paste") {
-        paste(planPaste(project, clipboard.current, previewAt, magnetic, { editTargets: state.editTargets }));
+        paste(pastePlan(project));
       } else {
         const copied = copyClips(project, state.selected);
         if (copied.length) {
@@ -1368,13 +1423,15 @@ export function TimelinePreview({
       return true;
     }
     if (action.startsWith("tool_")) {
-      if (event.repeat) return true;
-      temporaryTool.current = {
-        key: event.code || event.key.toLowerCase(),
-        previous: temporaryTool.current?.previous ?? tool,
-        started: performance.now(),
-        used: false,
-      };
+      if (event?.repeat) return true;
+      temporaryTool.current = event
+        ? {
+            key: event.code || event.key.toLowerCase(),
+            previous: temporaryTool.current?.previous ?? tool,
+            started: performance.now(),
+            used: false,
+          }
+        : null;
       setBladeHover(null);
       setTool(action.slice(5));
       return true;
@@ -1393,12 +1450,7 @@ export function TimelinePreview({
       return true;
     }
     if (action === "next_review") {
-      const next = project.markers
-        .filter(
-          (marker) =>
-            marker.kind === "review" && compare(parseRational(marker.at.t, true), parseRational(at, true)) > 0,
-        )
-        .sort((a, b) => compare(parseRational(a.at.t, true), parseRational(b.at.t, true)))[0];
+      const next = reviewMarker();
       if (next) seek(next.at.t);
       return true;
     }
@@ -1441,7 +1493,8 @@ export function TimelinePreview({
         },
       });
     return true;
-  });
+  };
+  useEditorShortcut(viewerOnly ? "source" : "timeline", handleShortcut, false, commandAvailability);
   useEffect(() => {
     const modifiers = (event: KeyboardEvent) => {
       if (event.key === "Shift" || event.key === "Alt")
